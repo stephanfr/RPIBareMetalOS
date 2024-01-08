@@ -1,0 +1,66 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <stddef.h>
+#include "type_traits"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    //
+    //  There is some asymmetry in the heap as the heap does not call constructors but does call destructors.
+    //
+
+    class memory_heap
+    {
+    public:
+        memory_heap()
+        {
+        }
+
+        template <typename T>
+        T *allocate_block(size_t num_elements_in_block, size_t element_alignment = alignof(T))
+        {
+            //  We want to use the larger of the size of the type or its alignment.
+            //      alignof(T) will always be >= sizeof(T) but since we pass in the alignment we want to be safe below and still test.
+
+            return reinterpret_cast<T *>(allocate_raw_block(sizeof(T) >= element_alignment ? sizeof(T) : element_alignment, num_elements_in_block));
+        }
+
+        template <typename T>
+        void deallocate_block(T *ptr, size_t num_elements)
+        {
+            MINIMAL_STD_ASSERT(validate_pointer(ptr));
+            MINIMAL_STD_ASSERT(num_elements_in_block(ptr) == num_elements);
+
+            //  If T is a class or struct type, then we want to insure we call the destructor
+
+            if (minstd::is_class<T>::value)
+            {
+                for (size_t i = 0; i < num_elements; i++)
+                {
+                    (ptr + i)->~T();
+                }
+            }
+
+            deallocate_raw_block((void*)(ptr));
+        }
+
+        virtual size_t bytes_allocated() const noexcept = 0;
+        virtual size_t blocks_allocated() const noexcept = 0;
+
+        virtual size_t raw_block_size(const void *block) const noexcept = 0;
+        virtual size_t num_elements_in_block(const void *block) const noexcept = 0;
+        virtual bool validate_pointer(const void *block) const noexcept = 0;
+
+    protected:
+        virtual void *allocate_raw_block(size_t element_size_in_bytes, size_t num_elements) = 0;
+        virtual void deallocate_raw_block(void *block) = 0;
+    };
+
+}

@@ -1,0 +1,515 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <stddef.h>
+#include <stdarg.h>
+#include <cstring>
+
+#include "minstd_utility.h" //  For std::forward
+
+#include "type_traits"
+#include "allocator"
+
+#define DEFAULT_INITIAL_SIZE 12
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T, size_t INITIAL_SIZE = 0, size_t MAX_SIZE = __SIZE_MAX__>
+    class vector
+    {
+    public:
+        using value_type = T;
+        using reference = T &;
+        using const_reference = const T &;
+        using pointer = T *;
+        using const_pointer = const T *;
+        using element_type = T;
+        using allocator_type = allocator<element_type>;
+
+        class iterator;
+        friend class iterator;
+
+        class const_iterator;
+        friend class const_iterator;
+
+        vector(allocator_type &allocator)
+            : allocator_(allocator),
+              begin_(allocator_.allocate(INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)),
+              end_(begin_),
+              current_allocated_size_(INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)
+        {
+        }
+
+        ~vector()
+        {
+            if (minstd::is_class<T>::value)
+            {
+                for (T *current_element = begin_; current_element < end_; current_element++)
+                {
+                    current_element->~T();
+                }
+            }
+
+            allocator_.deallocate(begin_, current_allocated_size_ );
+        }
+
+        [[nodiscard]] constexpr bool empty() const noexcept
+        {
+            return (begin_ == end_);
+        }
+
+        constexpr size_t size() const noexcept
+        {
+            return end_ - begin_;
+        }
+
+        constexpr size_t max_size() const noexcept
+        {
+            return MAX_SIZE;
+        }
+
+        constexpr size_t capacity() const noexcept
+        {
+            return current_allocated_size_;
+        }
+
+        constexpr reference front()
+        {
+            MINIMAL_STD_ASSERT(end_ > begin_)
+
+            return *begin_;
+        }
+
+        constexpr const_reference front() const
+        {
+            MINIMAL_STD_ASSERT(end_ > begin_)
+
+            return *begin_;
+        }
+
+        constexpr reference back()
+        {
+            MINIMAL_STD_ASSERT(end_ > begin_)
+
+            return *(end_ - 1);
+        }
+
+        constexpr const_reference back() const
+        {
+            MINIMAL_STD_ASSERT(end_ > begin_)
+
+            return *(end_ - 1);
+        }
+
+        constexpr reference at(size_t index)
+        {
+            MINIMAL_STD_ASSERT(index < size());
+
+            return *(begin_ + index);
+        }
+
+        constexpr const_reference at(size_t index) const
+        {
+            MINIMAL_STD_ASSERT(index < size());
+
+            return *(begin_ + index);
+        }
+
+        constexpr reference operator[](size_t index)
+        {
+            MINIMAL_STD_ASSERT(index < size());
+
+            return *(begin_ + index);
+        }
+
+        constexpr const_reference operator[](size_t index) const
+        {
+            MINIMAL_STD_ASSERT(index < size());
+
+            return *(begin_ + index);
+        }
+
+        constexpr iterator begin() noexcept;
+        constexpr iterator end() noexcept;
+        constexpr const_iterator begin() const noexcept;
+        constexpr const_iterator end() const noexcept;
+
+        constexpr iterator insert(const_iterator pos, const T &value);
+
+        template <class... Args>
+        constexpr iterator emplace(const_iterator pos, Args &&...args);
+
+        constexpr void push_back(const T &new_element)
+        {
+            *end_++ = new_element;
+        }
+
+        template <class... Args>
+        constexpr reference &emplace_back(Args &&...args)
+        {
+            T *new_node = new (end_++) T(minstd::forward<Args>(args)...);
+
+            return *new_node;
+        }
+
+        constexpr void pop_back()
+        {
+            if (minstd::is_class<T>::value)
+            {
+                if (end_ > begin_)
+                {
+                    (end_-- - 1)->~T();
+                }
+            }
+            else
+            {
+                end_--;
+            }
+        }
+
+    private:
+        allocator<T> &allocator_;
+
+        T *begin_;
+        T *end_;
+
+        size_t current_allocated_size_;
+    };
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    class vector<T, INITIAL_SIZE, MAX_SIZE>::iterator
+    {
+    private:
+        const vector<T, INITIAL_SIZE, MAX_SIZE> *vector_;
+        T *current_location_;
+
+    public:
+        friend class vector<T, INITIAL_SIZE, MAX_SIZE>;
+        friend class const_iterator;
+
+        using value_type = typename vector<T, INITIAL_SIZE, MAX_SIZE>::value_type;
+        using pointer = typename vector<T, INITIAL_SIZE, MAX_SIZE>::pointer;
+        using reference = typename vector<T, INITIAL_SIZE, MAX_SIZE>::reference;
+
+        iterator() = delete;
+        iterator(const vector<T, INITIAL_SIZE, MAX_SIZE> &vector, T *location) noexcept
+            : vector_(&vector),
+              current_location_(location)
+        {
+        }
+
+        void operator=(const iterator &itr_to_copy)
+        {
+            vector_ = itr_to_copy.vector_;
+            current_location_ = itr_to_copy.current_location_;
+        }
+
+        operator const_iterator()
+        {
+            return const_iterator(*vector_, current_location_);
+        }
+
+        //  prefix increment
+
+        iterator &operator++()
+        {
+            if (current_location_ >= vector_->end_)
+            {
+                current_location_ = vector_->end_;
+            }
+            else
+            {
+                current_location_++;
+            }
+
+            return *this;
+        }
+
+        //  postfix increment
+
+        iterator operator++(int)
+        {
+            iterator itr_to_return = *this;
+
+            if (current_location_ >= vector_->end_)
+            {
+                current_location_ = vector_->end_;
+            }
+            else
+            {
+                current_location_++;
+            }
+
+            return itr_to_return;
+        }
+
+        //  prefix decrement
+
+        iterator &operator--()
+        {
+            if (current_location_ <= vector_->begin_)
+            {
+                current_location_ = vector_->begin_;
+            }
+            else
+            {
+                current_location_--;
+            }
+
+            return *this;
+        }
+
+        //  postfix decrement
+
+        iterator operator--(int)
+        {
+            iterator itr_to_return = *this;
+
+            if (current_location_ <= vector_->begin_)
+            {
+                current_location_ = vector_->begin_;
+            }
+            else
+            {
+                current_location_--;
+            }
+
+            return itr_to_return;
+        }
+
+        reference operator*() const
+        {
+            return *current_location_;
+        }
+
+        pointer operator->() const
+        {
+            return current_location_;
+        }
+
+        bool operator==(const iterator &other) const noexcept
+        {
+            return (vector_ == other.vector_) && (current_location_ == other.current_location_);
+        }
+
+        bool operator!=(const iterator &other) const noexcept
+        {
+            return !(*this == other);
+        }
+
+        bool operator==(const const_iterator &other) const noexcept
+        {
+            return (vector_ == other.vector_) && (current_location_ == other.current_location_);
+        }
+
+        bool operator!=(const const_iterator &other) const noexcept
+        {
+            return !(*this == other);
+        }
+    };
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    class vector<T, INITIAL_SIZE, MAX_SIZE>::const_iterator
+    {
+    private:
+        const vector<T, INITIAL_SIZE, MAX_SIZE> *vector_;
+        T *current_location_;
+
+    public:
+        friend class vector<T, INITIAL_SIZE, MAX_SIZE>;
+        friend class iterator;
+
+        using value_type = typename vector<T, INITIAL_SIZE, MAX_SIZE>::value_type;
+        using const_pointer = typename vector<T, INITIAL_SIZE, MAX_SIZE>::const_pointer;
+        using const_reference = typename vector<T, INITIAL_SIZE, MAX_SIZE>::const_reference;
+
+        const_iterator() = delete;
+
+        explicit const_iterator(const vector<T, INITIAL_SIZE, MAX_SIZE> &vector, T *location) noexcept
+            : vector_(&vector),
+              current_location_(location)
+        {
+        }
+
+        const_iterator(const const_iterator &itr_to_copy)
+            : vector_(itr_to_copy.vector_),
+              current_location_(itr_to_copy.current_location_)
+        {
+        }
+
+        void operator=(const const_iterator &itr_to_copy)
+        {
+            vector_ = itr_to_copy.vector_;
+            current_location_ = itr_to_copy.current_location_;
+        }
+
+        //  prefix increment
+
+        const_iterator &operator++()
+        {
+            if (current_location_ >= vector_->end_)
+            {
+                current_location_ = vector_->end_;
+            }
+            else
+            {
+                current_location_++;
+            }
+
+            return *this;
+        }
+
+        //  postfix increment
+
+        const_iterator operator++(int)
+        {
+            const_iterator itr_to_return = *this;
+
+            if (current_location_ >= vector_->end_)
+            {
+                current_location_ = vector_->end_;
+            }
+            else
+            {
+                current_location_++;
+            }
+
+            return itr_to_return;
+        }
+
+        //  prefix decrement
+
+        const_iterator &operator--()
+        {
+            if (current_location_ <= vector_->begin_)
+            {
+                current_location_ = vector_->begin_;
+            }
+            else
+            {
+                current_location_--;
+            }
+
+            return *this;
+        }
+
+        //  postfix decrement
+
+        const_iterator operator--(int)
+        {
+            const_iterator itr_to_return = *this;
+
+            if (current_location_ <= vector_->begin_)
+            {
+                current_location_ = vector_->begin_;
+            }
+            else
+            {
+                current_location_--;
+            }
+
+            return itr_to_return;
+        }
+
+        const_reference operator*() const
+        {
+            return *current_location_;
+        }
+
+        const_pointer operator->() const
+        {
+            return current_location_;
+        }
+
+        bool operator==(const const_iterator &other) const noexcept
+        {
+            return (vector_->begin_ == other.vector_->begin_) && (current_location_ == other.current_location_);
+        }
+
+        bool operator!=(const const_iterator &other) const noexcept
+        {
+            return !(*this == other);
+        }
+
+        bool operator==(const iterator &other) const noexcept
+        {
+            return (vector_->begin_ == other.vector_->begin_) && (current_location_ == other.current_location_);
+        }
+
+        bool operator!=(const iterator &other) const noexcept
+        {
+            return !(*this == other);
+        }
+    };
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    constexpr vector<T, INITIAL_SIZE, MAX_SIZE>::iterator vector<T, INITIAL_SIZE, MAX_SIZE>::begin() noexcept
+    {
+        return iterator(*this, begin_);
+    }
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    constexpr vector<T, INITIAL_SIZE, MAX_SIZE>::iterator vector<T, INITIAL_SIZE, MAX_SIZE>::end() noexcept
+    {
+        return iterator(*this, end_);
+    }
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    constexpr vector<T, INITIAL_SIZE, MAX_SIZE>::const_iterator vector<T, INITIAL_SIZE, MAX_SIZE>::begin() const noexcept
+    {
+        return const_iterator(*this, begin_);
+    }
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    constexpr vector<T, INITIAL_SIZE, MAX_SIZE>::const_iterator vector<T, INITIAL_SIZE, MAX_SIZE>::end() const noexcept
+    {
+        return const_iterator(*this, end_);
+    }
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    constexpr vector<T, INITIAL_SIZE, MAX_SIZE>::iterator vector<T, INITIAL_SIZE, MAX_SIZE>::insert(vector<T, INITIAL_SIZE, MAX_SIZE>::const_iterator pos, const T &value)
+    {
+        MINIMAL_STD_ASSERT((pos.current_location_ >= begin_) && (pos.current_location_ <= end_));
+        MINIMAL_STD_ASSERT(size_t(end_ - begin_) < current_allocated_size_);
+
+        if (pos.current_location_ == end_)
+        {
+            push_back(value);
+            return --end();
+        }
+
+        memmove(pos.current_location_ + 1, pos.current_location_, reinterpret_cast<char *>(end_) - reinterpret_cast<char *>(pos.current_location_));
+        end_++;
+
+        *pos.current_location_ = value;
+
+        return iterator(*pos.vector_, pos.current_location_);
+    }
+
+    template <typename T, size_t INITIAL_SIZE, size_t MAX_SIZE>
+    template <class... Args>
+    constexpr vector<T, INITIAL_SIZE, MAX_SIZE>::iterator vector<T, INITIAL_SIZE, MAX_SIZE>::emplace(const_iterator pos, Args &&...args)
+    {
+        MINIMAL_STD_ASSERT((pos.current_location_ >= begin_) && (pos.current_location_ <= end_));
+        MINIMAL_STD_ASSERT(size_t(end_ - begin_) < current_allocated_size_);
+
+        if (pos.current_location_ == end_)
+        {
+            emplace_back(args...);
+            return --end();
+        }
+
+        memmove(pos.current_location_ + 1, pos.current_location_, reinterpret_cast<char *>(end_) - reinterpret_cast<char *>(pos.current_location_));
+        end_++;
+
+        new (pos.current_location_) T(minstd::forward<Args>(args)...);
+
+        return iterator(*pos.vector_, pos.current_location_);
+    }
+
+}

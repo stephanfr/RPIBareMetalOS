@@ -1,0 +1,10 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+//
+//  THIS FILE SHOULD EVENTUALLY MOVE TO THE STANDARD C LIB BUT RIGHT NOW string.h IS MISSING A LOT OF
+//      FUNCTIONS NEEDED BY CATCH2 AND UNTIL THAT IS FIXED CATCH2 WILL ERROR ON TEST COMPILES.
+//
+
+#include "string.h"

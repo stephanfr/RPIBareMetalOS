@@ -1,0 +1,341 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "allocator"
+
+#include "minstd_utility.h" //  For forward<>()
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename T>
+    class forward_list
+    {
+    private:
+        class node
+        {
+        public:
+            node() = delete;
+
+            explicit node(node *next, const T &element)
+                : element_(element),
+                  next_(next)
+            {
+            }
+
+            template <class... Args>
+            explicit node(node *next, Args &&...args)
+                : element_(minstd::forward<Args>(args)...),
+                  next_(next)
+            {
+            }
+
+        private:
+            T element_;
+
+            node *next_ = nullptr;
+
+            friend class forward_list;
+        };
+
+    public:
+        using value_type = T;
+        using reference = T &;
+        using const_reference = const T &;
+        using pointer = T *;
+        using const_pointer = const T *;
+        using node_type = node;
+        using allocator_type = allocator<node_type>;
+
+        class iterator;
+        friend class iterator;
+
+        class const_iterator;
+        friend class const_iterator;
+
+    public:
+        forward_list(allocator_type &allocator)
+            : allocator_(allocator),
+              front_(nullptr)
+        {
+        }
+
+        [[nodiscard]] bool empty() const noexcept
+        {
+            return front_ == nullptr;
+        }
+
+        size_t max_size() const noexcept
+        {
+            return allocator_.max_size();
+        }
+
+        reference front()
+        {
+            return front_->element_;
+        }
+
+        const_reference front() const
+        {
+            return front_->element_;
+        }
+
+        void push_front(const_reference value)
+        {
+            front_ = new (allocator_.allocate(1)) node_type(front_, value);
+        }
+
+        template <class... Args>
+        reference &emplace_front(Args &&...args)
+        {
+            front_ = new (allocator_.allocate(1)) node_type(front_, minstd::forward<Args>(args)...);
+
+            return front_->element_;
+        }
+
+        void pop_front()
+        {
+            if (front_ == nullptr)
+            {
+                return;
+            }
+
+            node_type *node_to_delete = front_;
+
+            front_ = front_->next_;
+
+            allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+        }
+
+        iterator insert_after(const_iterator pos, const_reference value);
+
+        template <class... Args>
+        iterator emplace_after(const_iterator pos, Args &&...args);
+
+        void erase_after(const_iterator pos);
+
+        iterator begin() noexcept;
+        const_iterator begin() const noexcept;
+        iterator end() noexcept;
+        const_iterator end() const noexcept;
+
+    private:
+        allocator_type &allocator_;
+
+        node_type *front_;
+    };
+
+    template <typename T>
+    class forward_list<T>::iterator
+    {
+    private:
+        node_type *node_ = nullptr;
+
+    public:
+        friend class forward_list<T>;
+        friend class const_iterator;
+
+        using value_type = typename forward_list<T>::value_type;
+        using pointer = typename forward_list<T>::pointer;
+        using reference = typename forward_list<T>::reference;
+
+        iterator() = delete;
+
+        iterator(node_type *node) noexcept
+            : node_(node)
+        {
+        }
+
+        //  prefix increment
+
+        iterator &operator++()
+        {
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return *this;
+        }
+
+        //  postfix increment
+
+        iterator operator++(int)
+        {
+            iterator itr_to_return = *this;
+
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return itr_to_return;
+        }
+
+        reference operator*() const
+        {
+            return node_->element_;
+        }
+
+        pointer operator->() const
+        {
+            return &(node_->element_);
+        }
+
+        bool operator==(const iterator other) const noexcept
+        {
+            return node_ == other.node_;
+        }
+
+        bool operator!=(iterator other) const noexcept
+        {
+            return !(*this == other);
+        }
+    };
+
+    template <typename T>
+    class forward_list<T>::const_iterator
+    {
+    private:
+        node_type *node_ = nullptr;
+
+    public:
+        friend class forward_list<T>;
+
+        using value_type = typename forward_list<T>::value_type;
+        using const_pointer = typename forward_list<T>::const_pointer;
+        using const_reference = typename forward_list<T>::const_reference;
+
+        const_iterator() = delete;
+
+        const_iterator(node_type *node) noexcept
+            : node_(node)
+        {
+        }
+        const_iterator(const iterator other) noexcept
+            : node_(other.node_)
+        {
+        }
+
+        //  prefix increment
+
+        const_iterator &operator++()
+        {
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return *this;
+        }
+
+        //  postfix increment
+
+        const_iterator operator++(int)
+        {
+            const_iterator itr_to_return = *this;
+
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return itr_to_return;
+        }
+
+        const_reference operator*() const
+        {
+            return node_->element_;
+        }
+
+        const_pointer operator->() const
+        {
+            return &(node_->element_);
+        }
+
+        bool operator==(const_iterator other) const noexcept
+        {
+            return node_ == other.node_;
+        }
+
+        bool operator!=(const_iterator other) const noexcept
+        {
+            return !(*this == other);
+        }
+    };
+
+    //
+    //  Methods with iterators need to be defined after the iterators themselves to avoid
+    //      problems with incomplete type references.
+    //
+
+    template <typename T>
+    forward_list<T>::iterator forward_list<T>::insert_after(const_iterator pos, const_reference value)
+    {
+        MINIMAL_STD_ASSERT(pos.node_ != nullptr); //  Neither begin() nor end() are legal
+
+        node_type *new_node = new (allocator_.allocate(1)) node_type(pos.node_->next_, value);
+
+        pos.node_->next_ = new_node;
+
+        return iterator(new_node);
+    }
+
+    template <typename T>
+    template <class... Args>
+    forward_list<T>::iterator forward_list<T>::emplace_after(const_iterator pos, Args &&...args)
+    {
+        MINIMAL_STD_ASSERT(pos.node_ != nullptr);
+
+        node_type *new_node = new (allocator_.allocate(1)) node_type(pos.node_->next_, minstd::forward<Args>(args)...);
+
+        pos.node_->next_ = new_node;
+
+        return iterator(new_node);
+    }
+
+    template <typename T>
+    void forward_list<T>::erase_after(forward_list<T>::const_iterator pos)
+    {
+        MINIMAL_STD_ASSERT(pos.node_ != nullptr); //  Have to have an iterator pointing to something
+
+        if (pos.node_->next_ == nullptr)
+        {
+            return;
+        }
+
+        node_type *node_to_delete = pos.node_->next_;
+
+        pos.node_->next_ = pos.node_->next_->next_;
+
+        allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+    }
+
+    template <typename T>
+    forward_list<T>::iterator forward_list<T>::begin() noexcept
+    {
+        return iterator(front_);
+    }
+
+    template <typename T>
+    forward_list<T>::const_iterator forward_list<T>::begin() const noexcept
+    {
+        return const_iterator(front_);
+    }
+
+    template <typename T>
+    forward_list<T>::iterator forward_list<T>::end() noexcept
+    {
+        return iterator(nullptr);
+    }
+
+    template <typename T>
+    forward_list<T>::const_iterator forward_list<T>::end() const noexcept
+    {
+        return const_iterator(nullptr);
+    }
+
+}

@@ -1,0 +1,7 @@
+.vscode
+sd.img
+gcc-cross
+**/image
+**/build
+**/coverage
+**/lib

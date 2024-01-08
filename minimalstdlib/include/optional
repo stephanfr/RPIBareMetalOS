@@ -1,0 +1,115 @@
+// Copyright 2023 steve. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include "type_traits"
+#include <stddef.h>
+
+#include "minstd_utility.h"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename T>
+    class optional
+    {
+    public:
+        optional() : has_value_(false)
+        {
+        }
+
+        explicit optional(optional &optional_to_copy)
+            : has_value_(optional_to_copy.has_value_)
+        {
+            if (has_value_)
+            {
+                new (&value_) T(optional_to_copy.value_);
+            }
+        }
+
+        explicit optional(optional &&optional_to_copy)
+            : has_value_(optional_to_copy.has_value_)
+        {
+            if (has_value_)
+            {
+                new (&value_) T(minstd::move(optional_to_copy.value_));
+                optional_to_copy.has_value_ = false;
+            }
+        }
+
+        optional(const T &value)
+            : has_value_(true),
+              value_(value)
+        {
+        }
+
+        optional(T &value)
+            : has_value_(true),
+              value_(value)
+        {
+        }
+
+        template <class... Args>
+        explicit optional(Args &&...args)
+            : has_value_(true)
+        {
+            new (&value_) T(minstd::forward<Args>(args)...);
+        }
+
+        ~optional()
+        {
+            if (has_value_)
+            {
+                (&value_)->~T();
+            }
+        }
+
+        constexpr bool has_value() const noexcept
+        {
+            return has_value_;
+        }
+
+        T &operator*()
+        {
+            return value_;
+        }
+
+        const T &operator*() const
+        {
+            return value_;
+        }
+
+        T *operator->()
+        {
+            return &(value_);
+        }
+
+        const T *operator->() const
+        {
+            return &(value_);
+        }
+
+        T &value()
+        {
+            return value_;
+        }
+
+        const T &value() const
+        {
+            return value_;
+        }
+
+    private:
+        bool has_value_;
+        union
+        {
+            char dummy_;
+            T value_;
+        };
+    };
+
+}

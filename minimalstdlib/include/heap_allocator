@@ -1,0 +1,43 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "memory_heap"
+
+#include "allocator"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename T>
+    class heap_allocator : public allocator<T>
+    {
+    public:
+        heap_allocator(memory_heap&    heap)
+            : heap_(heap)
+        {
+        }
+
+        size_t max_size() const noexcept override
+        {
+            return __SIZE_MAX__;
+        }
+
+        T *allocate(size_t num_elements) override
+        {
+            return heap_.allocate_block<T>(num_elements);
+        }
+
+        void deallocate(T *ptr, size_t num_elements) override
+        {
+            heap_.deallocate_block( ptr, num_elements );
+        }
+
+    private:
+        memory_heap &heap_;
+    };
+
+}
+

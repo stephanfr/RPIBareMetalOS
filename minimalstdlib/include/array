@@ -1,0 +1,157 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <stddef.h>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    //  These two template structs exist to support zero length arrays - which are required by the standard
+
+    template <typename T, size_t N> //  Non-zero length flavor
+    struct ElementType
+    {
+        using Type = T[N];
+    };
+
+    template <typename T> //  Zero length flavor
+    struct ElementType<T, 0>
+    {
+        struct Type
+        {
+            T &operator[](size_t) const noexcept { return nullptr; }
+            constexpr explicit operator T *() const noexcept { return nullptr; } //  Always return a null pointer
+        };
+    };
+
+    template <typename T, size_t N>
+    struct array
+    {
+        typedef T value_type;
+        typedef value_type *pointer;
+        typedef const value_type *const_pointer;
+        typedef value_type &reference;
+        typedef const value_type &const_reference;
+        typedef value_type *iterator;
+        typedef const value_type *const_iterator;
+
+        array() = default;
+        ~array() = default;
+
+        void fill(const value_type &value)
+        {
+            for (size_t i = 0; i < N; i++)
+            {
+                elements_[i] = value;
+            }
+        }
+
+        iterator begin() noexcept
+        {
+            return iterator(data());
+        }
+
+        const_iterator begin() const noexcept
+        {
+            return const_iterator(data());
+        }
+
+        iterator end() noexcept
+        {
+            return iterator(data() + N);
+        }
+
+        const iterator end() const noexcept
+        {
+            return const_iterator(data() + N);
+        }
+
+        const_iterator cbegin() const noexcept
+        {
+            return const_iterator(data());
+        }
+
+        const_iterator cend() const noexcept
+        {
+            return const_iterator(data() + N);
+        }
+
+        constexpr size_t size() const noexcept
+        {
+            return N;
+        }
+
+        constexpr size_t max_size() const noexcept
+        {
+            return N;
+        }
+
+        bool empty() const noexcept
+        {
+            return size() == 0;
+        }
+
+        reference operator[](size_t index) noexcept
+        {
+            return elements_[index];
+        }
+
+        constexpr const_reference operator[](size_t index) const noexcept
+        {
+            return elements_[index];
+        }
+
+        reference at(size_t index)
+        {
+            return elements_[index];
+        }
+
+        constexpr const_reference at(size_t index) const
+        {
+            return elements_[index];
+        }
+
+        reference front() noexcept
+        {
+            return elements_[(size_t)0];
+        }
+
+        constexpr const_reference front() const noexcept
+        {
+            return elements_[(size_t)0];
+        }
+
+        reference back() noexcept
+        {
+            return elements_[N - 1];
+        }
+
+        constexpr const_reference back() const noexcept
+        {
+            return elements_[N - 1];
+        }
+
+        pointer data() noexcept
+        {
+            return static_cast<pointer>(elements_);
+        }
+
+        const_pointer data() const noexcept
+        {
+            return static_cast<const_pointer>(elements_);
+        }
+
+    private:
+        //  A bit of template type deducation below.  The case of N == 0 results in the 'Zero length flavor'
+        //      of ElementType being used.  The zero length version essentially returns a nullptr for the array.
+        //
+        //  The reason for the complexity of the zero length flavor is that std::array (or in this case minstd::array)
+        //      is supposed to be a drop-in replacement for C arrays, therefore zero length should consume no memory.
+
+        typename ElementType<T, N>::Type elements_;
+    };
+}

@@ -1,0 +1,114 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include <memory.h>
+
+#include "type_traits.h"
+
+#include "memory_heap.h"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename T>
+    class pool
+    {
+    public:
+        pool(heap& pool_heap,
+             uint32_t pool_size)
+            : heap_(pool_heap),
+              pool_size_(pool_size),
+              current_size(0)
+        {
+            buffer = heap_.allocate_block<T>(pool_size_);
+            occupied = heap_.allocate_block<bool>(pool_size_);
+
+            for (uint32_t i = 0; i < pool_size_; i++)
+            {
+                occupied[i] = false;
+            }
+        }
+
+        constexpr uint32_t pool_size()
+        {
+            return pool_size_;
+        }
+
+        uint32_t currentSize() const
+        {
+            return current_size;
+        }
+
+        T *add(const T &new_element)
+        {
+            for (uint32_t i = 0; i < pool_size_; i++)
+            {
+                if (!occupied[i])
+                {
+                    T *element_in_buffer = new (static_cast<T *>(buffer) + i) T(new_element);
+                    occupied[i] = true;
+                    current_size++;
+
+                    return element_in_buffer;
+                }
+            }
+
+            return nullptr;
+        }
+
+        template <typename... Args>
+        T *emplace(Args &&...args)
+        {
+            for (uint32_t i = 0; i < pool_size_; i++)
+            {
+                if (!occupied[i])
+                {
+                    T *element_in_buffer = new (static_cast<T *>(buffer) + i) T(forward<Args>(args)...);
+                    occupied[i] = true;
+                    current_size++;
+
+                    return element_in_buffer;
+                }
+            }
+
+            return nullptr;
+        }
+
+        void remove(T *element_to_remove)
+        {
+            uint32_t index = element_to_remove - buffer;
+
+            if (index >= pool_size_)
+            {
+                return;
+            }
+
+            if (minstd::is_class<T>::value)
+            {
+                ::operator delete(static_cast<T *>(buffer) + index);
+            }
+
+            occupied[index] = false;
+            current_size--;
+        }
+
+    private:
+        memory_heap& heap_;
+        const uint32_t pool_size_;
+
+        uint32_t current_size;
+
+        bool *occupied;
+
+        T *buffer;
+    };
+
+}

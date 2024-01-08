@@ -1,0 +1,3 @@
+These tests can be a bit messy as I am using the Catch2 framework and compiling under linux for testing.  Therefore,
+I cannot use the minimalclib.a library as it is built for bare metal.  That is why some of the functions in that
+library are copied here and compiled....

@@ -1,0 +1,253 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <stdint.h>
+
+#include "memory_heap"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    class single_block_memory_heap : public memory_heap
+    {
+    public:
+        single_block_memory_heap() = delete;
+
+        single_block_memory_heap(void *location,
+                                 size_t max_size,
+                                 size_t block_alignment = alignof(single_block_memory_heap))
+            : heap_start_(static_cast<char *>(location)),
+              max_size_(max_size),
+              block_alignment_(block_alignment),
+              header_size_(aligned_size(sizeof(block_header))),
+              minimum_size_block_for_split_(header_size_ + aligned_size(sizeof(uint32_t))),
+              current_end_(static_cast<char *>(location))
+        {
+        }
+
+        const void* heap_start() const
+        {
+            return heap_start_;
+        }
+
+        const void* current_end() const
+        {
+            return current_end_;
+        }
+
+        size_t bytes_allocated() const noexcept
+        {
+            return bytes_allocated_;
+        }
+
+        size_t blocks_allocated() const noexcept
+        {
+            return blocks_allocated_;
+        }
+
+        size_t raw_block_size(const void *block) const noexcept
+        {
+            return reinterpret_cast<const block_header *>(static_cast<const char *>(block) - header_size_)->block_size_;
+        }
+
+        size_t num_elements_in_block(const void *block) const noexcept
+        {
+            return reinterpret_cast<const block_header *>(static_cast<const char *>(block) - header_size_)->num_elements_in_block_;
+        }
+
+        size_t blocks_allocated_but_unused() const noexcept
+        {
+            return blocks_allocated_but_unused_;
+        }
+
+        bool validate_pointer(const void *block) const noexcept
+        {
+            const char *block_without_header = reinterpret_cast<const char *>(block) - header_size_;
+
+            if ((block_without_header < heap_start_) || (block_without_header >= current_end_))
+            {
+                return false;
+            }
+
+            block_header_ptr current_block(const_cast<char *>(heap_start_));
+
+            do
+            {
+                if (block_without_header == current_block.ptr)
+                {
+                    return true;
+                }
+
+                current_block.advance_to_next_block();
+            } while (current_block.ptr < current_end_);
+
+            return false;
+        }
+
+    protected:
+        void *allocate_raw_block(size_t element_size_in_bytes, size_t num_elements_in_block)
+        {
+            //  Compute the block size in bytes adjusting for alignment
+
+            size_t block_size_in_bytes = aligned_size(element_size_in_bytes * num_elements_in_block);
+
+            block_size_in_bytes += header_size_;
+
+            //  If the heap is exhausted, search for an unused block
+
+            if (bytes_allocated_ + block_size_in_bytes > max_size_)
+            {
+                return search_for_unused_block(block_size_in_bytes, num_elements_in_block);
+            }
+
+            //  Space exists
+
+            block_header_ptr block(current_end_);
+
+            block.header->in_use_ = true;
+            block.header->block_size_ = block_size_in_bytes;
+            block.header->num_elements_in_block_ = num_elements_in_block;
+
+            current_end_ += block_size_in_bytes;
+            bytes_allocated_ += block_size_in_bytes;
+            blocks_allocated_++;
+
+            //  The block actually starts after the header
+
+            return block.ptr + header_size_;
+        }
+
+        void deallocate_raw_block(void *block)
+        {
+            //  TODO - check for duoble deletes
+            
+            //  Mark the block as not in use and containing zero elements
+
+            reinterpret_cast<block_header *>(static_cast<char *>(block) - header_size_)->in_use_ = false;
+            reinterpret_cast<block_header *>(static_cast<char *>(block) - header_size_)->num_elements_in_block_ = 0;
+
+            blocks_allocated_but_unused_++;
+        }
+
+    private:
+        //  Each heap block starts with a header whose main purpose is to permit finding the next heap block or empty space
+        //      The block pointer returned from the heap is the byte immediately following the header.
+
+        typedef struct block_header
+        {
+            bool in_use_;
+            size_t block_size_; //  Size of block in bytes including the header.  Should be an offset to the next block.
+            size_t num_elements_in_block_;
+        } block_header;
+
+        //  The block_header_ptr union reduces an otherwise huge number of reinterpret_casts
+
+        union block_header_ptr
+        {
+            char *ptr;
+            block_header *header;
+
+            block_header_ptr() = delete;
+
+            explicit block_header_ptr(char *block)
+                : ptr(block)
+            {
+            }
+
+            void advance_to_next_block() { ptr += header->block_size_; }
+        };
+
+        const char *heap_start_; //  const char* because we do not want to risk accidentally changing it and we want to do byte based pointer arithmetic
+        const size_t max_size_;
+        const size_t block_alignment_;
+        const size_t header_size_;
+        const size_t minimum_size_block_for_split_;
+        char *current_end_;
+
+        size_t bytes_allocated_ = 0;
+        size_t blocks_allocated_ = 0;
+        size_t blocks_allocated_but_unused_ = 0;
+
+        size_t aligned_size(size_t unaligned_block_size_in_bytes)
+        {
+            return (((unaligned_block_size_in_bytes / block_alignment_) + ((unaligned_block_size_in_bytes % block_alignment_) == 0 ? 0 : 1)) * block_alignment_);
+        }
+
+        void *search_for_unused_block(size_t block_size_in_bytes, size_t num_elements_in_block)
+        {
+            if (blocks_allocated_but_unused_ == 0)
+            {
+                return nullptr;
+            }
+
+            block_header_ptr current_block(const_cast<char *>(heap_start_));
+
+            block_header_ptr best_fit_block(nullptr);
+            size_t best_fit_block_size = 0;
+
+            while (current_block.ptr < current_end_)
+            {
+                //  skip ahead to the next block if this block is in use or if it is unused but too small
+
+                if ((current_block.header->in_use_) || (current_block.header->block_size_ < block_size_in_bytes))
+                {
+                    current_block.advance_to_next_block();
+                    continue;
+                }
+
+                //  If we are here, the block is unused.
+                //  If the block is the same size as the requested block, then return it now.
+
+                if (current_block.header->block_size_ == block_size_in_bytes)
+                {
+                    best_fit_block = current_block;
+                    break;
+                }
+
+                //  The block is bigger than required, so look for the biggest block
+                //      and then we can split it
+
+                if (current_block.header->block_size_ > best_fit_block_size)
+                {
+                    best_fit_block = current_block;
+                    best_fit_block_size = current_block.header->block_size_;
+                }
+
+                current_block.advance_to_next_block();
+            }
+
+            if (best_fit_block.ptr != nullptr)
+            {
+                if (best_fit_block.header->block_size_ > block_size_in_bytes + minimum_size_block_for_split_)
+                {
+                    block_header_ptr new_block(best_fit_block.ptr + block_size_in_bytes);
+
+                    new_block.header->block_size_ = best_fit_block.header->block_size_ - block_size_in_bytes;
+                    new_block.header->in_use_ = false;
+                    new_block.header->num_elements_in_block_ = 0;
+
+                    best_fit_block.header->block_size_ = block_size_in_bytes;
+
+                    blocks_allocated_++;
+                }
+                else
+                {
+                    blocks_allocated_but_unused_--;
+                }
+
+                best_fit_block.header->in_use_ = true;
+                best_fit_block.header->num_elements_in_block_ = num_elements_in_block;
+
+                best_fit_block.ptr += header_size_; //  Add the offset for the header before returning the block
+            }
+
+            return best_fit_block.ptr;
+        }
+    };
+
+}

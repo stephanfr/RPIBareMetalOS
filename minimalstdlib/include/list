@@ -1,0 +1,565 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "allocator"
+
+#include "minstd_utility.h" //  For forward<>()
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T>
+    class list
+    {
+    private:
+        class node
+        {
+        public:
+            node() = delete;
+
+            explicit node(node *next, node *prev, const T &element)
+                : element_(element),
+                  next_(next),
+                  prev_(prev)
+            {
+            }
+
+            template <class... Args>
+            explicit node(node *next, node *prev, Args &&...args)
+                : element_(minstd::forward<Args>(args)...),
+                  next_(next),
+                  prev_(prev)
+            {
+            }
+
+        private:
+            T element_;
+
+            node *next_ = nullptr;
+            node *prev_ = nullptr;
+
+            template <typename T1>
+            friend class list;
+        };
+
+    public:
+        using value_type = T;
+        using reference = T &;
+        using const_reference = const T &;
+        using pointer = T *;
+        using const_pointer = const T *;
+        using node_type = node;
+        using allocator_type = allocator<node_type>;
+
+        class iterator;
+        friend class iterator;
+
+        class const_iterator;
+        friend class const_iterator;
+
+    public:
+        list() = delete;
+
+        list(allocator_type &allocator)
+            : allocator_(allocator),
+              front_(nullptr),
+              back_(nullptr)
+        {
+        }
+
+        ~list()
+        {
+            clear();
+        }
+
+        void clear()
+        {
+            while( front_ != nullptr )
+            {
+                node_type *node_to_delete = front_;
+
+                allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+
+                front_ = front_->next_;
+            }
+        }
+
+        [[nodiscard]] bool empty() const noexcept
+        {
+            return front_ == nullptr;
+        }
+
+        size_t max_size() const noexcept
+        {
+            return allocator_.max_size();
+        }
+
+        reference front()
+        {
+            return front_->element_;
+        }
+
+        const_reference front() const
+        {
+            return front_->element_;
+        }
+
+        reference back()
+        {
+            return back_->element_;
+        }
+
+        const_reference back() const
+        {
+            return back_->element_;
+        }
+
+        void push_front(const_reference value)
+        {
+            node_type *new_node = new (allocator_.allocate(1)) node_type(front_, nullptr, value);
+
+            if (front_ != nullptr)
+            {
+                front_->prev_ = new_node;
+            }
+
+            front_ = new_node;
+
+            if (back_ == nullptr)
+            {
+                back_ = new_node;
+            }
+        }
+
+        template <class... Args>
+        reference &emplace_front(Args &&...args)
+        {
+            node_type *new_node = new (allocator_.allocate(1)) node_type(front_, nullptr, minstd::forward<Args>(args)...);
+
+            if (front_ != nullptr)
+            {
+                front_->prev_ = new_node;
+            }
+
+            front_ = new_node;
+
+            if (back_ == nullptr)
+            {
+                back_ = new_node;
+            }
+
+            return new_node->element_;
+        }
+
+        void push_back(const_reference value)
+        {
+            node_type *new_node = new (allocator_.allocate(1)) node_type(nullptr, back_, value);
+
+            if (back_ != nullptr)
+            {
+                back_->next_ = new_node;
+            }
+
+            back_ = new_node;
+
+            if (front_ == nullptr)
+            {
+                front_ = new_node;
+            }
+        }
+
+        template <class... Args>
+        reference &emplace_back(Args &&...args)
+        {
+            node_type *new_node = new (allocator_.allocate(1)) node_type(nullptr, back_, minstd::forward<Args>(args)...);
+
+            if (back_ != nullptr)
+            {
+                back_->next_ = new_node;
+            }
+
+            back_ = new_node;
+
+            if (front_ == nullptr)
+            {
+                front_ = new_node;
+            }
+
+            return new_node->element_;
+        }
+
+        void pop_front()
+        {
+            if (front_ == nullptr)
+            {
+                return;
+            }
+
+            node_type *node_to_delete = front_;
+
+            front_ = front_->next_;
+
+            if (front_ != nullptr)
+            {
+                front_->prev_ = nullptr;
+            }
+            else
+            {
+                back_ = nullptr;
+            }
+
+            allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+        }
+
+        void pop_back()
+        {
+            if (back_ == nullptr)
+            {
+                return;
+            }
+
+            node_type *node_to_delete = back_;
+
+            back_ = back_->prev_;
+
+            if (back_ != nullptr)
+            {
+                back_->next_ = nullptr;
+            }
+            else
+            {
+                front_ = nullptr;
+            }
+
+            allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+        }
+
+        iterator begin() noexcept;
+        const_iterator begin() const noexcept;
+        iterator end() noexcept;
+        const_iterator end() const noexcept;
+
+        iterator insert_after(const_iterator pos, const_reference value);
+
+        template <class... Args>
+        iterator emplace_after(const_iterator pos, Args &&...args);
+
+        void erase_after(const_iterator pos);
+
+    private:
+        allocator<node_type> &allocator_;
+
+        node_type *front_;
+        node_type *back_;
+    };
+
+    template <typename T>
+    class list<T>::iterator
+    {
+    private:
+        const list<T> *list_;
+        node_type *node_ = nullptr;
+
+    public:
+        friend class list<T>;
+        friend class const_iterator;
+
+        using value_type = typename list<T>::value_type;
+        using pointer = typename list<T>::pointer;
+        using reference = typename list<T>::reference;
+
+        iterator() = delete;
+
+        iterator(const list<T> *list,
+                 node_type *node) noexcept
+            : list_(list),
+              node_(node)
+        {
+        }
+
+        //  prefix increment
+
+        iterator &operator++()
+        {
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return *this;
+        }
+
+        //  postfix increment
+
+        iterator operator++(int)
+        {
+            iterator itr_to_return = *this;
+
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return itr_to_return;
+        }
+
+        //  prefix decrement
+
+        iterator &operator--()
+        {
+            if (node_ != nullptr)
+            {
+                node_ = node_->prev_;
+            }
+            else if (list_->back_ != nullptr)
+            {
+                node_ = list_->back_;
+            }
+
+            return *this;
+        }
+
+        //  postfix decrement
+
+        iterator operator--(int)
+        {
+            iterator itr_to_return = *this;
+
+            if (node_ != nullptr)
+            {
+                node_ = node_->prev_;
+            }
+            else if (list_->back_ != nullptr)
+            {
+                node_ = list_->back_;
+            }
+
+            return itr_to_return;
+        }
+
+        reference operator*() const
+        {
+            return node_->element_;
+        }
+
+        pointer operator->() const
+        {
+            return &(node_->element_);
+        }
+
+        bool operator==(const iterator other) const noexcept
+        {
+            return node_ == other.node_;
+        }
+
+        bool operator!=(iterator other) const noexcept
+        {
+            return !(*this == other);
+        }
+    };
+
+    template <typename T>
+    class list<T>::const_iterator
+    {
+    private:
+        const list<T> *list_;
+        node_type *node_ = nullptr;
+
+    public:
+        friend class list<T>;
+
+        using value_type = typename list<T>::value_type;
+        using const_pointer = typename list<T>::const_pointer;
+        using const_reference = typename list<T>::const_reference;
+
+        const_iterator() = delete;
+
+        const_iterator(const list<T> *list,
+                       node_type *node) noexcept
+            : list_(list),
+              node_(node)
+        {
+        }
+        const_iterator(const iterator other) noexcept
+            : list_(other.list_),
+              node_(other.node_)
+        {
+        }
+
+        //  prefix increment
+
+        const_iterator &operator++()
+        {
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return *this;
+        }
+
+        //  postfix increment
+
+        const_iterator operator++(int)
+        {
+            const_iterator itr_to_return = *this;
+
+            if (node_ != nullptr)
+            {
+                node_ = node_->next_;
+            }
+
+            return itr_to_return;
+        }
+
+        //  prefix decrement
+
+        const_iterator &operator--()
+        {
+            if (node_ != nullptr)
+            {
+                node_ = node_->prev_;
+            }
+            else if (list_->back_ != nullptr)
+            {
+                node_ = list_->back_;
+            }
+
+            return *this;
+        }
+
+        //  postfix decrement
+
+        const_iterator operator--(int)
+        {
+            const_iterator itr_to_return = *this;
+
+            if (node_ != nullptr)
+            {
+                node_ = node_->prev_;
+            }
+            else if (list_->back_ != nullptr)
+            {
+                node_ = list_->back_;
+            }
+
+            return itr_to_return;
+        }
+
+        const_reference operator*() const
+        {
+            return node_->element_;
+        }
+
+        const_pointer operator->() const
+        {
+            return &(node_->element_);
+        }
+
+        bool operator==(const_iterator other) const noexcept
+        {
+            return node_ == other.node_;
+        }
+
+        bool operator!=(const_iterator other) const noexcept
+        {
+            return !(*this == other);
+        }
+    };
+
+    template <typename T>
+    list<T>::iterator list<T>::begin() noexcept
+    {
+        return iterator(this, front_);
+    }
+
+    template <typename T>
+    list<T>::const_iterator list<T>::begin() const noexcept
+    {
+        return const_iterator(this, front_);
+    }
+
+    template <typename T>
+    list<T>::iterator list<T>::end() noexcept
+    {
+        return iterator(this, nullptr);
+    }
+
+    template <typename T>
+    list<T>::const_iterator list<T>::end() const noexcept
+    {
+        return const_iterator(this, nullptr);
+    }
+
+    template <typename T>
+    list<T>::iterator list<T>::insert_after(const_iterator pos, const_reference value)
+    {
+        MINIMAL_STD_ASSERT(pos.node_ != nullptr);
+
+        node_type *new_node = new (allocator_.allocate(1)) node_type(pos.node_->next_, pos.node_, value);
+
+        pos.node_->next_ = new_node;
+
+        if (new_node->next_ != nullptr)
+        {
+            new_node->next_->prev_ = new_node;
+        }
+        else
+        {
+            back_ = new_node;
+        }
+
+        return iterator(this, new_node);
+    }
+
+    template <typename T>
+    template <class... Args>
+    list<T>::iterator list<T>::emplace_after(const_iterator pos, Args &&...args)
+    {
+        MINIMAL_STD_ASSERT(pos.node_ != nullptr); //  Neither begin() nor end() are legal
+
+        node_type *new_node = new (allocator_.allocate(1)) node_type(pos.node_->next_, pos.node_, minstd::forward<Args>(args)...);
+
+        pos.node_->next_ = new_node;
+
+        if (new_node->next_ != nullptr)
+        {
+            new_node->next_->prev_ = new_node;
+        }
+        else
+        {
+            back_ = new_node;
+        }
+
+        return iterator(this, new_node);
+    }
+
+    template <typename T>
+    void list<T>::erase_after(list<T>::const_iterator pos)
+    {
+        MINIMAL_STD_ASSERT(pos.node_ != nullptr); //  Have to have an iterator pointing to something
+
+        if (pos.node_->next_ == nullptr)
+        {
+            return;
+        }
+
+        node_type *node_to_delete = pos.node_->next_;
+
+        pos.node_->next_ = pos.node_->next_->next_;
+
+        if (pos.node_->next_ != nullptr)
+        {
+            pos.node_->next_->prev_ = pos.node_;
+        }
+        else
+        {
+            back_ = pos.node_;
+        }
+
+        allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+    }
+
+}

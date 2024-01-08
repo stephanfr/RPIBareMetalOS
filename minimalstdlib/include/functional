@@ -1,0 +1,40 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <class T>
+    class reference_wrapper
+    {
+    public:
+        constexpr reference_wrapper(T &&reference_to_wrap) noexcept
+            : value_(&reference_to_wrap)
+        {
+        }
+
+        constexpr reference_wrapper(const reference_wrapper &wrapper_to_copy) noexcept
+            : value_(wrapper_to_copy.value_)
+        {
+        }
+
+        constexpr operator T &() const noexcept
+        {
+            return *value_;
+        }
+
+        constexpr T &get() const noexcept
+        {
+            return *value_;
+        }
+
+    private:
+        T *value_ = nullptr;
+    };
+}
+
