@@ -1,7 +1,14 @@
+<<<<<<< HEAD
 .vscode
+=======
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 sd.img
 gcc-cross
 **/image
 **/build
 **/coverage
 **/lib
+<<<<<<< HEAD
+=======
+**/doc
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

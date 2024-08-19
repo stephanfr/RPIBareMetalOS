@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 include ../Makefile.mk
 
 ASM_SRC_DIR := src/asm
@@ -32,3 +33,12 @@ clean:
 	/bin/mkdir -p $(OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(LIB_DIR) > /dev/null 2> /dev/null || true
 
+=======
+# Copyright 2023 Stephan Friedl. All rights reserved.
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
+TARGET?=aarch64
+
+include Makefile.$(TARGET).mk
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

@@ -1,0 +1,39 @@
+{
+    "configurations": [
+        {
+            "name": "AArch64 Bare Metal",
+            "includePath": [
+                "~/dev/gcc-cross/aarch64-none-elf/lib/gcc/aarch64-none-elf/12.3.1/include",
+                "~/dev/gcc-cross/aarch64-none-elf/lib/gcc/aarch64-none-elf/12.3.1/include-fixed",
+                "~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include",
+                "~/dev/third-party/cpputest/include",
+                "${workspaceFolder}/rpibaremetalos/include",
+                "${workspaceFolder}/minimalclib/include",
+                "${workspaceFolder}/minimalstdio/include",
+                "${workspaceFolder}/minimalstdlib/include"
+            ],
+            "defines": [
+                "_LIBC_LIMITS_H_",
+                "PRINTF_ALIAS_STANDARD_FUNCTION_NAMES_SOFT=1",
+                "CPPUTEST_USE_STD_CPP_LIB=0",
+                "CPPUTEST_USE_STD_C_LIB=0",
+                "CPPUTEST_HAVE_LONG_LONG_INT=0",
+                "CPPUTEST_CHAR_BIT=8",
+                "CPPUTEST_USE_MEM_LEAK_DETECTION=0",
+                "INCLUDE_TEST_HELPERS"
+            ],
+            "compilerPath": "/usr/bin/gcc",
+            "cStandard": "c17",
+            "cppStandard": "c++20",
+            "intelliSenseMode": "linux-gcc-x64",
+            "configurationProvider": "ms-vscode.makefile-tools",
+            "compilerArgs": [
+                "-ffreestanding",
+                "-nostdinc",
+                "-nostdlib",
+                "-nostdinc++"
+            ]
+        }
+    ],
+    "version": 4
+}

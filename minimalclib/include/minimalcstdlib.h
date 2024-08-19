@@ -22,6 +22,10 @@ char* utoa( unsigned int value, char *str, int base );
 
 long strtol(const char *numeric_string, char **first_nonconverted_character, int base, int *result_code);
 
+<<<<<<< HEAD
+=======
+/*
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 #define min(a,b) \
    ({ __typeof__ (a) _a = (a); \
        __typeof__ (b) _b = (b); \
@@ -31,6 +35,10 @@ long strtol(const char *numeric_string, char **first_nonconverted_character, int
    ({ __typeof__ (a) _a = (a); \
        __typeof__ (b) _b = (b); \
      _a > _b ? _a : _b; })
+<<<<<<< HEAD
+=======
+*/
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #ifdef __cplusplus
 }

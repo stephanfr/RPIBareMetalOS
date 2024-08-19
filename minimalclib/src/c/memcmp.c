@@ -58,6 +58,12 @@ QUICKREF
 /* Threshhold for punting to the byte copier.  */
 #define TOO_SMALL(LEN)  ((LEN) < LBLOCKSIZE)
 
+<<<<<<< HEAD
+=======
+#undef memcmp
+
+#ifdef __AARCH64_BUILD__
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 int
 memcmp (const void *m1,
 	const void *m2,
@@ -118,3 +124,7 @@ memcmp (const void *m1,
   return 0;
 #endif /* not PREFER_SIZE_OVER_SPEED */
 }
+<<<<<<< HEAD
+=======
+#endif
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Copyright 2023 Stephan Friedl. All rights reserved.
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
@@ -118,3 +119,16 @@ $(ARMSTUB_DIRS):
 armstub_clean:
 	/bin/rm armstub/build/*.* armstub/image/*.* > /dev/null 2> /dev/null || true
 	
+=======
+# Copyright 2024 Stephan Friedl. All rights reserved.
+# Use of this source code is governed by a BSD-style
+# license that can be found in the LICENSE file.
+
+TEST_TARGETS := test test-coverage
+
+ifeq (,$(filter $(TEST_TARGETS), $(MAKECMDGOALS)))
+include Makefile.aarch64.mk
+else
+include Makefile.test.mk
+endif
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

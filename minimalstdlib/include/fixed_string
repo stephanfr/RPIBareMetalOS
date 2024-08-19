@@ -6,6 +6,7 @@
 
 #include "minstdconfig.h"
 
+<<<<<<< HEAD
 #include <cstring>
 #include <stdint.h>
 
@@ -191,32 +192,61 @@ namespace MINIMAL_STD_NAMESPACE
     };
 
     template <typename T, size_t MAX_SIZE>  //  Default value for MAX_SIZE is in the forward declaration at the top of the file
+=======
+#include <string.h>
+#include <stdint.h>
+
+#include "allocator"
+#include "algorithm"
+#include "basic_string"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T, size_t MAX_SIZE> //  Default value for MAX_SIZE is in the forward declaration at the top of the file
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     class basic_fixed_string : public basic_string<T>
     {
     public:
         static constexpr size_t npos = SIZE_MAX;
 
         explicit basic_fixed_string()
+<<<<<<< HEAD
             : basic_string<T>(fixed_buffer_, MAX_SIZE)
+=======
+            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE)
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         basic_fixed_string(const T *value)
+<<<<<<< HEAD
             : basic_string<T>(fixed_buffer_, MAX_SIZE, value)
+=======
+            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, value)
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         explicit basic_fixed_string(const T *value, size_t length)
+<<<<<<< HEAD
             : basic_string<T>(fixed_buffer_, MAX_SIZE, value, length)
+=======
+            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, value, length)
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         explicit basic_fixed_string(const basic_string<T> &string_to_copy)
+<<<<<<< HEAD
             : basic_string<T>(fixed_buffer_, MAX_SIZE, string_to_copy)
+=======
+            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, string_to_copy)
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         explicit basic_fixed_string(const basic_fixed_string &string_to_copy)
+<<<<<<< HEAD
             : basic_string<T>( fixed_buffer_, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_ )
         {
         }
@@ -224,6 +254,9 @@ namespace MINIMAL_STD_NAMESPACE
         template <size_t OTHER_MAX_SIZE>
         explicit basic_fixed_string(const basic_fixed_string<T, OTHER_MAX_SIZE> &string_to_copy)
             : basic_string<T>( fixed_buffer_, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_ )
+=======
+            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_)
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
@@ -252,6 +285,7 @@ namespace MINIMAL_STD_NAMESPACE
         }
 
     private:
+<<<<<<< HEAD
 
         union
         {
@@ -261,19 +295,45 @@ namespace MINIMAL_STD_NAMESPACE
         
     };
 
+=======
+        union
+        {
+            uint64_t alignment_helper_; //  On aarch64 bare metal without the MMU, alignment matters.  This union forces alignment of the char array with a uint64_t which appears to work.
+            T fixed_buffer_[MAX_SIZE + 1];
+        };
+
+        void grow_buffer_for_string(const T *str) override
+        {}
+
+        void grow_buffer(size_t chars_needed) override
+        {};
+    };
+
+
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     template <typename T>
     template <size_t OTHER_MAX_SIZE>
     basic_string<T> &basic_string<T>::operator=(const basic_fixed_string<T, OTHER_MAX_SIZE> &string_to_copy)
     {
+<<<<<<< HEAD
         basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy.buffer_, basic_string<T>::buffer_size_ ), basic_string<T>::max_size_);
+=======
+        basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy.buffer_, basic_string<T>::buffer_size_), basic_string<T>::max_size_);
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         return *this;
     }
 
+<<<<<<< HEAD
     //  Declare a string class with the char data type
 
     using string = basic_string<char>;
 
     template <size_t MAX_SIZE = 64>
+=======
+    //  Declare a fixed string class with the char data type
+
+    template <size_t MAX_SIZE = DEFAULT_FIXED_STRING_MAX_SIZE>
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     using fixed_string = basic_fixed_string<char, MAX_SIZE>;
 }

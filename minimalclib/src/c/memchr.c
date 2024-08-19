@@ -78,6 +78,12 @@ QUICKREF
    to fill (long)MASK. */
 #define DETECTCHAR(X,MASK) (DETECTNULL(X ^ MASK))
 
+<<<<<<< HEAD
+=======
+#undef memchr
+
+#ifdef __AARCH64_BUILD__
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 void *
 memchr (const void *src_void,
 	int c,
@@ -142,3 +148,7 @@ memchr (const void *src_void,
 
   return NULL;
 }
+<<<<<<< HEAD
+=======
+#endif
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

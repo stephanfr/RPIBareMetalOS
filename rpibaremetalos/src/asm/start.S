@@ -68,11 +68,14 @@ _start:
 
     //  Running at EL3 
 
+<<<<<<< HEAD
     //  Identify the board type, we need that the setup interrupts and the physical timer
 
     bl      IdentifyBoardType
     bl      SetupPhysicalTimer
 
+=======
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 	// Set L2 read/write cache latency to 3
 
 	mrs     x0, L2CTLR_EL1
@@ -99,10 +102,24 @@ _start:
 	mov     x0, #CPUECTLR_EL1_SMPEN
 	msr     CPUECTLR_EL1, x0
 
+<<<<<<< HEAD
     //  If we are on a platform that supports the Generic Interrupt Controller, configure it now
 
     bl      IdentifyBoardType
     cmp     x0, #RPI_BOARD_ENUM_RPI3
+=======
+    //  Identify the board type and then setup the physical timer
+
+    bl      IdentifyBoardType
+    mov     x3, x0                  //  Copy board type into register 3 
+
+    bl      SetupPhysicalTimer
+
+    //  If we are on a platform that supports the Generic Interrupt Controller, configure it now
+    //      Register 3 contains the board type copied above. 
+
+    cmp     x3, #RPI_BOARD_ENUM_RPI3
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     b.eq    rpi3_skip_gic_config
 
         bl      ConfigureGIC400
@@ -118,9 +135,15 @@ rpi3_skip_gic_config:
 	//  Switch to EL2
 
 	mov     x0, #SPSR_EL3_VAL
+<<<<<<< HEAD
 	msr     spsr_el3, x0
 	adr     x0, running_in_el2
 	msr     elr_el3, x0
+=======
+	msr     SPSR_EL3, x0
+	adr     x0, running_in_el2
+	msr     ELR_EL3, x0
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 	eret
 
     //  Running at EL2 - processor will be in EL2 on entry with the default ARMSTUB
@@ -129,7 +152,11 @@ running_in_el2:
 
     //  Read CPU id, stop slave cores
 
+<<<<<<< HEAD
     mrs     x1, mpidr_el1
+=======
+    mrs     x1, MPIDR_EL1
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     and     x1, x1, #3
     cbz     x1, continue_on_core0
 
@@ -141,6 +168,7 @@ running_in_el2:
 
 continue_on_core0:
 
+<<<<<<< HEAD
     //  The physical timer should be setup when we get here - either above or in the default armstub
 
     cmp     x0, #4
@@ -164,11 +192,34 @@ continue_on_core0:
     msr     hstr_el2, xzr
     mov     x0, #(3 << 20)
     msr     cpacr_el1, x0
+=======
+    //  Sets the stack for EL1 - this can only be done in EL2 or EL3
+
+    adrp    x19, __el1_stack_top
+    add     x19, x19, :lo12:__el1_stack_top
+    msr     SP_EL1, x19
+
+    //  Enable CNTP for lower exception levels
+
+    mrs     x0, CNTHCTL_EL2
+    orr     x0, x0, #3
+    msr     CNTHCTL_EL2, x0
+    msr     CNTVOFF_EL2, xzr
+
+    //  Disable various CPU architectural feature traps
+
+    mov     x0, #0x33FF
+    msr     CPTR_EL2, x0
+    msr     HSTR_EL2, xzr
+    mov     x0, #(3 << 20)
+    msr     CPACR_EL1, x0
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Enable AArch64 in EL1
 
     mov     x0, #(1 << 31)              // AArch64
     orr     x0, x0, #(1 << 1)           // SWIO hardwired on Pi3
+<<<<<<< HEAD
     msr     hcr_el2, x0
     mrs     x0, hcr_el2
 
@@ -177,13 +228,29 @@ continue_on_core0:
     mov     x2, #0x0800
     movk    x2, #0x30d0, lsl #16
     msr     sctlr_el1, x2
+=======
+    msr     HCR_EL2, x0
+    mrs     x0, HCR_EL2
+
+    //  Configure CPU for EL1 and EL0
+
+    mov     x2, #0x0800
+    movk    x2, #0x30d0, lsl #16
+    msr     SCTLR_EL1, x2
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Change execution level to EL1
 
     mov     x2, SPSR_EL2_VALUE
+<<<<<<< HEAD
     msr     spsr_el2, x2
     adr     x2, running_in_el1          //  Load the EL2 exception return reg with the running_in_el1 symbol so we go there on eret
     msr     elr_el2, x2
+=======
+    msr     SPSR_EL2, x2
+    adr     x2, running_in_el1          //  Load the EL2 exception return reg with the running_in_el1 symbol so we go there on eret
+    msr     ELR_EL2, x2
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     eret                                //  Exception level may only change on an exception return
 
@@ -198,7 +265,11 @@ running_in_el1:
     //  Set up exception handlers
 
 	adr	    x0, _exception_vectors
+<<<<<<< HEAD
 	msr	    vbar_el1, x0		        //  Put the address of the exception vector table into VBAR_EL1
+=======
+	msr	    VBAR_EL1, x0		        //  Put the address of the exception vector table into VBAR_EL1
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Set top of stack.
     //      The linker script defines the __stack symbol to be the top of OS RAM.
@@ -207,16 +278,27 @@ running_in_el1:
     //  When we set the SPSR_EL2 register to SPSR_EL2_VALUE above, the SPSR_EL2_EL1h bits are set which means
     //      that on the eret above, SPSel set to 1 for execution in EL1.  This matters as it will impact which 
     //      exception vector table entry is chosen when an exception (or interrupt) occurs.  If the exception
+<<<<<<< HEAD
     //      is processed in EL1 with SPSel == 1, then the 't' suffixed entries are used.
     //
     //  SPSel == 1 means each exception level will have its own stack pointer (SP).  I *think* this makes sense
     //      from a security standpoint as it eliminates the risk of a stack based attack in EL0 getting into EL1.
+=======
+    //      is processed in EL1 with SPSel == 1, then the 'h' suffixed entries are used.
+    //
+    //  SPSel == 1 means each exception level will have its own stack pointer (SP).  I *think* this makes sense
+    //      from a security standpoint as it eliminates a risk of a stack based attack in EL0 getting into EL1.
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     //      The flip side is that we will have to handle the stacks individually and need to insure we do not
     //      overrun them.  Not setting up the SPs correctly should be a catastrophic error on startup.
 
     adrp    x19, __el0_stack_top
     add     x19, x19, :lo12:__el0_stack_top
+<<<<<<< HEAD
     msr     sp_el0, x19                          // Set the stack pointer for EL0
+=======
+    msr     SP_EL0, x19                          // Set the stack pointer for EL0
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Clear bss
     //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length

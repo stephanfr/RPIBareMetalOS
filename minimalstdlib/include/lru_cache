@@ -1,0 +1,264 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "stdint.h"
+
+#include "minstdconfig.h"
+
+#include "allocator"
+#include "avl_tree"
+#include "functional"
+#include "list"
+#include "new"
+#include "optional"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename Key, typename T>
+    class lru_cache
+    {
+    public:
+        class cache_entry
+        {
+        public:
+            cache_entry() = delete;
+            cache_entry(const cache_entry &) = delete;
+            cache_entry(cache_entry &&) = delete;
+
+            explicit cache_entry(const Key &key, const T &value)
+                : key_(key),
+                  value_(value)
+            {
+            }
+
+            explicit cache_entry(const Key &key, T &&value)
+                : key_(key),
+                  value_(minstd::move(value))
+            {
+            }
+
+            cache_entry &operator=(const cache_entry &) = delete;
+            cache_entry &operator=(cache_entry &&) = delete;
+
+            const Key &key() const noexcept
+            {
+                return key_;
+            }
+
+            const T &value() const noexcept
+            {
+                return value_;
+            }
+
+        private:
+            friend class lru_cache;
+
+            Key key_;
+            T value_;
+        };
+
+        using cache_entry_type = cache_entry;
+        using list_entry_type = list<cache_entry_type>::node_type;
+
+    private:
+        using list_entry_iterator = list<cache_entry_type>::iterator;
+        using map_entry_iterator = avl_tree<Key, list_entry_iterator>::iterator;
+
+    public:
+        using map_entry_type = avl_tree<Key, list_entry_iterator>::node_type;
+        using cache_entry_allocator_type = list<cache_entry_type>::allocator_type;
+        using map_entry_allocator_type = avl_tree<Key, list_entry_iterator>::allocator_type;
+
+        using iterator = list<cache_entry_type>::iterator;
+        using const_iterator = list<cache_entry_type>::const_iterator;
+
+        lru_cache() = delete;
+        lru_cache(const lru_cache &) = delete;
+        lru_cache(const lru_cache &&) = delete;
+
+        lru_cache(size_t max_cache_size,
+                  cache_entry_allocator_type &cache_entry_allocator,
+                  map_entry_allocator_type &map_entry_allocator)
+            : cache_entry_allocator_(cache_entry_allocator),
+              map_entry_allocator_(map_entry_allocator),
+              cache_entries_(cache_entry_allocator_),
+              cache_entry_map_(map_entry_allocator_),
+              max_cache_size_(max_cache_size),
+              cache_hits_(0),
+              cache_misses_(0)
+        {
+        }
+
+        ~lru_cache()
+        {
+            clear();
+        }
+
+        lru_cache &operator=(const lru_cache &) = delete;
+        lru_cache &operator=(const lru_cache &&) = delete;
+
+        size_t max_size() const noexcept
+        {
+            return max_cache_size_;
+        }
+
+        bool empty() const noexcept
+        {
+            return cache_entries_.empty();
+        }
+
+        size_t size() const noexcept
+        {
+            return cache_entries_.size();
+        }
+
+        uint64_t hits() const noexcept
+        {
+            return cache_hits_;
+        }
+
+        uint64_t misses() const noexcept
+        {
+            return cache_misses_;
+        }
+
+        iterator begin() noexcept
+        {
+            return cache_entries_.begin();
+        }
+
+        const_iterator begin() const noexcept
+        {
+            return cache_entries_.begin();
+        }
+
+        iterator end() noexcept
+        {
+            return cache_entries_.end();
+        }
+
+        const_iterator end() const noexcept
+        {
+            return cache_entries_.end();
+        }
+
+        void clear()
+        {
+            cache_entries_.clear();
+            cache_entry_map_.clear();
+        }
+
+        bool add(const Key &key, const T &value)
+        {
+            //  Do not overwrite existing entries
+
+            if (cache_entry_map_.find(key) != cache_entry_map_.end())
+            {
+                return false;
+            }
+
+            //  Insure space exists for a new entry
+
+            insure_space_exists();
+
+            //  Add the new entry to the front of the list and the front of the list to the map
+
+            cache_entries_.emplace_front(key, value);
+            cache_entry_map_.insert(key, cache_entries_.begin());
+
+            return true;
+        }
+
+        bool add(const Key &key, T &&value)
+        {
+            //  Do not overwrite existing entries
+
+            if (cache_entry_map_.find(key) != cache_entry_map_.end())
+            {
+                return false;
+            }
+
+            //  Insure space exists for a new entry
+
+            insure_space_exists();
+
+            //  Add the new entry to the front of the list and the front of the list to the map
+
+            cache_entries_.emplace_front(key, minstd::move(value));
+            cache_entry_map_.insert(key, cache_entries_.begin());
+
+            return true;
+        }
+
+        minstd::optional<minstd::reference_wrapper<T>> find(const Key &key)
+        {
+            map_entry_iterator entry_iter = cache_entry_map_.find(key);
+
+            //  The entry exists, so move it to the front of the entry list, update the map and return a reference to the entry
+
+            if (entry_iter != cache_entry_map_.end())
+            {
+                T &entry = entry_iter->second()->value_;
+
+                cache_entries_.move_front(entry_iter->second());
+
+                cache_entry_map_.erase(entry_iter);
+
+                cache_entry_map_.insert(key, cache_entries_.begin());
+
+                cache_hits_++;
+
+                return optional<reference_wrapper<T>>(minstd::move(entry));
+            }
+
+            cache_misses_++;
+
+            return optional<reference_wrapper<T>>();
+        }
+
+        bool remove(const Key &key)
+        {
+            map_entry_iterator entry_iter = cache_entry_map_.find(key);
+
+            //  The entry exists, so move it to the front of the entry list, update the map and return a reference to the entry
+
+            if (entry_iter != cache_entry_map_.end())
+            {
+                cache_entries_.erase(entry_iter->second());
+
+                cache_entry_map_.erase(entry_iter);
+
+                return true;
+            }
+
+            return false;
+        }
+
+    private:
+        cache_entry_allocator_type &cache_entry_allocator_;
+        map_entry_allocator_type &map_entry_allocator_;
+
+        list<cache_entry_type> cache_entries_;
+        avl_tree<Key, typename list<cache_entry_type>::iterator> cache_entry_map_;
+
+        size_t max_cache_size_;
+
+        uint64_t cache_hits_;
+        uint64_t cache_misses_;
+
+        void insure_space_exists()
+        {
+            if (cache_entries_.size() >= max_cache_size_)
+            {
+                typename list<cache_entry_type>::reference last_entry = cache_entries_.back();
+
+                cache_entries_.pop_back();
+                cache_entry_map_.erase(last_entry.key_);
+            }
+        }
+    };
+}

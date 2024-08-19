@@ -6,8 +6,21 @@
 
 #include <stdint.h>
 
+<<<<<<< HEAD
 typedef struct FAT32PartitionOpaqueData
 {
     uint32_t    first_sector_;
     uint32_t    num_sectors_;
 } FAT32PartitionOpaqueData;
+=======
+namespace filesystems::fat32
+{
+
+    typedef struct FAT32PartitionOpaqueData
+    {
+        uint32_t first_sector_;
+        uint32_t num_sectors_;
+    } FAT32PartitionOpaqueData;
+    
+} // namespace filesystems::fat32
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

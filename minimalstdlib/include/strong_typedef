@@ -1,0 +1,49 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+#include <stddef.h>
+
+#include <type_traits>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T, typename Tag>
+    struct strong_type
+    {
+        static_assert(minstd::is_arithmetic_v<T>);
+
+        T value_;
+
+        constexpr strong_type(T value) : value_(value) {}
+        constexpr strong_type() = default;
+
+        explicit operator T()
+        {
+            return value_;
+        }
+
+        explicit operator const T() const
+        {
+            return value_;
+        }
+
+        friend bool operator==(strong_type a, strong_type b) { return a.value_ == b.value_; }
+        friend bool operator!=(strong_type a, strong_type b) { return a.value_ != b.value_; }
+    };
+
+    namespace strong_type_op
+    {
+        template <typename T>
+        struct relational_comparison
+        {
+            friend bool operator<(T a, T b) { return a.value_ < b.value_; }
+            friend bool operator<=(T a, T b) { return a.value_ <= b.value_; }
+            friend bool operator>(T a, T b) { return a.value_ > b.value_; }
+            friend bool operator>=(T a, T b) { return a.value_ >= b.value_; }
+        };
+    }
+}
