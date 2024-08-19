@@ -34,18 +34,27 @@ Xoroshiro128PlusPlusRNG Xoroshiro128PlusPlusRNG::Fork(void) //	jump in the xoros
         {
             if (JUMP[i] & UINT64_C(1) << b)
             {
+<<<<<<< HEAD
                 s0 ^= state_[0];
                 s1 ^= state_[1];
+=======
+                s0 ^= state_.low;
+                s1 ^= state_.high;
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
             }
 
             Next64BitValueInternal();
         }
     }
 
+<<<<<<< HEAD
     minstd::array<uint64_t, 2> forked_seed;
 
     forked_seed[0] = s0;
     forked_seed[1] = s1;
 
     return Xoroshiro128PlusPlusRNG(forked_seed);
+=======
+    return Xoroshiro128PlusPlusRNG(Seed(s0, s1));
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 }

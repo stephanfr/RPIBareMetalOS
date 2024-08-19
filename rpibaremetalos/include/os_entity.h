@@ -6,10 +6,18 @@
 
 #include "os_config.h"
 
+<<<<<<< HEAD
 #include <fixed_string>
 #include <functional>
 #include <list>
 #include <type_traits>
+=======
+#include <type_traits>
+#include <fixed_string>
+#include <functional>
+#include <list>
+#include <memory>
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "services/uuid.h"
 
@@ -25,6 +33,19 @@ typedef enum class OSEntityRegistryResultCodes
     ERROR_SAVING_ENTITY_BY_UUID
 } OSEntityRegistryResultCodes;
 
+<<<<<<< HEAD
+=======
+inline bool Successful(OSEntityRegistryResultCodes result_code)
+{
+    return result_code == OSEntityRegistryResultCodes::SUCCESS;
+}
+
+inline bool Failed(OSEntityRegistryResultCodes result_code)
+{
+    return result_code != OSEntityRegistryResultCodes::SUCCESS;
+}
+
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 typedef enum class OSEntityTypes
 {
     HARDWARE_RNG = 1,
@@ -41,6 +62,11 @@ public:
              const char *name,
              const char *alias);
 
+<<<<<<< HEAD
+=======
+    virtual ~OSEntity(){};
+
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     virtual OSEntityTypes OSEntityType() const noexcept = 0;
 
     const minstd::string &Name() const noexcept
@@ -87,16 +113,35 @@ private:
 class OSEntityRegistry
 {
 public:
+<<<<<<< HEAD
     virtual ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityById(UUID id) = 0;
+=======
+    
+    virtual bool DoesEntityExist( const UUID &id) = 0;
+    virtual ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityById(const UUID &id) = 0;
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     virtual void FindEntitiesByType(OSEntityTypes type, minstd::list<UUID> &entity_ids) = 0;
 
     template <typename T>
+<<<<<<< HEAD
     OSEntityRegistryResultCodes AddEntity(unique_ptr<T> &new_entity)
     {
         static_assert(minstd::is_base_of_v<OSEntity, T>);
 
         return AddEntityInternal((unique_ptr<OSEntity> &)new_entity);
+=======
+    OSEntityRegistryResultCodes AddEntity(minstd::unique_ptr<T> &new_entity)
+    {
+        static_assert(minstd::is_base_of_v<OSEntity, T>);
+
+        return AddEntityInternal((minstd::unique_ptr<OSEntity> &)new_entity);
+    }
+
+    OSEntityRegistryResultCodes RemoveEntityById( const UUID &id)
+    {
+        return RemoveEntityByIdInternal(id);
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 
     template <typename T>
@@ -111,7 +156,11 @@ public:
             return ReferenceResult<OSEntityRegistryResultCodes, T>::Failure(get_entity_result.ResultCode());
         }
 
+<<<<<<< HEAD
         return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(get_entity_result.Value()));
+=======
+        return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(*get_entity_result));
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 
     template <typename T>
@@ -126,7 +175,11 @@ public:
             return ReferenceResult<OSEntityRegistryResultCodes, T>::Failure(get_entity_result.ResultCode());
         }
 
+<<<<<<< HEAD
         return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(get_entity_result.Value()));
+=======
+        return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(*get_entity_result));
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 
     template <typename T>
@@ -141,7 +194,11 @@ public:
             return ReferenceResult<OSEntityRegistryResultCodes, T>::Failure(get_entity_result.ResultCode());
         }
 
+<<<<<<< HEAD
         return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(get_entity_result.Value()));
+=======
+        return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(*get_entity_result));
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 
     template <typename T>
@@ -156,11 +213,21 @@ public:
             return ReferenceResult<OSEntityRegistryResultCodes, T>::Failure(get_entity_result.ResultCode());
         }
 
+<<<<<<< HEAD
         return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(get_entity_result.Value()));
     }
 
 protected:
     virtual OSEntityRegistryResultCodes AddEntityInternal(unique_ptr<OSEntity> &new_entity) = 0;
+=======
+        return ReferenceResult<OSEntityRegistryResultCodes, T>::Success(static_cast<T &>(*get_entity_result));
+    }
+
+protected:
+    virtual OSEntityRegistryResultCodes AddEntityInternal(minstd::unique_ptr<OSEntity> &new_entity) = 0;
+    virtual OSEntityRegistryResultCodes RemoveEntityByIdInternal(const UUID &id) = 0;
+
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     virtual ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityByNameInternal(const char *name) = 0;
     virtual ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityByNameInternal(const minstd::string &name) = 0;
     virtual ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityByAliasInternal(const char *alias) = 0;

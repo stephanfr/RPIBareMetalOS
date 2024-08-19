@@ -6,6 +6,15 @@
 
 #include "minstdconfig.h"
 
+<<<<<<< HEAD
+=======
+#include <stddef.h>
+
+#include "utility"
+
+#include "type_traits"
+
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 namespace MINIMAL_STD_NAMESPACE
 {
 
@@ -36,5 +45,137 @@ namespace MINIMAL_STD_NAMESPACE
     private:
         T *value_ = nullptr;
     };
+<<<<<<< HEAD
 }
 
+=======
+
+    template <typename T>
+    bool operator<(const minstd::reference_wrapper<T> &lhs, const minstd::reference_wrapper<T> &rhs)
+    {
+        return lhs.get() < rhs.get();
+    }
+
+    template <typename T>
+    bool operator>(const minstd::reference_wrapper<T> &lhs, const minstd::reference_wrapper<T> &rhs)
+    {
+        return lhs.get() > rhs.get();
+    }
+
+    template <typename T>
+    bool operator==(const minstd::reference_wrapper<T> &lhs, const minstd::reference_wrapper<T> &rhs)
+    {
+        return lhs.get() == rhs.get();
+    }
+
+    template <typename T>
+    inline reference_wrapper<T>
+    ref(T &element) noexcept
+    {
+        return reference_wrapper<T>(minstd::move(element));
+    }
+
+    template <typename T>
+    inline reference_wrapper<const T>
+    cref(const T &element) noexcept
+    {
+        return reference_wrapper<const T>(minstd::move(element));
+    }
+
+    template <typename T, size_t MAX_FUNCTOR_SIZE = 256>
+    class function;
+
+    template <typename ReturnType, typename... Args, size_t MAX_FUNCTOR_SIZE>
+    class function<ReturnType(Args...), MAX_FUNCTOR_SIZE>
+    {
+
+    public:
+        function()
+            : invoke_(nullptr),
+              construct_(nullptr),
+              destroy_(nullptr),
+              buffer_size_(0)
+        {
+        }
+
+        template <typename Functor>
+        function(Functor f)
+            : invoke_(reinterpret_cast<InvocationFunctionType>(invoke_function<Functor>)),
+              construct_(reinterpret_cast<ConstructorFunctionType>(construct_function<Functor>)),
+              destroy_(reinterpret_cast<DestructorFunctionType>(destroy_function<Functor>)),
+              buffer_size_(sizeof(Functor))
+        {
+            static_assert(MAX_FUNCTOR_SIZE > sizeof(Functor));
+
+            //  Save the functor
+
+            construct_(storage_buffer_, reinterpret_cast<char *>(&f));
+        }
+
+        function(function const &rhs)
+            : invoke_(rhs.invoke_),
+              construct_(rhs.construct_),
+              destroy_(rhs.destroy_),
+              buffer_size_(rhs.buffer_size_)
+        {
+            if (invoke_)
+            {
+                construct_(storage_buffer_, const_cast<char *>(rhs.storage_buffer_));
+            }
+        }
+
+        ~function()
+        {
+            if (destroy_ != nullptr)
+            {
+                destroy_(storage_buffer_);
+            }
+        }
+
+        // other constructors, from nullptr, from function pointers
+
+        ReturnType operator()(Args &&...args)
+        {
+            return this->invoke_(this->storage_buffer_, minstd::forward<Args>(args)...);
+        }
+
+    private:
+        //  The approach is pretty simple, we take the construction, destruction and invocation function pointers,
+        //      erase their types and store the functor in a char array.
+
+        typedef ReturnType (*InvocationFunctionType)(char *, Args &&...);
+        typedef void (*ConstructorFunctionType)(char *, char *);
+        typedef void (*DestructorFunctionType)(char *);
+
+        InvocationFunctionType invoke_;
+        ConstructorFunctionType construct_;
+        DestructorFunctionType destroy_;
+
+        char storage_buffer_[MAX_FUNCTOR_SIZE];
+        size_t buffer_size_;
+
+        //  Generic methods for invoking the invocation, construction and destrcution functions.
+        //      These are used to wrap the Functor and are then cast to a char array for
+        //      type erasure and stored in the data buffer.
+
+        template <typename Functor>
+        static ReturnType invoke_function(Functor *fn, Args &&...args)
+        {
+            return (*fn)(minstd::forward<Args>(args)...);
+        }
+
+        template <typename Functor>
+        static void construct_function(Functor *construct_dst, const Functor *construct_src)
+        {
+            // the functor type must be copy-constructible
+            new (construct_dst) Functor(*construct_src);
+        }
+
+        template <typename Functor>
+        static void destroy_function(Functor *f)
+        {
+            f->~Functor();
+        }
+    };
+}
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

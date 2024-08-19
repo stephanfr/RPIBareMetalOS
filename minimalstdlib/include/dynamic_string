@@ -1,0 +1,167 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <stdint.h>
+#include <string.h>
+
+#include "algorithm"
+#include "allocator"
+#include "basic_string"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T, size_t MAX_SIZE> //  Default value for MAX_SIZE is in the forward declaration at the top of the file
+    class basic_dynamic_string : public basic_string<T>
+    {
+    public:
+        static constexpr size_t npos = SIZE_MAX;
+
+        using allocator_type = allocator<T>;
+
+        explicit basic_dynamic_string(allocator_type &allocator)
+            : basic_string<T>(allocator.allocate(minstd::min( DEFAULT_DYNAMIC_STRING_SIZE, MAX_SIZE + 1 )), minstd::min( DEFAULT_DYNAMIC_STRING_SIZE, MAX_SIZE + 1 ), MAX_SIZE),
+              allocator_(allocator)
+        {
+        }
+
+        explicit basic_dynamic_string(const T *value, allocator_type &allocator)
+            : basic_string<T>(allocator.allocate(compute_buffer_size(value)), compute_buffer_size(value), MAX_SIZE, value),
+              allocator_(allocator)
+        {
+        }
+
+        explicit basic_dynamic_string(const T *value, size_t length, allocator_type &allocator)
+            : basic_string<T>(allocator.allocate(compute_buffer_size(value, length)), compute_buffer_size(value, length), MAX_SIZE, value, length),
+              allocator_(allocator)
+        {
+        }
+
+        explicit basic_dynamic_string(const basic_string<T> &string_to_copy, allocator_type &allocator)
+            : basic_string<T>(allocator.allocate(compute_buffer_size(string_to_copy.length())), compute_buffer_size(string_to_copy.length()), MAX_SIZE, string_to_copy),
+              allocator_(allocator)
+        {
+        }
+
+        virtual ~basic_dynamic_string()
+        {
+            if (basic_string<T>::buffer_ != nullptr)
+            {
+                allocator_.deallocate(basic_string<T>::buffer_, basic_string<T>::buffer_size_);
+            }
+        }
+
+        basic_dynamic_string &operator=(const basic_dynamic_string &string_to_copy)
+        {
+            size_t new_length = minstd::min(strnlen(string_to_copy.data(), basic_string<T>::max_size_ ) + 1, basic_string<T>::max_size_ + 1);
+
+            if (new_length > basic_string<T>::buffer_size_)
+            {
+                allocator_.deallocate(basic_string<T>::buffer_, basic_string<T>::buffer_size_);
+
+                basic_string<T>::buffer_size_ = new_length;
+                basic_string<T>::buffer_ = allocator_.allocate(basic_string<T>::buffer_size_);
+            }
+
+            basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy.data(), basic_string<T>::buffer_size_ ), basic_string<T>::max_size_);
+
+            return *this;
+        }
+
+        basic_dynamic_string &operator=(const basic_string<T> &string_to_copy)
+        {
+            size_t new_length = minstd::min(strnlen(string_to_copy.data(), basic_string<T>::max_size_ ) + 1, basic_string<T>::max_size_ + 1);
+
+            if (new_length > basic_string<T>::buffer_size_)
+            {
+                allocator_.deallocate(basic_string<T>::buffer_, basic_string<T>::buffer_size_);
+
+                basic_string<T>::buffer_size_ = new_length;
+                basic_string<T>::buffer_ = allocator_.allocate(basic_string<T>::buffer_size_);
+            }
+
+            basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy.data(), basic_string<T>::buffer_size_ ), basic_string<T>::max_size_);
+
+            return *this;
+        }
+
+        basic_dynamic_string &operator=(const T *string_to_copy)
+        {
+            size_t new_length = minstd::min(strnlen(string_to_copy, basic_string<T>::max_size_ ) + 1, basic_string<T>::max_size_ + 1);
+
+            if (new_length > basic_string<T>::buffer_size_)
+            {
+                allocator_.deallocate(basic_string<T>::buffer_, basic_string<T>::buffer_size_);
+
+                basic_string<T>::buffer_size_ = new_length;
+                basic_string<T>::buffer_ = allocator_.allocate(basic_string<T>::buffer_size_);
+            }
+
+            basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy, basic_string<T>::buffer_size_ ), basic_string<T>::max_size_);
+
+            return *this;
+        }
+
+    private:
+        allocator_type &allocator_;
+
+
+        static size_t compute_buffer_size( const char* value, size_t length = DEFAULT_DYNAMIC_STRING_MAX_SIZE)
+        {
+            return compute_buffer_size(strnlen(value, length));
+        }
+
+        static size_t compute_buffer_size( size_t length)
+        {
+            return minstd::min( (size_t)((length + 1) * DYNAMIC_STRING_OVERALLOCATION_PERCENTAGE), MAX_SIZE + 1);
+        }
+
+        void grow_buffer_for_string(const T *str) override
+        {
+            grow_buffer(strnlen(str, basic_string<T>::max_size_));
+
+        }
+
+        void grow_buffer(size_t chars_needed) override
+        {
+
+            if (basic_string<T>::buffer_size_ >= basic_string<T>::max_size_ + 1)
+            {
+                return;
+            }
+
+            if (basic_string<T>::length_ + chars_needed + 1 > basic_string<T>::buffer_size_)
+            {
+                size_t new_buffer_size = minstd::min((size_t)((basic_string<T>::length_ + chars_needed + 1) * DYNAMIC_STRING_OVERALLOCATION_PERCENTAGE), basic_string<T>::max_size_ + 1 );
+
+                char *new_buffer = allocator_.allocate(new_buffer_size);
+
+                strlcpy(new_buffer, basic_string<T>::buffer_, basic_string<T>::length_ + 1);
+
+                allocator_.deallocate(basic_string<T>::buffer_, basic_string<T>::buffer_size_);
+
+                basic_string<T>::buffer_ = new_buffer;
+
+                basic_string<T>::buffer_size_ = new_buffer_size;
+            }
+        }
+    };
+
+    template <typename T>
+    template <size_t OTHER_MAX_SIZE>
+    basic_string<T> &basic_string<T>::operator=(const basic_dynamic_string<T, OTHER_MAX_SIZE> &string_to_copy)
+    {
+        basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy.buffer_, basic_string<T>::buffer_size_), basic_string<T>::max_size_);
+
+        return *this;
+    }
+
+    //  Declare a dynamic string class with the char data type
+
+    template <size_t MAX_SIZE = DEFAULT_DYNAMIC_STRING_MAX_SIZE>
+    using dynamic_string = basic_dynamic_string<char, MAX_SIZE>;
+}

@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 
+<<<<<<< HEAD
 #include "memory_heap"
 
 namespace MINIMAL_STD_NAMESPACE
@@ -220,5 +221,23 @@ namespace MINIMAL_STD_NAMESPACE
 
             return best_fit_block.ptr;
         }
+=======
+#include "single_block_memory_heap"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <size_t FIXED_SIZE, size_t ALIGNMENT = alignof(single_block_memory_heap)>
+    class stack_memory_heap : public single_block_memory_heap
+    {
+    public:
+        stack_memory_heap()
+            : single_block_memory_heap( heap_, FIXED_SIZE, ALIGNMENT )
+        {
+        }
+
+    private :
+
+        char heap_[FIXED_SIZE]; //  Storage on the stack
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     };
 }

@@ -1,0 +1,114 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <stddef.h>
+
+#include <alloca.h>
+
+#include "new"
+
+#include "minstdconfig.h"
+#include "utility"
+
+#include "heap_allocator"
+#include "single_block_memory_heap"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename T>
+    class unique_ptr
+    {
+    public:
+        explicit unique_ptr()
+        {
+        }
+
+        explicit unique_ptr(T *pointer_to_wrap, minstd::memory_heap &heap)
+            : wrapped_pointer_(pointer_to_wrap),
+              heap_(&heap)
+        {
+        }
+
+        unique_ptr(unique_ptr &pointer_to_copy)
+            : wrapped_pointer_(pointer_to_copy.wrapped_pointer_),
+              heap_(pointer_to_copy.heap_)
+        {
+            pointer_to_copy.wrapped_pointer_ = nullptr;
+        }
+
+        unique_ptr(unique_ptr &&pointer_to_copy)
+            : wrapped_pointer_(pointer_to_copy.wrapped_pointer_),
+              heap_(pointer_to_copy.heap_)
+        {
+            pointer_to_copy.wrapped_pointer_ = nullptr;
+        }
+
+        ~unique_ptr()
+        {
+            if (wrapped_pointer_ != nullptr)
+            {
+                //  If T is a class, the destructor is called in deallocate_block
+                heap_->deallocate_block(wrapped_pointer_, 1);
+            }
+        }
+
+        unique_ptr &operator=(unique_ptr &pointer_to_copy) = delete;
+
+        unique_ptr &operator=(unique_ptr &&pointer_to_move)
+        {
+            if (wrapped_pointer_ != nullptr)
+            {
+                //  If T is a class, the destructor is called in deallocate_block
+                heap_->deallocate_block(wrapped_pointer_, 1);
+            }
+
+            wrapped_pointer_ = pointer_to_move.wrapped_pointer_;
+            heap_ = pointer_to_move.heap_;
+            pointer_to_move.wrapped_pointer_ = nullptr;
+
+            return *this;
+        }
+
+        T &operator*()
+        {
+            return *wrapped_pointer_;
+        }
+
+        const T &operator*() const
+        {
+            return *wrapped_pointer_;
+        }
+
+        T *operator->()
+        {
+            return wrapped_pointer_;
+        }
+
+        const T *operator->() const
+        {
+            return wrapped_pointer_;
+        }
+
+        T *release() noexcept
+        {
+            T *return_value = wrapped_pointer_;
+
+            wrapped_pointer_ = nullptr;
+
+            return return_value;
+        }
+
+        T *get() const noexcept
+        {
+            return wrapped_pointer_;
+        }
+
+    private:
+        T *wrapped_pointer_ = nullptr;
+        minstd::memory_heap *heap_ = nullptr;
+    };
+}   //  namespace MINSTD

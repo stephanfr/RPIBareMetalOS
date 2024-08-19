@@ -4,9 +4,15 @@
 
 #include "devices/system_timer.h"
 
+<<<<<<< HEAD
 #include "memory.h"
 
 
+=======
+#include <memory>
+
+#include "heaps.h"
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 class SystemTimerImpl : public SystemTimer
 {

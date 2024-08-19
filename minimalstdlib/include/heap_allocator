@@ -15,28 +15,71 @@ namespace MINIMAL_STD_NAMESPACE
     class heap_allocator : public allocator<T>
     {
     public:
+<<<<<<< HEAD
         heap_allocator(memory_heap&    heap)
             : heap_(heap)
+=======
+        heap_allocator(memory_heap&    heap,
+                       size_t          max_size = __SIZE_MAX__)
+            : heap_(heap),
+              max_size_(max_size)
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         size_t max_size() const noexcept override
         {
+<<<<<<< HEAD
             return __SIZE_MAX__;
+=======
+            return max_size_;
+        }
+
+        size_t current_size() const noexcept override
+        {
+            return current_size_;
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         T *allocate(size_t num_elements) override
         {
+<<<<<<< HEAD
             return heap_.allocate_block<T>(num_elements);
+=======
+            if( current_size_ + num_elements > max_size_ )
+            {
+                return nullptr;
+            }
+
+            T* block = heap_.allocate_block<T>(num_elements);
+
+            if(block != nullptr)
+            {
+                current_size_ += num_elements;
+            }
+
+            return block;
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         void deallocate(T *ptr, size_t num_elements) override
         {
             heap_.deallocate_block( ptr, num_elements );
+<<<<<<< HEAD
+=======
+
+            current_size_ -= num_elements;
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
     private:
         memory_heap &heap_;
+<<<<<<< HEAD
+=======
+
+        size_t max_size_ = 0;
+        size_t current_size_ = 0;
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
     };
 
 }

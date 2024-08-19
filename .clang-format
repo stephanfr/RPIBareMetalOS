@@ -9,5 +9,10 @@
     ColumnLimit: 0, 
     AccessModifierOffset: -4, 
     NamespaceIndentation: All, 
+<<<<<<< HEAD
     FixNamespaceComments: false
+=======
+    FixNamespaceComments: false,
+    ForEachMacros: [TEST_GROUP]
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 }

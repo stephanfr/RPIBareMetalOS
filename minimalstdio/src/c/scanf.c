@@ -4,7 +4,11 @@
  * license that can be found in the LICENSE file.
  */
 
+<<<<<<< HEAD
 #include "scanf.h"
+=======
+#include "minimalstdio_constants.h"
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include <ctype.h>
 

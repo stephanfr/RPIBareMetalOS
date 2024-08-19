@@ -5,7 +5,11 @@
 #pragma once
 
 #include <stdint.h>
+<<<<<<< HEAD
 #include <minstd_utility.h>
+=======
+#include <utility>
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "os_entity.h"
 
@@ -48,11 +52,20 @@ typedef enum class BlockIOResultCodes
     __LAST_BLOCK_IO_ERROR__
 } BlockIOResultCodes;
 
+<<<<<<< HEAD
+=======
+inline bool Failed( BlockIOResultCodes  code )
+{
+    return code != BlockIOResultCodes::SUCCESS;
+}
+
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 constexpr uint32_t MAX_BLOCK_IO_BLOCK_SIZE = 2048;
 
 class BlockIODevice : public OSEntity
 {
 public:
+<<<<<<< HEAD
 
     BlockIODevice() = delete;
 
@@ -61,6 +74,16 @@ public:
                    const char *alias )
         : OSEntity( permanent, name, alias )
     {}
+=======
+    BlockIODevice() = delete;
+
+    BlockIODevice(bool permanent,
+                  const char *name,
+                  const char *alias)
+        : OSEntity(permanent, name, alias)
+    {
+    }
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     virtual ~BlockIODevice()
     {
@@ -73,6 +96,7 @@ public:
 
     virtual uint32_t BlockSize() const = 0;
 
+<<<<<<< HEAD
     virtual BlockIOResultCodes Seek(uint64_t offset_in_bytes) = 0;
 
     virtual ValueResult<BlockIOResultCodes, uint32_t> ReadFromBlock(uint8_t *buffer, uint32_t block_number, uint32_t bocks_to_read) = 0;
@@ -82,3 +106,61 @@ public:
 };
 
 
+=======
+    /** @brief Moves the block device's internal offset to a specific block location
+     *
+     *     @param[in] offset_in_bytes Number of blocks from the start of the device to set the internal offset
+     *
+     *     @return Block IO operation result code
+     */
+
+    virtual BlockIOResultCodes Seek(uint64_t offset_in_blocks) = 0;
+
+    /** @brief Reads one or more blocks from the device starting at the specified block
+     *
+     *     @param[in] buffer Pointer to an existing empty buffer
+     *     @param[in] block_number Block number from which reading will begin
+     *     @param[in] blocks_to_read Number of blocks to read
+     *
+     *     @return ValueResult \n
+     *             Success: number of blocks read \n
+     *             Failure: failure result code
+     */
+
+    virtual ValueResult<BlockIOResultCodes, uint32_t> ReadFromBlock(uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_read) = 0;
+
+    /** @brief Reads one or more blocks from the device starting at the current offset
+     *
+     *     @param[in] buffer Pointer to an existing empty buffer
+     *     @param[in] blocks_to_read Number of blocks to read
+     *
+     *     @return ValueResult \n
+     *             Success: number of blocks read \n
+     *             Failure: failure result code
+     */
+
+    virtual ValueResult<BlockIOResultCodes, uint32_t> ReadFromCurrentOffset(uint8_t *buffer, uint32_t blocks_to_read) = 0;
+
+    /** @brief Writes one or more blocks from the buffer to the device starting at the specified block number
+     *
+     *     @param[in] buffer Pointer to an existing buffer containing data to write to the device
+     *     @param[in] block_number Block number from which writing will begin
+     *     @param[in] blocks_to_write Number of blocks to write
+     *
+     *     @return ValueResult \n
+     *             Success: number of blocks written \n
+     *             Failure: failure result code
+     */
+
+    virtual ValueResult<BlockIOResultCodes, uint32_t> WriteBlock(uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_write) = 0;
+
+    /** @brief Returns a text desription for a result code
+     *
+     *     @param[in] code result code
+     *
+     *     @return C string for the result code description
+     */
+
+    const char *GetMessageForResultCode(BlockIOResultCodes code);
+};
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)

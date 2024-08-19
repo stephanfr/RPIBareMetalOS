@@ -62,6 +62,14 @@ QUICKREF
 
 #undef memcpy
 
+<<<<<<< HEAD
+=======
+//
+//  Despite telling the compiler to use builtins, we need memcpy defined for the AArch64 build
+// 
+
+#ifdef __AARCH64_BUILD__
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 void *
 memcpy (void *__restrict dst0,
 	const void *__restrict src0,
@@ -120,5 +128,9 @@ memcpy (void *__restrict dst0,
   return dst0;
 #endif /* not PREFER_SIZE_OVER_SPEED */
 }
+<<<<<<< HEAD
 
+=======
+#endif
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 

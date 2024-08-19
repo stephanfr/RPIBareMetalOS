@@ -6,8 +6,13 @@
 
 #include "os_config.h"
 
+<<<<<<< HEAD
 #include <cstring>
 #include <stdint.h>
+=======
+#include <stdint.h>
+#include <string.h>
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 typedef enum class LogLevel : uint32_t
 {
@@ -25,8 +30,18 @@ typedef enum class LogLevel : uint32_t
 
 void SetLogLevel(LogLevel new_level);
 
+<<<<<<< HEAD
 void __LogInternal(LogLevel log_level, const char *filename, int line_number, const char *function, const char *format, ...);
 void __LogWithoutLineNumberInternal(LogLevel log_level, const char *filename, const char *function, const char *format, ...);
+=======
+#ifndef __NO_LOGGING__
+void __LogInternal(LogLevel log_level, const char *filename, int line_number, const char *function, const char *format, ...);
+void __LogWithoutLineNumberInternal(LogLevel log_level, const char *filename, const char *function, const char *format, ...);
+#else
+extern void __LogInternal(LogLevel log_level, const char *filename, int line_number, const char *function, const char *format, ...);
+extern void __LogWithoutLineNumberInternal(LogLevel log_level, const char *filename, const char *function, const char *format, ...);
+#endif
+>>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #define LogFatal(format, ...) __LogInternal(LogLevel::FATAL, __FILE__, __LINE__, __FUNCTION__, format __VA_OPT__(, ) __VA_ARGS__)
 #define LogError(format, ...) __LogInternal(LogLevel::ERROR, __FILE__, __LINE__, __FUNCTION__, format __VA_OPT__(, ) __VA_ARGS__)
