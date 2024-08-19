@@ -13,11 +13,7 @@
 
 #include "devices/std_streams.h"
 
-<<<<<<< HEAD
-#define MAX_MODIFIED_FORMAT_LENGTH 128
-=======
 #define MAX_MODIFIED_FORMAT_LENGTH 256
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 constexpr const char *LogLevelNames[] = {
     "FATAL   ",

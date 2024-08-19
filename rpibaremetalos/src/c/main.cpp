@@ -4,14 +4,10 @@
 
 #include <stdint.h>
 
-<<<<<<< HEAD
-#include <list>
-=======
 #include <fixed_string>
 #include <functional>
 #include <list>
 #include <stack_allocator>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "minimalstdio.h"
 
@@ -19,19 +15,12 @@
 #include "platform/platform.h"
 #include "platform/platform_info.h"
 
-<<<<<<< HEAD
-=======
 #include "devices/character_io.h"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 #include "devices/log.h"
 #include "devices/physical_timer.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
 #include "devices/system_timer.h"
-<<<<<<< HEAD
-#include "devices/character_io.h"
-=======
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "isr/system_timer_reschedule_isr.h"
 #include "isr/task_switch_isr.h"
@@ -58,10 +47,6 @@
 
 #include <scanf.h>
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 extern "C" void kernel_main()
 {
     //  Call InitializePlatform() first
@@ -70,11 +55,7 @@ extern "C" void kernel_main()
 
     const PlatformInfo &platformInfo = GetPlatformInfo();
 
-<<<<<<< HEAD
-    SetLogLevel(LogLevel::INFO);
-=======
     SetLogLevel(LogLevel::ERROR);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     printf("SEF RPI Bare Metal OS V0.01\n");
 
@@ -84,9 +65,6 @@ extern "C" void kernel_main()
 
     //  Mount the filesystems on the SD card
 
-<<<<<<< HEAD
-    MountSDCardFilesystems();
-=======
     filesystems::MountSDCardFilesystems();
 
     minstd::stack_allocator<minstd::list<UUID>::node_type, 24> uuid_list_stack_allocator;
@@ -402,7 +380,6 @@ extern "C" void kernel_main()
             }
         }
     }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Setup the ISRs
 
@@ -416,80 +393,6 @@ extern "C" void kernel_main()
 
     printf("Interrupts enabled\n");
 
-<<<<<<< HEAD
-    minstd::stack_allocator<minstd::list<UUID>::node_type, 24>  uuid_list_stack_allocator;
-    minstd::list<UUID>  all_filesystems(uuid_list_stack_allocator);
-
-    GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, all_filesystems );
-
-    Filesystem  *boot_filesystem = nullptr;
-
-    for( auto itr = all_filesystems.begin(); itr != all_filesystems.end(); itr++ )
-    {
-        auto get_entity_result = GetOSEntityRegistry().GetEntityById(*itr);
-
-        if( get_entity_result.Failed() )
-        {
-            printf("Failed to get OS Entity by ID\n");
-            PowerManager().Halt();
-        }
-
-        if( static_cast<Filesystem&>(get_entity_result.Value()).IsBoot() )
-        {
-            boot_filesystem = &(static_cast<Filesystem&>(get_entity_result.Value()));
-            break;
-        }
-    }
-
-    if( boot_filesystem == nullptr )
-    {
-        printf("Failed to get boot filesystem\n");
-        PowerManager().Halt();
-    }
-
-    {
-        auto result = boot_filesystem->GetDirectory("/");
-
-        if (result.Successful())
-        {
-            for (auto itr = result.Value().Entries().begin(); itr != result.Value().Entries().end(); itr++)
-            {
-                printf("%s %-9u %s %s\n", itr->AttributesString(), itr->Size(), itr->Name().c_str(), itr->Extension().c_str());
-            }
-        }
-
-        printf("\n\n");
-
-        result = minstd::move(boot_filesystem->GetDirectory("/subdir 1_1/subdir 2_1"));
-
-        if (result.Successful())
-        {
-            for (auto itr = result.Value().Entries().begin(); itr != result.Value().Entries().end(); itr++)
-            {
-                printf("%s %-9u %s %s\n", itr->AttributesString(), itr->Size(), itr->Name().c_str(), itr->Extension().c_str());
-            }
-        }
-
-        auto open_file_result = boot_filesystem->OpenFile("/README.MD", FileModes::READ);
-
-        printf("Opened file: %s with size: %u\n", open_file_result.Value().Filename().c_str(), open_file_result.Value().Size());
-
-        StackBuffer file_buffer(alloca(19), 19);
-
-        do
-        {
-            file_buffer.Clear();
-            open_file_result.Value().Read(file_buffer);
-
-            printf("%.*s", (int)file_buffer.Size(), (const char *)file_buffer.Data());
-        } while (file_buffer.Size() == 19);
-
-        printf("\n");
-    }
-
-
-=======
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     printf("In console.  'd' for diagnostic info, 'r' to Reboot or 'h' to Halt\n\n");
 
     // echo everything back

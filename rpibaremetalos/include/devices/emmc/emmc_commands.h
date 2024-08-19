@@ -8,17 +8,10 @@
 
 typedef enum EMMCCommandResponses
 {
-<<<<<<< HEAD
-    RTNone,
-    RT136,
-    RT48,
-    RT48Busy
-=======
     RT_NONE = 0,
     RT_136_BITS = 1,
     RT_48_BITS = 2,
     RT_48_BITS_BUSY = 3
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 } EMMCCommandResponses;
 
 //
@@ -48,40 +41,24 @@ typedef struct EMMCCommand
     uint8_t res1 : 2;
 } EMMCCommand;
 
-<<<<<<< HEAD
-#define RES_CMD                                      \
-=======
 #define RESERVED_CMD                                 \
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {                                                \
         1, 1, 3, 1, 1, 0xF, 3, 1, 1, 1, 1, 3, 0xF, 3 \
     }
 
-<<<<<<< HEAD
-static const EMMCCommand INVALID_CMD = RES_CMD;
-
-typedef enum class EMMCCommandTypes : uint32_t
-=======
 static const EMMCCommand INVALID_CMD = RESERVED_CMD;
 
 typedef enum EMMCCommandTypes : uint32_t
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 {
     GoIdle = 0,
     SendCide = 2,
     SendRelativeAddr = 3,
-<<<<<<< HEAD
-    IOSetOpCond = 5,
-    SelectCard = 7,
-    SendIfCond = 8,
-=======
     SetDsr = 4,
     IOSetOpCond = 5,
     SwitchFunction = 6,
     SelectCard = 7,
     SendIfCond = 8,
     SendCsd = 9,
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     SetBlockLen = 16,
     ReadBlock = 17,
     ReadMultiple = 18,
@@ -92,69 +69,6 @@ typedef enum EMMCCommandTypes : uint32_t
     App = 55
 } EMMCCommandTypes;
 
-<<<<<<< HEAD
-static constexpr EMMCCommand commands[] = {
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
-    RES_CMD,
-    {0, 0, 0, 0, 0, 0, RT136, 0, 1, 0, 0, 0, 2, 0},
-    {0, 0, 0, 0, 0, 0, RT48, 0, 1, 0, 0, 0, 3, 0},
-    {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 0},
-    {0, 0, 0, 0, 0, 0, RT136, 0, 0, 0, 0, 0, 5, 0},
-    {0, 0, 0, 0, 0, 0, RT48, 0, 1, 0, 0, 0, 6, 0},
-    {0, 0, 0, 0, 0, 0, RT48Busy, 0, 1, 0, 0, 0, 7, 0},
-    {0, 0, 0, 0, 0, 0, RT48, 0, 1, 0, 0, 0, 8, 0},
-    {0, 0, 0, 0, 0, 0, RT136, 0, 1, 0, 0, 0, 9, 0},
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    {0, 0, 0, 0, 0, 0, RT48, 0, 1, 0, 0, 0, 16, 0},
-    {0, 0, 0, 1, 0, 0, RT48, 0, 1, 0, 1, 0, 17, 0},
-    {0, 1, 1, 1, 1, 0, RT48, 0, 1, 0, 1, 0, 18, 0},
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    {0, 0, 0, 0, 0, 0, RT48, 0, 0, 0, 0, 0, 41, 0},
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    {0, 0, 0, 1, 0, 0, RT48, 0, 1, 0, 1, 0, 51, 0},
-    RES_CMD,
-    RES_CMD,
-    RES_CMD,
-    {0, 0, 0, 0, 0, 0, RT48, 0, 1, 0, 0, 0, 55, 0},
-};
-
-
-bool operator ==( const EMMCCommand& command1, const EMMCCommand& command2 )
-=======
 //
 //  When adding commands, insure that the 'index' field matches the index of the entry in the array,
 //      i.e. ReadBlock is 17 and it must be in commands[17].
@@ -220,7 +134,6 @@ static constexpr EMMCCommand commands[] = {
 };
 
 bool operator==(const EMMCCommand &command1, const EMMCCommand &command2)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 {
     return &command1 == &command2;
 }

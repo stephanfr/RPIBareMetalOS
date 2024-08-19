@@ -6,13 +6,8 @@
 
 #include "minstdconfig.h"
 
-<<<<<<< HEAD
-#include <stddef.h>
-#include "type_traits"
-=======
 #include "type_traits"
 #include <stddef.h>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -44,14 +39,9 @@ namespace MINIMAL_STD_NAMESPACE
             MINIMAL_STD_ASSERT(num_elements_in_block(ptr) == num_elements);
 
             //  If T is a class or struct type, then we want to insure we call the destructor
-<<<<<<< HEAD
-
-            if (minstd::is_class<T>::value)
-=======
             //      The constexpr if is effectively a 'static if'.
 
             if constexpr (minstd::is_class_v<T>)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             {
                 for (size_t i = 0; i < num_elements; i++)
                 {
@@ -59,17 +49,6 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-<<<<<<< HEAD
-            deallocate_raw_block((void*)(ptr));
-        }
-
-        virtual size_t bytes_allocated() const noexcept = 0;
-        virtual size_t blocks_allocated() const noexcept = 0;
-
-        virtual size_t raw_block_size(const void *block) const noexcept = 0;
-        virtual size_t num_elements_in_block(const void *block) const noexcept = 0;
-        virtual bool validate_pointer(const void *block) const noexcept = 0;
-=======
             deallocate_raw_block((void *)(ptr));
         }
 
@@ -84,7 +63,6 @@ namespace MINIMAL_STD_NAMESPACE
 
         virtual bool validate_pointer(const void *block) const noexcept = 0;
         virtual size_t actual_block_size(const void *block) const noexcept = 0;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     protected:
         virtual void *allocate_raw_block(size_t element_size_in_bytes, size_t num_elements) = 0;

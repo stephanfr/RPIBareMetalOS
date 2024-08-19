@@ -32,110 +32,62 @@ extern "C"
 
     extern unsigned *__get_ctype_table();
 
-<<<<<<< HEAD
-    inline int isalpha(int c)
-=======
     static inline int isalpha(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_UPPER | CTYPE_LOWER);
     }
 
-<<<<<<< HEAD
-    inline int isupper(int c)
-=======
     static inline int isupper(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_UPPER);
     }
 
-<<<<<<< HEAD
-    inline int islower(int c)
-=======
     static inline int islower(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_LOWER);
     }
 
-<<<<<<< HEAD
-    inline int isdigit(int c)
-=======
     static inline int isdigit(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_DIGIT);
     }
 
-<<<<<<< HEAD
-    inline int isxdigit(int c)
-=======
     static inline int isxdigit(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_HEX_DIGIT);
     }
 
-<<<<<<< HEAD
-    inline int isspace(int c)
-=======
     static inline int isspace(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_SPACE);
     }
 
-<<<<<<< HEAD
-    inline int ispunct(int c)
-=======
     static inline int ispunct(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_PUNCTUATION);
     }
 
-<<<<<<< HEAD
-    inline int isalnum(int c)
-=======
     static inline int isalnum(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_UPPER | CTYPE_LOWER | CTYPE_DIGIT);
     }
 
-<<<<<<< HEAD
-    inline int isprint(int c)
-=======
     static inline int isprint(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_UPPER | CTYPE_LOWER | CTYPE_DIGIT | CTYPE_PUNCTUATION | CTYPE_BLANK);
     }
 
-<<<<<<< HEAD
-    inline int isgraph(int c)
-=======
     static inline int isgraph(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_UPPER | CTYPE_LOWER | CTYPE_DIGIT | CTYPE_PUNCTUATION);
     }
 
-<<<<<<< HEAD
-    inline int iscntrl(int c)
-=======
     static inline int iscntrl(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_CONTROL);
     }
 
-<<<<<<< HEAD
-    inline int isblank(int c)
-=======
     static inline int isblank(int c)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return __get_ctype_table()[c] & (CTYPE_BLANK);
     }
@@ -144,16 +96,6 @@ extern "C"
     //  tolower and toupper
     //
 
-<<<<<<< HEAD
-    inline int tolower(int _c)
-    {
-        return (_c - 'A' + 'a');
-    }
-
-    inline int toupper(int _c)
-    {
-        return (_c - 'a' + 'A');
-=======
     static inline int tolower(int c)
     {
         if( !islower(c) )
@@ -172,7 +114,6 @@ extern "C"
         }
 
         return c;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 
 #ifdef __cplusplus

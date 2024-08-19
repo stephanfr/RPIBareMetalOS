@@ -2,18 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-<<<<<<< HEAD
-#include <catch2/catch_test_macros.hpp>
-
-#include "../include/minstdconfig.h"
-
-#include "../include/heap_allocator"
-#include "../include/list"
-#include "../include/stack_allocator"
-#include "../include/single_block_memory_heap"
-
-#define TEST_BUFFER_SIZE 65536
-=======
 #include <CppUTest/TestHarness.h>
 
 #include <minstdconfig.h>
@@ -27,13 +15,10 @@
 
 #define TEST_BUFFER_SIZE 65536
 #define MAX_HEAP_ELEMENTS 4096
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 namespace
 {
 
-<<<<<<< HEAD
-=======
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
     TEST_GROUP (ListTests)
@@ -41,7 +26,6 @@ namespace
     };
 #pragma GCC diagnostic pop
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     static char buffer[TEST_BUFFER_SIZE];
 
     class TestElement
@@ -74,110 +58,6 @@ namespace
     {
         TestElementList list1(allocator);
 
-<<<<<<< HEAD
-        REQUIRE(list1.empty());
-
-        list1.push_front(TestElement(2));
-
-        REQUIRE(!list1.empty());
-        REQUIRE(list1.front().value() == 2);
-        REQUIRE(list1.back().value() == 2);
-
-        list1.push_back(TestElement(3));
-
-        REQUIRE(list1.front().value() == 2);
-        REQUIRE(list1.back().value() == 3);
-
-        list1.emplace_front(1);
-
-        REQUIRE(list1.front().value() == 1);
-        REQUIRE(list1.back().value() == 3);
-
-        list1.emplace_back(4);
-
-        REQUIRE(list1.front().value() == 1);
-        REQUIRE(list1.back().value() == 4);
-
-        typename TestElementList::iterator itr = list1.begin();
-
-        REQUIRE(itr++->value() == 1);
-        REQUIRE(itr++->value() == 2);
-        REQUIRE(itr++->value() == 3);
-        REQUIRE(itr++->value() == 4);
-        REQUIRE(itr == list1.end());
-
-        typename TestElementList::const_iterator const_itr = list1.begin();
-
-        REQUIRE(const_itr++->value() == 1);
-        REQUIRE(const_itr++->value() == 2);
-        REQUIRE(const_itr++->value() == 3);
-        REQUIRE(const_itr++->value() == 4);
-        REQUIRE(const_itr == list1.end());
-
-        list1.pop_front();
-
-        REQUIRE(list1.front().value() == 2);
-
-        itr = list1.end();
-
-        REQUIRE(itr == list1.end());
-        REQUIRE((*--itr).value() == 4);
-        REQUIRE((*--itr).value() == 3);
-        REQUIRE((*--itr).value() == 2);
-        REQUIRE(itr == list1.begin());
-
-        const_itr = list1.end();
-
-        REQUIRE(const_itr == list1.end());
-        REQUIRE((*--const_itr).value() == 4);
-        REQUIRE((*--const_itr).value() == 3);
-        REQUIRE((*--const_itr).value() == 2);
-        REQUIRE(const_itr == list1.begin());
-
-        list1.pop_back();
-
-        REQUIRE(list1.front().value() == 2);
-        REQUIRE(list1.back().value() == 3);
-
-        itr = list1.begin();
-
-        REQUIRE((*itr++).value() == 2);
-        REQUIRE((*itr++).value() == 3);
-        REQUIRE(itr == list1.end());
-
-        const_itr = list1.begin();
-
-        REQUIRE((*const_itr++).value() == 2);
-        REQUIRE((*const_itr++).value() == 3);
-        REQUIRE(const_itr == list1.end());
-
-        list1.pop_back();
-
-        REQUIRE(list1.front().value() == 2);
-        REQUIRE(list1.back().value() == 2);
-
-        itr = list1.begin();
-
-        REQUIRE((*itr++).value() == 2);
-        REQUIRE(itr == list1.end());
-
-        const_itr = list1.begin();
-
-        REQUIRE((*const_itr++).value() == 2);
-        REQUIRE(const_itr == list1.end());
-
-        list1.pop_back();
-
-        REQUIRE(list1.empty());
-
-        itr = list1.begin();
-
-        REQUIRE(itr == list1.end());
-
-        const_itr = list1.begin();
-
-        REQUIRE(const_itr == list1.end());
-=======
         CHECK(list1.empty());
         CHECK(list1.size() == 0);
 
@@ -322,74 +202,11 @@ namespace
         const_itr = list1.begin();
 
         CHECK(const_itr == list1.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.push_front(TestElement(3));
         list1.push_front(TestElement(2));
         list1.push_front(TestElement(1));
 
-<<<<<<< HEAD
-        REQUIRE(list1.front().value() == 1);
-        REQUIRE(list1.back().value() == 3);
-
-        itr = list1.begin();
-
-        REQUIRE((*itr++).value() == 1);
-        REQUIRE((*itr++).value() == 2);
-        REQUIRE((*itr++).value() == 3);
-        REQUIRE(itr == list1.end());
-
-        const_itr = list1.begin();
-
-        REQUIRE((*const_itr++).value() == 1);
-        REQUIRE((*const_itr++).value() == 2);
-        REQUIRE((*const_itr++).value() == 3);
-        REQUIRE(const_itr == list1.end());
-
-        list1.pop_front();
-
-        REQUIRE(list1.front().value() == 2);
-        REQUIRE(list1.back().value() == 3);
-
-        itr = list1.begin();
-
-        REQUIRE((*itr++).value() == 2);
-        REQUIRE((*itr++).value() == 3);
-        REQUIRE(itr == list1.end());
-
-        const_itr = list1.begin();
-
-        REQUIRE((*const_itr++).value() == 2);
-        REQUIRE((*const_itr++).value() == 3);
-        REQUIRE(const_itr == list1.end());
-
-        list1.pop_front();
-
-        REQUIRE(list1.front().value() == 3);
-        REQUIRE(list1.back().value() == 3);
-
-        itr = list1.begin();
-
-        REQUIRE((*itr++).value() == 3);
-        REQUIRE(itr == list1.end());
-
-        const_itr = list1.begin();
-
-        REQUIRE((*const_itr++).value() == 3);
-        REQUIRE(const_itr == list1.end());
-
-        list1.pop_front();
-
-        REQUIRE(list1.empty());
-
-        itr = list1.begin();
-
-        REQUIRE(itr == list1.end());
-
-        const_itr = list1.begin();
-
-        REQUIRE(const_itr == list1.end());
-=======
         CHECK(list1.front().value() == 1);
         CHECK(list1.back().value() == 3);
 
@@ -488,7 +305,6 @@ namespace
         CHECK((*itr++).value() == 3);
         CHECK((*itr++).value() == 1);
         CHECK((*itr++).value() == 2);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 
     void testInsertAfterFunctionality(ListAllocator &allocator)
@@ -496,47 +312,15 @@ namespace
 
         TestElementList list1(allocator);
 
-<<<<<<< HEAD
-        REQUIRE(list1.empty());
-=======
         CHECK(list1.empty());
         CHECK(list1.size() == 0);
 
         list1.erase_after(list1.begin()); //  No-op
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.push_front(TestElement(1));
 
         list1.insert_after(list1.begin(), TestElement(2));
 
-<<<<<<< HEAD
-        REQUIRE(list1.front().value() == 1);
-        REQUIRE(list1.back().value() == 2);
-
-        list1.insert_after(++list1.begin(), TestElement(4));
-
-        REQUIRE(list1.front().value() == 1);
-        REQUIRE(list1.back().value() == 4);
-
-        list1.insert_after(++list1.begin(), TestElement(3));
-
-        REQUIRE(list1.front().value() == 1);
-        REQUIRE(list1.back().value() == 4);
-
-        list1.insert_after(--list1.end(), TestElement(5));
-
-        REQUIRE(list1.front().value() == 1);
-        REQUIRE(list1.back().value() == 5);
-
-        typename TestElementList::const_iterator const_itr = list1.begin();
-
-        REQUIRE(const_itr++->value() == 1);
-        REQUIRE(const_itr++->value() == 2);
-        REQUIRE(const_itr++->value() == 3);
-        REQUIRE(const_itr++->value() == 4);
-        REQUIRE(const_itr++->value() == 5);
-        REQUIRE(const_itr == list1.end());
-=======
         CHECK(list1.size() == 2);
         CHECK(list1.front().value() == 1);
         CHECK(list1.back().value() == 2);
@@ -567,72 +351,41 @@ namespace
         CHECK(const_itr++->value() == 4);
         CHECK(const_itr++->value() == 5);
         CHECK(const_itr == list1.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.pop_back();
 
         const_itr = list1.begin();
 
-<<<<<<< HEAD
-        REQUIRE(const_itr++->value() == 1);
-        REQUIRE(const_itr++->value() == 2);
-        REQUIRE(const_itr++->value() == 3);
-        REQUIRE(const_itr++->value() == 4);
-        REQUIRE(const_itr == list1.end());
-=======
         CHECK(list1.size() == 4);
         CHECK(const_itr++->value() == 1);
         CHECK(const_itr++->value() == 2);
         CHECK(const_itr++->value() == 3);
         CHECK(const_itr++->value() == 4);
         CHECK(const_itr == list1.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.erase_after(list1.begin());
 
         const_itr = list1.begin();
 
-<<<<<<< HEAD
-        REQUIRE(const_itr++->value() == 1);
-        REQUIRE(const_itr++->value() == 3);
-        REQUIRE(const_itr++->value() == 4);
-        REQUIRE(const_itr == list1.end());
-=======
         CHECK(list1.size() == 3);
         CHECK(const_itr++->value() == 1);
         CHECK(const_itr++->value() == 3);
         CHECK(const_itr++->value() == 4);
         CHECK(const_itr == list1.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.erase_after(--(--list1.end()));
 
         const_itr = list1.begin();
 
-<<<<<<< HEAD
-        REQUIRE(const_itr++->value() == 1);
-        REQUIRE(const_itr++->value() == 3);
-        REQUIRE(const_itr == list1.end());
-=======
         CHECK(list1.size() == 2);
         CHECK(const_itr++->value() == 1);
         CHECK(const_itr++->value() == 3);
         CHECK(const_itr == list1.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.erase_after(list1.begin());
 
         const_itr = list1.begin();
 
-<<<<<<< HEAD
-        REQUIRE(const_itr++->value() == 1);
-        REQUIRE(const_itr == list1.end());
-    }
-
-    TEST_CASE("Test list with static heap and stack allocators push/pop positive cases", "")
-    {
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-=======
         CHECK(list1.size() == 1);
         CHECK(const_itr++->value() == 1);
         CHECK(const_itr == list1.end());
@@ -777,47 +530,30 @@ namespace
     TEST(ListTests, ListWithStaticHeapAndStackAllocators_push_pop_PositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, MAX_HEAP_ELEMENTS);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         ListStaticHeapAllocator heap_allocator(test_heap);
 
         testListFunctionality(heap_allocator);
 
-<<<<<<< HEAD
-        //        REQUIRE(test_heap.blocks_allocated() == 15);
-=======
         CHECK(test_heap.bytes_in_use() == 0);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         ListStackAllocator stack_allocator;
 
         testListFunctionality(stack_allocator);
     }
 
-<<<<<<< HEAD
-    TEST_CASE("Test list with static heap and stack allocators insert/erase after positive cases", "")
-    {
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-=======
     TEST(ListTests, ListWithStaticHeapAndStackAllocators_insert_erase_after_PositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         ListStaticHeapAllocator heap_allocator(test_heap);
 
         testInsertAfterFunctionality(heap_allocator);
 
-<<<<<<< HEAD
-        //        REQUIRE(test_heap.blocks_allocated() == 15);
-=======
         CHECK(test_heap.bytes_in_use() == 0);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         ListStackAllocator stack_allocator;
 
         testInsertAfterFunctionality(stack_allocator);
     }
-<<<<<<< HEAD
-=======
 
     TEST(ListTests, ListWithStaticHeapAndStackAllocators_move_front)
     {
@@ -859,5 +595,4 @@ namespace
         CHECK(list1.max_size() == MAX_HEAP_ELEMENTS);
     }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 }

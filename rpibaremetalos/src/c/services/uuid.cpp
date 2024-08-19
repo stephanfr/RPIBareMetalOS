@@ -4,18 +4,9 @@
 
 #include "services/uuid.h"
 
-<<<<<<< HEAD
-#include "services/xoroshiro128plusplus.h"
-
-#include <minimalstdio.h>
-#include <minimalcstdlib.h>
-
-Xoroshiro128PlusPlusRNG *__uuid_generator_rng = nullptr;
-=======
 #include <minimalstdio.h>
 
 #include "platform/platform_sw_rngs.h"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 const UUID UUID::NIL(0UL, 0UL);
 const UUID UUID::MAX(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
@@ -28,13 +19,8 @@ UUID UUID::GenerateUUID(Versions version)
     //      the version nunmber 4 must be placed in the top 4 bits of time_hi_and_version_
     //      and the rest of the bits are random.
 
-<<<<<<< HEAD
-    return UUID( (__uuid_generator_rng->Next64BitValue() & ~0x000000000000F000) | 0x0000000000004000,
-                 (__uuid_generator_rng->Next64BitValue() & ~0xC000000000000000) | 0x8000000000000000 );
-=======
     return UUID( (GetUUIDGeneratorRNG().Next64BitValue() & ~0x000000000000F000) | 0x0000000000004000,
                  (GetUUIDGeneratorRNG().Next64BitValue() & ~0xC000000000000000) | 0x8000000000000000 );
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 }
 
 char *UUID::ToString(char buffer[36]) const

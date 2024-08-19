@@ -25,11 +25,7 @@
         h ^= k;      \
     }
 
-<<<<<<< HEAD
-uint32_t MurmurHash2A(const void *key, int len, uint32_t seed)
-=======
 uint32_t MurmurHash2A(const void *key, int len, MurmurHash2ASeed seed)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 {
     const uint32_t m = 0x5bd1e995;
     const int r = 24;
@@ -37,11 +33,7 @@ uint32_t MurmurHash2A(const void *key, int len, MurmurHash2ASeed seed)
 
     const unsigned char *data = (const unsigned char *)key;
 
-<<<<<<< HEAD
-    uint32_t h = seed;
-=======
     uint32_t h = (uint32_t)seed;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     while (len >= 4)
     {
@@ -75,20 +67,12 @@ uint32_t MurmurHash2A(const void *key, int len, MurmurHash2ASeed seed)
     return h;
 }
 
-<<<<<<< HEAD
-uint64_t MurmurHash64A(const void *key, int len, uint64_t seed)
-=======
 uint64_t MurmurHash64A(const void *key, int len, MurmurHash64ASeed seed)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 {
     const uint64_t m = 0xc6a4a7935bd1e995LLU;
     const int r = 47;
 
-<<<<<<< HEAD
-    uint64_t h = seed ^ (len * m);
-=======
     uint64_t h = (uint64_t)seed ^ (len * m);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     const uint64_t *data = (const uint64_t *)key;
     const uint64_t *end = data + (len / 8);

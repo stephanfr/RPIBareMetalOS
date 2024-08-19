@@ -6,11 +6,7 @@
 
 #include "allocator"
 
-<<<<<<< HEAD
-#include "minstd_utility.h" //  For forward<>()
-=======
 #include "utility" //  For forward<>()
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -22,11 +18,8 @@ namespace MINIMAL_STD_NAMESPACE
         {
         public:
             node() = delete;
-<<<<<<< HEAD
-=======
             node( const node &other) = delete;
             node( node &&other) = delete;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
             explicit node(node *next, node *prev, const T &element)
                 : element_(element),
@@ -43,12 +36,9 @@ namespace MINIMAL_STD_NAMESPACE
             {
             }
 
-<<<<<<< HEAD
-=======
             node& operator=(const node &other) = delete;
             node& operator=(node &&other) = delete;
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         private:
             T element_;
 
@@ -74,14 +64,9 @@ namespace MINIMAL_STD_NAMESPACE
         class const_iterator;
         friend class const_iterator;
 
-<<<<<<< HEAD
-    public:
-        list() = delete;
-=======
         list() = delete;
         list(const list &other) = delete;
         list(list &&other) = delete;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list(allocator_type &allocator)
             : allocator_(allocator),
@@ -95,18 +80,12 @@ namespace MINIMAL_STD_NAMESPACE
             clear();
         }
 
-<<<<<<< HEAD
-        void clear()
-        {
-            while( front_ != nullptr )
-=======
         list& operator=(const list &other) = delete;
         list& operator=(list &&other) = delete;
 
         void clear()
         {
             while (front_ != nullptr)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             {
                 node_type *node_to_delete = front_;
 
@@ -114,13 +93,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                 front_ = front_->next_;
             }
-<<<<<<< HEAD
-=======
 
             back_ = nullptr;
 
             size_ = 0;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         [[nodiscard]] bool empty() const noexcept
@@ -128,52 +104,32 @@ namespace MINIMAL_STD_NAMESPACE
             return front_ == nullptr;
         }
 
-<<<<<<< HEAD
-        size_t max_size() const noexcept
-=======
         [[nodiscard]] size_t size() const noexcept
         {
             return size_;
         }
 
         [[nodiscard]] size_t max_size() const noexcept
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return allocator_.max_size();
         }
 
-<<<<<<< HEAD
-        reference front()
-=======
         [[nodiscard]] reference front()
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return front_->element_;
         }
 
-<<<<<<< HEAD
-        const_reference front() const
-=======
         [[nodiscard]] const_reference front() const
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return front_->element_;
         }
 
-<<<<<<< HEAD
-        reference back()
-=======
         [[nodiscard]] reference back()
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return back_->element_;
         }
 
-<<<<<<< HEAD
-        const_reference back() const
-=======
         [[nodiscard]] const_reference back() const
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return back_->element_;
         }
@@ -193,11 +149,8 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 back_ = new_node;
             }
-<<<<<<< HEAD
-=======
 
             size_++;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         template <class... Args>
@@ -217,11 +170,8 @@ namespace MINIMAL_STD_NAMESPACE
                 back_ = new_node;
             }
 
-<<<<<<< HEAD
-=======
             size_++;
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             return new_node->element_;
         }
 
@@ -232,14 +182,11 @@ namespace MINIMAL_STD_NAMESPACE
             if (back_ != nullptr)
             {
                 back_->next_ = new_node;
-<<<<<<< HEAD
-=======
 
                 if( back_->prev_ == nullptr )
                 {
                     front_->next_ = new_node;
                 }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             }
 
             back_ = new_node;
@@ -248,11 +195,8 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 front_ = new_node;
             }
-<<<<<<< HEAD
-=======
 
             size_++;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         template <class... Args>
@@ -263,14 +207,11 @@ namespace MINIMAL_STD_NAMESPACE
             if (back_ != nullptr)
             {
                 back_->next_ = new_node;
-<<<<<<< HEAD
-=======
 
                 if( back_->prev_ == nullptr )
                 {
                     front_->next_ = new_node;
                 }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             }
 
             back_ = new_node;
@@ -280,11 +221,8 @@ namespace MINIMAL_STD_NAMESPACE
                 front_ = new_node;
             }
 
-<<<<<<< HEAD
-=======
             size_++;
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             return new_node->element_;
         }
 
@@ -309,11 +247,8 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
             allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
-<<<<<<< HEAD
-=======
 
             size_--;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         void pop_back()
@@ -337,11 +272,8 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
             allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
-<<<<<<< HEAD
-=======
 
             size_--;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         iterator begin() noexcept;
@@ -349,20 +281,14 @@ namespace MINIMAL_STD_NAMESPACE
         iterator end() noexcept;
         const_iterator end() const noexcept;
 
-<<<<<<< HEAD
-=======
         iterator move_front( const iterator &pos ); 
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         iterator insert_after(const_iterator pos, const_reference value);
 
         template <class... Args>
         iterator emplace_after(const_iterator pos, Args &&...args);
 
-<<<<<<< HEAD
-=======
         void erase(const_iterator pos);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         void erase_after(const_iterator pos);
 
     private:
@@ -370,11 +296,8 @@ namespace MINIMAL_STD_NAMESPACE
 
         node_type *front_;
         node_type *back_;
-<<<<<<< HEAD
-=======
 
         size_t size_ = 0;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     };
 
     template <typename T>
@@ -400,8 +323,6 @@ namespace MINIMAL_STD_NAMESPACE
               node_(node)
         {
         }
-<<<<<<< HEAD
-=======
         
         iterator(const iterator &other) noexcept
             : list_(other.list_),
@@ -416,7 +337,6 @@ namespace MINIMAL_STD_NAMESPACE
 
             return *this;
         }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         //  prefix increment
 
@@ -468,14 +388,10 @@ namespace MINIMAL_STD_NAMESPACE
 
             if (node_ != nullptr)
             {
-<<<<<<< HEAD
-                node_ = node_->prev_;
-=======
                 if( node_->prev_ != nullptr )
                 {
                     node_ = node_->prev_;
                 }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             }
             else if (list_->back_ != nullptr)
             {
@@ -528,18 +444,12 @@ namespace MINIMAL_STD_NAMESPACE
               node_(node)
         {
         }
-<<<<<<< HEAD
-=======
-
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         const_iterator(const iterator other) noexcept
             : list_(other.list_),
               node_(other.node_)
         {
         }
 
-<<<<<<< HEAD
-=======
         const_iterator &operator=(const const_iterator &other) noexcept
         {
             list_ = other.list_;
@@ -548,7 +458,6 @@ namespace MINIMAL_STD_NAMESPACE
             return *this;
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         //  prefix increment
 
         const_iterator &operator++()
@@ -599,14 +508,10 @@ namespace MINIMAL_STD_NAMESPACE
 
             if (node_ != nullptr)
             {
-<<<<<<< HEAD
-                node_ = node_->prev_;
-=======
                 if( node_->prev_ != nullptr )
                 {
                     node_ = node_->prev_;
                 }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             }
             else if (list_->back_ != nullptr)
             {
@@ -662,8 +567,6 @@ namespace MINIMAL_STD_NAMESPACE
     }
 
     template <typename T>
-<<<<<<< HEAD
-=======
     list<T>::iterator list<T>::move_front( const list<T>::iterator &pos )
     {
         //  Return now if the iterator is at the end or already at the front
@@ -699,7 +602,6 @@ namespace MINIMAL_STD_NAMESPACE
     }
 
     template <typename T>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     list<T>::iterator list<T>::insert_after(const_iterator pos, const_reference value)
     {
         MINIMAL_STD_ASSERT(pos.node_ != nullptr);
@@ -717,11 +619,8 @@ namespace MINIMAL_STD_NAMESPACE
             back_ = new_node;
         }
 
-<<<<<<< HEAD
-=======
         size_++;
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         return iterator(this, new_node);
     }
 
@@ -744,17 +643,12 @@ namespace MINIMAL_STD_NAMESPACE
             back_ = new_node;
         }
 
-<<<<<<< HEAD
-=======
         size_++;
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         return iterator(this, new_node);
     }
 
     template <typename T>
-<<<<<<< HEAD
-=======
     void list<T>::erase(list<T>::const_iterator pos)
     {
         MINIMAL_STD_ASSERT(pos.node_ != nullptr); //  Have to have an iterator pointing to something
@@ -785,16 +679,11 @@ namespace MINIMAL_STD_NAMESPACE
     }
 
     template <typename T>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     void list<T>::erase_after(list<T>::const_iterator pos)
     {
         MINIMAL_STD_ASSERT(pos.node_ != nullptr); //  Have to have an iterator pointing to something
 
-<<<<<<< HEAD
-        if (pos.node_->next_ == nullptr)
-=======
         if ((pos.node_ == nullptr) || (pos.node_->next_ == nullptr))
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return;
         }
@@ -813,12 +702,7 @@ namespace MINIMAL_STD_NAMESPACE
         }
 
         allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
-<<<<<<< HEAD
-    }
-
-=======
 
         size_--;
     }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 }

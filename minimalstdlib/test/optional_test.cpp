@@ -2,13 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-<<<<<<< HEAD
-#include <catch2/catch_test_macros.hpp>
-
-#include "../include/minstdconfig.h"
-
-#include "../include/optional"
-=======
 #include <CppUTest/TestHarness.h>
 
 #include <stdint.h>
@@ -16,20 +9,16 @@
 #include <minstdconfig.h>
 
 #include <optional>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 namespace
 {
 
-<<<<<<< HEAD
-=======
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
     TEST_GROUP(OptionalTests)
     {};
 #pragma GCC diagnostic pop
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     class TestElement
     {
     public:
@@ -73,41 +62,6 @@ namespace
         uint32_t value2_;
     };
 
-<<<<<<< HEAD
-    TEST_CASE("Test with primitive", "")
-    {
-        minstd::optional<uint32_t> test_uint32_t1;
-
-        REQUIRE(test_uint32_t1.has_value() == false);
-
-        minstd::optional<uint32_t> test_uint32_t2(7);
-
-        REQUIRE(test_uint32_t2.has_value() == true);
-        REQUIRE(test_uint32_t2.value() == 7);
-    }
-
-    TEST_CASE("Test with object", "")
-    {
-        minstd::optional<TestElement> test_elem1;
-
-        REQUIRE(test_elem1.has_value() == false);
-
-        minstd::optional<TestElement> test_elem2( TestElement(9,10) );
-
-        REQUIRE(test_elem2.has_value() == true);
-        REQUIRE(test_elem2.value().value1() == 9);
-        REQUIRE(test_elem2.value().value2() == 10);
-        REQUIRE((*test_elem2).value1() == 9);
-        REQUIRE((*test_elem2).value2() == 10);
-
-        minstd::optional<TestElement> test_elem3( TestElement(11, 12) );
-
-        REQUIRE(test_elem3.has_value() == true);
-        REQUIRE(test_elem3.value().value1() == 11);
-        REQUIRE(test_elem3.value().value2() == 12);
-        REQUIRE(test_elem3->value1() == 11);
-        REQUIRE(test_elem3->value2() == 12);
-=======
     TEST(OptionalTests, PrimitivesTest)
     {
         minstd::optional<uint32_t> test_uint32_t1;
@@ -247,6 +201,5 @@ namespace
         CHECK((*test_elem2).value1() == 11);
         CHECK((*test_elem2).value2() == 12);
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 }

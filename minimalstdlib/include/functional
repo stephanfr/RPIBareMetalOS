@@ -6,15 +6,12 @@
 
 #include "minstdconfig.h"
 
-<<<<<<< HEAD
-=======
 #include <stddef.h>
 
 #include "utility"
 
 #include "type_traits"
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 namespace MINIMAL_STD_NAMESPACE
 {
 
@@ -45,10 +42,6 @@ namespace MINIMAL_STD_NAMESPACE
     private:
         T *value_ = nullptr;
     };
-<<<<<<< HEAD
-}
-
-=======
 
     template <typename T>
     bool operator<(const minstd::reference_wrapper<T> &lhs, const minstd::reference_wrapper<T> &rhs)
@@ -178,4 +171,3 @@ namespace MINIMAL_STD_NAMESPACE
         }
     };
 }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

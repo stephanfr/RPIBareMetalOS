@@ -6,18 +6,11 @@
 
 #include "minstdconfig.h"
 
-<<<<<<< HEAD
-#include "type_traits"
-#include <stddef.h>
-
-#include "minstd_utility.h"
-=======
 #include "new"
 #include "type_traits"
 #include <stddef.h>
 
 #include "utility"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -30,8 +23,6 @@ namespace MINIMAL_STD_NAMESPACE
         {
         }
 
-<<<<<<< HEAD
-=======
         explicit optional(const optional &optional_to_copy)
             : has_value_(optional_to_copy.has_value_)
         {
@@ -41,7 +32,6 @@ namespace MINIMAL_STD_NAMESPACE
             }
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         explicit optional(optional &optional_to_copy)
             : has_value_(optional_to_copy.has_value_)
         {
@@ -88,8 +78,6 @@ namespace MINIMAL_STD_NAMESPACE
             }
         }
 
-<<<<<<< HEAD
-=======
         optional& operator=( const T &new_value )
         {
             value_ = new_value;
@@ -111,7 +99,6 @@ namespace MINIMAL_STD_NAMESPACE
             has_value_ = false;
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         constexpr bool has_value() const noexcept
         {
             return has_value_;

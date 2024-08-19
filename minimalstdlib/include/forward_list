@@ -4,16 +4,10 @@
 
 #pragma once
 
-<<<<<<< HEAD
-#include "allocator"
-
-#include "minstd_utility.h" //  For forward<>()
-=======
 #include "new"
 #include "allocator"
 
 #include "utility" //  For forward<>()
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 namespace MINIMAL_STD_NAMESPACE
 {

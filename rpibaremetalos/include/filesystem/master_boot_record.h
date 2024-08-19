@@ -9,15 +9,9 @@
 #include "filesystem/filesystem_errors.h"
 #include "filesystem/partition.h"
 
-<<<<<<< HEAD
-
-FilesystemResultCodes   GetPartitions(BlockIODevice &io_device, MassStoragePartitions& partitions);
-
-=======
 namespace filesystems
 {
 
     FilesystemResultCodes GetPartitions(BlockIODevice &io_device, MassStoragePartitions &partitions);
     
 } // namespace filesystems
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

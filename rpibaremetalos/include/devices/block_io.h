@@ -5,11 +5,7 @@
 #pragma once
 
 #include <stdint.h>
-<<<<<<< HEAD
-#include <minstd_utility.h>
-=======
 #include <utility>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "os_entity.h"
 
@@ -52,29 +48,16 @@ typedef enum class BlockIOResultCodes
     __LAST_BLOCK_IO_ERROR__
 } BlockIOResultCodes;
 
-<<<<<<< HEAD
-=======
 inline bool Failed( BlockIOResultCodes  code )
 {
     return code != BlockIOResultCodes::SUCCESS;
 }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 constexpr uint32_t MAX_BLOCK_IO_BLOCK_SIZE = 2048;
 
 class BlockIODevice : public OSEntity
 {
 public:
-<<<<<<< HEAD
-
-    BlockIODevice() = delete;
-
-    BlockIODevice( bool permanent,
-                   const char *name,
-                   const char *alias )
-        : OSEntity( permanent, name, alias )
-    {}
-=======
     BlockIODevice() = delete;
 
     BlockIODevice(bool permanent,
@@ -83,7 +66,6 @@ public:
         : OSEntity(permanent, name, alias)
     {
     }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     virtual ~BlockIODevice()
     {
@@ -96,17 +78,6 @@ public:
 
     virtual uint32_t BlockSize() const = 0;
 
-<<<<<<< HEAD
-    virtual BlockIOResultCodes Seek(uint64_t offset_in_bytes) = 0;
-
-    virtual ValueResult<BlockIOResultCodes, uint32_t> ReadFromBlock(uint8_t *buffer, uint32_t block_number, uint32_t bocks_to_read) = 0;
-    virtual ValueResult<BlockIOResultCodes, uint32_t> ReadFromCurrentOffset(uint8_t *buffer, uint32_t bocks_to_read) = 0;
-
-    const char *GetMessageForResultCode(BlockIOResultCodes code);
-};
-
-
-=======
     /** @brief Moves the block device's internal offset to a specific block location
      *
      *     @param[in] offset_in_bytes Number of blocks from the start of the device to set the internal offset
@@ -163,4 +134,3 @@ public:
 
     const char *GetMessageForResultCode(BlockIOResultCodes code);
 };
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

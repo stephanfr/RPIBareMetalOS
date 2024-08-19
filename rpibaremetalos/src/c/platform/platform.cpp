@@ -2,18 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-<<<<<<< HEAD
-#include <cstring>
-#include <stddef.h>
-
-#include <fixed_string>
-=======
 #include <stddef.h>
 #include <string.h>
 
 #include <fixed_string>
 #include <memory>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "platform/exception_manager.h"
 #include "platform/platform_info.h"
@@ -28,22 +21,6 @@
 
 #include "devices/rpi3/rpi3_hw_rng.h"
 #include "devices/rpi4/rpi4_hw_rng.h"
-<<<<<<< HEAD
-#include "services/xoroshiro128plusplus.h"
-
-#include "devices/uart0.h"
-#include "devices/uart1.h"
-#include "devices/std_streams.h"
-
-#include "platform/kernel_command_line.h"
-
-#include "memory.h"
-
-#include "asm_globals.h"
-
-#include "services/random_number_generator.h"
-
-=======
 
 #include "devices/std_streams.h"
 #include "devices/uart0.h"
@@ -55,7 +32,6 @@
 
 #include "asm_globals.h"
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 //  Forward declare the assembly language function which returns the board type
 
 extern "C" uint32_t IdentifyBoardType();
@@ -70,18 +46,6 @@ bool __platform_initialized = false;
 static const PlatformInfo *__platform_info = nullptr;
 static ExceptionManager *__exception_manager = nullptr;
 
-<<<<<<< HEAD
-//  Globals for core RNG generators
-
-static RandomNumberGeneratorBase *__hw_random_number_generator = nullptr;
-static Xoroshiro128PlusPlusRNG *__root_xoroshiro128plusplus_random_number_generator = nullptr;
-
-extern Xoroshiro128PlusPlusRNG *__uuid_generator_rng;
-
-//  Global for OS Entity hash seed
-
-extern uint64_t __os_entity_hash_seed;
-=======
 //  Global for HW RNG generator
 
 static RandomNumberGeneratorBase *__hw_random_number_generator = nullptr;
@@ -90,7 +54,6 @@ static RandomNumberGeneratorBase *__hw_random_number_generator = nullptr;
 
 extern void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_seed,
                                                Xoroshiro128PlusPlusRNG::Seed xoroshiro_seed);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 //  Function to setup serial console
 
@@ -98,13 +61,8 @@ bool SetupSerialConsole()
 {
     //  Set defaults in case the command line does not contain a console setting
 
-<<<<<<< HEAD
-    minstd::fixed_string console_uart( DEAULT_SERIAL_CONSOLE );
-    BaudRates baud_rate = BaudRateFromInteger( DEFAULT_SERIAL_CONSOLE_BAUD_RATE );
-=======
     minstd::fixed_string<> console_uart(DEAULT_SERIAL_CONSOLE);
     BaudRates baud_rate = BaudRateFromInteger(DEFAULT_SERIAL_CONSOLE_BAUD_RATE);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Check the command line
 
@@ -136,11 +94,7 @@ bool SetupSerialConsole()
             case (uint32_t)BaudRates::BAUD_RATE_38400:
             case (uint32_t)BaudRates::BAUD_RATE_57600:
             case (uint32_t)BaudRates::BAUD_RATE_115200:
-<<<<<<< HEAD
-                baud_rate = BaudRateFromInteger( baud_rate_requested );
-=======
                 baud_rate = BaudRateFromInteger(baud_rate_requested);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
                 break;
             }
         }
@@ -173,28 +127,16 @@ bool SetupSerialConsole()
 
     //  Set stdin and stdout
 
-<<<<<<< HEAD
-    auto get_uart_result = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
-
-    if (get_uart_result.Failed())
-=======
     auto console = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
 
     if (console.Failed())
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return false;
     }
 
-<<<<<<< HEAD
-    CharacterIODevice &uart = get_uart_result.Value();
-
-    SetStandardStreams(&uart, &uart);
-=======
     CharacterIODevice &char_io_device = *console;
 
     SetStandardStreams(&char_io_device, &char_io_device);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Finished with success
 
@@ -236,28 +178,11 @@ void InitializePlatform()
         break;
     }
 
-<<<<<<< HEAD
-    //  Initialize the OS Entity hash seed from the HW RNG
-
-    __os_entity_hash_seed = __hw_random_number_generator->Next64BitValue();
-
-    //  Initialize the root Xoroshiro128plusplus RNG
-
-    minstd::array<uint64_t, 2> xoroshiro_seed;
-
-    xoroshiro_seed[0] = __hw_random_number_generator->Next64BitValue();
-    xoroshiro_seed[1] = __hw_random_number_generator->Next64BitValue();
-
-    __root_xoroshiro128plusplus_random_number_generator = static_new<Xoroshiro128PlusPlusRNG>(xoroshiro_seed);
-
-    __uuid_generator_rng = static_new<Xoroshiro128PlusPlusRNG>(__root_xoroshiro128plusplus_random_number_generator->Fork());
-=======
     //  Initialize the platform software RNGs from the HW RNG
 
     InitializeSWRandomNumberGenerators(MurmurHash64ASeed(__hw_random_number_generator->Next64BitValue()),
                                        Xoroshiro128PlusPlusRNG::Seed(__hw_random_number_generator->Next64BitValue(),
                                                                      __hw_random_number_generator->Next64BitValue()));
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     //  Get the kernel command line
 
@@ -265,11 +190,7 @@ void InitializePlatform()
 
     //  Setup the serial console
 
-<<<<<<< HEAD
-    if( !SetupSerialConsole() )
-=======
     if (!SetupSerialConsole())
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         ParkCore();
     }
@@ -297,11 +218,3 @@ RandomNumberGeneratorBase &GetHWRandomNumberGenerator()
 {
     return *__hw_random_number_generator;
 }
-<<<<<<< HEAD
-
-Xoroshiro128PlusPlusRNG &GetXoroshiro128PlusPlusRootRandomNumberGenerator()
-{
-    return *__root_xoroshiro128plusplus_random_number_generator;
-}
-=======
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

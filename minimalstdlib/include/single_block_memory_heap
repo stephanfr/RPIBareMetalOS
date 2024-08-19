@@ -12,10 +12,6 @@
 
 namespace MINIMAL_STD_NAMESPACE
 {
-<<<<<<< HEAD
-
-=======
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     class single_block_memory_heap : public memory_heap
     {
     public:
@@ -33,14 +29,11 @@ namespace MINIMAL_STD_NAMESPACE
         {
         }
 
-<<<<<<< HEAD
-=======
         const size_t max_size() const noexcept
         {
             return max_size_;
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         const void* heap_start() const
         {
             return heap_start_;
@@ -51,9 +44,6 @@ namespace MINIMAL_STD_NAMESPACE
             return current_end_;
         }
 
-<<<<<<< HEAD
-        size_t bytes_allocated() const noexcept
-=======
         size_t bytes_in_use() const noexcept
         {
             return bytes_allocated_ - bytes_allocated_but_unused_;
@@ -65,16 +55,11 @@ namespace MINIMAL_STD_NAMESPACE
         }
 
         size_t bytes_reserved() const noexcept
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return bytes_allocated_;
         }
 
-<<<<<<< HEAD
-        size_t blocks_allocated() const noexcept
-=======
         size_t blocks_reserved() const noexcept
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
             return blocks_allocated_;
         }
@@ -89,14 +74,11 @@ namespace MINIMAL_STD_NAMESPACE
             return reinterpret_cast<const block_header *>(static_cast<const char *>(block) - header_size_)->num_elements_in_block_;
         }
 
-<<<<<<< HEAD
-=======
         size_t bytes_allocated_but_unused() const noexcept
         {
             return bytes_allocated_but_unused_;
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         size_t blocks_allocated_but_unused() const noexcept
         {
             return blocks_allocated_but_unused_;
@@ -126,14 +108,11 @@ namespace MINIMAL_STD_NAMESPACE
             return false;
         }
 
-<<<<<<< HEAD
-=======
         size_t actual_block_size(const void *block) const noexcept
         {
             return reinterpret_cast<const block_header *>(static_cast<const char *>(block) - header_size_)->block_size_ - header_size_;
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     protected:
         void *allocate_raw_block(size_t element_size_in_bytes, size_t num_elements_in_block)
         {
@@ -169,10 +148,6 @@ namespace MINIMAL_STD_NAMESPACE
 
         void deallocate_raw_block(void *block)
         {
-<<<<<<< HEAD
-            //  TODO - check for duoble deletes
-            
-=======
             //  Check for double deletes
 
             if( !reinterpret_cast<block_header *>(static_cast<char *>(block) - header_size_)->in_use_ )
@@ -181,16 +156,12 @@ namespace MINIMAL_STD_NAMESPACE
                 return;
             }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             //  Mark the block as not in use and containing zero elements
 
             reinterpret_cast<block_header *>(static_cast<char *>(block) - header_size_)->in_use_ = false;
             reinterpret_cast<block_header *>(static_cast<char *>(block) - header_size_)->num_elements_in_block_ = 0;
 
-<<<<<<< HEAD
-=======
             bytes_allocated_but_unused_ += reinterpret_cast<block_header *>(static_cast<char *>(block) - header_size_)->block_size_;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             blocks_allocated_but_unused_++;
         }
 
@@ -231,10 +202,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         size_t bytes_allocated_ = 0;
         size_t blocks_allocated_ = 0;
-<<<<<<< HEAD
-=======
         size_t bytes_allocated_but_unused_ = 0;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         size_t blocks_allocated_but_unused_ = 0;
 
         size_t aligned_size(size_t unaligned_block_size_in_bytes)
@@ -265,11 +233,7 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 //  If we are here, the block is unused.
-<<<<<<< HEAD
-                //  If the block is the same size as the requested block, then return it now.
-=======
                 //  If the block is the same size as the requested block, then break
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
                 if (current_block.header->block_size_ == block_size_in_bytes)
                 {
@@ -302,17 +266,11 @@ namespace MINIMAL_STD_NAMESPACE
                     best_fit_block.header->block_size_ = block_size_in_bytes;
 
                     blocks_allocated_++;
-<<<<<<< HEAD
-                }
-                else
-                {
-=======
                     bytes_allocated_but_unused_ -= block_size_in_bytes;
                 }
                 else
                 {
                     bytes_allocated_but_unused_ -= block_size_in_bytes;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
                     blocks_allocated_but_unused_--;
                 }
 

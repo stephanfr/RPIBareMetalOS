@@ -4,14 +4,6 @@
 
 #pragma once
 
-<<<<<<< HEAD
-#include "algorithm"
-#include "stack_allocator"
-
-#include "array"
-
-#include "minstd_utility.h"
-=======
 #include "minstdconfig.h"
 
 #include "new"
@@ -22,7 +14,6 @@
 #include "array"
 
 #include "utility"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -62,13 +53,8 @@ namespace MINIMAL_STD_NAMESPACE
         struct avl_node
         {
 
-<<<<<<< HEAD
-            explicit avl_node(const minstd::pair<Key, T> &value)
-                : value_(value)
-=======
             explicit avl_node(const minstd::pair<Key, T> &&value)
                 : value_(minstd::move(value))
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             {
             }
 
@@ -82,8 +68,6 @@ namespace MINIMAL_STD_NAMESPACE
             {
             }
 
-<<<<<<< HEAD
-=======
             ~avl_node()
             {
             }
@@ -105,7 +89,6 @@ namespace MINIMAL_STD_NAMESPACE
                 return *this;
             }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             const Key &key() const
             {
                 return value_.first();
@@ -182,8 +165,6 @@ namespace MINIMAL_STD_NAMESPACE
         {
         }
 
-<<<<<<< HEAD
-=======
         ~avl_tree()
         {
             clear();
@@ -199,7 +180,6 @@ namespace MINIMAL_STD_NAMESPACE
             }
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         bool empty() const
         {
             return (size_ == 0);
@@ -229,14 +209,11 @@ namespace MINIMAL_STD_NAMESPACE
                 root_->right_reverse_ = nullptr;
             }
 
-<<<<<<< HEAD
-=======
             if (size_ == 0)
             {
                 root_ = nullptr;
             }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
             return initial_size - size_;
         }
 
@@ -362,41 +339,6 @@ namespace MINIMAL_STD_NAMESPACE
             return node_right;
         }
 
-<<<<<<< HEAD
-        node_type *insert_recursive(node_type *subtree_root, const key_type &key, const mapped_type &value)
-        {
-            if (subtree_root == nullptr)
-            {
-                //  Sub tree is empty, so we found the insert point.
-
-                size_++;
-
-                return new (allocator_.allocate(1)) node_type(key, value);
-            }
-
-            //  Work down the tree recursively to insert the new node.
-            //      Moving left is nodes with smaller keys, moving right is nodes with larger keys.
-
-            if (key < subtree_root->key())
-            {
-                subtree_root->set_left(insert_recursive(subtree_root->left_, key, value));
-            }
-            else if (key > subtree_root->key())
-            {
-                subtree_root->set_right(insert_recursive(subtree_root->right_, key, value));
-            }
-            else
-            {
-                return subtree_root; // Equal keys are disallowed
-            }
-
-            //  Rebalance the tree
-
-            return rebalance_after_insert(subtree_root, key);
-        }
-
-=======
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         node_type *insert_recursive(node_type *subtree_root, const key_type &key, mapped_type &&value)
         {
             if (subtree_root == nullptr)
@@ -491,12 +433,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                 if ((subtree_root->left_ == nullptr) || (subtree_root->right_ == nullptr))
                 {
-<<<<<<< HEAD
-=======
                     //  Save the left or right node, whichever is non-null.  We use this for determining
                     //      the new subtree_root after we delete the current subtree root
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
                     node_type *temp = subtree_root->left_ ? subtree_root->left_ : subtree_root->right_;
 
                     //  If both left and right are null, then this is a leaf node and can simply be deleted.
@@ -512,9 +451,6 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                     else
                     {
-<<<<<<< HEAD
-                        *subtree_root = *temp;
-=======
                         //  We need to move the value for the linked node into the current subtree_root
                         //      and then fixup the outbound link.
 
@@ -532,7 +468,6 @@ namespace MINIMAL_STD_NAMESPACE
                         {
                             subtree_root->right_->right_reverse_ = subtree_root;
                         }
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
                     }
 
                     allocator_.deallocate(temp, 1); //  Allocator will invoke delete
@@ -544,11 +479,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     node_type *subtree_front = find_front(subtree_root->right_);
 
-<<<<<<< HEAD
-                    subtree_root->value_ = subtree_front->value_;
-=======
                     subtree_root->value_ = minstd::move(subtree_front->value_);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
                     //  Delete the ordered successor
 
