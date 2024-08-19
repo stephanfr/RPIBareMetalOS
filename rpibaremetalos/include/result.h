@@ -6,37 +6,11 @@
 
 #include "macros.h"
 
-<<<<<<< HEAD
-#include "memory.h"
-
-#include <functional>
-#include <minstd_utility.h>
-#include <optional>
-
-#include "devices/log.h"
-
-#define ValueOrReturnOnFailure(variable, function_to_call)                      \
-    auto MAKE_UNIQUE_VARIABLE_NAME(_temp_) = function_to_call;                  \
-    if (MAKE_UNIQUE_VARIABLE_NAME(_temp_).Failed())                             \
-    {                                                                           \
-        return Result::Failure(MAKE_UNIQUE_VARIABLE_NAME(_temp_).ResultCode()); \
-    }                                                                           \
-    variable = MAKE_UNIQUE_VARIABLE_NAME(_temp_).Value();
-
-#define ValueOrReturnCodeOnlyOnFailure(variable, function_to_call) \
-    auto MAKE_UNIQUE_VARIABLE_NAME(_temp_) = function_to_call;     \
-    if (MAKE_UNIQUE_VARIABLE_NAME(_temp_).Failed())                \
-    {                                                              \
-        return MAKE_UNIQUE_VARIABLE_NAME(_temp_).ResultCode();     \
-    }                                                              \
-    variable = MAKE_UNIQUE_VARIABLE_NAME(_temp_).Value();
-=======
 #include <functional>
 #include <memory>
 #include <optional>
 #include <type_traits>
 #include <utility>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 typedef enum class SimpleSuccessOrFailure
 {
@@ -48,11 +22,7 @@ template <typename ResultCodeType, typename T>
 class ValueResult
 {
 public:
-<<<<<<< HEAD
-    ValueResult(ValueResult &result_to_copy)
-=======
     ValueResult(const ValueResult &result_to_copy)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         : result_code_(result_to_copy.result_code_),
           optional_return_value_(result_to_copy.optional_return_value_)
     {
@@ -113,9 +83,6 @@ public:
         return *optional_return_value_;
     }
 
-<<<<<<< HEAD
-private:
-=======
     template <typename U>
     operator const U &() const
     {
@@ -153,7 +120,6 @@ private:
     }
 
 protected:
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     ValueResult(ResultCodeType result_code,
                 const T &return_value)
         : result_code_(result_code),
@@ -177,8 +143,6 @@ protected:
     minstd::optional<T> optional_return_value_;
 };
 
-<<<<<<< HEAD
-=======
 template <typename ResultCodeType, typename T, typename TErr>
 class ValueResultWithErrorInfo : public ValueResult<ResultCodeType, T>
 {
@@ -256,7 +220,6 @@ protected:
     minstd::optional<TErr> optional_error_info_;
 };
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 template <typename ResultCodeType, typename T>
 class ReferenceResult
 {
@@ -317,8 +280,6 @@ public:
         return optional_return_reference_.value().get();
     }
 
-<<<<<<< HEAD
-=======
     template <typename U>
     operator const U &() const
     {
@@ -355,7 +316,6 @@ public:
         return optional_return_reference_.value().get();
     }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 private:
     ReferenceResult(ResultCodeType result_code,
                     T &return_value)
@@ -392,11 +352,7 @@ public:
     PointerResult &operator=(PointerResult &&result_to_move)
     {
         result_code_ = result_to_move.result_code_;
-<<<<<<< HEAD
-        optional_return_pointer_ = result_to_move.optional_return_pointer_;
-=======
         optional_return_pointer_ = minstd::move(result_to_move.optional_return_pointer_);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         return *this;
     }
@@ -406,11 +362,7 @@ public:
         return PointerResult(ResultCodeType::SUCCESS);
     }
 
-<<<<<<< HEAD
-    static PointerResult<ResultCodeType, T> Success(unique_ptr<T> &return_value)
-=======
     static PointerResult<ResultCodeType, T> Success(minstd::unique_ptr<T> &return_value)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         return PointerResult(ResultCodeType::SUCCESS, return_value);
     }
@@ -435,16 +387,6 @@ public:
         return result_code_;
     }
 
-<<<<<<< HEAD
-    T &Value()
-    {
-        return *optional_return_pointer_;
-    }
-
-    const T &Value() const
-    {
-        return *optional_return_pointer_;
-=======
     minstd::unique_ptr<T> &Value()
     {
         return optional_return_pointer_;
@@ -473,16 +415,11 @@ public:
     const minstd::unique_ptr<T> &operator*() const
     {
         return optional_return_pointer_;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     }
 
 private:
     PointerResult(ResultCodeType result_code,
-<<<<<<< HEAD
-                  unique_ptr<T> &return_pointer)
-=======
                   minstd::unique_ptr<T> &return_pointer)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         : result_code_(result_code),
           optional_return_pointer_(return_pointer)
     {
@@ -494,10 +431,6 @@ private:
     }
 
     ResultCodeType result_code_;
-<<<<<<< HEAD
-    unique_ptr<T> optional_return_pointer_;
-};
-=======
     minstd::unique_ptr<T> optional_return_pointer_;
 };
 
@@ -580,4 +513,3 @@ inline T __ReturnCodeOrResult(U &variable)
     auto MAKE_UNIQUE_VARIABLE_NAME(_temp_) = expression;                           \
     static_assert(minstd::is_enum_v<decltype(MAKE_UNIQUE_VARIABLE_NAME(_temp_))>); \
     ReturnOnFailure(MAKE_UNIQUE_VARIABLE_NAME(_temp_), expression2);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

@@ -6,193 +6,6 @@
 
 #include "minstdconfig.h"
 
-<<<<<<< HEAD
-#include <cstring>
-#include <stdint.h>
-
-#include "algorithm"
-
-namespace MINIMAL_STD_NAMESPACE
-{
-    template <typename T, size_t MAX_SIZE = 64>
-    class basic_fixed_string;
-
-    template <typename T>
-    class basic_string
-    {
-    public:
-        static constexpr size_t npos = SIZE_MAX;
-
-        basic_string() = delete;
-        basic_string(basic_string &&) = delete;
-
-        basic_string &operator=(basic_string &&string_to_copy) = delete;
-
-        ~basic_string() = default;
-
-        basic_string &operator=(const T *value)
-        {
-            length_ = minstd::min(strlcpy(buffer_, value, buffer_size_), max_size_);
-
-            return *this;
-        }
-
-        basic_string &operator=(const basic_string &string_to_copy)
-        {
-            length_ = minstd::min(strlcpy(buffer_, string_to_copy.buffer_, buffer_size_), max_size_);
-
-            return *this;
-        }
-
-        template <size_t OTHER_MAX_SIZE>
-        basic_string &operator=(const basic_fixed_string<T, OTHER_MAX_SIZE> &string_to_copy);
-
-        bool operator==(const basic_string<T> &value) const
-        {
-            return length_ != value.length_ ? false : (strncmp(buffer_, value.buffer_, buffer_size_) == 0);
-        }
-
-        bool operator==(const T *value) const
-        {
-            return strncmp(buffer_, value, buffer_size_) == 0;
-        }
-
-        constexpr T &operator[](size_t pos)
-        {
-            if (pos >= buffer_size_)
-            {
-                return const_cast<T &>(EMPTY_CHARACTER);
-            }
-
-            return buffer_[pos];
-        }
-
-        constexpr const T &operator[](size_t pos) const
-        {
-            if (pos >= buffer_size_)
-            {
-                return EMPTY_CHARACTER;
-            }
-
-            return buffer_[pos];
-        }
-
-        operator const T *() const
-        {
-            return buffer_;
-        }
-
-        constexpr void clear() noexcept
-        {
-            length_ = 0;
-            buffer_[0] = 0;
-        }
-
-        const T *c_str() const
-        {
-            return buffer_;
-        }
-
-        const T *data() const
-        {
-            return buffer_;
-        }
-
-        size_t size() const
-        {
-            return length_;
-        }
-
-        size_t length() const
-        {
-            return length_;
-        }
-
-        [[nodiscard]] constexpr bool empty() const noexcept
-        {
-            return length_ == 0;
-        }
-
-        basic_string &operator+=(const T *value)
-        {
-            length_ += minstd::min(strlcpy(buffer_ + length_, value, buffer_size_ - length_), max_size_ - length_);
-
-            return *this;
-        }
-
-        constexpr size_t find_last_of(T ch, size_t pos = npos) const noexcept
-        {
-            size_t search_start_index = (pos != npos) ? minstd::min(pos, length_) : length_;
-
-            for (size_t i = search_start_index; i >= 0; i--)
-            {
-                if (buffer_[i] == ch)
-                {
-                    return i;
-                }
-            }
-
-            return npos;
-        }
-
-        constexpr size_t find( const T* string_to_search_for, size_t pos = 0 ) const
-        {
-            char *location = strnstr( buffer_, string_to_search_for, length_ );
-
-            return location == NULL ? npos : location - buffer_;
-        }
-
-        void substr( basic_string &substring, size_t pos = 0, size_t count = npos - 2 ) const
-        {
-            substring.length_ = minstd::min( strlcpy(substring.buffer_, buffer_ + minstd::min( pos, length_ ), minstd::min( count + 1, substring.buffer_size_ )), minstd::min( count, substring.max_size_ ));
-        }
-
-    protected:
-        T *buffer_;
-
-        const size_t max_size_;
-        const size_t buffer_size_;
-
-        size_t length_;
-
-        const T EMPTY_CHARACTER = 0x00;
-
-        explicit basic_string(T *buffer, size_t max_size)
-            : buffer_(buffer),
-              max_size_(max_size),
-              buffer_size_(max_size + 1),
-              length_(0)
-        {
-            buffer_[0] = 0;
-        }
-
-        explicit basic_string(T *buffer, size_t max_size, const T *value)
-            : buffer_(buffer),
-              max_size_(max_size),
-              buffer_size_(max_size + 1)
-        {
-            length_ = minstd::min(strlcpy(buffer_, value, buffer_size_), max_size_);
-        }
-
-        explicit basic_string(T *buffer, size_t max_size, const T *value, size_t length)
-            : buffer_(buffer),
-              max_size_(max_size),
-              buffer_size_(max_size + 1)
-        {
-            length_ = minstd::min(strlcpy(buffer_, value, minstd::min(buffer_size_, length + 1)), minstd::min(length, max_size_));
-        }
-
-        explicit basic_string(T *buffer, size_t max_size, const basic_string &string_to_copy)
-            : buffer_(buffer),
-              max_size_(max_size),
-              buffer_size_(max_size + 1)
-        {
-            length_ = minstd::min(strlcpy(buffer_, string_to_copy.buffer_, buffer_size_), max_size_);
-        }
-    };
-
-    template <typename T, size_t MAX_SIZE>  //  Default value for MAX_SIZE is in the forward declaration at the top of the file
-=======
 #include <string.h>
 #include <stdint.h>
 
@@ -203,60 +16,33 @@ namespace MINIMAL_STD_NAMESPACE
 namespace MINIMAL_STD_NAMESPACE
 {
     template <typename T, size_t MAX_SIZE> //  Default value for MAX_SIZE is in the forward declaration at the top of the file
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     class basic_fixed_string : public basic_string<T>
     {
     public:
         static constexpr size_t npos = SIZE_MAX;
 
         explicit basic_fixed_string()
-<<<<<<< HEAD
-            : basic_string<T>(fixed_buffer_, MAX_SIZE)
-=======
             : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         basic_fixed_string(const T *value)
-<<<<<<< HEAD
-            : basic_string<T>(fixed_buffer_, MAX_SIZE, value)
-=======
             : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, value)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         explicit basic_fixed_string(const T *value, size_t length)
-<<<<<<< HEAD
-            : basic_string<T>(fixed_buffer_, MAX_SIZE, value, length)
-=======
             : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, value, length)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         explicit basic_fixed_string(const basic_string<T> &string_to_copy)
-<<<<<<< HEAD
-            : basic_string<T>(fixed_buffer_, MAX_SIZE, string_to_copy)
-=======
             : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, string_to_copy)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
         explicit basic_fixed_string(const basic_fixed_string &string_to_copy)
-<<<<<<< HEAD
-            : basic_string<T>( fixed_buffer_, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_ )
-        {
-        }
-
-        template <size_t OTHER_MAX_SIZE>
-        explicit basic_fixed_string(const basic_fixed_string<T, OTHER_MAX_SIZE> &string_to_copy)
-            : basic_string<T>( fixed_buffer_, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_ )
-=======
             : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         {
         }
 
@@ -285,17 +71,6 @@ namespace MINIMAL_STD_NAMESPACE
         }
 
     private:
-<<<<<<< HEAD
-
-        union
-        {
-            uint64_t    alignment_helper_;      //  On aarch64 bare metal without the MMU, alignment matters.  This union forces alignment of the char array with a uint64_t which appears to work.
-            T fixed_buffer_[MAX_SIZE + 1];
-        };
-        
-    };
-
-=======
         union
         {
             uint64_t alignment_helper_; //  On aarch64 bare metal without the MMU, alignment matters.  This union forces alignment of the char array with a uint64_t which appears to work.
@@ -310,30 +85,17 @@ namespace MINIMAL_STD_NAMESPACE
     };
 
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     template <typename T>
     template <size_t OTHER_MAX_SIZE>
     basic_string<T> &basic_string<T>::operator=(const basic_fixed_string<T, OTHER_MAX_SIZE> &string_to_copy)
     {
-<<<<<<< HEAD
-        basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy.buffer_, basic_string<T>::buffer_size_ ), basic_string<T>::max_size_);
-=======
         basic_string<T>::length_ = minstd::min(strlcpy(basic_string<T>::buffer_, string_to_copy.buffer_, basic_string<T>::buffer_size_), basic_string<T>::max_size_);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         return *this;
     }
 
-<<<<<<< HEAD
-    //  Declare a string class with the char data type
-
-    using string = basic_string<char>;
-
-    template <size_t MAX_SIZE = 64>
-=======
     //  Declare a fixed string class with the char data type
 
     template <size_t MAX_SIZE = DEFAULT_FIXED_STRING_MAX_SIZE>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     using fixed_string = basic_fixed_string<char, MAX_SIZE>;
 }

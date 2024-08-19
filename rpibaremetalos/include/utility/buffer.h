@@ -4,14 +4,6 @@
 
 #pragma once
 
-<<<<<<< HEAD
-#include <stdint.h>
-#include <algorithm>
-
-#include <cstring>
-
-#include "memory.h"
-=======
 #include <algorithm>
 #include <memory>
 #include <stdint.h>
@@ -19,7 +11,6 @@
 
 #include "heaps.h"
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 class Buffer
 {
@@ -31,24 +22,15 @@ public:
     virtual void Clear() = 0;
 
     virtual void *Data() = 0;
-<<<<<<< HEAD
-
-    virtual size_t Append( void* block_to_append, size_t bytes_to_append ) = 0;
-=======
     virtual const void *Data() const = 0;
 
     virtual size_t Append(void *block_to_append, size_t bytes_to_append) = 0;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 };
 
 class StackBuffer : public Buffer
 {
 public:
-<<<<<<< HEAD
-    StackBuffer(void* buffer, size_t size)
-=======
     StackBuffer(void *buffer, size_t size)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         : buffer_size_(size),
           size_(0),
           buffer_(buffer)
@@ -84,13 +66,6 @@ public:
         return buffer_;
     }
 
-<<<<<<< HEAD
-    size_t Append( void* block_to_append, size_t bytes_to_append )
-    {
-        size_t bytes_appended = minstd::min( buffer_size_ - size_, bytes_to_append );
-
-        memcpy( ((uint8_t*)buffer_) + size_, block_to_append, bytes_appended );
-=======
     const void *Data() const
     {
         return buffer_;
@@ -101,7 +76,6 @@ public:
         size_t bytes_appended = minstd::min(buffer_size_ - size_, bytes_to_append);
 
         memcpy(((uint8_t *)buffer_) + size_, block_to_append, bytes_appended);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         size_ += bytes_appended;
 
@@ -114,8 +88,6 @@ private:
 
     void *buffer_;
 };
-<<<<<<< HEAD
-=======
 
 class HeapBuffer : public Buffer
 {
@@ -178,4 +150,3 @@ private:
 
     minstd::unique_ptr<uint8_t> buffer_;
 };
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

@@ -7,14 +7,9 @@
 #include <forward_list>
 #include <heap_allocator>
 #include <map>
-<<<<<<< HEAD
-
-#include "memory.h"
-=======
 #include <memory>
 
 #include "heaps.h"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "isr/isr.h"
 

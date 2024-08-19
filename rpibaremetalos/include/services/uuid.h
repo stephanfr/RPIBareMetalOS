@@ -4,10 +4,7 @@
 
 #pragma once
 
-<<<<<<< HEAD
-=======
 #include "os_config.h"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 #include <stdint.h>
 
 class UUID
@@ -88,11 +85,7 @@ private:
         {
             uint64_t low_64_bits_;
             uint64_t high_64_bits_;
-<<<<<<< HEAD
-        } __attribute__((packed));
-=======
         } PACKED;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         struct
         {
@@ -102,11 +95,7 @@ private:
             uint16_t time_hi_and_version_;
             uint16_t time_mid_;
             uint32_t time_low_;
-<<<<<<< HEAD
-        } __attribute__((packed));
-=======
         } PACKED;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         struct
         {
@@ -116,13 +105,7 @@ private:
             uint16_t printf3_; //  %04x-
             uint16_t printf2_; //  %04x-
             uint32_t printf1_; //  %08x-
-<<<<<<< HEAD
-        } __attribute__((packed));
-
-    } __attribute__((packed));
-=======
         } PACKED;
 
     } PACKED;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 };

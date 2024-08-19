@@ -4,16 +4,10 @@
 
 #pragma once
 
-<<<<<<< HEAD
-#include <minstd_utility.h>
-#include <stdint.h>
-
-=======
 #include <stdint.h>
 
 #include <utility>
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 #include "devices/block_io.h"
 
 #include "result.h"
@@ -42,11 +36,8 @@ public:
 
     virtual ValueResult<BlockIOResultCodes, uint32_t> ReadFromBlock(uint8_t *buffer, uint32_t block_number, uint32_t bocks_to_read) = 0;
     virtual ValueResult<BlockIOResultCodes, uint32_t> ReadFromCurrentOffset(uint8_t *buffer, uint32_t bocks_to_read) = 0;
-<<<<<<< HEAD
-=======
 
     virtual ValueResult<BlockIOResultCodes, uint32_t> WriteBlock(uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_write) = 0;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 };
 
 ExternalMassMediaController &GetExternalMassMediaController();

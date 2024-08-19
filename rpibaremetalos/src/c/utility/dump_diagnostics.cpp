@@ -5,10 +5,7 @@
 #include <stdint.h>
 
 #include <minimalstdio.h>
-<<<<<<< HEAD
-=======
 #include <memory>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "asm_globals.h"
 #include "asm_utility.h"
@@ -18,12 +15,8 @@
 #include "platform/kernel_command_line.h"
 
 #include "devices/character_io.h"
-<<<<<<< HEAD
-#include "memory.h"
-=======
 
 #include "heaps.h"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 extern "C" uint32_t GetExceptionLevel();
 

@@ -51,10 +51,7 @@ QUICKREF
 
 #undef memset
 
-<<<<<<< HEAD
-=======
 #ifdef __AARCH64_BUILD__
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 void *
 memset (void *m,
 	int c,
@@ -115,7 +112,4 @@ memset (void *m,
 
   return m;
 }
-<<<<<<< HEAD
-=======
 #endif
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

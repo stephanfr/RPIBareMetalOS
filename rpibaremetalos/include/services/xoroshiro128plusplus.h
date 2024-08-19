@@ -9,11 +9,6 @@
 class Xoroshiro128PlusPlusRNG : public RandomNumberGeneratorBase
 {
 public:
-<<<<<<< HEAD
-    Xoroshiro128PlusPlusRNG() = delete;
-
-    Xoroshiro128PlusPlusRNG(minstd::array<uint64_t, 2> &seed)
-=======
     struct Seed
     {
         Seed(uint64_t low, uint64_t high)
@@ -30,7 +25,6 @@ public:
     explicit Xoroshiro128PlusPlusRNG(const Xoroshiro128PlusPlusRNG &) = default;
 
     Xoroshiro128PlusPlusRNG(const Seed &seed)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         : state_(seed),
           next_32bit_value_(0),
           has_next_32bit_value_(0)
@@ -64,15 +58,9 @@ public:
     }
 
     Xoroshiro128PlusPlusRNG Fork(void);
-<<<<<<< HEAD
-	
-private:
-    minstd::array<uint64_t, 2> state_;
-=======
 
 private:
     Seed state_;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     uint32_t next_32bit_value_ = 0;
     bool has_next_32bit_value_ = false;
@@ -84,15 +72,6 @@ private:
 
     uint64_t Next64BitValueInternal(void)
     {
-<<<<<<< HEAD
-        const uint64_t s0 = state_[0];
-        uint64_t s1 = state_[1];
-        const uint64_t result = rotl(s0 + s1, 17) + s0;
-
-        s1 ^= s0;
-        state_[0] = rotl(s0, 49) ^ s1 ^ (s1 << 21); // a, b
-        state_[1] = rotl(s1, 28);                   // c
-=======
         const uint64_t s0 = state_.low;
         uint64_t s1 = state_.high;
         const uint64_t result = rotl(s0 + s1, 17) + s0;
@@ -100,12 +79,7 @@ private:
         s1 ^= s0;
         state_.low = rotl(s0, 49) ^ s1 ^ (s1 << 21); // a, b
         state_.high = rotl(s1, 28);                  // c
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         return result;
     }
 };
-<<<<<<< HEAD
-
-=======
->>>>>>> 5e7e85c (FAT32 Filesystem Running)

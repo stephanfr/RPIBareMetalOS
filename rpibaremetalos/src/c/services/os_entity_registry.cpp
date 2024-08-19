@@ -7,45 +7,27 @@
 #include <heap_allocator>
 #include <list>
 #include <map>
-<<<<<<< HEAD
-#include <minstd_utility.h>
-
-#include "memory.h"
-=======
 #include <memory>
 #include <utility>
 
 #include "heaps.h"
 
 #include "platform/platform_sw_rngs.h"
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "services/murmur_hash.h"
 
 #include "devices/log.h"
 
-<<<<<<< HEAD
-uint64_t __os_entity_hash_seed = 0;
-
-inline uint64_t ComputeHash(const minstd::string &name_or_alias)
-{
-    return MurmurHash64A(name_or_alias.c_str(), name_or_alias.length(), __os_entity_hash_seed);
-=======
 inline uint64_t ComputeHash(const minstd::string &name_or_alias)
 {
     return MurmurHash64A(name_or_alias.c_str(), name_or_alias.length(), GetOSEntityHashSeed());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 }
 
 inline uint64_t ComputeHash(const char *name_or_alias)
 {
     uint32_t length = strnlen(name_or_alias, MAX_FILENAME_LENGTH);
 
-<<<<<<< HEAD
-    return MurmurHash64A(name_or_alias, length, __os_entity_hash_seed);
-=======
     return MurmurHash64A(name_or_alias, length, GetOSEntityHashSeed());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 }
 
 //
@@ -75,25 +57,16 @@ public:
     {
     }
 
-<<<<<<< HEAD
-    ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityById(UUID id) override;
-=======
     bool DoesEntityExist(const UUID &id) override;
 
     ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityById(const UUID &id) override;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     void FindEntitiesByType(OSEntityTypes type, minstd::list<UUID> &entity_ids) override;
 
 protected:
-<<<<<<< HEAD
-    
-    OSEntityRegistryResultCodes AddEntityInternal(unique_ptr<OSEntity> &new_entity) override;
-=======
     OSEntityRegistryResultCodes AddEntityInternal(minstd::unique_ptr<OSEntity> &new_entity) override;
 
     OSEntityRegistryResultCodes RemoveEntityByIdInternal(const UUID &id) override;
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityByNameInternal(const char *name) override
     {
@@ -116,19 +89,11 @@ protected:
     }
 
 private:
-<<<<<<< HEAD
-    using EntityByUUIDMapStaticHeapAllocator = minstd::heap_allocator<minstd::map<UUID, unique_ptr<OSEntity>>::node_type>;
-    using EntityUUIDByHashMapStaticHeapAllocator = minstd::heap_allocator<minstd::map<uint64_t, UUID>::node_type>;
-
-    EntityByUUIDMapStaticHeapAllocator entity_by_id_map_element_allocator_ = EntityByUUIDMapStaticHeapAllocator(__os_static_heap);
-    minstd::map<UUID, unique_ptr<OSEntity>> entity_by_id_ = minstd::map<UUID, unique_ptr<OSEntity>>(entity_by_id_map_element_allocator_);
-=======
     using EntityByUUIDMapStaticHeapAllocator = minstd::heap_allocator<minstd::map<UUID, minstd::unique_ptr<OSEntity>>::node_type>;
     using EntityUUIDByHashMapStaticHeapAllocator = minstd::heap_allocator<minstd::map<uint64_t, UUID>::node_type>;
 
     EntityByUUIDMapStaticHeapAllocator entity_by_id_map_element_allocator_ = EntityByUUIDMapStaticHeapAllocator(__os_static_heap);
     minstd::map<UUID, minstd::unique_ptr<OSEntity>> entity_by_id_ = minstd::map<UUID, minstd::unique_ptr<OSEntity>>(entity_by_id_map_element_allocator_);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
     EntityUUIDByHashMapStaticHeapAllocator entity_id_by_hash_element_allocator_ = EntityUUIDByHashMapStaticHeapAllocator(__os_static_heap);
     minstd::map<uint64_t, UUID> entity_id_by_name_hash_ = minstd::map<uint64_t, UUID>(entity_id_by_hash_element_allocator_);
@@ -138,11 +103,7 @@ private:
     ReferenceResult<OSEntityRegistryResultCodes, OSEntity> GetEntityByAliasHash(uint64_t alias_hash);
 };
 
-<<<<<<< HEAD
-OSEntityRegistryResultCodes OSEntityRegistryImpl::AddEntityInternal(unique_ptr<OSEntity> &new_entity)
-=======
 OSEntityRegistryResultCodes OSEntityRegistryImpl::AddEntityInternal(minstd::unique_ptr<OSEntity> &new_entity)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 {
     LogDebug1("Adding Entity with Name: %s\n", new_entity->Name().c_str());
 
@@ -182,9 +143,6 @@ OSEntityRegistryResultCodes OSEntityRegistryImpl::AddEntityInternal(minstd::uniq
     return OSEntityRegistryResultCodes::SUCCESS;
 }
 
-<<<<<<< HEAD
-ReferenceResult<OSEntityRegistryResultCodes, OSEntity> OSEntityRegistryImpl::GetEntityById(UUID id)
-=======
 OSEntityRegistryResultCodes OSEntityRegistryImpl::RemoveEntityByIdInternal(const UUID &id)
 {
     char buffer[64];
@@ -218,7 +176,6 @@ bool OSEntityRegistryImpl::DoesEntityExist(const UUID &id)
 }
 
 ReferenceResult<OSEntityRegistryResultCodes, OSEntity> OSEntityRegistryImpl::GetEntityById(const UUID &id)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 {
     using Result = ReferenceResult<OSEntityRegistryResultCodes, OSEntity>;
 

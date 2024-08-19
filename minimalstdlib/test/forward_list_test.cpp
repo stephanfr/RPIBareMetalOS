@@ -2,16 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-<<<<<<< HEAD
-#include <catch2/catch_test_macros.hpp>
-
-#include "../include/minstdconfig.h"
-
-#include "../include/forward_list"
-#include "../include/heap_allocator"
-#include "../include/stack_allocator"
-#include "../include/single_block_memory_heap"
-=======
 #include <CppUTest/TestHarness.h>
 
 #include <minstdconfig.h>
@@ -20,22 +10,18 @@
 #include <heap_allocator>
 #include <stack_allocator>
 #include <single_block_memory_heap>
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #define TEST_BUFFER_SIZE 65536
 
 namespace
 {
 
-<<<<<<< HEAD
-=======
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
     TEST_GROUP(ForwardListTests)
     {};
 #pragma GCC diagnostic pop
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     static char buffer[TEST_BUFFER_SIZE];
 
     class TestElement
@@ -70,19 +56,6 @@ namespace
         {
             TestElementForwardList test_list(allocator);
 
-<<<<<<< HEAD
-            REQUIRE(test_list.begin() == test_list.end());
-
-            auto itr = test_list.begin();
-
-            REQUIRE(itr == test_list.begin());
-            REQUIRE(itr == test_list.end());
-
-            itr++;
-
-            REQUIRE(itr == test_list.begin());
-            REQUIRE(itr == test_list.end());
-=======
             CHECK(test_list.begin() == test_list.end());
 
             auto itr = test_list.begin();
@@ -94,25 +67,11 @@ namespace
 
             CHECK(itr == test_list.begin());
             CHECK(itr == test_list.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
 
         {
             const TestElementForwardList test_list(allocator);
 
-<<<<<<< HEAD
-            REQUIRE(test_list.begin() == test_list.end());
-
-            auto itr = test_list.begin();
-
-            REQUIRE(itr == test_list.begin());
-            REQUIRE(itr == test_list.end());
-
-            itr++;
-
-            REQUIRE(itr == test_list.begin());
-            REQUIRE(itr == test_list.end());
-=======
             CHECK(test_list.begin() == test_list.end());
 
             auto itr = test_list.begin();
@@ -124,7 +83,6 @@ namespace
 
             CHECK(itr == test_list.begin());
             CHECK(itr == test_list.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         }
     }
 
@@ -132,37 +90,17 @@ namespace
     {
         TestElementForwardList list1(allocator);
 
-<<<<<<< HEAD
-        REQUIRE( list1.empty() );
-
-        list1.push_front(TestElement(5));
-
-        REQUIRE( !list1.empty() );
-=======
         CHECK( list1.empty() );
 
         list1.push_front(TestElement(5));
 
         CHECK( !list1.empty() );
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.push_front(TestElement(4));
         list1.push_front(TestElement(3));
         list1.push_front(TestElement(2));
         list1.push_front(TestElement(1));
 
-<<<<<<< HEAD
-        REQUIRE(list1.front().value() == 1);
-
-        auto itr1 = list1.begin();
-
-        REQUIRE((itr1++)->value() == 1);
-        REQUIRE((itr1++)->value() == 2);
-        REQUIRE((itr1++)->value() == 3);
-        REQUIRE((itr1++)->value() == 4);
-        REQUIRE((itr1++)->value() == 5);
-        REQUIRE(itr1 == list1.end());
-=======
         CHECK(list1.front().value() == 1);
 
         auto itr1 = list1.begin();
@@ -173,24 +111,16 @@ namespace
         CHECK((itr1++)->value() == 4);
         CHECK((itr1++)->value() == 5);
         CHECK(itr1 == list1.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         list1.pop_front();
         list1.erase_after(++list1.begin());
 
         itr1 = list1.begin();
 
-<<<<<<< HEAD
-        REQUIRE((itr1++)->value() == 2);
-        REQUIRE((itr1++)->value() == 3);
-        REQUIRE((itr1++)->value() == 5);
-        REQUIRE(itr1 == list1.end());
-=======
         CHECK((itr1++)->value() == 2);
         CHECK((itr1++)->value() == 3);
         CHECK((itr1++)->value() == 5);
         CHECK(itr1 == list1.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         TestElementForwardList list2(allocator);
 
@@ -199,17 +129,6 @@ namespace
         list2.emplace_front(7);
         list2.emplace_front(6);
 
-<<<<<<< HEAD
-        REQUIRE(list2.front().value() == 6);
-
-        auto itr2 = list2.begin();
-
-        REQUIRE((itr2++)->value() == 6);
-        REQUIRE((itr2++)->value() == 7);
-        REQUIRE((itr2++)->value() == 8);
-        REQUIRE((itr2++)->value() == 9);
-        REQUIRE(itr2 == list2.end());
-=======
         CHECK(list2.front().value() == 6);
 
         auto itr2 = list2.begin();
@@ -219,7 +138,6 @@ namespace
         CHECK((itr2++)->value() == 8);
         CHECK((itr2++)->value() == 9);
         CHECK(itr2 == list2.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         const TestElementForwardList list3(allocator);
 
@@ -230,19 +148,6 @@ namespace
         ia_itr = const_cast<TestElementForwardList&>(list3).insert_after(ia_itr, TestElement(103));
         const_cast<TestElementForwardList&>(list3).emplace_after(ia_itr, 104);
 
-<<<<<<< HEAD
-        REQUIRE(list3.front().value() == 100);
-
-        auto itr3 = list3.begin();
-
-        REQUIRE((itr3++)->value() == 100);
-        REQUIRE((itr3++)->value() == 101);
-        REQUIRE((itr3++)->value() == 102);
-        REQUIRE((itr3++)->value() == 103);
-        REQUIRE((itr3++)->value() == 104);
-        REQUIRE((itr3++)->value() == 105);
-        REQUIRE(itr3 == list3.end());
-=======
         CHECK(list3.front().value() == 100);
 
         auto itr3 = list3.begin();
@@ -254,7 +159,6 @@ namespace
         CHECK((itr3++)->value() == 104);
         CHECK((itr3++)->value() == 105);
         CHECK(itr3 == list3.end());
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         itr3 = list3.begin();
         itr3++;
@@ -273,15 +177,6 @@ namespace
 
         itr3 = list3.begin();
 
-<<<<<<< HEAD
-        REQUIRE((itr3++)->value() == 101);
-        REQUIRE((itr3++)->value() == 102);
-        REQUIRE((itr3++)->value() == 104);
-        REQUIRE(itr3 == list3.end());
-    }
-
-    TEST_CASE("Test forward list with static heap and stack allocators iterator invariants", "")
-=======
         CHECK((itr3++)->value() == 101);
         CHECK((itr3++)->value() == 102);
         CHECK((itr3++)->value() == 104);
@@ -289,7 +184,6 @@ namespace
     }
 
     TEST(ForwardListTests, ForwardListWithStaticHeapAndStackAllocatorsIteratorInvariantsTest)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
         ForwardListStaticHeapAllocator heap_allocator(test_heap);
@@ -301,22 +195,14 @@ namespace
         testInvariants(stack_allocator);
     }
 
-<<<<<<< HEAD
-    TEST_CASE("Test forward list with static heap allocator positive cases", "")
-=======
     TEST(ForwardListTests, ForwardListWithStaticHeapAllocatorPositiveCases)
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
         ForwardListStaticHeapAllocator heap_allocator(test_heap);
 
         testListFunctionality(heap_allocator);
 
-<<<<<<< HEAD
-        REQUIRE(test_heap.blocks_allocated() == 15);
-=======
         CHECK(test_heap.blocks_reserved() == 15);
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
         ForwardListStackAllocator stack_allocator;
 

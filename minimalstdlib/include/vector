@@ -7,16 +7,9 @@
 #include "minstdconfig.h"
 
 #include <stddef.h>
-<<<<<<< HEAD
-#include <stdarg.h>
-#include <cstring>
-
-#include "minstd_utility.h" //  For std::forward
-=======
 #include <string.h>
 
 #include "utility" //  For std::forward
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
 
 #include "type_traits"
 #include "allocator"
@@ -178,8 +171,6 @@ namespace MINIMAL_STD_NAMESPACE
             }
         }
 
-<<<<<<< HEAD
-=======
         void clear()
         {
             if (minstd::is_class<T>::value)
@@ -193,7 +184,6 @@ namespace MINIMAL_STD_NAMESPACE
             end_ = begin_;
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     private:
         allocator<T> &allocator_;
 

@@ -24,14 +24,11 @@ namespace MINIMAL_STD_NAMESPACE
             return FIXED_SIZE;
         }
 
-<<<<<<< HEAD
-=======
         size_t current_size() const noexcept override
         {
             return current_size_;
         }
 
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
         T *allocate(size_t num_elements) override
         {
             MINIMAL_STD_ASSERT(current_size_ + num_elements <= FIXED_SIZE);
@@ -47,10 +44,6 @@ namespace MINIMAL_STD_NAMESPACE
         {
         }
 
-<<<<<<< HEAD
-=======
-
->>>>>>> 5e7e85c (FAT32 Filesystem Running)
     private:
         char buffer_[sizeof( T [FIXED_SIZE] )];
         T* elements_ = reinterpret_cast<T*>(buffer_);
