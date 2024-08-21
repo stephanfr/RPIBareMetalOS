@@ -1,0 +1,170 @@
+// Copyright 2023 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <string.h>
+
+#include <algorithm>
+#include <memory>
+#include <memory_heap>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T>
+    class buffer
+    {
+    public:
+        virtual size_t buffer_size() const = 0;
+        virtual size_t size() const = 0;
+        virtual size_t space_remaining() const = 0;
+
+        virtual void clear() = 0;
+
+        virtual T *data() = 0;
+        virtual const T *data() const = 0;
+
+        virtual size_t append(T element_to_append) = 0;
+        virtual size_t append(const T *block_to_append, size_t elements_to_append) = 0;
+    };
+
+    template <typename T, size_t SIZE>
+    class stack_buffer : public buffer<T>
+    {
+    public:
+        stack_buffer()
+            : buffer_size_(SIZE),
+              size_(0)
+        {
+        }
+
+        virtual ~stack_buffer()
+        {
+        }
+
+        size_t buffer_size() const
+        {
+            return buffer_size_;
+        }
+
+        size_t size() const
+        {
+            return size_;
+        }
+
+        size_t space_remaining() const
+        {
+            return buffer_size_ - size_;
+        }
+
+        void clear()
+        {
+            size_ = 0;
+        }
+
+        T *data()
+        {
+            return buffer_;
+        }
+
+        const T *data() const
+        {
+            return buffer_;
+        }
+
+        size_t append(T element_to_append)
+        {
+            return append(&element_to_append, 1);
+        }
+
+        size_t append(const T *block_to_append, size_t elements_to_append)
+        {
+            size_t bytes_appended = min(buffer_size_ - size_, elements_to_append);
+
+            memcpy(buffer_ + size_, block_to_append, bytes_appended);
+
+            size_ += bytes_appended;
+
+            return bytes_appended;
+        }
+
+    private:
+        size_t buffer_size_;
+        size_t size_;
+
+        T buffer_[SIZE];
+    };
+
+    template <typename T>
+    class heap_buffer : public buffer<T>
+    {
+    public:
+        heap_buffer( memory_heap &heap, size_t size)
+            : heap_(heap),
+              buffer_size_(size),
+              size_(0),
+              buffer_(heap_.allocate_block<T>(buffer_size_), heap_)
+        {
+        }
+
+        virtual ~heap_buffer()
+        {
+        }
+
+        size_t buffer_size() const override
+        {
+            return buffer_size_;
+        }
+
+        size_t size() const override
+        {
+            return size_;
+        }
+
+        size_t space_remaining() const override
+        {
+            return buffer_size_ - size_;
+        }
+
+        void clear() override
+        {
+            size_ = 0;
+        }
+
+        T *data() override
+        {
+            return buffer_.get();
+        }
+
+        const T *data() const override
+        {
+            return buffer_.get();
+        }
+
+        size_t append(T element_to_append) override
+        {
+            return append(&element_to_append, 1);
+        }
+
+        size_t append(const T *block_to_append, size_t elements_to_append) override
+        {
+            size_t bytes_appended = min(buffer_size_ - size_, elements_to_append);
+
+            memcpy((buffer_.get()) + size_, block_to_append, bytes_appended);
+
+            size_ += bytes_appended;
+
+            return bytes_appended;
+        }
+
+    private:
+        memory_heap &heap_;
+        size_t buffer_size_;
+        size_t size_;
+
+        minstd::unique_ptr<T> buffer_;
+    };
+} // namespace minstd

@@ -1,0 +1,86 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#include "minstdconfig.h"
+
+#include <buffer>
+#include <character_io>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    class basic_ios
+    {
+    public:
+        basic_ios() = default;
+        basic_ios(const basic_ios &) = delete;
+        basic_ios(basic_ios &&) = delete;
+
+        virtual ~basic_ios() = default;
+
+        basic_ios &operator=(const basic_ios &) = delete;
+        basic_ios &operator=(basic_ios &&) = delete;
+
+        bool good() const noexcept { return good_; }
+        bool bad() const noexcept { return !good_; }
+
+        bool eof() const noexcept { return eof_; }
+
+    protected:
+        bool good_ = true;
+        bool eof_ = false;
+    };
+
+    template <typename T>
+    class istream : public basic_ios
+    {
+    public:
+        virtual ~istream() = default;
+
+        virtual istream &getline(buffer<T> &buffer, T delimiter) = 0;
+    };
+
+    template <typename T>
+    class character_istream : public istream<T>
+    {
+    public:
+        character_istream() = delete;
+        character_istream(character_istream<T> &) = delete;
+        character_istream(character_istream<T> &&) = delete;
+
+        character_istream(character_io_interface<T> &io)
+            : io_(io)
+        {
+        }
+
+        virtual ~character_istream() = default;
+
+        character_istream &operator=(const character_istream &) = delete;
+        character_istream &operator=(character_istream &&) = delete;
+
+        character_istream &getline(buffer<T> &buffer, T delimiter) override
+        {
+            do
+            {
+                T c = io_.getc();
+
+                if (c != delimiter)
+                {
+                    buffer.append(c);
+                }
+                else
+                {
+                    break;
+                }
+            } while (true);
+
+            buffer.append((T)'\0'); // Null-terminate the string
+
+            return *this;
+        }
+
+    private:
+        character_io_interface<T> &io_;
+    };
+
+} // namespace minstd

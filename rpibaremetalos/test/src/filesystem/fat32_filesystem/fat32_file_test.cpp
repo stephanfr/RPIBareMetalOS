@@ -65,9 +65,7 @@ namespace
 
         //  Read the file
 
-        uint8_t local_buffer[4096];
-
-        StackBuffer buffer(local_buffer, 4096);
+        minstd::stack_buffer<uint8_t, 4096> buffer;
 
         file->Read(buffer);
 
@@ -105,9 +103,7 @@ namespace
 
         //  Read the file
 
-        uint8_t local_buffer[4096];
-
-        StackBuffer buffer(local_buffer, 4096);
+        minstd::stack_buffer<uint8_t, 4096> buffer;
 
         file->Read(buffer);
 
@@ -145,10 +141,9 @@ namespace
 
         //  Append to it
 
-        char buffer[1024];
-        StackBuffer buffer_to_append = StackBuffer(buffer, 1024);
+        minstd::stack_buffer<uint8_t, 1024> buffer_to_append;
 
-        buffer_to_append.Append((void *)"This is content for the new File\n", 33);
+        buffer_to_append.append((uint8_t *)"This is content for the new File\n", 33);
 
         for (int i = 0; i < 510; i++)
         {
@@ -181,17 +176,15 @@ namespace
 
         CHECK(file_for_check.Successful());
 
-        char read_buf[33 * 1500];
-
-        StackBuffer read_buffer = StackBuffer(read_buf, 33 * 1500);
+        minstd::stack_buffer<uint8_t, 33 * 1500> read_buffer;
 
         file_for_check->Read(read_buffer);
 
-        CHECK_EQUAL((33 * 1022), read_buffer.Size());
+        CHECK_EQUAL((33 * 1022), read_buffer.size());
 
         for (int i = 0; i < 1022; i++)
         {
-            STRNCMP_EQUAL("This is content for the new File\n", (char *)read_buffer.Data() + (i * 33), 33);
+            STRNCMP_EQUAL("This is content for the new File\n", (char *)read_buffer.data() + (i * 33), 33);
         }
 
         //  Close and Delete the file and check it is gone
@@ -215,9 +208,7 @@ namespace
 
         CHECK(directory.Successful());
 
-        char ref_buffer[16384];
-
-        StackBuffer reference_buffer(ref_buffer, 16384);
+        minstd::stack_buffer<uint8_t, 16384> reference_buffer;
 
         {
             //  Create a file.  It will be closed when the File instance goes out of scope.
@@ -256,17 +247,15 @@ namespace
 
         CHECK(file_for_check.Successful());
 
-        char read_buf[6 * reference_buffer.Size()];
-
-        StackBuffer read_buffer = StackBuffer(read_buf, 6 * reference_buffer.Size());
+        minstd::stack_buffer<uint8_t, 6 * 16384> read_buffer;
 
         file_for_check->Read(read_buffer);
 
-        CHECK_EQUAL(file1_size, read_buffer.Size());
+        CHECK_EQUAL(file1_size, read_buffer.size());
 
         for (int i = 0; i < 5; i++)
         {
-            STRNCMP_EQUAL((char *)reference_buffer.Data(), (char *)read_buffer.Data() + (i * reference_buffer.Size()), reference_buffer.Size());
+            STRNCMP_EQUAL((char *)reference_buffer.data(), (char *)read_buffer.data() + (i * reference_buffer.size()), reference_buffer.size());
         }
 
         //  Close and Delete the file and check it is gone
@@ -299,13 +288,11 @@ namespace
 
         //  Try to read from it and insure we get zero bytes
 
-        char read_buf[16384];
-
-        StackBuffer read_buffer = StackBuffer(read_buf, 16384);
+        minstd::stack_buffer<uint8_t, 16384> read_buffer;
 
         CHECK(Successful(new_file->Read(read_buffer)));
 
-        CHECK_EQUAL(0, read_buffer.Size());
+        CHECK_EQUAL(0, read_buffer.size());
     }
 
     TEST(FAT32File, Seek)
@@ -329,10 +316,9 @@ namespace
 
         //  Append to it
 
-        char buffer[1024];
-        StackBuffer buffer_to_append = StackBuffer(buffer, 1024);
+        minstd::stack_buffer<uint8_t, 1024> buffer_to_append;
 
-        buffer_to_append.Append((void *)"****************************************************************************************************", 100);
+        buffer_to_append.append((uint8_t*)"****************************************************************************************************", 100);
 
         for (int i = 0; i < 500; i++)
         {
@@ -347,15 +333,15 @@ namespace
 
         CHECK(Successful(new_file->Seek(0)));
 
-        buffer_to_append.Clear();
-        buffer_to_append.Append((void *)"0", 1);
+        buffer_to_append.clear();
+        buffer_to_append.append((const uint8_t*)"0", 1);
 
         CHECK(Successful(new_file->Write(buffer_to_append)));
 
         CHECK(Successful(new_file->Seek(67)));
 
-        buffer_to_append.Clear();
-        buffer_to_append.Append((void *)"1", 1);
+        buffer_to_append.clear();
+        buffer_to_append.append((const uint8_t*)"1", 1);
 
         CHECK(Successful(new_file->Write(buffer_to_append)));
 
@@ -363,22 +349,22 @@ namespace
 
         CHECK(Successful(new_file->Seek(1023)));
 
-        buffer_to_append.Clear();
-        buffer_to_append.Append((void *)"23", 2);
+        buffer_to_append.clear();
+        buffer_to_append.append((const uint8_t*)"23", 2);
 
         CHECK(Successful(new_file->Write(buffer_to_append)));
 
         CHECK(Successful(new_file->Seek(20000)));
 
-        buffer_to_append.Clear();
-        buffer_to_append.Append((void *)"4", 1);
+        buffer_to_append.clear();
+        buffer_to_append.append((const uint8_t*)"4", 1);
 
         CHECK(Successful(new_file->Write(buffer_to_append)));
 
         CHECK(Successful(new_file->Seek(49999)));
 
-        buffer_to_append.Clear();
-        buffer_to_append.Append((void *)"5", 1);
+        buffer_to_append.clear();
+        buffer_to_append.append((const uint8_t*)"5", 1);
 
         CHECK(Successful(new_file->Write(buffer_to_append)));
 
@@ -390,20 +376,18 @@ namespace
 
         CHECK(Successful(new_file->Seek(0)));
 
-        char read_buf[100000];
-
-        StackBuffer read_buffer = StackBuffer(read_buf, 100000);
+        minstd::stack_buffer<uint8_t, 100000> read_buffer;
 
         CHECK(Successful(new_file->Read(read_buffer)));
 
-        CHECK_EQUAL(50000, read_buffer.Size());
+        CHECK_EQUAL(50000, read_buffer.size());
 
-        CHECK_EQUAL('0', ((char *)(read_buffer.Data()))[0]);
-        CHECK_EQUAL('1', ((char *)(read_buffer.Data()))[67]);
-        CHECK_EQUAL('2', ((char *)(read_buffer.Data()))[1023]); //  This is the last byte of the first clusterEnd of the second cluster
-        CHECK_EQUAL('3', ((char *)(read_buffer.Data()))[1024]); //  This is the first byte of the third cluster
-        CHECK_EQUAL('4', ((char *)(read_buffer.Data()))[20000]);
-        CHECK_EQUAL('5', ((char *)(read_buffer.Data()))[49999]);
+        CHECK_EQUAL('0', ((char *)(read_buffer.data()))[0]);
+        CHECK_EQUAL('1', ((char *)(read_buffer.data()))[67]);
+        CHECK_EQUAL('2', ((char *)(read_buffer.data()))[1023]); //  This is the last byte of the first clusterEnd of the second cluster
+        CHECK_EQUAL('3', ((char *)(read_buffer.data()))[1024]); //  This is the first byte of the third cluster
+        CHECK_EQUAL('4', ((char *)(read_buffer.data()))[20000]);
+        CHECK_EQUAL('5', ((char *)(read_buffer.data()))[49999]);
     }
 
     TEST(FAT32File, ReadDeviceErrorNegativeTest)
@@ -433,10 +417,9 @@ namespace
             CHECK(new_file.Successful());
             CHECK(*(new_file->AbsolutePath()) == minstd::fixed_string<>("/file testing/read error test.txt"));
 
-            char buffer[1024];
-            StackBuffer buffer_to_append = StackBuffer(buffer, 1024);
+            minstd::stack_buffer<uint8_t, 1024> buffer_to_append;
 
-            buffer_to_append.Append((void *)"This is content for the new File\n", 33);
+            buffer_to_append.append((const uint8_t*)"This is content for the new File\n", 33);
 
             for (int i = 0; i < 100; i++)
             {
@@ -453,9 +436,7 @@ namespace
 
             CHECK(new_file1.Successful());
 
-            char read_buf[16384];
-
-            StackBuffer read_buffer = StackBuffer(read_buf, 513);
+            minstd::stack_buffer<uint8_t, 16384> read_buffer;
 
             get_test_device_result->SimulateReadError(i);
 
@@ -500,10 +481,9 @@ namespace
             CHECK(new_file.Successful());
             CHECK(*(new_file->AbsolutePath()) == minstd::fixed_string<>("/file testing/write error test.txt"));
 
-            char buffer[1024];
-            StackBuffer buffer_to_append = StackBuffer(buffer, 1024);
+            minstd::stack_buffer<uint8_t, 1024> buffer_to_append;
 
-            buffer_to_append.Append((void *)"This is content for the new File\n", 33);
+            buffer_to_append.append((const uint8_t*)"This is content for the new File\n", 33);
 
             CHECK(Successful(new_file->Append(buffer_to_append)));
 
@@ -568,10 +548,9 @@ namespace
         CHECK(new_file.Successful());
         CHECK(*(new_file->AbsolutePath()) == minstd::fixed_string<>("/file testing/write error test.txt"));
 
-        char buffer[1024];
-        StackBuffer buffer_to_append = StackBuffer(buffer, 1024);
+        minstd::stack_buffer<uint8_t, 1024> buffer_to_append;
 
-        buffer_to_append.Append((void *)"This is content for the new File\n", 33);
+        buffer_to_append.append((const uint8_t*)"This is content for the new File\n", 33);
 
         //  The first write failure will occur when trying to allocate the first cluster for the file
 
@@ -592,9 +571,7 @@ namespace
 
         CHECK(directory.Successful());
 
-        char ref_buffer[16384];
-
-        StackBuffer reference_buffer(ref_buffer, 16384);
+        minstd::stack_buffer<uint8_t, 16384> reference_buffer;
 
         uint32_t file_size = 0;
 
@@ -623,17 +600,15 @@ namespace
 
         CHECK(file_for_check.Successful());
 
-        char read_buf[2 * reference_buffer.Size()];
-
-        StackBuffer read_buffer = StackBuffer(read_buf, 2 * reference_buffer.Size());
+        minstd::stack_buffer<uint8_t, 2 * 16384> read_buffer;
 
         file_for_check->Read(read_buffer);
 
-        CHECK_EQUAL(file_size, read_buffer.Size());
+        CHECK_EQUAL(file_size, read_buffer.size());
 
         for (int i = 0; i < 2; i++)
         {
-            STRNCMP_EQUAL((char *)reference_buffer.Data(), (char *)read_buffer.Data() + (i * reference_buffer.Size()), reference_buffer.Size());
+            STRNCMP_EQUAL((char *)reference_buffer.data(), (char *)read_buffer.data() + (i * reference_buffer.size()), reference_buffer.size());
         }
 
         //  Close, rename and then insure the original file is no longer there
@@ -651,17 +626,15 @@ namespace
 
             CHECK(file_for_check.Successful());
 
-            char read_buf[2 * reference_buffer.Size()];
-
-            StackBuffer read_buffer = StackBuffer(read_buf, 2 * reference_buffer.Size());
+            minstd::stack_buffer<uint8_t, 2 * 16384> read_buffer;
 
             file_for_check->Read(read_buffer);
 
-            CHECK_EQUAL(file_size, read_buffer.Size());
+            CHECK_EQUAL(file_size, read_buffer.size());
 
             for (int i = 0; i < 2; i++)
             {
-                STRNCMP_EQUAL((char *)reference_buffer.Data(), (char *)read_buffer.Data() + (i * reference_buffer.Size()), reference_buffer.Size());
+                STRNCMP_EQUAL((char *)reference_buffer.data(), (char *)read_buffer.data() + (i * reference_buffer.size()), reference_buffer.size());
             }
 
             //  Close the file
@@ -719,9 +692,7 @@ namespace
 
     TEST(FAT32File, ClosedFileNegativeTests)
     {
-        char buf[4096];
-
-        StackBuffer buffer(buf, 4096);
+        minstd::stack_buffer<uint8_t, 4096> buffer;
 
         //  Get the filesystem
 
@@ -790,9 +761,7 @@ namespace
 
     TEST(FAT32File, FileFilesystemDoesNotExistNegativeTest)
     {
-        char buf[4096];
-
-        StackBuffer buffer(buf, 4096);
+        minstd::stack_buffer<uint8_t, 4096> buffer;
 
         //  Get the filesystem
 

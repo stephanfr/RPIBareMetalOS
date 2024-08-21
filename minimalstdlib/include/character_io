@@ -1,0 +1,18 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T>
+    class character_io_interface
+    {
+    public:
+        virtual void putc(T c) = 0;
+        virtual T getc(void) = 0;
+    };
+} // namespace minstd

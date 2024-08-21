@@ -7,6 +7,7 @@
 #include "filesystem/filesystems.h"
 
 #include <map>
+#include "heaps.h"
 
 #include "devices/log.h"
 

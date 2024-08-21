@@ -100,7 +100,7 @@ namespace filesystems::fat32
         return FilesystemResultCodes::SUCCESS;
     }
 
-    FilesystemResultCodes FAT32File::Read(Buffer &buffer)
+    FilesystemResultCodes FAT32File::Read(minstd::buffer<uint8_t> &buffer)
     {
         using Result = FilesystemResultCodes;
 
@@ -135,7 +135,7 @@ namespace filesystems::fat32
 
         //  Read from the current cluster and offset and append to the buffer until the buffer is full.
 
-        while (buffer.SpaceRemaining() > 0)
+        while (buffer.space_remaining() > 0)
         {
             auto read_block_result = block_io_adapter.ReadCluster(current_cluster_, block_buffer);
 
@@ -150,7 +150,7 @@ namespace filesystems::fat32
 
             //  Append to the buffer, though the number of bytes appended may be less than the bytes to read if we run out of space in the buffer
 
-            uint32_t bytes_appended = buffer.Append(block_buffer + byte_offset_into_cluster_, bytes_to_read);
+            uint32_t bytes_appended = buffer.append(block_buffer + byte_offset_into_cluster_, bytes_to_read);
 
             byte_offset_into_file_ += bytes_appended;
             byte_offset_into_cluster_ += bytes_appended;
@@ -185,7 +185,7 @@ namespace filesystems::fat32
         return FilesystemResultCodes::SUCCESS;
     }
 
-    FilesystemResultCodes FAT32File::Write(const Buffer &buffer)
+    FilesystemResultCodes FAT32File::Write(const minstd::buffer<uint8_t> &buffer)
     {
         using Result = FilesystemResultCodes;
 
@@ -235,7 +235,7 @@ namespace filesystems::fat32
 
         uint32_t offset_into_buffer = 0;
 
-        while (offset_into_buffer < buffer.Size())
+        while (offset_into_buffer < buffer.size())
         {
             //  If we have data already written into this cluster, then read it so we can append.
 
@@ -252,9 +252,9 @@ namespace filesystems::fat32
             //  Append from the buffer to the cluster, then write the cluster.
 
             uint32_t bytes_left_in_cluster = block_io_adapter.BytesPerCluster() - byte_offset_into_cluster_;
-            uint32_t bytes_to_copy = minstd::min(bytes_left_in_cluster, (uint32_t)buffer.Size() - offset_into_buffer);
+            uint32_t bytes_to_copy = minstd::min(bytes_left_in_cluster, (uint32_t)buffer.size() - offset_into_buffer);
 
-            memcpy(block_buffer + byte_offset_into_cluster_, (char *)buffer.Data() + offset_into_buffer, bytes_to_copy);
+            memcpy(block_buffer + byte_offset_into_cluster_, (char *)buffer.data() + offset_into_buffer, bytes_to_copy);
 
             BlockIOResultCodes write_block_result = block_io_adapter.WriteCluster(current_cluster_, block_buffer);
 
@@ -273,7 +273,7 @@ namespace filesystems::fat32
 
             offset_into_buffer += bytes_to_copy;
 
-            if (offset_into_buffer >= buffer.Size())
+            if (offset_into_buffer >= buffer.size())
             {
                 break;
             }
@@ -333,7 +333,7 @@ namespace filesystems::fat32
         return FilesystemResultCodes::SUCCESS;
     }
 
-    FilesystemResultCodes FAT32File::Append(const Buffer &buffer)
+    FilesystemResultCodes FAT32File::Append(const minstd::buffer<uint8_t> &buffer)
     {
         LogEntryAndExit("Entering\n");
 

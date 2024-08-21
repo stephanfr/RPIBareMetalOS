@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <character_io>
+
 #include "os_entity.h"
 
 typedef enum class BaudRates : uint32_t
@@ -60,7 +62,7 @@ BaudRates BaudRateFromInteger( uint32_t value )
     }
 }
 
-class CharacterIODevice : public OSEntity
+class CharacterIODevice : public OSEntity, public minstd::character_io_interface<unsigned int>
 {
 public:
 
@@ -80,7 +82,4 @@ public:
     {
         return OSEntityTypes::CHARACTER_DEVICE;
     }
-
-    virtual void putc(unsigned int c) = 0;
-    virtual unsigned int getc(void) = 0;
 };
