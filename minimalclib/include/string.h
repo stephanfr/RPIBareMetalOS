@@ -17,6 +17,10 @@ extern "C"
 
     char *strchr(const char *str, int ch);
     char *strrchr(const char *str, int ch);
+    size_t strspn(const char *dest, const char *src);
+    size_t strcspn(const char *dest, const char *src);
+    char *strtok(char *str, const char *delim);
+
     size_t strlcpy(char *destination, const char *source, size_t max_size);
     size_t strnlen(const char *, size_t count);
     char *strnstr(const char *string_searched, const char *search_string, size_t max_count);
