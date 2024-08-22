@@ -7,15 +7,38 @@
 #include <stddef.h>
 #include <string.h>
 
-char *strtok(char *s, const char *sep)
-{
-	static char *p;
-	if (!s && !(s = p)) return NULL;
-	s += strspn(s, sep);
-	if (!*s) return p = 0;
-	p = s + strcspn(s, sep);
-	if (*p) *p++ = 0;
-	else p = 0;
-	return s;
+//
+//	Pretty simple implementation, search for the first delimiter in the string, replace it with a null terminator
+//	and then search for the next non-delimiter character.
+//
 
+char *strtok(char *str, const char *delim)
+{
+    static char *buffer;
+
+    if ((str == NULL) && ((str = buffer) == NULL))
+    {
+        return NULL;
+    }
+
+    str += strspn(str, delim);
+
+    if (*str == '\0')
+    {
+        buffer = NULL;
+        return NULL;
+    }
+
+    buffer = str + strcspn(str, delim);
+
+    if (*buffer != '\0')
+    {
+        *buffer++ = '\0';
+    }
+    else
+    {
+        buffer = NULL;
+    }
+
+    return str;
 }
