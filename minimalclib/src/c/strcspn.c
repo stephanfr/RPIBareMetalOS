@@ -28,14 +28,14 @@ size_t strcspn(const char *dest, const char *src)
 
     if (src[0] == '\0')
     {
-        return 0;
+        return strnlen(dest, __SIZE_MAX__);
     }
 
     if (src[1] == '\0')
     {
         const char *dest_start = dest;
 
-        for (; *dest == *src; dest++)
+        for (; (*dest != 0x00) && (*dest != *src); dest++)
         {
         }
 
@@ -49,7 +49,7 @@ size_t strcspn(const char *dest, const char *src)
 
     unsigned char *dest_itr = (unsigned char *)dest;
 
-    for (; !(char_bitset[*dest_itr >> 3] & ((unsigned char)0x01 << (*dest_itr % 8))); dest_itr++)
+    for (; (*dest_itr) && (!(char_bitset[*dest_itr >> 3] & ((unsigned char)0x01 << (*dest_itr % 8)))); dest_itr++)
     {
     }
 

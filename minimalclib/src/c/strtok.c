@@ -12,32 +12,38 @@
 //	and then search for the next non-delimiter character.
 //
 
-char *strtok(char *str, const char *delim)
+char *strtok(char *str, const char *delim, char **saveptr)
 {
-    static char *buffer;
-
-    if ((str == NULL) && ((str = buffer) == NULL))
+    if(str == NULL)
     {
-        return NULL;
+        if( *saveptr == NULL)
+        {
+            return NULL;
+        }
+
+        str = *saveptr;
     }
 
     str += strspn(str, delim);
 
     if (*str == '\0')
     {
-        buffer = NULL;
+        *saveptr = NULL;
         return NULL;
     }
 
-    buffer = str + strcspn(str, delim);
+    size_t next_delim = strcspn(str, delim);
 
-    if (*buffer != '\0')
+    *saveptr = str + next_delim;
+
+    if (**saveptr != '\0')
     {
-        *buffer++ = '\0';
+        **saveptr = '\0';
+        (*saveptr)++;
     }
     else
     {
-        buffer = NULL;
+        *saveptr = NULL;
     }
 
     return str;

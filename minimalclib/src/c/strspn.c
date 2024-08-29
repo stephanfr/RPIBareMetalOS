@@ -49,7 +49,7 @@ size_t strspn(const char *dest, const char *src)
 
     unsigned char *dest_itr = (unsigned char *)dest;
 
-    for (; (char_bitset[*dest_itr >> 3] & ((unsigned char)0x01 << (*dest_itr % 8))); dest_itr++)
+    for (; (*dest_itr) && ((char_bitset[*dest_itr >> 3] & ((unsigned char)0x01 << (*dest_itr % 8)))); dest_itr++)
     {
     }
 
