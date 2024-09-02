@@ -20,7 +20,7 @@ CPREPROCESSOR := $(GCC_CROSS_TOOLS_PATH)aarch64-none-elf-cpp
 
 
 ASM_FLAGS := -Wall -O2 -ffreestanding -mcpu=cortex-a53 -mstrict-align
-C_FLAGS := -Wall -O2 -ffreestanding -fno-stack-protector -nostdinc -nostdlib -nostartfiles -fno-exceptions -fno-unwind-tables -mcpu=cortex-a53 -mstrict-align
+C_FLAGS := -std=c17 -Wall -O2 -ffreestanding -fno-stack-protector -nostdinc -nostdlib -nostartfiles -fno-exceptions -fno-unwind-tables -mcpu=cortex-a53 -mstrict-align
 CPP_FLAGS := $(C_FLAGS) -std=c++20 -fno-rtti
 LD_FLAGS := -nostartfiles -nodefaultlibs -nostdlib -static
 INCLUDE_DIRS := -I$(GCC_CROSS_INCLUDE)/lib/gcc/aarch64-none-elf/$(GCC_VERSION)/include -I$(GCC_CROSS_INCLUDE)/lib/gcc/aarch64-none-elf/$(GCC_VERSION)/include-fixed -I$(GCC_CROSS_INCLUDE)/aarch64-none-elf/include
