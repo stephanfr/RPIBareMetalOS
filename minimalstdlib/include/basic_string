@@ -25,6 +25,8 @@ namespace MINIMAL_STD_NAMESPACE
     public:
         static constexpr size_t npos = SIZE_MAX;
 
+        typedef T ValueType;
+
         basic_string() = delete;
         basic_string(basic_string &&) = delete;
 
@@ -73,7 +75,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         bool operator>(const T *value) const
         {
-            return strncmp(buffer_, value, minstd::max( length_, strnlen(value, buffer_size_))) > 0;
+            return strncmp(buffer_, value, minstd::max(length_, strnlen(value, buffer_size_))) > 0;
         }
 
         bool operator<(const basic_string<T> &value) const
@@ -83,7 +85,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         bool operator<(const T *value) const
         {
-            return strncmp(buffer_, value, minstd::max( length_, strnlen(value, buffer_size_))) < 0;
+            return strncmp(buffer_, value, minstd::max(length_, strnlen(value, buffer_size_))) < 0;
         }
 
         constexpr T &operator[](size_t pos)
@@ -147,6 +149,27 @@ namespace MINIMAL_STD_NAMESPACE
             grow_buffer_for_string(value);
 
             basic_string<T>::length_ += minstd::min(strlcpy(basic_string<T>::buffer_ + basic_string<T>::length_, value, basic_string<T>::buffer_size_ - basic_string<T>::length_), basic_string<T>::max_size_ - basic_string<T>::length_);
+
+            return *this;
+        }
+
+        basic_string<T> &append(const T *value, size_t length)
+        {
+            if (length == 0)
+            {
+                return *this;
+            }
+
+            grow_buffer(length + 1);
+
+            size_t chars_copied = 0;
+
+            while( value[chars_copied] != 0 && chars_copied < length && length_ < max_size_ - 1)
+            {
+                buffer_[length_++] = value[chars_copied++];
+            }
+
+            buffer_[length_] = 0;
 
             return *this;
         }
