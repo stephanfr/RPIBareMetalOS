@@ -1,0 +1,351 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <format_arg>
+
+namespace FMT_FORMATTERS_NAMESPACE
+{
+    using arg_format_options = ::MINIMAL_STD_NAMESPACE::arg_format_options;
+    using fmt_arg = ::MINIMAL_STD_NAMESPACE::fmt_arg;
+
+    //
+    //  char* formatter
+    //
+
+    class CharacterStringFormatter : public fmt_arg
+    {
+    public:
+        CharacterStringFormatter(const char *value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const char *value_;
+    };
+
+    inline const size_t GetFmtArgSize(const char *value)
+    {
+        return sizeof(CharacterStringFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const char *value)
+    {
+        return new (mem_loc) CharacterStringFormatter(value);
+    }
+
+    //
+    //  minstd::string formatter
+    //
+
+    class StringFormatter : public fmt_arg
+    {
+    public:
+        StringFormatter(const minstd::string &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const minstd::string &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const minstd::string &value)
+    {
+        return sizeof(StringFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const minstd::string &value)
+    {
+        return new (mem_loc) StringFormatter(value);
+    }
+
+    //
+    //  64 bit unsigned integer formatter
+    //
+
+    class Unsigned64BitIntFormatter : public fmt_arg
+    {
+    public:
+        Unsigned64BitIntFormatter(const uint64_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const uint64_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const uint64_t &value)
+    {
+        return sizeof(Unsigned64BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint64_t &value)
+    {
+        return new (mem_loc) Unsigned64BitIntFormatter(value);
+    }
+
+    //
+    //  64 bit signed integer formatter
+    //
+
+    class Signed64BitIntFormatter : public fmt_arg
+    {
+    public:
+        Signed64BitIntFormatter(const int64_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const int64_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const int64_t &value)
+    {
+        return sizeof(Signed64BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const int64_t &value)
+    {
+        return new (mem_loc) Signed64BitIntFormatter(value);
+    }
+
+    //
+    //  32 bit unsigned integer formatter
+    //
+
+    class Unsigned32BitIntFormatter : public fmt_arg
+    {
+    public:
+        Unsigned32BitIntFormatter(const uint32_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const uint32_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const uint32_t &value)
+    {
+        return sizeof(Unsigned32BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint32_t &value)
+    {
+        return new (mem_loc) Unsigned32BitIntFormatter(value);
+    }
+
+    //
+    //  32 bit signed integer formatter
+    //
+
+    class Signed32BitIntFormatter : public fmt_arg
+    {
+    public:
+        Signed32BitIntFormatter(const int32_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const int32_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const int32_t &value)
+    {
+        return sizeof(Signed32BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const int32_t &value)
+    {
+        return new (mem_loc) Signed32BitIntFormatter(value);
+    }
+
+    //
+    //  16 bit unsigned integer formatter
+    //
+
+    class Unsigned16BitIntFormatter : public fmt_arg
+    {
+    public:
+        Unsigned16BitIntFormatter(const uint16_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const uint16_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const uint16_t &value)
+    {
+        return sizeof(Unsigned16BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint16_t &value)
+    {
+        return new (mem_loc) Unsigned16BitIntFormatter(value);
+    }
+
+    //
+    //  16 bit signed integer formatter
+    //
+
+    class Signed16BitIntFormatter : public fmt_arg
+    {
+    public:
+        Signed16BitIntFormatter(const int16_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const int16_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const int16_t &value)
+    {
+        return sizeof(Signed16BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const int16_t &value)
+    {
+        return new (mem_loc) Signed16BitIntFormatter(value);
+    }
+
+    //
+    //  8 bit unsigned integer formatter
+    //
+
+    class Unsigned8BitIntFormatter : public fmt_arg
+    {
+    public:
+        Unsigned8BitIntFormatter(const uint8_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const uint8_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const uint8_t &value)
+    {
+        return sizeof(Unsigned8BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint8_t &value)
+    {
+        return new (mem_loc) Unsigned8BitIntFormatter(value);
+    }
+
+    //
+    //  8 bit signed integer formatter
+    //
+
+    class Signed8BitIntFormatter : public fmt_arg
+    {
+    public:
+        Signed8BitIntFormatter(const int8_t &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const int8_t &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const int8_t &value)
+    {
+        return sizeof(Signed8BitIntFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const int8_t &value)
+    {
+        return new (mem_loc) Signed8BitIntFormatter(value);
+    }
+
+    //
+    //  float formatter
+    //
+
+    class FloatFormatter : public fmt_arg
+    {
+    public:
+        FloatFormatter(const float &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const float &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const float &value)
+    {
+        return sizeof(FloatFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const float &value)
+    {
+        return new (mem_loc) FloatFormatter(value);
+    }
+
+    //
+    //  double formatter
+    //
+
+    class DoubleFormatter : public fmt_arg
+    {
+    public:
+        DoubleFormatter(const double &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const double &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const double &value)
+    {
+        return sizeof(DoubleFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const double &value)
+    {
+        return new (mem_loc) DoubleFormatter(value);
+    }
+} // namespace FMT_FORMATTERS_NAMESPACE

@@ -5,10 +5,12 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 extern "C" void __assert(const char *msg, const char *file, int line);
 
 #define MINIMAL_STD_NAMESPACE minstd
+#define FMT_FORMATTERS_NAMESPACE fmt_formatters
 
 #define MINIMAL_STD_ASSERT(expression)                 \
     {                                                  \

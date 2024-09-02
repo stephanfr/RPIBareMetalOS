@@ -1,7 +1,3 @@
-// Copyright 2023 Stephan Friedl. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 //  Almost all of this file is lifted or adapted from John Wellbelove's ETL project.
 //      Attribution and licensing for that project appears below.
 //
@@ -725,5 +721,82 @@ namespace MINIMAL_STD_NAMESPACE
 
     template <typename T1, typename T2>
     inline constexpr bool is_base_of_v = is_base_of<T1, T2>::value;
+
+    // Provide unsigned type for a signed integer type
+
+    template <typename T>
+    struct make_unsigned
+    {
+        typedef T type;
+    };
+
+    template <>
+    struct make_unsigned<char>
+    {
+        typedef unsigned char type;
+    };
+
+    template <>
+    struct make_unsigned<signed char>
+    {
+        typedef unsigned char type;
+    };
+
+    template <>
+    struct make_unsigned<short>
+    {
+        typedef unsigned short type;
+    };
+
+    template <>
+    struct make_unsigned<int>
+    {
+        typedef unsigned int type;
+    };
+
+    template <>
+    struct make_unsigned<long>
+    {
+        typedef unsigned long type;
+    };
+
+    template <>
+    struct make_unsigned<long long>
+    {
+        typedef unsigned long long type;
+    };
+/*
+    template <typename T>
+    struct make_unsigned<const T> : add_const<typename make_unsigned<T>::type>
+    {
+    };
+
+    template <typename T>
+    struct make_unsigned<volatile T> : add_volatile<typename make_unsigned<T>::type>
+    {
+    };
+
+    template <typename T>
+    struct make_unsigned<const volatile T> : add_const<typename add_volatile<typename make_unsigned<T>::type>::type>
+    {
+    };
+*/
+    template <typename T>
+    using make_unsigned_t = typename make_unsigned<T>::type;
+
+    //  Determine if a variadic template list contains a specific type.
+    //      These are functions, not structs, because we need to be able to do the template parameter expansion
+
+    template <typename T>
+    inline constexpr bool contains_type()
+    {
+        return false;
+    }
+
+    template <typename T, typename U, typename... Tail>
+    inline constexpr bool contains_type()
+    {
+        return is_same<T, U>::value ? true : contains_type<T, Tail...>();
+    }
 
 }

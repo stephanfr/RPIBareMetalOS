@@ -1,0 +1,52 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <optional>
+#include <basic_string>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    typedef struct arg_format_options
+    {
+        typedef enum class align
+        {
+            left,
+            right,
+            center
+        } align;
+
+        minstd::optional<uint32_t> position_;
+        minstd::optional<uint32_t> width_;
+        minstd::optional<uint32_t> precision_;
+        minstd::optional<char> fill_;
+        minstd::optional<align> alignment_;
+        minstd::optional<bool> alt_;
+        minstd::optional<char> sign_;
+        minstd::optional<char> type_;
+        minstd::optional<uint32_t> integer_base_;
+
+        void clear()
+        {
+            position_.reset();
+            width_.reset();
+            precision_.reset();
+            fill_.reset();
+            alignment_.reset();
+            alt_.reset();
+            sign_.reset();
+            type_.reset();
+            integer_base_.reset();
+        }
+
+    } arg_format_options;
+
+    class fmt_arg
+    {
+    public:
+        virtual void Append(minstd::string &buffer, const arg_format_options &format_options) const = 0;
+    };
+
+}
