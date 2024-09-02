@@ -29,6 +29,7 @@ namespace filesystems
         //
 
         FILESYSTEM_DOES_NOT_EXIST,
+        UNABLE_TO_FIND_BOOT_FILESYSTEM,
         PATH_TOO_LONG,
         EMPTY_PATH,
         EMPTY_FILENAME,

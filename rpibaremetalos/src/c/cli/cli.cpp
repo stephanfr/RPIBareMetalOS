@@ -6,68 +6,38 @@
 
 #include <stdint.h>
 
-#include <functional>
-#include <list>
-#include <stack_allocator>
-#include <iostream>
+#include <character_io>
 
 #include "minimalstdio.h"
 
 #include "heaps.h"
 
-#include "devices/std_streams.h"
 #include "devices/physical_timer.h"
 #include "devices/power_manager.h"
 
-#include "filesystem/filesystems.h"
-
 #include "utility/dump_diagnostics.h"
+
+#include "cli/list_command.h"
 
 namespace cli
 {
-
-    ReferenceResult<CLIResultCodes, CommandLineInterface> StartCommandLineInterface()
+    ReferenceResult<CLIResultCodes, CommandLineInterface>
+    StartCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                              UUID filesystem_id,
+                              const minstd::string &current_directory_path)
     {
         using Result = ReferenceResult<CLIResultCodes, CommandLineInterface>;
 
-        minstd::stack_allocator<minstd::list<UUID>::node_type, 24> uuid_list_stack_allocator;
-        minstd::list<UUID> all_filesystems(uuid_list_stack_allocator);
-
-        GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, all_filesystems);
-
-        filesystems::Filesystem *boot_filesystem = nullptr;
-
-        for (auto itr = all_filesystems.begin(); itr != all_filesystems.end(); itr++)
-        {
-            auto get_entity_result = GetOSEntityRegistry().GetEntityById(*itr);
-
-            if (get_entity_result.Failed())
-            {
-                Result::Failure(CLIResultCodes::UNABLE_TO_FIND_BOOT_FILESYSTEM);
-            }
-
-            if (static_cast<filesystems::Filesystem &>(get_entity_result).IsBoot())
-            {
-                boot_filesystem = &(static_cast<filesystems::Filesystem &>(get_entity_result));
-                break;
-            }
-        }
-
-        if (boot_filesystem == nullptr)
-        {
-            return Result::Failure(CLIResultCodes::UNABLE_TO_FIND_BOOT_FILESYSTEM);
-        }
-
         //  Create a CLI instance and register it as an OS Entity
 
-        auto cli_instance = make_dynamic_unique<CommandLineInterface>(*boot_filesystem);
+        auto cli_instance = make_dynamic_unique<CommandLineInterface>(io_device, filesystem_id, current_directory_path);
 
         if (GetOSEntityRegistry().AddEntity(cli_instance) != OSEntityRegistryResultCodes::SUCCESS)
         {
             return Result::Failure(CLIResultCodes::UNABLE_TO_ADD_CLI_TO_REGISTERY);
         }
 
-        //  Get the CLI entity from the registry
+        //  Get the CLI entity from the registry and return it
 
         auto cli_entity = GetOSEntityRegistry().GetEntityByName<CommandLineInterface>("CLI");
 
@@ -81,73 +51,49 @@ namespace cli
 
     void CommandLineInterface::Run()
     {
+        ListCommandDispatcher list_command_dispatcher;
+
         printf("Command Line Interface\n");
 
-        printf("In console.  'd' for diagnostic info, 'r' to Reboot or 'h' to Halt\n\n");
-
-        ListDirectory( minstd::fixed_string<>("/"));
-
-        minstd::character_istream<unsigned int> stdin_stream(*stdin);
-        minstd::stack_buffer<unsigned int, 128> input_buffer;
-
-        while (1)
+        while (true)
         {
             printf("\n> ");
-            
-            input_buffer.clear();
-            stdin_stream.getline(input_buffer, '\n');
 
-            printf("input length: %lu\n", input_buffer.size());
+            const char *first_token = command_parser_.GetNextLine();
 
-            for( size_t i = 0; i < input_buffer.size(); i++ )
+            if (first_token == nullptr)
             {
-                printf( "%c", input_buffer.data()[i]);
+                continue;
             }
 
-            printf("\n");
-
-            if (input_buffer.data()[0] == 'd')
+            if (strnicmp(first_token, "list", MAX_CLI_COMMAND_LENGTH) == 0)
+            {
+                list_command_dispatcher.DispatchCommand(command_parser_, session_context_);
+            }
+            else if (strnicmp(first_token, "change", MAX_CLI_COMMAND_LENGTH) == 0)
+            {
+                session_context_.current_directory_path_ += "/";
+                session_context_.current_directory_path_ += command_parser_.NextToken();
+            }
+            else if (strnicmp(first_token, "dump", MAX_CLI_COMMAND_LENGTH) == 0)
             {
                 DumpDiagnostics();
             }
-            else if (input_buffer.data()[0] == 'h')
-            {
-                return;
-            }
-            else if (input_buffer.data()[0] == 'r')
+            else if (strnicmp(first_token, "reboot", MAX_CLI_COMMAND_LENGTH) == 0)
             {
                 printf("\nRebooting\n");
                 PhysicalTimer().WaitMsec(50);
 
                 PowerManager().Reboot();
             }
-        }
-    }
-
-    void CommandLineInterface::ListDirectory(const minstd::string &directory_absolute_path)
-    {
-        auto result = boot_filesystem_.GetDirectory(directory_absolute_path);
-
-        if (result.Successful())
-        {
-            printf("Directory Listing\n");
-
-            auto callback = [](const filesystems::FilesystemDirectoryEntry &directory_entry) -> filesystems::FilesystemDirectoryVisitorCallbackStatus
+            else if (strnicmp(first_token, "halt", MAX_CLI_COMMAND_LENGTH) == 0)
             {
-                printf("%s %-9u %s %s\n", directory_entry.AttributesString(), directory_entry.Size(), directory_entry.Name().c_str(), directory_entry.Extension().c_str());
-                return filesystems::FilesystemDirectoryVisitorCallbackStatus::NEXT;
-            };
-
-            auto visit_directory_result = result->VisitDirectory(callback);
-
-            if (visit_directory_result != filesystems::FilesystemResultCodes::SUCCESS)
-            {
-                printf("Error visiting directory listing for root directory.\n");
+                return;
             }
-        }
-        else
-        {
-            printf("Error getting directory listing for root directory on boot filesystem.\n");
+            else
+            {
+                printf("Unknown command: %s\n", first_token);
+            }
         }
     }
 

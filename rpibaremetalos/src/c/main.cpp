@@ -401,7 +401,17 @@ extern "C" void kernel_main()
 
     //  Start the command line interface
 
-    auto start_cli_result = cli::StartCommandLineInterface();
+    EchoingCharacterIODevice echoing_stdin(*stdin, *stdout);
+
+    auto boot_filesystem = filesystems::GetBootFilesystem();
+
+    if (boot_filesystem.Failed())
+    {
+        printf("Failed to get boot filesystem\n");
+        PowerManager().Halt();
+    }
+
+    auto start_cli_result = cli::StartCommandLineInterface(echoing_stdin, boot_filesystem->Id(), minstd::fixed_string<>("/"));
 
     if (start_cli_result.Failed())
     {

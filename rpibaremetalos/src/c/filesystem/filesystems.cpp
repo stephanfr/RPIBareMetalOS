@@ -65,4 +65,45 @@ namespace filesystems
         return SimpleSuccessOrFailure::SUCCESS;
     }
 
+    ReferenceResult<FilesystemResultCodes, Filesystem> GetBootFilesystem()
+    {
+        using Result = ReferenceResult<FilesystemResultCodes, Filesystem>;
+
+        //  Walk through the filesystems registered with the OS and find the one marked as boot
+
+        minstd::stack_allocator<minstd::list<UUID>::node_type, MAX_FILESYSTEMS> uuid_list_stack_allocator;
+        minstd::list<UUID> all_filesystems(uuid_list_stack_allocator);
+
+        GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, all_filesystems);
+
+        filesystems::Filesystem *boot_filesystem = nullptr;
+
+        for (auto itr = all_filesystems.begin(); itr != all_filesystems.end(); itr++)
+        {
+            auto get_entity_result = GetOSEntityRegistry().GetEntityById(*itr);
+
+            if (get_entity_result.Failed())
+            {
+                Result::Failure(FilesystemResultCodes::UNABLE_TO_FIND_BOOT_FILESYSTEM);
+            }
+
+            if (static_cast<filesystems::Filesystem &>(get_entity_result).IsBoot())
+            {
+                boot_filesystem = &(static_cast<filesystems::Filesystem &>(get_entity_result));
+                break;
+            }
+        }
+
+        //  Return failure if we didn't find a boot filesystem
+
+        if( boot_filesystem == nullptr )
+        {
+            return Result::Failure(FilesystemResultCodes::UNABLE_TO_FIND_BOOT_FILESYSTEM);
+        }
+
+        //  Return the boot filesystem
+
+        return Result::Success(*boot_filesystem);
+    }
+
 } // namespace filesystems

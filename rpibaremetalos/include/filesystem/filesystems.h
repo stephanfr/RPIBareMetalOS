@@ -336,4 +336,6 @@ namespace filesystems
     };
 
     SimpleSuccessOrFailure MountSDCardFilesystems();
+
+    ReferenceResult<FilesystemResultCodes, Filesystem> GetBootFilesystem();
 } // namespace filesystems

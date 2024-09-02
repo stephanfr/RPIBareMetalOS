@@ -9,34 +9,15 @@
 
 #include "result.h"
 
-#include "filesystem/filesystems.h"
 #include "os_entity.h"
+
+#include "cli/cli_errors.h"
+#include "cli/command_dispatcher.h"
+#include "cli/command_parser.h"
+#include "cli/session_context.h"
 
 namespace cli
 {
-
-    typedef enum class CLIResultCodes : uint32_t
-    {
-        SUCCESS = 0,
-        FAILURE,
-
-        INTERNAL_ERROR,
-
-        UNABLE_TO_FIND_BOOT_FILESYSTEM,
-        UNABLE_TO_ADD_CLI_TO_REGISTERY,
-        UNABLE_TO_GET_CLI_ENTITY_FROM_REGISTERY,
-
-        //
-        //  End of error codes flag
-        //
-
-        __END_OF_CLI_RESULT_CODES__
-    } CLIResultCodes;
-
-    //
-    //  Command Line Interface class
-    //
-
     class CommandLineInterface : public OSEntity
     {
     public:
@@ -44,9 +25,14 @@ namespace cli
         CommandLineInterface(const CommandLineInterface &) = delete;
         CommandLineInterface(CommandLineInterface &&) = delete;
 
-        CommandLineInterface(filesystems::Filesystem &boot_filesystem)
+        CommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                             UUID filesystem_id,
+                             const minstd::string &current_directory_path)
             : OSEntity(true, "CLI", "Command Line Interface"),
-              boot_filesystem_(boot_filesystem)
+              input_stream_(io_device),
+              output_stream_(io_device),
+              command_parser_(input_stream_),
+              session_context_(input_stream_, output_stream_, filesystem_id, current_directory_path)
         {
         }
 
@@ -65,16 +51,20 @@ namespace cli
         void Run();
 
     private:
+        minstd::character_istream<char, unsigned int, minstd::stream_traits<char>::ascii_terminal, minstd::stream_traits<char>::append_trailing_null> input_stream_;
+        minstd::character_ostream<char, unsigned int> output_stream_;
 
-        filesystems::Filesystem &boot_filesystem_;
+        CommandParser command_parser_;
 
-        void ListDirectory(const minstd::string &directory_absolute_path);
+        CLISessionContext session_context_;
     };
 
     //
     //  Factory method for the CLI
     //
 
-    ReferenceResult<CLIResultCodes, CommandLineInterface> StartCommandLineInterface();
+    ReferenceResult<CLIResultCodes, CommandLineInterface> StartCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                                                                                    UUID filesystem_id_,
+                                                                                    const minstd::string &current_directory_path);
 
 } // namespace cli

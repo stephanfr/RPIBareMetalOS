@@ -4,6 +4,7 @@
     "files.associations": {
         "memory": "cpp",
         "function": "cpp",
+        "format_arg": "cpp",
         "array": "cpp",
         "deque": "cpp",
         "forward_list": "cpp",
@@ -42,7 +43,9 @@
         "stddef.h": "c",
         "scanf.h": "c",
         "ctype.h": "c",
-        "utility": "cpp"
+        "utility": "cpp",
+        "format": "cpp",
+        "basic_string": "cpp"
     },
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.errorSquiggles": "disabled",
