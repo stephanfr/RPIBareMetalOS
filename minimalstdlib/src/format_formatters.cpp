@@ -393,4 +393,16 @@ namespace FMT_FORMATTERS_NAMESPACE
         FloatToString(buffer, value_, format_options);
     }
 
+    void BoolFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    {
+        if(value_)
+        {
+            buffer += "true";
+        }
+        else
+        {
+            buffer += "false";
+        }
+    }
+
 } // namespace FMT_FORMATTERS_NAMESPACE

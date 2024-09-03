@@ -111,6 +111,13 @@ namespace
         STRCMP_EQUAL("This is a test: 423\n", minstd::fmt::format(formatted_string, "This is a test: {}\n", (uint64_t)423).c_str());
     }
 
+    TEST(FormatTests, Bools)
+    {
+        minstd::fixed_string<256> formatted_string;
+
+        STRCMP_EQUAL("This is a test: true false\n", minstd::fmt::format(formatted_string, "This is a test: {} {}\n", true, false).c_str());
+    }
+
     TEST(FormatTests, Floats)
     {
         minstd::fixed_string<256> formatted_string;

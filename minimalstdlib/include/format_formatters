@@ -348,4 +348,32 @@ namespace FMT_FORMATTERS_NAMESPACE
     {
         return new (mem_loc) DoubleFormatter(value);
     }
+
+    //
+    //  bool formatter
+    //
+
+    class BoolFormatter : public fmt_arg
+    {
+    public:
+        BoolFormatter(const bool &value)
+            : value_(value)
+        {
+        }
+
+        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+
+    private:
+        const bool &value_;
+    };
+
+    inline const size_t GetFmtArgSize(const bool &value)
+    {
+        return sizeof(BoolFormatter);
+    }
+
+    inline const fmt_arg *GetFmtArg(void *mem_loc, const bool &value)
+    {
+        return new (mem_loc) BoolFormatter(value);
+    }
 } // namespace FMT_FORMATTERS_NAMESPACE
