@@ -13,10 +13,7 @@
 
 namespace MINIMAL_STD_NAMESPACE
 {
-    namespace internal
-    {
-        void BuildOutput(minstd::string &buffer, const char *fmt, const fmt_arg *args[], size_t num_args);
-    }
+    void BuildFormatOutput(minstd::string &buffer, const char *fmt, const fmt_arg *args[], size_t num_args);
 
     minstd::string &format(minstd::string &buffer, const char *fmt, auto &&...args)
     {
@@ -27,8 +24,8 @@ namespace MINIMAL_STD_NAMESPACE
         //  This looks scary but should be pretty bullet proof - so long as we follow the rules...
         //
         //  We use fold expressions to iterate over all the arguments and calculate the total storage
-        //      required for all the as 'fmt::arg' types and then we allocate a block on the stack
-        //      of this size.  We then use placement new to create the 'fmt::arg' objects in this block
+        //      required for all the as 'fmt_arg' types and then we allocate a block on the stack
+        //      of this size.  We then use placement new to create the 'fmt_arg' objects in this block
         //      with correct offsets for each argument.  We save a pointer to each argument in an array
         //      as the abstract base class so we can just invoke 'Append' as needed.  We will not call
         //      destructors - so if you add a new argument type, make sure it is trivially destructible.
@@ -77,7 +74,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         //  Build the formatted output
 
-        internal::BuildOutput(buffer, fmt, all_args, num_args);
+        BuildFormatOutput(buffer, fmt, all_args, num_args);
 
         //  Return the buffer
 

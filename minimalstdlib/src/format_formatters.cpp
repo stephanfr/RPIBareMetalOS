@@ -15,6 +15,11 @@ namespace FMT_FORMATTERS_NAMESPACE
     constexpr char LOWER_CASE_NUMERIC_CONVERSION_DIGITS[37] = "0123456789abcdefghijklmnopqrstuvwxyz";
     constexpr char UPPER_CASE_NUMERIC_CONVERSION_DIGITS[37] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+    constexpr char PLUS_SIGN[] = {"+"};
+    constexpr char MINUS_SIGN[] = {"-"};
+    constexpr char SPACE_CHAR[] = {" "};
+    constexpr char NO_SIGN_OR_SPACE[] = {""};
+
     //
     //  Function to handle integer prefixes for binary, octal or hex
     //
@@ -76,70 +81,120 @@ namespace FMT_FORMATTERS_NAMESPACE
         }
     }
 
+    const char* DetermineSign(bool is_negative, const arg_format_options &format)
+    {
+        //  If the value is negative, then we will always include the unary minus sign
+
+        if (is_negative)
+        {
+            return MINUS_SIGN;
+        }
+
+        //  If the sign is specified, then we may need to add either a plus or space
+
+        if (format.sign().has_value())
+        {
+            if (format.sign().value() == arg_format_options::sign_treatment::always_plus)
+            {
+                return PLUS_SIGN;
+            }
+            else if (format.sign().value() == arg_format_options::sign_treatment::space)
+            {
+                return SPACE_CHAR;
+            }
+        }
+
+        //  If we are down here, then no sign or space before the number
+
+        return NO_SIGN_OR_SPACE;
+    }
+
     //
     //  Function to align and pad numerics
     //
 
-    void HandleNumericAlignmentAndFill(minstd::string &buffer, const minstd::string &sign, size_t start_of_number, const arg_format_options &format)
+    void HandleZeroFill(minstd::string &buffer, const char *sign, size_t start_of_number, const arg_format_options &format)
     {
-        size_t number_length = (buffer.size() - start_of_number) + sign.size() + IntegerPrefixLength(format);
+        size_t number_length = (buffer.size() - start_of_number) + ( sign[0] != 0 ? 1 : 0 ) + IntegerPrefixLength(format);
 
-        //  Add the sign if this is not zero filled
+        //  If the width is specified and the number of characters is less than the width and the
+        //      alignment is either right or center or we have zero fill, then we need to add fill characters.
 
-        if (!format.is_zero_fill())
+        if (format.width().has_value() && (format.width().value() > number_length))
         {
-            //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
+            //  Determine how much to fill in front of the number
 
-            AddIntegerPrefix(buffer, format);
+            size_t fill_count = format.width().value() - number_length;
 
-            buffer += sign;
+            for (size_t i = 0; i < fill_count; i++)
+            {
+                buffer.push_back('0');
+            }
         }
+
+        //  Add the sign and prefix.
+        //      We do not do this above, because we only fill above if there is a width specified and it still needs to be met.
+
+        AddIntegerPrefix(buffer, format);
+
+        //  Add the sign
+
+        buffer += sign;
+
+        //	Reverse the string in place
+
+        char c;
+
+        size_t i = buffer.size() - 1;
+
+        for (size_t j = start_of_number; j < i; j++, i--)
+        {
+            c = buffer[j];
+            buffer[j] = buffer[i];
+            buffer[i] = c;
+        }
+    }
+
+    void HandleNumericAlignmentAndFill(minstd::string &buffer, const char* sign, size_t start_of_number, const arg_format_options &format)
+    {
+        //  Handle zero fill separately
+
+        if (format.is_zero_fill())
+        {
+            HandleZeroFill(buffer, sign, start_of_number, format);
+            return;
+        }
+
+        //  Format according to the alignment, fill and width
+
+        size_t number_length = (buffer.size() - start_of_number) + ( sign[0] != 0 ? 1 : 0 ) + IntegerPrefixLength(format);
+
+        //  Add the sign and if this is hex, octal or binary and alt is pecified, then we need to add the prefix
+
+        AddIntegerPrefix(buffer, format);
+
+        buffer += sign;
 
         //  If the width is specified and the number of characters is less than the width and the
         //      alignment is either right or center or we have zero fill, then we need to add fill characters.
 
         if (format.width().has_value() &&
             (format.width().value() > number_length) &&
-            (format.is_zero_fill() || format.is_right_aligned() || format.is_center_aligned()))
+            (format.is_right_aligned() || format.is_center_aligned()))
         {
             //  Determine how much to fill in front of the number
 
             size_t fill_count = format.width().value() - number_length;
 
-            if (!format.is_zero_fill())
+            if (format.is_center_aligned())
             {
-                if (format.is_center_aligned())
-                {
-                    fill_count /= 2;
-                }
-
-                for (size_t i = 0; i < fill_count; i++)
-                {
-                    buffer.push_back(format.fill().value());
-                }
+                fill_count /= 2;
             }
-            else
+
+            for (size_t i = 0; i < fill_count; i++)
             {
-                for (size_t i = 0; i < fill_count; i++)
-                {
-                    buffer.push_back('0');
-                }
+                buffer.push_back(format.fill().value());
             }
-        }
-
-        //  Add the sign and prefix if zero fill is specified.
-        //      We do not do this above, because we only fill above if there is a width specified and it still needs to be met.
-
-        if (format.is_zero_fill())
-        {
-
-            //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
-
-            AddIntegerPrefix(buffer, format);
-
-            //  Add the sign
-
-            buffer += sign;
         }
 
         //	Reverse the string in place
@@ -158,7 +213,7 @@ namespace FMT_FORMATTERS_NAMESPACE
         //  If the width is specified and the number of characters is less than the width
         //      then we have to add fill characters for either left or center alignment.
 
-        number_length = (buffer.size() - start_of_number) + sign.size();
+        number_length = (buffer.size() - start_of_number) + ( sign[0] != 0 ? 1 : 0 );
 
         if (format.width().has_value() && (format.width().value() > number_length))
         {
@@ -176,7 +231,7 @@ namespace FMT_FORMATTERS_NAMESPACE
     //
 
     template <typename T>
-    void FloatToString(minstd::string &buffer, const T &arg, const arg_format_options &format)
+    void FloatToString(minstd::string &buffer, const T &value, const arg_format_options &format)
     {
         static uint64_t const pow10[] = {1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000};
 
@@ -187,19 +242,19 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         //  Start the conversion
 
-        if (arg < 0)
+        if (value < 0)
         {
             //  Negative numbers
 
-            decimals = (uint64_t)(-arg * decimal_multiplier) % decimal_multiplier;
-            units = (uint64_t)(-arg);
+            decimals = (uint64_t)(-value * decimal_multiplier) % decimal_multiplier;
+            units = (uint64_t)(-value);
         }
         else
         {
             //  Positive numbers
 
-            decimals = (uint64_t)(arg * decimal_multiplier) % decimal_multiplier;
-            units = (uint64_t)arg;
+            decimals = (uint64_t)(value * decimal_multiplier) % decimal_multiplier;
+            units = (uint64_t)value;
         }
 
         size_t start_of_number = buffer.size();
@@ -218,22 +273,14 @@ namespace FMT_FORMATTERS_NAMESPACE
             units /= 10;
         }
 
-        //  Get the sign
-
-        minstd::fixed_string<4> sign;
-
-        if (arg < 0)
-        {
-            sign = "-";
-        }
-
         //  Align, pad and unreverse the number
 
-        HandleNumericAlignmentAndFill(buffer, sign, start_of_number, format);
+        HandleNumericAlignmentAndFill(buffer, DetermineSign((value < 0), format), start_of_number, format);
     }
 
     //
-    //  Template function to convert unsigned integers to string.  Works for all unsigned integer types.
+    //  Template function to convert unsigned integers to string.  Works for all unsigned integer types
+    //      and leaves the string in reverse order.
     //
 
     template <typename T>
@@ -292,7 +339,7 @@ namespace FMT_FORMATTERS_NAMESPACE
             return;
         }
 
-        //  We need to convert the value to an unsigned type to handle the negative case, only if the base is 10.
+        //  We need to convert the value to an unsigned type to handle the negative case
 
         size_t start_of_number = buffer.size();
 
@@ -309,36 +356,9 @@ namespace FMT_FORMATTERS_NAMESPACE
             UnsignedIntToReversedString(buffer, (unsigned_T)value, format.integer_base().value(), numeric_conversion_digits);
         }
 
-        //  Get the sign
-
-        minstd::fixed_string<4> sign;
-
-        if (format.sign().has_value())
-        {
-            if (value >= 0)
-            {
-                if (format.sign().value() == arg_format_options::sign_treatment::always_plus)
-                {
-                    sign = "+";
-                }
-                else if (format.sign().value() == arg_format_options::sign_treatment::space)
-                {
-                    sign = " ";
-                }
-            }
-            else
-            {
-                sign = "-";
-            }
-        }
-        else if (value < 0)
-        {
-            sign = "-";
-        }
-
         //  Align, pad and unreverse the number
 
-        HandleNumericAlignmentAndFill(buffer, sign, start_of_number, format);
+        HandleNumericAlignmentAndFill(buffer, DetermineSign((value < 0), format), start_of_number, format);
     }
 
     //

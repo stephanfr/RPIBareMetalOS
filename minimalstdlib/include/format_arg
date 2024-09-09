@@ -75,6 +75,16 @@ namespace MINIMAL_STD_NAMESPACE
         bool is_alt() const { return alt_.has_value() && alt_.value(); }
         bool is_zero_fill() const { return zero_fill_.has_value() && zero_fill_.value(); }
 
+        void set_width(uint32_t width) { width_ = width; }
+        void set_precision(uint32_t precision) { precision_ = precision; }
+        void set_fill(char fill) { fill_ = fill; }
+        void set_alignment(align alignment) { alignment_ = alignment; }
+        void set_alt(bool alt) { alt_ = alt; }
+        void set_sign(sign_treatment sign) { sign_ = sign; }
+        void set_zero_fill(bool zero_fill) { zero_fill_ = zero_fill; }
+        void set_type_specifier(char type_specifier) { type_specifier_ = type_specifier; }
+        void set_integer_base(uint32_t integer_base) { integer_base_ = integer_base; }
+
         void clear()
         {
             width_.reset();
@@ -138,8 +148,6 @@ namespace MINIMAL_STD_NAMESPACE
 
     private:
 
-        friend bool ParseArgFormatString(const minstd::string &argument_format, arg_format_options &format_options);
-
         minstd::optional<uint32_t> width_;
         minstd::optional<uint32_t> precision_;
         minstd::optional<char> fill_;
@@ -153,7 +161,6 @@ namespace MINIMAL_STD_NAMESPACE
 
     //  Declare a couple functions to parse the format string into the options above
 
-    minstd::pair<bool, minstd::optional<uint32_t>> ParseArgId(const minstd::string &argument_format);
     bool ParseArgFormatString(const minstd::string &argument_format, arg_format_options &format_options);
 
     //  Declare the abstract base class for all the format arguments
@@ -163,4 +170,4 @@ namespace MINIMAL_STD_NAMESPACE
     public:
         virtual void Append(minstd::string &buffer, const minstd::string &format) const = 0;
     };
-}
+} // namespace MINIMAL_STD_NAMESPACE

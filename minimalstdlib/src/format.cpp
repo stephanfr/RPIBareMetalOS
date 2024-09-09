@@ -55,14 +55,133 @@ namespace MINIMAL_STD_NAMESPACE
         return minstd::make_pair(true, minstd::optional<uint32_t>(position));
     }
 
+    void ParseTypeSpecifier(const char character, arg_format_options &format_options)
+    {
+        switch (character)
+        {
+        case 'd':
+            format_options.set_integer_base(10);
+            format_options.set_type_specifier('d');
+            break;
+
+        case 'x':
+            format_options.set_integer_base(16);
+            format_options.set_type_specifier('x');
+            break;
+
+        case 'X':
+            format_options.set_integer_base(16);
+            format_options.set_type_specifier('X');
+            break;
+
+        case 'b':
+            format_options.set_integer_base(2);
+            format_options.set_type_specifier('b');
+            break;
+
+        case 'B':
+            format_options.set_integer_base(2);
+            format_options.set_type_specifier('B');
+            break;
+
+        case 'o':
+            format_options.set_integer_base(8);
+            format_options.set_type_specifier('o');
+            break;
+
+        case 'p':
+            format_options.set_integer_base(16);
+            format_options.set_type_specifier('X'); //  Morph to hex spec
+            break;
+
+        default:
+            format_options.set_type_specifier(character);
+        }
+    }
+
+    bool ParseAlignmentAndFill(const minstd::string &argument_format, size_t &processed_characters, arg_format_options &format_options)
+    {
+        //  Extract the fill character and alignment specifier
+
+        size_t align_spec_loc = strcspn(argument_format.c_str() + processed_characters, "<>^");
+
+        if ((processed_characters + align_spec_loc) < argument_format.length())
+        {
+            if ((align_spec_loc == 0) || (align_spec_loc == 1))
+            {
+                switch (argument_format[processed_characters + align_spec_loc])
+                {
+                case '<':
+                    format_options.set_alignment(arg_format_options::align::left);
+                    break;
+
+                case '>':
+                    format_options.set_alignment(arg_format_options::align::right);
+                    break;
+
+                case '^':
+                    format_options.set_alignment(arg_format_options::align::center);
+                    break;
+                }
+            }
+            else
+            {
+                //  Invalid alignment specifier
+
+                return false;
+            }
+
+            if (align_spec_loc == 1)
+            {
+                //  Fill character cannot be either an opening or closing curly brace.  We can only detect the opening brace here.
+
+                if (argument_format[processed_characters] == '{')
+                {
+                    return false;
+                }
+
+                format_options.set_fill(argument_format[processed_characters]);
+            }
+
+            processed_characters += align_spec_loc + 1;
+        }
+
+        return true;
+    }
+
+    void ParseSignSpecifier(const minstd::string &argument_format, size_t &processed_characters, arg_format_options &format_options)
+    {
+        //  If we have a '+', '-', or ' ', then we have a sign specifier
+
+        if ((argument_format[processed_characters] == '+') ||
+            (argument_format[processed_characters] == '-') ||
+            (argument_format[processed_characters] == ' '))
+        {
+            switch (argument_format[processed_characters])
+            {
+            case '+':
+                format_options.set_sign(arg_format_options::sign_treatment::always_plus);
+                break;
+
+            case '-':
+                format_options.set_sign(arg_format_options::sign_treatment::minus);
+                break;
+
+            case ' ':
+                format_options.set_sign(arg_format_options::sign_treatment::space);
+                break;
+            }
+
+            processed_characters++;
+        }
+    }
+
     bool ParseArgFormatString(const minstd::string &argument_format, arg_format_options &format_options)
     {
         //
         //  This function is long but not too messy.  Parsing is pretty straightforward.
-        //      It could be broken into smaller functions, but that would just make it more complicated.
-        //      Parsing pretty much proceeds from left to right, extracting the various format specifiers.
-        //      Some specifiers are dependent on others or mutually exclusive, which is why breaking this
-        //      up would get a bit ugly.
+        //      I have broken out some of the bigger chunks into separate functions to keep
+        //      the code comprehensible and hopefully maintainable.
         //
 
         format_options.clear();
@@ -98,47 +217,9 @@ namespace MINIMAL_STD_NAMESPACE
 
         //  Extract the fill character and alignment specifier
 
-        size_t align_spec_loc = strcspn(argument_format.c_str() + processed_characters, "<>^");
-
-        if ((processed_characters + align_spec_loc) < argument_format.length())
+        if (!ParseAlignmentAndFill(argument_format, processed_characters, format_options))
         {
-            if ((align_spec_loc == 0) || (align_spec_loc == 1))
-            {
-                switch (argument_format[processed_characters + align_spec_loc])
-                {
-                case '<':
-                    format_options.alignment_ = arg_format_options::align::left;
-                    break;
-
-                case '>':
-                    format_options.alignment_ = arg_format_options::align::right;
-                    break;
-
-                case '^':
-                    format_options.alignment_ = arg_format_options::align::center;
-                    break;
-                }
-            }
-            else
-            {
-                //  Invalid alignment specifier
-
-                return false;
-            }
-
-            if (align_spec_loc == 1)
-            {
-                //  Fill character cannot be either an opening or closing curly brace.  We can only detect the opening brace here.
-
-                if (argument_format[processed_characters] == '{')
-                {
-                    return false;
-                }
-
-                format_options.fill_ = argument_format[processed_characters];
-            }
-
-            processed_characters += align_spec_loc + 1;
+            return false;
         }
 
         //  Return if we are at the end of the string
@@ -150,27 +231,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         //  If we have a '+', '-', or ' ', then we have a sign specifier
 
-        if ((argument_format[processed_characters] == '+') ||
-            (argument_format[processed_characters] == '-') ||
-            (argument_format[processed_characters] == ' '))
-        {
-            switch (argument_format[processed_characters])
-            {
-            case '+':
-                format_options.sign_ = arg_format_options::sign_treatment::always_plus;
-                break;
-
-            case '-':
-                format_options.sign_ = arg_format_options::sign_treatment::minus;
-                break;
-
-            case ' ':
-                format_options.sign_ = arg_format_options::sign_treatment::space;
-                break;
-            }
-
-            processed_characters++;
-        }
+        ParseSignSpecifier(argument_format, processed_characters, format_options);
 
         //  Return if we are at the end of the string
 
@@ -183,7 +244,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         if (argument_format[processed_characters] == '#')
         {
-            format_options.alt_ = true;
+            format_options.set_alt(true);
             processed_characters++;
         }
 
@@ -198,7 +259,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         if (argument_format[processed_characters] == '0')
         {
-            format_options.zero_fill_ = !format_options.alignment_.has_value(); //  Zero fill is ignored with an alignment specifier
+            format_options.set_zero_fill(!format_options.alignment().has_value()); //  Zero fill is ignored with an alignment specifier
 
             processed_characters++;
         }
@@ -215,7 +276,7 @@ namespace MINIMAL_STD_NAMESPACE
         while ((argument_format[processed_characters] != 0) &&
                (isdigit(argument_format[processed_characters])))
         {
-            format_options.width_ = (format_options.width_.has_value() ? format_options.width_.value() * 10 : 0) + (argument_format[processed_characters] - '0');
+            format_options.set_width((format_options.width().has_value() ? format_options.width().value() * 10 : 0) + (argument_format[processed_characters] - '0'));
             processed_characters++;
         }
 
@@ -235,7 +296,7 @@ namespace MINIMAL_STD_NAMESPACE
             while ((argument_format[processed_characters] != 0) &&
                    (isdigit(argument_format[processed_characters])))
             {
-                format_options.precision_ = (format_options.precision_.has_value() ? format_options.precision_.value() * 10 : 0) + (argument_format[processed_characters] - '0');
+                format_options.set_precision((format_options.precision().has_value() ? format_options.precision().value() * 10 : 0) + (argument_format[processed_characters] - '0'));
                 processed_characters++;
             }
         }
@@ -247,51 +308,9 @@ namespace MINIMAL_STD_NAMESPACE
             return true;
         }
 
-        //  If we have an alphabetic character, then we have a type specifier
+        //  Parse the type specifier if there is one
 
-        if (isalpha(argument_format[processed_characters]))
-        {
-            switch (argument_format[processed_characters])
-            {
-            case 'd':
-                format_options.integer_base_ = 10;
-                format_options.type_specifier_ = 'd';
-                break;
-
-            case 'x':
-                format_options.integer_base_ = 16;
-                format_options.type_specifier_ = 'x';
-                break;
-
-            case 'X':
-                format_options.integer_base_ = 16;
-                format_options.type_specifier_ = 'X';
-                break;
-
-            case 'b':
-                format_options.integer_base_ = 2;
-                format_options.type_specifier_ = 'b';
-                break;
-
-            case 'B':
-                format_options.integer_base_ = 2;
-                format_options.type_specifier_ = 'B';
-                break;
-
-            case 'o':
-                format_options.integer_base_ = 8;
-                format_options.type_specifier_ = 'o';
-                break;
-
-            case 'p':
-                format_options.integer_base_ = 16;
-                format_options.type_specifier_ = 'X'; //  Morph to hex spec
-                break;
-
-            default:
-                format_options.type_specifier_ = argument_format[processed_characters];
-            }
-        }
+        ParseTypeSpecifier(argument_format[processed_characters], format_options);
 
         //  Finished
 
@@ -302,93 +321,90 @@ namespace MINIMAL_STD_NAMESPACE
     //  fmt methods follow
     //
 
-    namespace internal
+    void BuildFormatOutput(minstd::string &buffer, const char *fmt, const fmt_arg *args[], size_t num_args)
     {
-        void BuildOutput(minstd::string &buffer, const char *fmt, const fmt_arg *args[], size_t num_args)
+        minstd::fixed_string<32> argument_format;
+
+        size_t format_placeholder_index = 0;
+
+        size_t format_string_length = strnlen(fmt, SIZE_MAX); //  I don't like SiZE_MAX but we don't know the upper bound....
+
+        size_t i = 0;
+
+        while (fmt[i] != 0x00)
         {
-            minstd::fixed_string<32> argument_format;
+            //  Look for an opening brace or the end of the format string.
 
-            size_t format_placeholder_index = 0;
+            size_t opening_brace = strcspn(fmt + i, "{");
 
-            size_t format_string_length = strnlen(fmt, SIZE_MAX); //  I don't like SiZE_MAX but we don't know the upper bound....
+            buffer.append(fmt + i, opening_brace);
+            i += opening_brace + 1;
 
-            size_t i = 0;
-
-            while (fmt[i] != 0x00)
+            if (i >= format_string_length)
             {
-                //  Look for an opening brace or the end of the format string.
+                //  No more placeholders
 
-                size_t opening_brace = strcspn(fmt + i, "{");
+                break;
+            }
 
-                buffer.append(fmt + i, opening_brace);
-                i += opening_brace + 1;
+            //  Look for a closing brace or the end of the string.
 
-                if (i >= format_string_length)
-                {
-                    //  No more placeholders
+            size_t closing_brace = strcspn(fmt + i, "}");
 
-                    break;
-                }
+            if (i + closing_brace >= format_string_length)
+            {
+                //  No closing brace, so exit now.
 
-                //  Look for a closing brace or the end of the string.
+                break;
+            }
 
-                size_t closing_brace = strcspn(fmt + i, "}");
+            //   Insure the closing brace is not where the fill character is expected
 
-                if (i + closing_brace >= format_string_length)
-                {
-                    //  No closing brace, so exit now.
+            if ((fmt[i + closing_brace + 1] == '<') ||
+                (fmt[i + closing_brace + 1] == '>') ||
+                (fmt[i + closing_brace + 1] == '^'))
+            {
+                buffer += "{Invalid format string: '";
+                buffer.append(fmt + i, closing_brace + 2);
+                buffer += "'}";
+                i += closing_brace + 2;
+                continue;
+            }
 
-                    break;
-                }
+            //  Extract the format string
 
-                //   Insure the closing brace is not where the fill character is expected
+            argument_format.clear();
 
-                if(( fmt[i + closing_brace + 1] == '<' ) ||
-                   ( fmt[i + closing_brace + 1] == '>' ) ||
-                   ( fmt[i + closing_brace + 1] == '^' ))
-                {
-                    buffer += "{Invalid format string: '";
-                    buffer.append(fmt + i, closing_brace + 2);
-                    buffer += "'}";
-                    i += closing_brace + 2;
-                    continue;
-                }
+            argument_format.append(fmt + i, closing_brace);
 
-                //  Extract the format string
+            i += closing_brace + 1;
 
-                argument_format.clear();
+            //  Look for a positional argument
 
-                argument_format.append(fmt + i, closing_brace);
+            auto arg_position = ParseArgId(argument_format);
 
-                i += closing_brace + 1;
+            if (!arg_position.first())
+            {
+                //  Invalid format string
 
-                //  Look for a positional argument
+                buffer += "{Invalid format string: '";
+                buffer += argument_format;
+                buffer += "'}";
+                continue;
+            }
 
-                auto arg_position = ParseArgId(argument_format);
+            //  Insert the argument.  If this is not a positional argument, we need to advance to the next argument.
 
-                if (!arg_position.first())
-                {
-                    //  Invalid format string
+            const uint32_t position = arg_position.second().has_value() ? arg_position.second().value() : format_placeholder_index++;
 
-                    buffer += "{Invalid format string: '";
-                    buffer += argument_format;
-                    buffer += "'}";
-                    continue;
-                }
-
-                //  Insert the argument.  If this is not a positional argument, we need to advance to the next argument.
-
-                const uint32_t position = arg_position.second().has_value() ? arg_position.second().value() : format_placeholder_index++;
-
-                if (position < num_args)
-                {
-                    args[position]->Append(buffer, argument_format);
-                }
-                else
-                {
-                    buffer += "{Argument position out of range}";
-                }
+            if (position < num_args)
+            {
+                args[position]->Append(buffer, argument_format);
+            }
+            else
+            {
+                buffer += "{Argument position out of range}";
             }
         }
-    } // namespace internal
+    }
 } // namespace minstd
