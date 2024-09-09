@@ -2,13 +2,13 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include <format>
-
 #include "cli/list_command.h"
 
 #include "os_entity.h"
 
 #include "filesystem/filesystems.h"
+
+#include <format>
 
 namespace cli
 {
@@ -73,8 +73,7 @@ namespace cli
 
             auto callback = [&buffer, &context](const filesystems::FilesystemDirectoryEntry &directory_entry) -> filesystems::FilesystemDirectoryVisitorCallbackStatus
             {
-                //                printf("%s %-9u %s %s\n", directory_entry.AttributesString(), directory_entry.Size(), directory_entry.Name().c_str(), directory_entry.Extension().c_str());
-                context.output_stream_ << minstd::fmt::format(buffer, "{} {:<9} {} {}\n", directory_entry.AttributesString(), directory_entry.Size(), directory_entry.Name(), directory_entry.Extension());
+                context.output_stream_ << minstd::format(buffer, "{} {:<9} {} {}\n", directory_entry.AttributesString(), directory_entry.Size(), directory_entry.Name(), directory_entry.Extension());
                 return filesystems::FilesystemDirectoryVisitorCallbackStatus::NEXT;
             };
 

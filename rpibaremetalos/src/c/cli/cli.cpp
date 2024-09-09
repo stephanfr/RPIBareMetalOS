@@ -18,6 +18,7 @@
 #include "utility/dump_diagnostics.h"
 
 #include "cli/list_command.h"
+#include "cli/show_command.h"
 
 namespace cli
 {
@@ -52,6 +53,7 @@ namespace cli
     void CommandLineInterface::Run()
     {
         ListCommandDispatcher list_command_dispatcher;
+        ShowCommandDispatcher show_command_dispatcher;
 
         printf("Command Line Interface\n");
 
@@ -69,6 +71,10 @@ namespace cli
             if (strnicmp(first_token, "list", MAX_CLI_COMMAND_LENGTH) == 0)
             {
                 list_command_dispatcher.DispatchCommand(command_parser_, session_context_);
+            }
+            else if (strnicmp(first_token, "show", MAX_CLI_COMMAND_LENGTH) == 0)
+            {
+                show_command_dispatcher.DispatchCommand(command_parser_, session_context_);
             }
             else if (strnicmp(first_token, "change", MAX_CLI_COMMAND_LENGTH) == 0)
             {
