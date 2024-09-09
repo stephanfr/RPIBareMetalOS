@@ -275,6 +275,11 @@ namespace MINIMAL_STD_NAMESPACE
                 format_options.type_ = 'o';
                 break;
 
+            case 'p':
+                format_options.integer_base_ = 16;
+                format_options.type_ = 'X'; //  Morph to hex spec
+                break;
+
             default:
                 format_options.type_ = argument_format[processed_characters];
             }

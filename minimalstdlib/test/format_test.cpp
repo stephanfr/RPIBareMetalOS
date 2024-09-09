@@ -155,6 +155,14 @@ namespace
         STRCMP_EQUAL("This is a test: 12.3400 -56.7800\n", minstd::format(formatted_string, "This is a test: {} {}\n", (double)12.34, (double)-56.78).c_str());
     }
 
+    TEST(FormatTests, Pointer)
+    {
+        minstd::fixed_string<256> formatted_string;
+
+        STRNCMP_EQUAL("This is a test: 0X", minstd::format(formatted_string, "This is a test: {}\n", &formatted_string).c_str(), 18);
+        STRNCMP_EQUAL("This is a test: 0X", minstd::format(formatted_string, "This is a test: {:p}\n", &formatted_string).c_str(), 18);
+    }
+
     TEST(FormatTests, PositionalArguments)
     {
         minstd::fixed_string<256> formatted_string;

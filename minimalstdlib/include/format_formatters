@@ -63,6 +63,17 @@ namespace FMT_FORMATTERS_NAMESPACE
                                                           minstd::optional<char>(),
                                                           minstd::optional<uint32_t>());
 
+    const auto DEFAULT_POINTER_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                          minstd::optional<uint32_t>(12),
+                                                          minstd::optional<uint32_t>(),
+                                                          minstd::optional<char>(' '),
+                                                          minstd::optional<arg_format_options::align>(arg_format_options::align::left),
+                                                          minstd::optional<bool>(true),
+                                                          minstd::optional<arg_format_options::sign>(),
+                                                          minstd::optional<bool>(true),
+                                                          minstd::optional<char>('X'),
+                                                          minstd::optional<uint32_t>(16));
+
     //
     //  Declare a template helper to provide default formatting options for a type
     //
@@ -231,6 +242,8 @@ namespace FMT_FORMATTERS_NAMESPACE
     DECLARE_TYPE_FORMATTER(const double, DoubleFormatter, DEFAULT_FLOATING_POINT_FORMAT)
 
     DECLARE_TYPE_FORMATTER(const bool, BooleanFormatter, DEFAULT_STRING_FORMAT)
+
+    DECLARE_TYPE_FORMATTER(const void*, PointerFormatter, DEFAULT_POINTER_FORMAT)
 
     //
     //  Undefine the macro before we leave

@@ -455,4 +455,11 @@ namespace FMT_FORMATTERS_NAMESPACE
             FormattedStringAppend(buffer, "false", 5, format_options);
         }
     }
+    
+    template <>
+    void fmt_arg_base<const void*>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
+    {
+        UnsignedIntToString(buffer, reinterpret_cast<uint64_t>(value_), format_options);
+    }
+
 } // namespace FMT_FORMATTERS_NAMESPACE
