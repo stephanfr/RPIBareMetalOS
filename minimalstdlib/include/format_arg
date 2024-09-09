@@ -68,6 +68,13 @@ namespace MINIMAL_STD_NAMESPACE
         const minstd::optional<char>& type_specifier() const { return type_specifier_; }
         const minstd::optional<uint32_t>& integer_base() const { return integer_base_; }
 
+        bool is_left_aligned() const { return alignment_.has_value() && alignment_.value() == align::left; }
+        bool is_right_aligned() const { return alignment_.has_value() && alignment_.value() == align::right; }
+        bool is_center_aligned() const { return alignment_.has_value() && alignment_.value() == align::center; }
+        
+        bool is_alt() const { return alt_.has_value() && alt_.value(); }
+        bool is_zero_fill() const { return zero_fill_.has_value() && zero_fill_.value(); }
+
         void clear()
         {
             width_.reset();

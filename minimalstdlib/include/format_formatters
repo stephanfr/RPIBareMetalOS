@@ -59,7 +59,7 @@ namespace FMT_FORMATTERS_NAMESPACE
                                                           minstd::optional<char>(),
                                                           minstd::optional<uint32_t>());
 
-    const auto DEFAULT_POINTER_FORMAT = arg_format_options(minstd::optional<uint32_t>(12),
+    const auto DEFAULT_POINTER_FORMAT = arg_format_options(minstd::optional<uint32_t>(18),
                                                           minstd::optional<uint32_t>(),
                                                           minstd::optional<char>(' '),
                                                           minstd::optional<arg_format_options::align>(arg_format_options::align::left),

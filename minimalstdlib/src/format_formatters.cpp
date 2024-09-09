@@ -19,11 +19,33 @@ namespace FMT_FORMATTERS_NAMESPACE
     //  Function to handle integer prefixes for binary, octal or hex
     //
 
-    void HandleIntegerPrefix(minstd::string &buffer, const arg_format_options &format)
+    size_t IntegerPrefixLength(const arg_format_options &format)
     {
         //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
 
-        if (format.alt().has_value() && format.alt().value() && format.type_specifier().has_value())
+        if (format.is_alt() && format.type_specifier().has_value())
+        {
+            switch (format.type_specifier().value())
+            {
+            case 'o':
+                return 1;
+
+            case 'b':
+            case 'B':
+            case 'x':
+            case 'X':
+                return 2;
+            }
+        }
+
+        return 0;
+    }
+
+    void AddIntegerPrefix(minstd::string &buffer, const arg_format_options &format)
+    {
+        //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
+
+        if (format.is_alt() && format.type_specifier().has_value())
         {
             switch (format.type_specifier().value())
             {
@@ -60,29 +82,33 @@ namespace FMT_FORMATTERS_NAMESPACE
 
     void HandleNumericAlignmentAndFill(minstd::string &buffer, const minstd::string &sign, size_t start_of_number, const arg_format_options &format)
     {
-        size_t number_length = (buffer.size() - start_of_number) + sign.size();
+        size_t number_length = (buffer.size() - start_of_number) + sign.size() + IntegerPrefixLength(format);
 
         //  Add the sign if this is not zero filled
 
-        if (!format.zero_fill().has_value() || !format.zero_fill().value())
+        if (!format.is_zero_fill())
         {
+            //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
+
+            AddIntegerPrefix(buffer, format);
+
             buffer += sign;
         }
 
         //  If the width is specified and the number of characters is less than the width and the
-        //      alignment is either right or center, then we need to add fill characters.
+        //      alignment is either right or center or we have zero fill, then we need to add fill characters.
 
         if (format.width().has_value() &&
             (format.width().value() > number_length) &&
-            ((format.alignment().value() == arg_format_options::align::right) || (format.alignment().value() == arg_format_options::align::center)))
+            (format.is_zero_fill() || format.is_right_aligned() || format.is_center_aligned()))
         {
             //  Determine how much to fill in front of the number
 
             size_t fill_count = format.width().value() - number_length;
 
-            if (!format.zero_fill().has_value() || !format.zero_fill().value())
+            if (!format.is_zero_fill())
             {
-                if (format.alignment().value() == arg_format_options::align::center)
+                if (format.is_center_aligned())
                 {
                     fill_count /= 2;
                 }
@@ -98,11 +124,22 @@ namespace FMT_FORMATTERS_NAMESPACE
                 {
                     buffer.push_back('0');
                 }
-
-                //  Add the sign
-
-                buffer += sign;
             }
+        }
+
+        //  Add the sign and prefix if zero fill is specified.
+        //      We do not do this above, because we only fill above if there is a width specified and it still needs to be met.
+
+        if (format.is_zero_fill())
+        {
+
+            //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
+
+            AddIntegerPrefix(buffer, format);
+
+            //  Add the sign
+
+            buffer += sign;
         }
 
         //	Reverse the string in place
@@ -234,10 +271,6 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         UnsignedIntToReversedString(buffer, value, format.integer_base().value(), numeric_conversion_digits);
 
-        //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
-
-        HandleIntegerPrefix(buffer, format);
-
         //  Align, pad and unreverse the number
 
         HandleNumericAlignmentAndFill(buffer, minstd::fixed_string<4>(), start_of_number, format);
@@ -275,10 +308,6 @@ namespace FMT_FORMATTERS_NAMESPACE
         {
             UnsignedIntToReversedString(buffer, (unsigned_T)value, format.integer_base().value(), numeric_conversion_digits);
         }
-
-        //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
-
-        HandleIntegerPrefix(buffer, format);
 
         //  Get the sign
 

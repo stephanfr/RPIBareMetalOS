@@ -158,9 +158,10 @@ namespace
     TEST(FormatTests, Pointer)
     {
         minstd::fixed_string<256> formatted_string;
+        void *pointer = (void *)0x00000000000a3348;
 
-        STRNCMP_EQUAL("This is a test: 0X", minstd::format(formatted_string, "This is a test: {}\n", &formatted_string).c_str(), 18);
-        STRNCMP_EQUAL("This is a test: 0X", minstd::format(formatted_string, "This is a test: {:p}\n", &formatted_string).c_str(), 18);
+        STRNCMP_EQUAL("This is a test: 0X00000000000A3348", minstd::format(formatted_string, "This is a test: {}", pointer).c_str(), 32);
+        STRNCMP_EQUAL("This is a test: 0X00000000000A3348", minstd::format(formatted_string, "This is a test: {:p}", pointer).c_str(), 32);
     }
 
     TEST(FormatTests, PositionalArguments)
@@ -209,6 +210,8 @@ namespace
         minstd::fixed_string<256> formatted_string;
 
         STRCMP_EQUAL("This is a test: 000423 of zero prefixing", minstd::format(formatted_string, "This is a test: {:06} {}", 423, "of zero prefixing").c_str());
+    
+        STRCMP_EQUAL("0x00a02082", minstd::format(formatted_string, "{:#010x}", 0x00a02082).c_str());
     }
 
     TEST(FormatTests, Precision)
