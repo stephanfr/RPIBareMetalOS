@@ -15,8 +15,6 @@ namespace FMT_FORMATTERS_NAMESPACE
     constexpr char LOWER_CASE_NUMERIC_CONVERSION_DIGITS[37] = "0123456789abcdefghijklmnopqrstuvwxyz";
     constexpr char UPPER_CASE_NUMERIC_CONVERSION_DIGITS[37] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-    constexpr uint32_t DEFAULT_FLOATING_POINT_PRECISION = 4;
-
     //
     //  Function to handle integer prefixes for binary, octal or hex
     //
@@ -60,25 +58,50 @@ namespace FMT_FORMATTERS_NAMESPACE
     //  Function to align and pad numerics
     //
 
-    void HandleNumericAlignmentAndFill(minstd::string &buffer, size_t start_of_number, const arg_format_options &format)
+    void HandleNumericAlignmentAndFill(minstd::string &buffer, const minstd::string &sign, size_t start_of_number, const arg_format_options &format)
     {
+        size_t number_length = (buffer.size() - start_of_number) + sign.size();
+
+        //  Add the sign if this is not zero filled
+
+        if (!format.zero_fill_.has_value() || !format.zero_fill_.value())
+        {
+            buffer += sign;
+        }
+
         //  If the width is specified and the number of characters is less than the width and the
         //      alignment is either right or center, then we need to add fill characters.
 
         if (format.width_.has_value() &&
-            (format.width_.value() > buffer.size() - start_of_number) &&
+            (format.width_.value() > number_length) &&
             ((format.alignment_.value() == arg_format_options::align::right) || (format.alignment_.value() == arg_format_options::align::center)))
         {
-            size_t fill_count = format.width_.value() - (buffer.size() - start_of_number);
+            //  Determine how much to fill in front of the number
 
-            if (format.alignment_.value() == arg_format_options::align::center)
+            size_t fill_count = format.width_.value() - number_length;
+
+            if (!format.zero_fill_.has_value() || !format.zero_fill_.value())
             {
-                fill_count /= 2;
+                if (format.alignment_.value() == arg_format_options::align::center)
+                {
+                    fill_count /= 2;
+                }
+
+                for (size_t i = 0; i < fill_count; i++)
+                {
+                    buffer.push_back(format.fill_.value());
+                }
             }
-
-            for (size_t i = 0; i < fill_count; i++)
+            else
             {
-                buffer.push_back(format.fill_.value());
+                for (size_t i = 0; i < fill_count; i++)
+                {
+                    buffer.push_back('0');
+                }
+
+                //  Add the sign
+
+                buffer += sign;
             }
         }
 
@@ -98,9 +121,11 @@ namespace FMT_FORMATTERS_NAMESPACE
         //  If the width is specified and the number of characters is less than the width
         //      then we have to add fill characters for either left or center alignment.
 
-        if (format.width_.has_value() && (format.width_.value() > buffer.size() - start_of_number))
+        number_length = (buffer.size() - start_of_number) + sign.size();
+
+        if (format.width_.has_value() && (format.width_.value() > number_length))
         {
-            size_t fill_count = format.width_.value() - (buffer.size() - start_of_number);
+            size_t fill_count = format.width_.value() - number_length;
 
             for (size_t i = 0; i < fill_count; i++)
             {
@@ -122,18 +147,6 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         uint64_t decimals;
         uint64_t units;
-
-        //  Set the default alignment and fill if they were not specified
-
-        if (!format.alignment_.has_value())
-        {
-            const_cast<arg_format_options &>(format).alignment_ = arg_format_options::align::right;
-        }
-
-        if (!format.fill_.has_value())
-        {
-            const_cast<arg_format_options &>(format).fill_ = ' ';
-        }
 
         //  Start the conversion
 
@@ -168,14 +181,18 @@ namespace FMT_FORMATTERS_NAMESPACE
             units /= 10;
         }
 
+        //  Get the sign
+
+        minstd::fixed_string<4> sign;
+
         if (arg < 0)
         {
-            buffer.push_back('-'); //  Add the minus sign
+            sign = "-";
         }
 
         //  Align, pad and unreverse the number
 
-        HandleNumericAlignmentAndFill(buffer, start_of_number, format);
+        HandleNumericAlignmentAndFill(buffer, sign, start_of_number, format);
     }
 
     //
@@ -209,18 +226,6 @@ namespace FMT_FORMATTERS_NAMESPACE
             return;
         }
 
-        //  Set the default alignment and fill if they were not specified
-
-        if (!format.alignment_.has_value())
-        {
-            const_cast<arg_format_options &>(format).alignment_ = arg_format_options::align::right;
-        }
-
-        if (!format.fill_.has_value())
-        {
-            const_cast<arg_format_options &>(format).fill_ = ' ';
-        }
-
         //  Get the number in a reversed order
 
         size_t start_of_number = buffer.size();
@@ -235,7 +240,7 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         //  Align, pad and unreverse the number
 
-        HandleNumericAlignmentAndFill(buffer, start_of_number, format);
+        HandleNumericAlignmentAndFill(buffer, minstd::fixed_string<4>(), start_of_number, format);
     }
 
     //
@@ -243,7 +248,7 @@ namespace FMT_FORMATTERS_NAMESPACE
     //
 
     template <typename T>
-    static void SignedIntToString(minstd::string &buffer, T value, const arg_format_options &format)
+    void SignedIntToString(minstd::string &buffer, T value, const arg_format_options &format)
     {
         //  Insure the requested base is OK
 
@@ -252,18 +257,6 @@ namespace FMT_FORMATTERS_NAMESPACE
         {
             buffer += "{Invalid base}";
             return;
-        }
-
-        //  Set the default alignment and fill if they were not specified
-
-        if (!format.alignment_.has_value())
-        {
-            const_cast<arg_format_options &>(format).alignment_ = arg_format_options::align::right;
-        }
-
-        if (!format.fill_.has_value())
-        {
-            const_cast<arg_format_options &>(format).fill_ = ' ';
         }
 
         //  We need to convert the value to an unsigned type to handle the negative case, only if the base is 10.
@@ -287,122 +280,179 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         HandleIntegerPrefix(buffer, format);
 
-        //  Add a negative sign if this is a negative value
+        //  Get the sign
 
-        if (value < 0)
+        minstd::fixed_string<4> sign;
+
+        if (format.sign_.has_value())
         {
-            buffer.push_back('-');
+            if (value >= 0)
+            {
+                if (format.sign_.value() == arg_format_options::sign::always_plus)
+                {
+                    sign = "+";
+                }
+                else if (format.sign_.value() == arg_format_options::sign::space)
+                {
+                    sign = " ";
+                }
+            }
+            else
+            {
+                sign = "-";
+            }
+        }
+        else if (value < 0)
+        {
+            sign = "-";
         }
 
         //  Align, pad and unreverse the number
 
-        HandleNumericAlignmentAndFill(buffer, start_of_number, format);
+        HandleNumericAlignmentAndFill(buffer, sign, start_of_number, format);
     }
 
     //
-    //  Append methods for the different format argument types
+    //  Template function to append strings to the buffer
     //
 
-    void CharacterStringFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <typename T>
+    void FormattedStringAppend(minstd::string &buffer, const T &value, size_t length, const arg_format_options &format_options)
     {
-        if (!format_options.alignment_.has_value())
+        //  Determine if fill is needed for alignment and if yes, the amount of fill needed before and/or after the string
+
+        size_t fill_after_count = 0;
+        size_t fill_before_count = 0;
+
+        if (format_options.width_.has_value() && (format_options.width_.value() > length))
         {
-            const_cast<arg_format_options &>(format_options).alignment_ = arg_format_options::align::left;
+            size_t fill_count = format_options.width_.value() - length;
+
+            if (format_options.alignment_.has_value())
+            {
+                switch (format_options.alignment_.value())
+                {
+                case arg_format_options::align::left:
+                    fill_after_count = fill_count;
+                    break;
+
+                case arg_format_options::align::right:
+                    fill_before_count = fill_count;
+                    break;
+
+                case arg_format_options::align::center:
+                    fill_before_count = fill_count / 2;
+                    fill_after_count = fill_count - fill_before_count;
+                    break;
+                }
+            }
         }
 
-        buffer += value_;
-    }
-
-    void StringFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
-    {
-        if (!format_options.alignment_.has_value())
+        for (size_t i = 0; i < fill_before_count; i++)
         {
-            const_cast<arg_format_options &>(format_options).alignment_ = arg_format_options::align::left;
+            buffer.push_back(format_options.fill_.value());
         }
 
-        buffer += value_;
+        buffer += value;
+
+        for (size_t i = 0; i < fill_after_count; i++)
+        {
+            buffer.push_back(format_options.fill_.value());
+        }
     }
 
-    void Unsigned64BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    //
+    //  Specializations for specific argument formatters
+    //
+
+    template <>
+    void fmt_arg_base<const char>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
+    {
+        FormattedStringAppend(buffer, value_, 1, format_options);
+    }
+
+    template <>
+    void fmt_arg_base<const char *>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
+    {
+        FormattedStringAppend(buffer, value_, strnlen(value_, SIZE_MAX), format_options);
+    }
+
+    template <>
+    void fmt_arg_base<const minstd::string &>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
+    {
+        FormattedStringAppend(buffer, value_, value_.length(), format_options);
+    }
+
+    template <>
+    void fmt_arg_base<const uint64_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         UnsignedIntToString(buffer, value_, format_options);
     }
 
-    void Signed64BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const int64_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         SignedIntToString(buffer, value_, format_options);
     }
 
-    void Unsigned32BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const uint32_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         UnsignedIntToString(buffer, value_, format_options);
     }
 
-    void Signed32BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const int32_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         SignedIntToString(buffer, value_, format_options);
     }
 
-    void Unsigned16BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const uint16_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         UnsignedIntToString(buffer, value_, format_options);
     }
 
-    void Signed16BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const int16_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         SignedIntToString(buffer, value_, format_options);
     }
 
-    void Unsigned8BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const uint8_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         UnsignedIntToString(buffer, value_, format_options);
     }
 
-    void Signed8BitIntFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const int8_t>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         SignedIntToString(buffer, value_, format_options);
     }
 
-    void FloatFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const float>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
-        if (!format_options.alignment_.has_value())
-        {
-            const_cast<arg_format_options &>(format_options).alignment_ = arg_format_options::align::right;
-        }
-
-        if (!format_options.precision_.has_value())
-        {
-            const_cast<arg_format_options &>(format_options).precision_ = DEFAULT_FLOATING_POINT_PRECISION;
-        }
-
         FloatToString(buffer, value_, format_options);
     }
 
-    void DoubleFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const double>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
-        if (!format_options.alignment_.has_value())
-        {
-            const_cast<arg_format_options &>(format_options).alignment_ = arg_format_options::align::right;
-        }
-
-        if (!format_options.precision_.has_value())
-        {
-            const_cast<arg_format_options &>(format_options).precision_ = DEFAULT_FLOATING_POINT_PRECISION;
-        }
-
         FloatToString(buffer, value_, format_options);
     }
 
-    void BoolFormatter::Append(minstd::string &buffer, const arg_format_options &format_options) const
+    template <>
+    void fmt_arg_base<const bool>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
-        if(value_)
+        if (value_)
         {
-            buffer += "true";
+            FormattedStringAppend(buffer, "true", 4, format_options);
         }
         else
         {
-            buffer += "false";
+            FormattedStringAppend(buffer, "false", 5, format_options);
         }
     }
-
 } // namespace FMT_FORMATTERS_NAMESPACE

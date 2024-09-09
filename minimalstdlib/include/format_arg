@@ -4,13 +4,17 @@
 
 #pragma once
 
-#include <optional>
 #include <basic_string>
+#include <optional>
 
 namespace MINIMAL_STD_NAMESPACE
 {
+    //  Declare a class to model the default format specification
+
     typedef struct arg_format_options
     {
+        using type = arg_format_options;
+
         typedef enum class align
         {
             left,
@@ -18,13 +22,48 @@ namespace MINIMAL_STD_NAMESPACE
             center
         } align;
 
+        typedef enum class sign
+        {
+            always_plus,
+            minus,
+            space
+        } sign;
+
+        arg_format_options() : position_(), width_(), precision_(), fill_(), alignment_(), alt_(), sign_(), type_(), integer_base_() {}
+        arg_format_options(minstd::optional<uint32_t> position,
+                           minstd::optional<uint32_t> width,
+                           minstd::optional<uint32_t> precision,
+                           minstd::optional<char> fill,
+                           minstd::optional<align> alignment,
+                           minstd::optional<bool> alt,
+                           minstd::optional<sign> sign,
+                           minstd::optional<bool> zero_fill,
+                           minstd::optional<char> type,
+                           minstd::optional<uint32_t> integer_base) : position_(position),
+                                                                      width_(width),
+                                                                      precision_(precision),
+                                                                      fill_(fill),
+                                                                      alignment_(alignment),
+                                                                      alt_(alt),
+                                                                      sign_(sign),
+                                                                      zero_fill_(zero_fill),
+                                                                      type_(type),
+                                                                      integer_base_(integer_base) {}
+
+        arg_format_options(const arg_format_options &other) = delete;
+        arg_format_options(arg_format_options &&other) = delete;
+
+        arg_format_options &operator=(const arg_format_options &other) = delete;
+        arg_format_options &operator=(arg_format_options &&other) = delete;
+
         minstd::optional<uint32_t> position_;
         minstd::optional<uint32_t> width_;
         minstd::optional<uint32_t> precision_;
         minstd::optional<char> fill_;
         minstd::optional<align> alignment_;
         minstd::optional<bool> alt_;
-        minstd::optional<char> sign_;
+        minstd::optional<sign> sign_;
+        minstd::optional<bool> zero_fill_;
         minstd::optional<char> type_;
         minstd::optional<uint32_t> integer_base_;
 
@@ -37,16 +76,76 @@ namespace MINIMAL_STD_NAMESPACE
             alignment_.reset();
             alt_.reset();
             sign_.reset();
+            zero_fill_.reset();
             type_.reset();
             integer_base_.reset();
         }
 
+        void merge_defaults(const arg_format_options &defaults)
+        {
+            if (!position_.has_value() && defaults.position_.has_value())
+            {
+                position_ = defaults.position_;
+            }
+
+            if (!width_.has_value() && defaults.width_.has_value())
+            {
+                width_ = defaults.width_;
+            }
+
+            if (!precision_.has_value() && defaults.precision_.has_value())
+            {
+                precision_ = defaults.precision_;
+            }
+
+            if (!fill_.has_value() && defaults.fill_.has_value())
+            {
+                fill_ = defaults.fill_;
+            }
+
+            if (!alignment_.has_value() && defaults.alignment_.has_value())
+            {
+                alignment_ = defaults.alignment_;
+            }
+
+            if (!alt_.has_value() && defaults.alt_.has_value())
+            {
+                alt_ = defaults.alt_;
+            }
+
+            if (!sign_.has_value() && defaults.sign_.has_value())
+            {
+                sign_ = defaults.sign_;
+            }
+
+            if (!zero_fill_.has_value() && defaults.zero_fill_.has_value())
+            {
+                zero_fill_ = defaults.zero_fill_;
+            }
+
+            if (!type_.has_value() && defaults.type_.has_value())
+            {
+                type_ = defaults.type_;
+            }
+
+            if (!integer_base_.has_value() && defaults.integer_base_.has_value())
+            {
+                integer_base_ = defaults.integer_base_;
+            }
+        }
+
     } arg_format_options;
+
+    //  Declare a couple functions to parse the format string into the options above
+
+    minstd::pair<bool, minstd::optional<uint32_t>> ParseArgId(const minstd::string &argument_format);
+    bool ParseArgFormatString(const minstd::string &argument_format, arg_format_options &format_options);
+
+    //  Declare the abstract base class for all the format arguments
 
     class fmt_arg
     {
     public:
-        virtual void Append(minstd::string &buffer, const arg_format_options &format_options) const = 0;
+        virtual void Append(minstd::string &buffer, const minstd::string &format) const = 0;
     };
-
 }

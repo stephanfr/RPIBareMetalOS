@@ -144,6 +144,13 @@ namespace MINIMAL_STD_NAMESPACE
             return length_ == 0;
         }
 
+        basic_string<T> &operator+=(const T value)
+        {
+            push_back(value);
+
+            return *this;
+        }
+
         basic_string<T> &operator+=(const T *value)
         {
             grow_buffer_for_string(value);
@@ -164,7 +171,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             size_t chars_copied = 0;
 
-            while( value[chars_copied] != 0 && chars_copied < length && length_ < max_size_ - 1)
+            while (value[chars_copied] != 0 && chars_copied < length && length_ < max_size_ - 1)
             {
                 buffer_[length_++] = value[chars_copied++];
             }

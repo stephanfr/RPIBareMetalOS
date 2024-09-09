@@ -13,367 +13,228 @@ namespace FMT_FORMATTERS_NAMESPACE
     using arg_format_options = ::MINIMAL_STD_NAMESPACE::arg_format_options;
     using fmt_arg = ::MINIMAL_STD_NAMESPACE::fmt_arg;
 
+    constexpr uint32_t DEFAULT_FLOATING_POINT_PRECISION = 4;
+
     //
-    //  char* formatter
+    //  Define default formatting options for various types
     //
 
-    class CharacterStringFormatter : public fmt_arg
+    const auto EMPTY_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                 minstd::optional<uint32_t>(),
+                                                 minstd::optional<uint32_t>(),
+                                                 minstd::optional<char>(),
+                                                 minstd::optional<arg_format_options::align>(),
+                                                 minstd::optional<bool>(),
+                                                 minstd::optional<arg_format_options::sign>(),
+                                                 minstd::optional<bool>(),
+                                                 minstd::optional<char>(),
+                                                 minstd::optional<uint32_t>());
+
+    const auto DEFAULT_INTEGER_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                           minstd::optional<uint32_t>(),
+                                                           minstd::optional<uint32_t>(),
+                                                           minstd::optional<char>(' '),
+                                                           minstd::optional<arg_format_options::align>(arg_format_options::align::right),
+                                                           minstd::optional<bool>(),
+                                                           minstd::optional<arg_format_options::sign>(arg_format_options::sign::minus),
+                                                           minstd::optional<bool>(),
+                                                           minstd::optional<char>(),
+                                                           minstd::optional<uint32_t>(10));
+
+    const auto DEFAULT_FLOATING_POINT_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                                  minstd::optional<uint32_t>(),
+                                                                  minstd::optional<uint32_t>(DEFAULT_FLOATING_POINT_PRECISION),
+                                                                  minstd::optional<char>(' '),
+                                                                  minstd::optional<arg_format_options::align>(arg_format_options::align::right),
+                                                                  minstd::optional<bool>(),
+                                                                  minstd::optional<arg_format_options::sign>(arg_format_options::sign::minus),
+                                                                  minstd::optional<bool>(),
+                                                                  minstd::optional<char>(),
+                                                                  minstd::optional<uint32_t>(10));
+
+    const auto DEFAULT_STRING_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                          minstd::optional<uint32_t>(),
+                                                          minstd::optional<uint32_t>(),
+                                                          minstd::optional<char>(' '),
+                                                          minstd::optional<arg_format_options::align>(arg_format_options::align::left),
+                                                          minstd::optional<bool>(),
+                                                          minstd::optional<arg_format_options::sign>(),
+                                                          minstd::optional<bool>(),
+                                                          minstd::optional<char>(),
+                                                          minstd::optional<uint32_t>());
+
+    //
+    //  Declare a template helper to provide default formatting options for a type
+    //
+
+    template <typename T, typename U>
+    class default_format
     {
     public:
-        CharacterStringFormatter(const char *value)
+        static const U &format();
+    };
+
+    //
+    //  Declare a base class for formatters.  This is not strictly required but will make defining the
+    //      formatters for most of the 'built-in' types much easier and insure consistency.
+    //
+
+    template <typename T, typename U = arg_format_options>
+    class fmt_arg_base : public fmt_arg
+    {
+    public:
+        using formatted_type = minstd::conditional<minstd::is_pointer_v<T> || minstd::is_reference_v<T>, T, T &>::type;
+
+        fmt_arg_base() = delete;
+        fmt_arg_base(const fmt_arg_base &other) = delete;
+        fmt_arg_base(fmt_arg_base &&other) = delete;
+
+        fmt_arg_base(const formatted_type value)
             : value_(value)
         {
         }
 
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+        fmt_arg_base &operator=(const fmt_arg_base &other) = delete;
+        fmt_arg_base &operator=(fmt_arg_base &&other) = delete;
 
-    private:
-        const char *value_;
+        void Append(minstd::string &buffer, const minstd::string &format) const
+        {
+            U format_options;
+
+            if (ParseFormatString(format, format_options))
+            {
+                format_options.merge_defaults(default_format<T, U>::format());
+
+                AppendInternal(buffer, format_options);
+            }
+            else
+            {
+                //  Invalid format string
+
+                buffer += "{Invalid format string: '";
+                buffer += format;
+                buffer += "'}";
+            }
+        }
+
+    protected:
+        const formatted_type value_;
+
+        void ParseFormatString(const minstd::string &format, U &format_options) const;
+
+        void AppendInternal(minstd::string &buffer, const U &format_options) const;
     };
 
-    inline const size_t GetFmtArgSize(const char *value)
-    {
-        return sizeof(CharacterStringFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const char *value)
-    {
-        return new (mem_loc) CharacterStringFormatter(value);
-    }
-
     //
-    //  minstd::string formatter
+    //  Formatter base class using the standard format options type.
     //
 
-    class StringFormatter : public fmt_arg
+    template <typename T>
+    class fmt_arg_base<T, arg_format_options> : public fmt_arg
     {
     public:
-        StringFormatter(const minstd::string &value)
+        using formatted_type = minstd::conditional<minstd::is_pointer_v<T> || minstd::is_reference_v<T>, T, T &>::type;
+
+        fmt_arg_base() = delete;
+        fmt_arg_base(const fmt_arg_base &other) = delete;
+        fmt_arg_base(fmt_arg_base &&other) = delete;
+
+        fmt_arg_base(const formatted_type value)
             : value_(value)
         {
         }
 
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+        fmt_arg_base &operator=(const fmt_arg_base &other) = delete;
+        fmt_arg_base &operator=(fmt_arg_base &&other) = delete;
 
-    private:
-        const minstd::string &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const minstd::string &value)
-    {
-        return sizeof(StringFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const minstd::string &value)
-    {
-        return new (mem_loc) StringFormatter(value);
-    }
-
-    //
-    //  64 bit unsigned integer formatter
-    //
-
-    class Unsigned64BitIntFormatter : public fmt_arg
-    {
-    public:
-        Unsigned64BitIntFormatter(const uint64_t &value)
-            : value_(value)
+        void Append(minstd::string &buffer, const minstd::string &format) const
         {
+            arg_format_options format_options;
+
+            if (ParseFormatString(format, format_options))
+            {
+                format_options.merge_defaults(default_format<T, arg_format_options>::format());
+
+                AppendInternal(buffer, format_options);
+            }
+            else
+            {
+                //  Invalid format string
+
+                buffer += "{Invalid format string: '";
+                buffer += format;
+                buffer += "'}";
+            }
         }
 
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+    protected:
+        const formatted_type value_;
 
-    private:
-        const uint64_t &value_;
-    };
+        void AppendInternal(minstd::string &buffer, const arg_format_options &format_options) const;
 
-    inline const size_t GetFmtArgSize(const uint64_t &value)
-    {
-        return sizeof(Unsigned64BitIntFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint64_t &value)
-    {
-        return new (mem_loc) Unsigned64BitIntFormatter(value);
-    }
-
-    //
-    //  64 bit signed integer formatter
-    //
-
-    class Signed64BitIntFormatter : public fmt_arg
-    {
-    public:
-        Signed64BitIntFormatter(const int64_t &value)
-            : value_(value)
+        bool ParseFormatString(const minstd::string &format, arg_format_options &format_options) const
         {
+            return ParseArgFormatString(format, format_options);
         }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const int64_t &value_;
     };
 
-    inline const size_t GetFmtArgSize(const int64_t &value)
-    {
-        return sizeof(Signed64BitIntFormatter);
-    }
+    //
+    //  I tried a bunch of different ways to try to get all the formatters to be handled through templates and
+    //      type deduction but coould not get to anythign that worked well for other templated types, like minstd::string.
+    //      Therefore, I resorted to the macro below to define the formatters for the 'built-in' types.
+    //
 
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const int64_t &value)
-    {
-        return new (mem_loc) Signed64BitIntFormatter(value);
+#define DECLARE_TYPE_FORMATTER(type_, formatter, DEFAULT_FORMAT_OPTIONS)            \
+    using format_options_type = decltype(DEFAULT_FORMAT_OPTIONS)::type;             \
+                                                                                    \
+    template <>                                                                     \
+    class default_format<type_, format_options_type>                                \
+    {                                                                               \
+    public:                                                                         \
+        static const format_options_type &format()                                  \
+        {                                                                           \
+            return DEFAULT_FORMAT_OPTIONS;                                          \
+        }                                                                           \
+    };                                                                              \
+                                                                                    \
+    using formatter = fmt_arg_base<type_>;                                          \
+                                                                                    \
+    inline const size_t GetFmtArgSize(formatter::formatted_type value)              \
+    {                                                                               \
+        return sizeof(formatter);                                                   \
+    }                                                                               \
+                                                                                    \
+    inline const fmt_arg *GetFmtArg(void *mem_loc, formatter::formatted_type value) \
+    {                                                                               \
+        return new (mem_loc) formatter(value);                                      \
     }
 
     //
-    //  32 bit unsigned integer formatter
+    //  Declare formatters for the 'built-in' types
     //
 
-    class Unsigned32BitIntFormatter : public fmt_arg
-    {
-    public:
-        Unsigned32BitIntFormatter(const uint32_t &value)
-            : value_(value)
-        {
-        }
+    DECLARE_TYPE_FORMATTER(const char, CharFormatter, DEFAULT_STRING_FORMAT)
+    DECLARE_TYPE_FORMATTER(const char *, CharacterStringFormatter, DEFAULT_STRING_FORMAT)
 
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
+    DECLARE_TYPE_FORMATTER(const minstd::string &, StdStringFormatter, DEFAULT_STRING_FORMAT)
 
-    private:
-        const uint32_t &value_;
-    };
+    DECLARE_TYPE_FORMATTER(const uint64_t, Unsigned64BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int64_t, Signed64BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const uint32_t, Unsigned32BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int32_t, Signed32BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const uint16_t, Unsigned16BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int16_t, Signed16BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const uint8_t, Unsigned8BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int8_t, Signed8BitIntFormatter, DEFAULT_INTEGER_FORMAT)
 
-    inline const size_t GetFmtArgSize(const uint32_t &value)
-    {
-        return sizeof(Unsigned32BitIntFormatter);
-    }
+    DECLARE_TYPE_FORMATTER(const float, FloatFormatter, DEFAULT_FLOATING_POINT_FORMAT)
+    DECLARE_TYPE_FORMATTER(const double, DoubleFormatter, DEFAULT_FLOATING_POINT_FORMAT)
 
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint32_t &value)
-    {
-        return new (mem_loc) Unsigned32BitIntFormatter(value);
-    }
+    DECLARE_TYPE_FORMATTER(const bool, BooleanFormatter, DEFAULT_STRING_FORMAT)
 
     //
-    //  32 bit signed integer formatter
+    //  Undefine the macro before we leave
     //
 
-    class Signed32BitIntFormatter : public fmt_arg
-    {
-    public:
-        Signed32BitIntFormatter(const int32_t &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const int32_t &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const int32_t &value)
-    {
-        return sizeof(Signed32BitIntFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const int32_t &value)
-    {
-        return new (mem_loc) Signed32BitIntFormatter(value);
-    }
-
-    //
-    //  16 bit unsigned integer formatter
-    //
-
-    class Unsigned16BitIntFormatter : public fmt_arg
-    {
-    public:
-        Unsigned16BitIntFormatter(const uint16_t &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const uint16_t &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const uint16_t &value)
-    {
-        return sizeof(Unsigned16BitIntFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint16_t &value)
-    {
-        return new (mem_loc) Unsigned16BitIntFormatter(value);
-    }
-
-    //
-    //  16 bit signed integer formatter
-    //
-
-    class Signed16BitIntFormatter : public fmt_arg
-    {
-    public:
-        Signed16BitIntFormatter(const int16_t &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const int16_t &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const int16_t &value)
-    {
-        return sizeof(Signed16BitIntFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const int16_t &value)
-    {
-        return new (mem_loc) Signed16BitIntFormatter(value);
-    }
-
-    //
-    //  8 bit unsigned integer formatter
-    //
-
-    class Unsigned8BitIntFormatter : public fmt_arg
-    {
-    public:
-        Unsigned8BitIntFormatter(const uint8_t &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const uint8_t &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const uint8_t &value)
-    {
-        return sizeof(Unsigned8BitIntFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const uint8_t &value)
-    {
-        return new (mem_loc) Unsigned8BitIntFormatter(value);
-    }
-
-    //
-    //  8 bit signed integer formatter
-    //
-
-    class Signed8BitIntFormatter : public fmt_arg
-    {
-    public:
-        Signed8BitIntFormatter(const int8_t &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const int8_t &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const int8_t &value)
-    {
-        return sizeof(Signed8BitIntFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const int8_t &value)
-    {
-        return new (mem_loc) Signed8BitIntFormatter(value);
-    }
-
-    //
-    //  float formatter
-    //
-
-    class FloatFormatter : public fmt_arg
-    {
-    public:
-        FloatFormatter(const float &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const float &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const float &value)
-    {
-        return sizeof(FloatFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const float &value)
-    {
-        return new (mem_loc) FloatFormatter(value);
-    }
-
-    //
-    //  double formatter
-    //
-
-    class DoubleFormatter : public fmt_arg
-    {
-    public:
-        DoubleFormatter(const double &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const double &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const double &value)
-    {
-        return sizeof(DoubleFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const double &value)
-    {
-        return new (mem_loc) DoubleFormatter(value);
-    }
-
-    //
-    //  bool formatter
-    //
-
-    class BoolFormatter : public fmt_arg
-    {
-    public:
-        BoolFormatter(const bool &value)
-            : value_(value)
-        {
-        }
-
-        void Append(minstd::string &buffer, const arg_format_options &format) const override;
-
-    private:
-        const bool &value_;
-    };
-
-    inline const size_t GetFmtArgSize(const bool &value)
-    {
-        return sizeof(BoolFormatter);
-    }
-
-    inline const fmt_arg *GetFmtArg(void *mem_loc, const bool &value)
-    {
-        return new (mem_loc) BoolFormatter(value);
-    }
+#undef DECLARE_TYPE_FORMATTER
 } // namespace FMT_FORMATTERS_NAMESPACE
