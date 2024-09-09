@@ -23,9 +23,9 @@ namespace FMT_FORMATTERS_NAMESPACE
     {
         //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
 
-        if (format.alt_.has_value() && format.alt_.value() && format.type_.has_value())
+        if (format.alt().has_value() && format.alt().value() && format.type_specifier().has_value())
         {
-            switch (format.type_.value())
+            switch (format.type_specifier().value())
             {
             case 'b':
                 buffer.push_back('b');
@@ -64,7 +64,7 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         //  Add the sign if this is not zero filled
 
-        if (!format.zero_fill_.has_value() || !format.zero_fill_.value())
+        if (!format.zero_fill().has_value() || !format.zero_fill().value())
         {
             buffer += sign;
         }
@@ -72,24 +72,24 @@ namespace FMT_FORMATTERS_NAMESPACE
         //  If the width is specified and the number of characters is less than the width and the
         //      alignment is either right or center, then we need to add fill characters.
 
-        if (format.width_.has_value() &&
-            (format.width_.value() > number_length) &&
-            ((format.alignment_.value() == arg_format_options::align::right) || (format.alignment_.value() == arg_format_options::align::center)))
+        if (format.width().has_value() &&
+            (format.width().value() > number_length) &&
+            ((format.alignment().value() == arg_format_options::align::right) || (format.alignment().value() == arg_format_options::align::center)))
         {
             //  Determine how much to fill in front of the number
 
-            size_t fill_count = format.width_.value() - number_length;
+            size_t fill_count = format.width().value() - number_length;
 
-            if (!format.zero_fill_.has_value() || !format.zero_fill_.value())
+            if (!format.zero_fill().has_value() || !format.zero_fill().value())
             {
-                if (format.alignment_.value() == arg_format_options::align::center)
+                if (format.alignment().value() == arg_format_options::align::center)
                 {
                     fill_count /= 2;
                 }
 
                 for (size_t i = 0; i < fill_count; i++)
                 {
-                    buffer.push_back(format.fill_.value());
+                    buffer.push_back(format.fill().value());
                 }
             }
             else
@@ -123,13 +123,13 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         number_length = (buffer.size() - start_of_number) + sign.size();
 
-        if (format.width_.has_value() && (format.width_.value() > number_length))
+        if (format.width().has_value() && (format.width().value() > number_length))
         {
-            size_t fill_count = format.width_.value() - number_length;
+            size_t fill_count = format.width().value() - number_length;
 
             for (size_t i = 0; i < fill_count; i++)
             {
-                buffer.push_back(format.fill_.value());
+                buffer.push_back(format.fill().value());
             }
         }
     }
@@ -143,7 +143,7 @@ namespace FMT_FORMATTERS_NAMESPACE
     {
         static uint64_t const pow10[] = {1, 10, 100, 1000, 10000, 100000, 1000000, 10000000, 100000000};
 
-        uint64_t decimal_multiplier = pow10[minstd::min(format.precision_.value(), (uint32_t)8)];
+        uint64_t decimal_multiplier = pow10[minstd::min(format.precision().value(), (uint32_t)8)];
 
         uint64_t decimals;
         uint64_t units;
@@ -167,7 +167,7 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         size_t start_of_number = buffer.size();
 
-        for (size_t i = 0; i < format.precision_.value(); i++)
+        for (size_t i = 0; i < format.precision().value(); i++)
         {
             buffer.push_back((decimals % 10) + '0');
             decimals /= 10;
@@ -219,8 +219,8 @@ namespace FMT_FORMATTERS_NAMESPACE
     {
         //  Insure the desired base is legal, only 2 to 36 is supported
 
-        if (!format.integer_base_.has_value() ||
-            ((format.integer_base_.value() < 2) || (format.integer_base_.value() > 36)))
+        if (!format.integer_base().has_value() ||
+            ((format.integer_base().value() < 2) || (format.integer_base().value() > 36)))
         {
             buffer += "{Invalid base}";
             return;
@@ -230,9 +230,9 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         size_t start_of_number = buffer.size();
 
-        const char *numeric_conversion_digits = (format.type_.has_value() && ((format.type_.value() == 'X') || (format.type_.value() == 'B'))) ? UPPER_CASE_NUMERIC_CONVERSION_DIGITS : LOWER_CASE_NUMERIC_CONVERSION_DIGITS;
+        const char *numeric_conversion_digits = (format.type_specifier().has_value() && ((format.type_specifier().value() == 'X') || (format.type_specifier().value() == 'B'))) ? UPPER_CASE_NUMERIC_CONVERSION_DIGITS : LOWER_CASE_NUMERIC_CONVERSION_DIGITS;
 
-        UnsignedIntToReversedString(buffer, value, format.integer_base_.value(), numeric_conversion_digits);
+        UnsignedIntToReversedString(buffer, value, format.integer_base().value(), numeric_conversion_digits);
 
         //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
 
@@ -252,8 +252,8 @@ namespace FMT_FORMATTERS_NAMESPACE
     {
         //  Insure the requested base is OK
 
-        if (!format.integer_base_.has_value() ||
-            ((format.integer_base_.value() < 2) || (format.integer_base_.value() > 36)))
+        if (!format.integer_base().has_value() ||
+            ((format.integer_base().value() < 2) || (format.integer_base().value() > 36)))
         {
             buffer += "{Invalid base}";
             return;
@@ -263,17 +263,17 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         size_t start_of_number = buffer.size();
 
-        const char *numeric_conversion_digits = (format.type_.has_value() && ((format.type_.value() == 'X') || (format.type_.value() == 'B'))) ? UPPER_CASE_NUMERIC_CONVERSION_DIGITS : LOWER_CASE_NUMERIC_CONVERSION_DIGITS;
+        const char *numeric_conversion_digits = (format.type_specifier().has_value() && ((format.type_specifier().value() == 'X') || (format.type_specifier().value() == 'B'))) ? UPPER_CASE_NUMERIC_CONVERSION_DIGITS : LOWER_CASE_NUMERIC_CONVERSION_DIGITS;
 
         typedef typename minstd::make_unsigned<T>::type unsigned_T;
 
         if (value < 0)
         {
-            UnsignedIntToReversedString(buffer, (unsigned_T)-value, format.integer_base_.value(), numeric_conversion_digits);
+            UnsignedIntToReversedString(buffer, (unsigned_T)-value, format.integer_base().value(), numeric_conversion_digits);
         }
         else
         {
-            UnsignedIntToReversedString(buffer, (unsigned_T)value, format.integer_base_.value(), numeric_conversion_digits);
+            UnsignedIntToReversedString(buffer, (unsigned_T)value, format.integer_base().value(), numeric_conversion_digits);
         }
 
         //  If this is hex, octal or binary and alt is pecified, then we need to add the prefix
@@ -284,15 +284,15 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         minstd::fixed_string<4> sign;
 
-        if (format.sign_.has_value())
+        if (format.sign().has_value())
         {
             if (value >= 0)
             {
-                if (format.sign_.value() == arg_format_options::sign::always_plus)
+                if (format.sign().value() == arg_format_options::sign_treatment::always_plus)
                 {
                     sign = "+";
                 }
-                else if (format.sign_.value() == arg_format_options::sign::space)
+                else if (format.sign().value() == arg_format_options::sign_treatment::space)
                 {
                     sign = " ";
                 }
@@ -324,13 +324,13 @@ namespace FMT_FORMATTERS_NAMESPACE
         size_t fill_after_count = 0;
         size_t fill_before_count = 0;
 
-        if (format_options.width_.has_value() && (format_options.width_.value() > length))
+        if (format_options.width().has_value() && (format_options.width().value() > length))
         {
-            size_t fill_count = format_options.width_.value() - length;
+            size_t fill_count = format_options.width().value() - length;
 
-            if (format_options.alignment_.has_value())
+            if (format_options.alignment().has_value())
             {
-                switch (format_options.alignment_.value())
+                switch (format_options.alignment().value())
                 {
                 case arg_format_options::align::left:
                     fill_after_count = fill_count;
@@ -350,14 +350,14 @@ namespace FMT_FORMATTERS_NAMESPACE
 
         for (size_t i = 0; i < fill_before_count; i++)
         {
-            buffer.push_back(format_options.fill_.value());
+            buffer.push_back(format_options.fill().value());
         }
 
         buffer += value;
 
         for (size_t i = 0; i < fill_after_count; i++)
         {
-            buffer.push_back(format_options.fill_.value());
+            buffer.push_back(format_options.fill().value());
         }
     }
 
@@ -455,9 +455,9 @@ namespace FMT_FORMATTERS_NAMESPACE
             FormattedStringAppend(buffer, "false", 5, format_options);
         }
     }
-    
+
     template <>
-    void fmt_arg_base<const void*>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
+    void fmt_arg_base<const void *>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
         UnsignedIntToString(buffer, reinterpret_cast<uint64_t>(value_), format_options);
     }

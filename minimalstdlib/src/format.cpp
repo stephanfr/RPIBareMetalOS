@@ -57,6 +57,14 @@ namespace MINIMAL_STD_NAMESPACE
 
     bool ParseArgFormatString(const minstd::string &argument_format, arg_format_options &format_options)
     {
+        //
+        //  This function is long but not too messy.  Parsing is pretty straightforward.
+        //      It could be broken into smaller functions, but that would just make it more complicated.
+        //      Parsing pretty much proceeds from left to right, extracting the various format specifiers.
+        //      Some specifiers are dependent on others or mutually exclusive, which is why breaking this
+        //      up would get a bit ugly.
+        //
+
         format_options.clear();
 
         //  If the string is empty - return now
@@ -120,7 +128,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             if (align_spec_loc == 1)
             {
-                //  Fill character cannot be either an openin or closing curly brace.  We can only detect the opening brace here.
+                //  Fill character cannot be either an opening or closing curly brace.  We can only detect the opening brace here.
 
                 if (argument_format[processed_characters] == '{')
                 {
@@ -149,15 +157,15 @@ namespace MINIMAL_STD_NAMESPACE
             switch (argument_format[processed_characters])
             {
             case '+':
-                format_options.sign_ = arg_format_options::sign::always_plus;
+                format_options.sign_ = arg_format_options::sign_treatment::always_plus;
                 break;
 
             case '-':
-                format_options.sign_ = arg_format_options::sign::minus;
+                format_options.sign_ = arg_format_options::sign_treatment::minus;
                 break;
 
             case ' ':
-                format_options.sign_ = arg_format_options::sign::space;
+                format_options.sign_ = arg_format_options::sign_treatment::space;
                 break;
             }
 
@@ -247,41 +255,41 @@ namespace MINIMAL_STD_NAMESPACE
             {
             case 'd':
                 format_options.integer_base_ = 10;
-                format_options.type_ = 'd';
+                format_options.type_specifier_ = 'd';
                 break;
 
             case 'x':
                 format_options.integer_base_ = 16;
-                format_options.type_ = 'x';
+                format_options.type_specifier_ = 'x';
                 break;
 
             case 'X':
                 format_options.integer_base_ = 16;
-                format_options.type_ = 'X';
+                format_options.type_specifier_ = 'X';
                 break;
 
             case 'b':
                 format_options.integer_base_ = 2;
-                format_options.type_ = 'b';
+                format_options.type_specifier_ = 'b';
                 break;
 
             case 'B':
                 format_options.integer_base_ = 2;
-                format_options.type_ = 'B';
+                format_options.type_specifier_ = 'B';
                 break;
 
             case 'o':
                 format_options.integer_base_ = 8;
-                format_options.type_ = 'o';
+                format_options.type_specifier_ = 'o';
                 break;
 
             case 'p':
                 format_options.integer_base_ = 16;
-                format_options.type_ = 'X'; //  Morph to hex spec
+                format_options.type_specifier_ = 'X'; //  Morph to hex spec
                 break;
 
             default:
-                format_options.type_ = argument_format[processed_characters];
+                format_options.type_specifier_ = argument_format[processed_characters];
             }
         }
 
