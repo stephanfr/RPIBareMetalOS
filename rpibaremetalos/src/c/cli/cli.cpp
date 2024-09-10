@@ -19,6 +19,7 @@
 
 #include "cli/list_command.h"
 #include "cli/show_command.h"
+#include "cli/change_command.h"
 
 namespace cli
 {
@@ -54,6 +55,7 @@ namespace cli
     {
         ListCommandDispatcher list_command_dispatcher;
         ShowCommandDispatcher show_command_dispatcher;
+        ChangeCommandDispatcher change_command_dispatcher;
 
         printf("Command Line Interface\n");
 
@@ -78,12 +80,7 @@ namespace cli
             }
             else if (strnicmp(first_token, "change", MAX_CLI_COMMAND_LENGTH) == 0)
             {
-                session_context_.current_directory_path_ += "/";
-                session_context_.current_directory_path_ += command_parser_.NextToken();
-            }
-            else if (strnicmp(first_token, "dump", MAX_CLI_COMMAND_LENGTH) == 0)
-            {
-                DumpDiagnostics();
+                change_command_dispatcher.DispatchCommand(command_parser_, session_context_);
             }
             else if (strnicmp(first_token, "reboot", MAX_CLI_COMMAND_LENGTH) == 0)
             {

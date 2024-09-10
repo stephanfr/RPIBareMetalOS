@@ -8,11 +8,11 @@
 
 namespace cli
 {
-    class ListCommandDispatcher : public CLICommandDispatcher
+    class ChangeCommandDispatcher : public CLICommandDispatcher
     {
     public:
-        ListCommandDispatcher()
-            : CLICommandDispatcher("list")
+        ChangeCommandDispatcher()
+            : CLICommandDispatcher("change")
         {
         }
 
@@ -20,11 +20,10 @@ namespace cli
                                      CLISessionContext &context) override;
 
     private:
-        void ListFilesystems(CommandParser &parser,
+        void ChangeFilesystem(CommandParser &parser,
+                              CLISessionContext &context);
+
+        void ChangeDirectory(CommandParser &parser,
                              CLISessionContext &context);
-
-        void ListDirectory(CommandParser &parser,
-                           CLISessionContext &context);
-
     };
 } // namespace cli

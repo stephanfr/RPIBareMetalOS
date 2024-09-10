@@ -9,6 +9,8 @@
 #include "filesystem/filesystems.h"
 
 #include <format>
+#include <list>
+#include <stack_allocator>
 
 namespace cli
 {
@@ -28,8 +30,50 @@ namespace cli
             ListDirectory(parser, context);
             return;
         }
+        else if(strnicmp(element_to_list, "filesystems", MAX_CLI_COMMAND_TOKEN_LENGTH) == 0)
+        {
+            ListFilesystems(parser, context);
+            return;
+        }
 
         context.output_stream_ << "Unrecognized token: " << element_to_list << "\n";
+    }
+
+    void ListCommandDispatcher::ListFilesystems(CommandParser &parser,
+                                                CLISessionContext &context)
+    {
+        //  Get the list of filesystems
+
+        minstd::stack_allocator<minstd::list<UUID>::node_type, 24> uuid_list_stack_allocator;
+        minstd::list<UUID> filesystem_ids(uuid_list_stack_allocator);
+
+        GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, filesystem_ids);
+
+        if (filesystem_ids.empty())
+        {
+            context.output_stream_ << "No filesystems available\n";
+            return;
+        }
+
+        //  Iterate through the filesystems and list them
+
+        minstd::fixed_string<128> buffer;
+
+        for (const auto &filesystem_id : filesystem_ids)
+        {
+            auto filesystem_entity = GetOSEntityRegistry().GetEntityById(filesystem_id);
+
+            if (filesystem_entity.Successful())
+            {
+                auto &filesystem = static_cast<filesystems::Filesystem &>(filesystem_entity);
+
+                context.output_stream_ << minstd::format(buffer, "Filesystem: '{}'('{}')\n", filesystem.Name(), filesystem.Alias());
+            }
+            else
+            {
+                context.output_stream_ << "Error getting filesystem\n";
+            }
+        }
     }
 
     void ListCommandDispatcher::ListDirectory(CommandParser &parser,
