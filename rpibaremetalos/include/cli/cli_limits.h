@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <stddef.h>
+#include <stdint.h>
 
 constexpr uint32_t MAX_CLI_COMMAND_TOKEN_LENGTH = 16;
 
