@@ -7,7 +7,7 @@
 #include <character_io>
 #include <iostream>
 
-#define MAX_CLI_COMMAND_LENGTH 1024
+#include "cli/cli_limits.h"
 
 namespace cli
 {
@@ -30,6 +30,11 @@ namespace cli
 
         const char *GetNextLine();
 
+        const char *CurrentToken() const
+        {
+            return current_token_;
+        }
+
         const char *NextToken();
 
     private:
@@ -42,5 +47,7 @@ namespace cli
         char input_[MAX_CLI_COMMAND_LENGTH + 1];
 
         char *strtoklit_buffer_ = nullptr;
+
+        char *current_token_ = nullptr;
     };
 } // namespace cli

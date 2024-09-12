@@ -12,41 +12,27 @@
 #include <list>
 #include <stack_allocator>
 
-namespace cli
+namespace cli::commands
 {
-    void ChangeCommandDispatcher::DispatchCommand(CommandParser &parser,
-                                                  CLISessionContext &context)
+    //  Instantiate static const instances of the individual list commands
+
+    const CLIChangeFilesystemCommand CLIChangeFilesystemCommand::instance;
+    const CLIChangeDirectoryCommand CLIChangeDirectoryCommand::instance;
+
+    const CLIChangeCommand CLIChangeCommand::instance;
+
+    //  Command to change the current filesystem
+
+    void CLIChangeFilesystemCommand::ProcessToken(CommandParser &parser,
+                                                  CLISessionContext &context) const
     {
-        const char *element_to_list = parser.NextToken();
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
-        if (element_to_list == nullptr)
-        {
-            context.output_stream_ << "Incomplete Command\n";
-            return;
-        }
-
-        if (strnicmp(element_to_list, "filesystem", MAX_CLI_COMMAND_TOKEN_LENGTH) == 0)
-        {
-            ChangeFilesystem(parser, context);
-            return;
-        }
-        else if(strnicmp(element_to_list, "directory", MAX_CLI_COMMAND_TOKEN_LENGTH) == 0)
-        {
-            ChangeDirectory(parser, context);
-            return;
-        }
-
-        context.output_stream_ << "Unrecognized token: " << element_to_list << "\n";
-    }
-
-    void ChangeCommandDispatcher::ChangeFilesystem(CommandParser &parser,
-                                                   CLISessionContext &context)
-    {
         const char *new_filesystem = parser.NextToken();
 
         //  Get the list of filesystems
 
-        minstd::stack_allocator<minstd::list<UUID>::node_type, 24> uuid_list_stack_allocator;
+        minstd::stack_allocator<minstd::list<UUID>::node_type, MAX_CLI_FILESYSTEMS_TO_LIST> uuid_list_stack_allocator;
         minstd::list<UUID> filesystem_ids(uuid_list_stack_allocator);
 
         GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, filesystem_ids);
@@ -58,8 +44,6 @@ namespace cli
         }
 
         //  Iterate through the filesystems, stop if we find one that matches the name entered
-
-        minstd::fixed_string<128> buffer;
 
         for (const auto &filesystem_id : filesystem_ids)
         {
@@ -84,14 +68,16 @@ namespace cli
         context.output_stream_ << minstd::format(buffer, "Filesystem {} not found\n", new_filesystem);
     }
 
-    void ChangeCommandDispatcher::ChangeDirectory(CommandParser &parser,
-                                                  CLISessionContext &context)
+    //  Command to change the current directory
+
+    void CLIChangeDirectoryCommand::ProcessToken(CommandParser &parser,
+                                                 CLISessionContext &context) const
     {
-        minstd::fixed_string<128> buffer;
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
         const char *new_directory = parser.NextToken();
 
-        if(new_directory == nullptr)
+        if (new_directory == nullptr)
         {
             context.output_stream_ << "Incomplete Command\n";
             return;
@@ -113,7 +99,7 @@ namespace cli
 
         minstd::fixed_string<MAX_FILESYSTEM_PATH_LENGTH> directory_absolute_path = context.current_directory_path_;
 
-        if( directory_absolute_path != "/" )
+        if (directory_absolute_path != "/")
         {
             directory_absolute_path += "/";
         }
@@ -122,13 +108,12 @@ namespace cli
 
         auto directory = filesystem.GetDirectory(directory_absolute_path);
 
-        if(directory.Failed())
+        if (directory.Failed())
         {
-            context.output_stream_ << minstd::format( buffer, "Directory '{}' not found\n", new_directory );
+            context.output_stream_ << minstd::format(buffer, "Directory '{}' not found\n", new_directory);
             return;
         }
 
         context.current_directory_path_ = directory_absolute_path;
     }
-
 } // namespace cli

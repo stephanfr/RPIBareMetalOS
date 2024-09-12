@@ -6,25 +6,50 @@
 
 #include "command_dispatcher.h"
 
-namespace cli
+namespace cli::commands
 {
-    class ListCommandDispatcher : public CLICommandDispatcher
+    class CLIListDirectoryCommand : public CLICommandExecutor
     {
     public:
-        ListCommandDispatcher()
-            : CLICommandDispatcher("list")
+
+        static const CLIListDirectoryCommand instance;
+
+        CLIListDirectoryCommand()
+            : CLICommandExecutor("directory")
         {
         }
 
-        virtual void DispatchCommand(CommandParser &parser,
-                                     CLISessionContext &context) override;
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
 
-    private:
-        void ListFilesystems(CommandParser &parser,
-                             CLISessionContext &context);
+    class CLIListFilesystemsCommand : public CLICommandExecutor
+    {
+    public:
 
-        void ListDirectory(CommandParser &parser,
-                           CLISessionContext &context);
+        static const CLIListFilesystemsCommand instance;
 
+        CLIListFilesystemsCommand()
+            : CLICommandExecutor("filesystems")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
+
+    //  Create the top-level list command
+
+    class CLIListCommand : public CLIParentCommand<2>
+    {
+    public:
+
+        static const CLIListCommand instance;
+
+        CLIListCommand()
+            : CLIParentCommand("list", {CLIListFilesystemsCommand::instance,
+                                        CLIListDirectoryCommand::instance})
+        {
+        }
     };
 } // namespace cli

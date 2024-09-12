@@ -37,6 +37,18 @@ namespace cli
         CLISessionContext &operator=(const CLISessionContext &) = delete;
         CLISessionContext &operator=(CLISessionContext &&) = delete;
 
+        CLISessionContext &operator<<(const minstd::string &str)
+        {
+            output_stream_ << str;
+            return *this;
+        }
+
+        CLISessionContext &operator<<(const char *str)
+        {
+            output_stream_ << str;
+            return *this;
+        }
+
         minstd::istream<char> &input_stream_;
         minstd::ostream<char> &output_stream_;
 

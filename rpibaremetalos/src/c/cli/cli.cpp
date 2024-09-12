@@ -8,21 +8,54 @@
 
 #include <character_io>
 
-#include "minimalstdio.h"
-
 #include "heaps.h"
 
-#include "devices/physical_timer.h"
-#include "devices/power_manager.h"
-
-#include "utility/dump_diagnostics.h"
-
+#include "cli/change_command.h"
+#include "cli/halt_reboot_commands.h"
 #include "cli/list_command.h"
 #include "cli/show_command.h"
-#include "cli/change_command.h"
 
 namespace cli
 {
+    //  Declare the CLI Root
+
+    class CLIRoot : public CLIParentCommand<5>
+    {
+    public:
+        static const CLIRoot instance;
+
+        CLIRoot()
+            : CLIParentCommand("", {commands::CLIListCommand::instance,
+                                    commands::CLIShowCommand::instance,
+                                    commands::CLIChangeCommand::instance,
+                                    commands::CLIHaltCommand::instance,
+                                    commands::CLIRebootCommand::instance})
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override
+        {
+            const char *token = parser.CurrentToken();
+
+            for (size_t i = 0; i < NUM_CHILDREN; i++)
+            {
+                if (children_[i].get().MatchesToken(token))
+                {
+                    return children_[i].get().ProcessToken(parser, context);
+                }
+            }
+
+            context << "Unrecognized token: " << token << "\n";
+        };
+    };
+
+    const CLIRoot CLIRoot::instance;
+
+    //
+    //  Function to create and start the CLI
+    //
+
     ReferenceResult<CLIResultCodes, CommandLineInterface>
     StartCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
                               UUID filesystem_id,
@@ -53,15 +86,11 @@ namespace cli
 
     void CommandLineInterface::Run()
     {
-        ListCommandDispatcher list_command_dispatcher;
-        ShowCommandDispatcher show_command_dispatcher;
-        ChangeCommandDispatcher change_command_dispatcher;
-
-        printf("Command Line Interface\n");
+        session_context_ << "Command Line Interface\n";
 
         while (true)
         {
-            printf("\n> ");
+            session_context_ << "\n> ";
 
             const char *first_token = command_parser_.GetNextLine();
 
@@ -70,33 +99,7 @@ namespace cli
                 continue;
             }
 
-            if (strnicmp(first_token, "list", MAX_CLI_COMMAND_LENGTH) == 0)
-            {
-                list_command_dispatcher.DispatchCommand(command_parser_, session_context_);
-            }
-            else if (strnicmp(first_token, "show", MAX_CLI_COMMAND_LENGTH) == 0)
-            {
-                show_command_dispatcher.DispatchCommand(command_parser_, session_context_);
-            }
-            else if (strnicmp(first_token, "change", MAX_CLI_COMMAND_LENGTH) == 0)
-            {
-                change_command_dispatcher.DispatchCommand(command_parser_, session_context_);
-            }
-            else if (strnicmp(first_token, "reboot", MAX_CLI_COMMAND_LENGTH) == 0)
-            {
-                printf("\nRebooting\n");
-                PhysicalTimer().WaitMsec(50);
-
-                PowerManager().Reboot();
-            }
-            else if (strnicmp(first_token, "halt", MAX_CLI_COMMAND_LENGTH) == 0)
-            {
-                return;
-            }
-            else
-            {
-                printf("Unknown command: %s\n", first_token);
-            }
+            CLIRoot::instance.ProcessToken(command_parser_, session_context_);
         }
     }
 

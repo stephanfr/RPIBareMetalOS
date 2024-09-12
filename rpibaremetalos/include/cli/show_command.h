@@ -6,22 +6,31 @@
 
 #include "command_dispatcher.h"
 
-namespace cli
+namespace cli::commands
 {
-    class ShowCommandDispatcher : public CLICommandDispatcher
+    class CLIShowDiagnosticsCommand : public CLICommandExecutor
     {
     public:
-        ShowCommandDispatcher()
-            : CLICommandDispatcher("show")
+        static const CLIShowDiagnosticsCommand instance;
+
+        CLIShowDiagnosticsCommand()
+            : CLICommandExecutor("diagnostics")
         {
         }
 
-        virtual void DispatchCommand(CommandParser &parser,
-                                     CLISessionContext &context) override;
-
-    private:
-        void ShowDiagnostics(CommandParser &parser,
-                             CLISessionContext &context);
-
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
     };
+
+    class CLIShowCommand : public CLIParentCommand<1>
+    {
+    public:
+        static const CLIShowCommand instance;
+
+        CLIShowCommand()
+            : CLIParentCommand("show", {CLIShowDiagnosticsCommand::instance})
+        {
+        }
+    };
+
 } // namespace cli

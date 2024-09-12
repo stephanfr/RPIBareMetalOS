@@ -29,14 +29,18 @@ namespace cli
 
         //  Return the first token
 
-        return strtoklit(input_, TOKEN_DELIMITERS, TOKEN_LITERAL_DELIMITERS, &strtoklit_buffer_);
+        current_token_ = strtoklit(input_, TOKEN_DELIMITERS, TOKEN_LITERAL_DELIMITERS, &strtoklit_buffer_);
+
+        return current_token_;
     }
 
     const char *CommandParser::NextToken()
     {
         //  Move forward to the next token
 
-        return strtoklit(nullptr, TOKEN_DELIMITERS, TOKEN_LITERAL_DELIMITERS, &strtoklit_buffer_);
+        current_token_ = strtoklit(nullptr, TOKEN_DELIMITERS, TOKEN_LITERAL_DELIMITERS, &strtoklit_buffer_);
+
+        return current_token_;
     }
 
 } //  namespace cli

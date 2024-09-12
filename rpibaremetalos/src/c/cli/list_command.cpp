@@ -12,73 +12,24 @@
 #include <list>
 #include <stack_allocator>
 
-namespace cli
+namespace cli::commands
 {
-    void ListCommandDispatcher::DispatchCommand(CommandParser &parser,
-                                                CLISessionContext &context)
+    //  Instantiate static const instances of the individual list commands
+
+    const CLIListDirectoryCommand CLIListDirectoryCommand::instance;
+    const CLIListFilesystemsCommand CLIListFilesystemsCommand::instance;
+
+    //  Now for the parent command
+
+    const CLIListCommand CLIListCommand::instance;
+
+    //  Command to list the contents of a directory
+
+    void CLIListDirectoryCommand::ProcessToken(CommandParser &parser,
+                                               CLISessionContext &context) const
     {
-        const char *element_to_list = parser.NextToken();
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
-        if (element_to_list == nullptr)
-        {
-            context.output_stream_ << "Incomplete Command\n";
-            return;
-        }
-
-        if (strnicmp(element_to_list, "directory", MAX_CLI_COMMAND_TOKEN_LENGTH) == 0)
-        {
-            ListDirectory(parser, context);
-            return;
-        }
-        else if(strnicmp(element_to_list, "filesystems", MAX_CLI_COMMAND_TOKEN_LENGTH) == 0)
-        {
-            ListFilesystems(parser, context);
-            return;
-        }
-
-        context.output_stream_ << "Unrecognized token: " << element_to_list << "\n";
-    }
-
-    void ListCommandDispatcher::ListFilesystems(CommandParser &parser,
-                                                CLISessionContext &context)
-    {
-        //  Get the list of filesystems
-
-        minstd::stack_allocator<minstd::list<UUID>::node_type, 24> uuid_list_stack_allocator;
-        minstd::list<UUID> filesystem_ids(uuid_list_stack_allocator);
-
-        GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, filesystem_ids);
-
-        if (filesystem_ids.empty())
-        {
-            context.output_stream_ << "No filesystems available\n";
-            return;
-        }
-
-        //  Iterate through the filesystems and list them
-
-        minstd::fixed_string<128> buffer;
-
-        for (const auto &filesystem_id : filesystem_ids)
-        {
-            auto filesystem_entity = GetOSEntityRegistry().GetEntityById(filesystem_id);
-
-            if (filesystem_entity.Successful())
-            {
-                auto &filesystem = static_cast<filesystems::Filesystem &>(filesystem_entity);
-
-                context.output_stream_ << minstd::format(buffer, "Filesystem: '{}'('{}')\n", filesystem.Name(), filesystem.Alias());
-            }
-            else
-            {
-                context.output_stream_ << "Error getting filesystem\n";
-            }
-        }
-    }
-
-    void ListCommandDispatcher::ListDirectory(CommandParser &parser,
-                                              CLISessionContext &context)
-    {
         //  Insure the filesystem is still mounted
 
         auto filesystem_entity = GetOSEntityRegistry().GetEntityById(context.current_filesystem_id_);
@@ -109,8 +60,6 @@ namespace cli
 
         if (directory.Successful())
         {
-            minstd::fixed_string<128> buffer;
-
             //  List the contents of the directory with the visitor callback
 
             context.output_stream_ << "Directory Listing for " << directory_absolute_path << "\n";
@@ -133,4 +82,44 @@ namespace cli
             context.output_stream_ << "Error getting directory listing.\n";
         }
     }
+
+    //  Command to list the filesystem currently mounted
+
+    void CLIListFilesystemsCommand::ProcessToken(CommandParser &parser,
+                                                 CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        //  Get the list of filesystems
+
+        minstd::stack_allocator<minstd::list<UUID>::node_type, MAX_CLI_FILESYSTEMS_TO_LIST> uuid_list_stack_allocator;
+        minstd::list<UUID> filesystem_ids(uuid_list_stack_allocator);
+
+        GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, filesystem_ids);
+
+        if (filesystem_ids.empty())
+        {
+            context.output_stream_ << "No filesystems available\n";
+            return;
+        }
+
+        //  Iterate through the filesystems and list them
+
+        for (const auto &filesystem_id : filesystem_ids)
+        {
+            auto filesystem_entity = GetOSEntityRegistry().GetEntityById(filesystem_id);
+
+            if (filesystem_entity.Successful())
+            {
+                auto &filesystem = static_cast<filesystems::Filesystem &>(filesystem_entity);
+
+                context.output_stream_ << minstd::format(buffer, "Filesystem: '{}'('{}')\n", filesystem.Name(), filesystem.Alias());
+            }
+            else
+            {
+                context.output_stream_ << "Error getting filesystem\n";
+            }
+        }
+    }
+
 } // namespace cli

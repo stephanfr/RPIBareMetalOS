@@ -6,24 +6,50 @@
 
 #include "command_dispatcher.h"
 
-namespace cli
+namespace cli::commands
 {
-    class ChangeCommandDispatcher : public CLICommandDispatcher
+    class CLIChangeFilesystemCommand : public CLICommandExecutor
     {
     public:
-        ChangeCommandDispatcher()
-            : CLICommandDispatcher("change")
+
+        static const CLIChangeFilesystemCommand instance;
+
+        CLIChangeFilesystemCommand()
+            : CLICommandExecutor("filesystem")
         {
         }
 
-        virtual void DispatchCommand(CommandParser &parser,
-                                     CLISessionContext &context) override;
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
 
-    private:
-        void ChangeFilesystem(CommandParser &parser,
-                              CLISessionContext &context);
+    class CLIChangeDirectoryCommand : public CLICommandExecutor
+    {
+    public:
 
-        void ChangeDirectory(CommandParser &parser,
-                             CLISessionContext &context);
+        static const CLIChangeDirectoryCommand instance;
+
+        CLIChangeDirectoryCommand()
+            : CLICommandExecutor("directory")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
+
+    //  Create the top-level list command
+
+    class CLIChangeCommand : public CLIParentCommand<2>
+    {
+    public:
+
+        static const CLIChangeCommand instance;
+
+        CLIChangeCommand()
+            : CLIParentCommand("change", {CLIChangeFilesystemCommand::instance,
+                                          CLIChangeDirectoryCommand::instance})
+        {
+        }
     };
 } // namespace cli
