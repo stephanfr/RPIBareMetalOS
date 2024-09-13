@@ -8,5 +8,5 @@
 
 void TaskSwitchISR::HandleInterrupt()
 {
-    printf("In task switch ISR\n");
+//    printf("In task switch ISR\n");
 }

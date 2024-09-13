@@ -84,7 +84,7 @@ namespace filesystems
             return file->Size();
         }
 
-        FilesystemResultCodes Read(Buffer &buffer)
+        FilesystemResultCodes Read(minstd::buffer<uint8_t> &buffer)
         {
             using Result = FilesystemResultCodes;
 
@@ -95,7 +95,7 @@ namespace filesystems
             return file->Read(buffer);
         }
 
-        FilesystemResultCodes Write(const Buffer &buffer)
+        FilesystemResultCodes Write(const minstd::buffer<uint8_t> &buffer)
         {
             using Result = FilesystemResultCodes;
 
@@ -106,7 +106,7 @@ namespace filesystems
             return file->Write(buffer);
         }
 
-        FilesystemResultCodes Append(const Buffer &buffer)
+        FilesystemResultCodes Append(const minstd::buffer<uint8_t> &buffer)
         {
             using Result = FilesystemResultCodes;
 

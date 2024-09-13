@@ -7,6 +7,7 @@
 #include "os_config.h"
 
 #include <algorithm>
+#include <buffer>
 #include <dynamic_string>
 #include <fixed_string>
 #include <functional>
@@ -21,7 +22,6 @@
 #include "filesystem/filesystem_path.h"
 #include "filesystem/partition.h"
 
-#include "utility/buffer.h"
 #include "utility/opaque_data.h"
 
 namespace filesystems
@@ -235,9 +235,9 @@ namespace filesystems
 
         virtual ValueResult<FilesystemResultCodes, uint32_t> Size() const = 0;
 
-        virtual FilesystemResultCodes Read(Buffer &buffer) = 0;
-        virtual FilesystemResultCodes Write(const Buffer &buffer) = 0;
-        virtual FilesystemResultCodes Append(const Buffer &buffer) = 0;
+        virtual FilesystemResultCodes Read(minstd::buffer<uint8_t> &buffer) = 0;
+        virtual FilesystemResultCodes Write(const minstd::buffer<uint8_t> &buffer) = 0;
+        virtual FilesystemResultCodes Append(const minstd::buffer<uint8_t> &buffer) = 0;
 
         virtual FilesystemResultCodes SeekEnd() = 0;
         virtual FilesystemResultCodes Seek(uint32_t position) = 0;
@@ -336,4 +336,6 @@ namespace filesystems
     };
 
     SimpleSuccessOrFailure MountSDCardFilesystems();
+
+    ReferenceResult<FilesystemResultCodes, Filesystem> GetBootFilesystem();
 } // namespace filesystems

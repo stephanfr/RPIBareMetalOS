@@ -4,11 +4,11 @@
 
 #include <CppUTest/TestHarness.h>
 
-#include "utility/buffer.h"
+#include <buffer>
 
 namespace ut_utility
 {
-    uint32_t ReadFile(const char *reference_filename, Buffer &buffer);
+    uint32_t ReadFile(const char *reference_filename, minstd::buffer<uint8_t> &buffer);
 
-    void FILE_EQUAL(const char *reference_filename, const Buffer &buffer);
+    void FILE_EQUAL(const char *reference_filename, const minstd::buffer<uint8_t> &buffer);
 }

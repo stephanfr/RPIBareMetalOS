@@ -48,6 +48,8 @@ constexpr size_t MAX_OS_ENTITY_NAME_LENGTH = 255;
 //  Filesystem limits
 //
 
+constexpr size_t MAX_FILESYSTEMS = 32;
+
 constexpr size_t MAX_FILENAME_LENGTH = 255;
 constexpr size_t MAX_FILE_EXTENSION_LENGTH = 64;
 constexpr size_t MAX_FILESYSTEM_PATH_LENGTH = 4096;

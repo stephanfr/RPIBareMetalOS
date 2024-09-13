@@ -1,0 +1,248 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <format_arg>
+
+namespace FMT_FORMATTERS_NAMESPACE
+{
+    using arg_format_options = ::MINIMAL_STD_NAMESPACE::arg_format_options;
+    using fmt_arg = ::MINIMAL_STD_NAMESPACE::fmt_arg;
+
+    constexpr uint32_t DEFAULT_FLOATING_POINT_PRECISION = 4;
+
+    //
+    //  Define default formatting options for various types
+    //
+
+    const auto EMPTY_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                 minstd::optional<uint32_t>(),
+                                                 minstd::optional<char>(),
+                                                 minstd::optional<arg_format_options::align>(),
+                                                 minstd::optional<bool>(),
+                                                 minstd::optional<arg_format_options::sign_treatment>(),
+                                                 minstd::optional<bool>(),
+                                                 minstd::optional<char>(),
+                                                 minstd::optional<uint32_t>());
+
+    const auto DEFAULT_INTEGER_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                           minstd::optional<uint32_t>(),
+                                                           minstd::optional<char>(' '),
+                                                           minstd::optional<arg_format_options::align>(arg_format_options::align::right),
+                                                           minstd::optional<bool>(),
+                                                           minstd::optional<arg_format_options::sign_treatment>(arg_format_options::sign_treatment::minus),
+                                                           minstd::optional<bool>(),
+                                                           minstd::optional<char>(),
+                                                           minstd::optional<uint32_t>(10));
+
+    const auto DEFAULT_FLOATING_POINT_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                                  minstd::optional<uint32_t>(DEFAULT_FLOATING_POINT_PRECISION),
+                                                                  minstd::optional<char>(' '),
+                                                                  minstd::optional<arg_format_options::align>(arg_format_options::align::right),
+                                                                  minstd::optional<bool>(),
+                                                                  minstd::optional<arg_format_options::sign_treatment>(arg_format_options::sign_treatment::minus),
+                                                                  minstd::optional<bool>(),
+                                                                  minstd::optional<char>(),
+                                                                  minstd::optional<uint32_t>(10));
+
+    const auto DEFAULT_STRING_FORMAT = arg_format_options(minstd::optional<uint32_t>(),
+                                                          minstd::optional<uint32_t>(),
+                                                          minstd::optional<char>(' '),
+                                                          minstd::optional<arg_format_options::align>(arg_format_options::align::left),
+                                                          minstd::optional<bool>(),
+                                                          minstd::optional<arg_format_options::sign_treatment>(),
+                                                          minstd::optional<bool>(),
+                                                          minstd::optional<char>(),
+                                                          minstd::optional<uint32_t>());
+
+    const auto DEFAULT_POINTER_FORMAT = arg_format_options(minstd::optional<uint32_t>(18),
+                                                          minstd::optional<uint32_t>(),
+                                                          minstd::optional<char>(' '),
+                                                          minstd::optional<arg_format_options::align>(arg_format_options::align::left),
+                                                          minstd::optional<bool>(true),
+                                                          minstd::optional<arg_format_options::sign_treatment>(),
+                                                          minstd::optional<bool>(true),
+                                                          minstd::optional<char>('X'),
+                                                          minstd::optional<uint32_t>(16));
+
+    //
+    //  Declare a template helper to provide default formatting options for a type
+    //
+
+    template <typename T, typename U>
+    class default_format
+    {
+    public:
+        static const U &format();
+    };
+
+    //
+    //  Declare a base class for formatters.  This is not strictly required but will make defining the
+    //      formatters for most of the 'built-in' types much easier and insure consistency.
+    //
+
+    template <typename T, typename U = arg_format_options>
+    class fmt_arg_base : public fmt_arg
+    {
+    public:
+        using formatted_type = minstd::conditional<minstd::is_pointer_v<T> || minstd::is_reference_v<T>, T, T &>::type;
+
+        fmt_arg_base() = delete;
+        fmt_arg_base(const fmt_arg_base &other) = delete;
+        fmt_arg_base(fmt_arg_base &&other) = delete;
+
+        fmt_arg_base(const formatted_type value)
+            : value_(value)
+        {
+        }
+
+        fmt_arg_base &operator=(const fmt_arg_base &other) = delete;
+        fmt_arg_base &operator=(fmt_arg_base &&other) = delete;
+
+        void Append(minstd::string &buffer, const minstd::string &format) const
+        {
+            U format_options;
+
+            if (ParseFormatString(format, format_options))
+            {
+                format_options.merge_defaults(default_format<T, U>::format());
+
+                AppendInternal(buffer, format_options);
+            }
+            else
+            {
+                //  Invalid format string
+
+                buffer += "{Invalid format string: '";
+                buffer += format;
+                buffer += "'}";
+            }
+        }
+
+    protected:
+        const formatted_type value_;
+
+        void ParseFormatString(const minstd::string &format, U &format_options) const;
+
+        void AppendInternal(minstd::string &buffer, const U &format_options) const;
+    };
+
+    //
+    //  Formatter base class using the standard format options type.
+    //
+
+    template <typename T>
+    class fmt_arg_base<T, arg_format_options> : public fmt_arg
+    {
+    public:
+        using formatted_type = minstd::conditional<minstd::is_pointer_v<T> || minstd::is_reference_v<T>, T, T &>::type;
+
+        fmt_arg_base() = delete;
+        fmt_arg_base(const fmt_arg_base &other) = delete;
+        fmt_arg_base(fmt_arg_base &&other) = delete;
+
+        fmt_arg_base(const formatted_type value)
+            : value_(value)
+        {
+        }
+
+        fmt_arg_base &operator=(const fmt_arg_base &other) = delete;
+        fmt_arg_base &operator=(fmt_arg_base &&other) = delete;
+
+        void Append(minstd::string &buffer, const minstd::string &format) const
+        {
+            arg_format_options format_options;
+
+            if (ParseFormatString(format, format_options))
+            {
+                format_options.merge_defaults(default_format<T, arg_format_options>::format());
+
+                AppendInternal(buffer, format_options);
+            }
+            else
+            {
+                //  Invalid format string
+
+                buffer += "{Invalid format string: '";
+                buffer += format;
+                buffer += "'}";
+            }
+        }
+
+    protected:
+        const formatted_type value_;
+
+        void AppendInternal(minstd::string &buffer, const arg_format_options &format_options) const;
+
+        bool ParseFormatString(const minstd::string &format, arg_format_options &format_options) const
+        {
+            return ParseArgFormatString(format, format_options);
+        }
+    };
+
+    //
+    //  I tried a bunch of different ways to try to get all the formatters to be handled through templates and
+    //      type deduction but coould not get to anythign that worked well for other templated types, like minstd::string.
+    //      Therefore, I resorted to the macro below to define the formatters for the 'built-in' types.
+    //
+
+#define DECLARE_TYPE_FORMATTER(type_, formatter, DEFAULT_FORMAT_OPTIONS)            \
+    using format_options_type = decltype(DEFAULT_FORMAT_OPTIONS)::type;             \
+                                                                                    \
+    template <>                                                                     \
+    class default_format<type_, format_options_type>                                \
+    {                                                                               \
+    public:                                                                         \
+        static const format_options_type &format()                                  \
+        {                                                                           \
+            return DEFAULT_FORMAT_OPTIONS;                                          \
+        }                                                                           \
+    };                                                                              \
+                                                                                    \
+    using formatter = fmt_arg_base<type_>;                                          \
+                                                                                    \
+    inline const size_t GetFmtArgSize(formatter::formatted_type value)              \
+    {                                                                               \
+        return sizeof(formatter);                                                   \
+    }                                                                               \
+                                                                                    \
+    inline const fmt_arg *GetFmtArg(void *mem_loc, formatter::formatted_type value) \
+    {                                                                               \
+        return new (mem_loc) formatter(value);                                      \
+    }
+
+    //
+    //  Declare formatters for the 'built-in' types
+    //
+
+    DECLARE_TYPE_FORMATTER(const char, CharFormatter, DEFAULT_STRING_FORMAT)
+    DECLARE_TYPE_FORMATTER(const char *, CharacterStringFormatter, DEFAULT_STRING_FORMAT)
+
+    DECLARE_TYPE_FORMATTER(const minstd::string &, StdStringFormatter, DEFAULT_STRING_FORMAT)
+
+    DECLARE_TYPE_FORMATTER(const uint64_t, Unsigned64BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int64_t, Signed64BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const uint32_t, Unsigned32BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int32_t, Signed32BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const uint16_t, Unsigned16BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int16_t, Signed16BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const uint8_t, Unsigned8BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+    DECLARE_TYPE_FORMATTER(const int8_t, Signed8BitIntFormatter, DEFAULT_INTEGER_FORMAT)
+
+    DECLARE_TYPE_FORMATTER(const float, FloatFormatter, DEFAULT_FLOATING_POINT_FORMAT)
+    DECLARE_TYPE_FORMATTER(const double, DoubleFormatter, DEFAULT_FLOATING_POINT_FORMAT)
+
+    DECLARE_TYPE_FORMATTER(const bool, BooleanFormatter, DEFAULT_STRING_FORMAT)
+
+    DECLARE_TYPE_FORMATTER(const void*, PointerFormatter, DEFAULT_POINTER_FORMAT)
+
+    //
+    //  Undefine the macro before we leave
+    //
+
+#undef DECLARE_TYPE_FORMATTER
+} // namespace FMT_FORMATTERS_NAMESPACE

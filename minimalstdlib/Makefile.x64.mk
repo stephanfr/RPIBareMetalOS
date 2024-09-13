@@ -21,7 +21,7 @@ $(LIB) : $(CPP_OBJ)
 	$(AR) rcs $(LIB) $(CPP_OBJ)
 
 $(OBJ_DIR)/%.o: $(CPP_SRC_DIR)/%.cpp 
-	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(OPTIMIZATION_FLAGS) -c $< -o $@
+	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(TEST_OPTIMIZATION_FLAGS) $(TEST_CPP_FLAGS) -c $< -o $@
 
 
 lib: clean $(LIB)

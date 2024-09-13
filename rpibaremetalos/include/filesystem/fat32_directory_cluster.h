@@ -6,10 +6,12 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
+#include <buffer>
 #include <fixed_string>
 
-#include "utility/buffer.h"
+#include "heaps.h"
 
 #include "filesystem/filesystems.h"
 
@@ -1317,7 +1319,7 @@ namespace filesystems::fat32
 
         Location location_;
 
-        HeapBuffer buffer_;
+        minstd::heap_buffer<uint8_t> buffer_;
         bool buffer_is_empty_;
 
         FAT32DirectoryEntryAddress current_entry_;
@@ -1340,10 +1342,10 @@ namespace filesystems::fat32
                                const FAT32DirectoryEntryAddress &current_entry)
             : directory_cluster_(directory_cluster),
               location_(location),
-              buffer_(buffer_size),
+              buffer_(__os_dynamic_heap, buffer_size),
               buffer_is_empty_(true),
               current_entry_(current_entry),
-              directory_entries_(buffer_.Data())
+              directory_entries_(buffer_.data())
         {
         }
 
@@ -1368,7 +1370,7 @@ namespace filesystems::fat32
         {
             if (buffer_is_empty_)
             {
-                if (directory_cluster_.block_io_adapter_.ReadCluster(current_entry_.cluster_, static_cast<uint8_t *>(buffer_.Data())) != BlockIOResultCodes::SUCCESS)
+                if (directory_cluster_.block_io_adapter_.ReadCluster(current_entry_.cluster_, buffer_.data()) != BlockIOResultCodes::SUCCESS)
                 {
                     LogDebug1("Failed to read directory cluster: %u\n", current_entry_.cluster_);
                     return FilesystemResultCodes::FAT32_DEVICE_READ_ERROR;

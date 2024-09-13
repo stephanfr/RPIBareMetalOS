@@ -84,9 +84,9 @@ namespace filesystems::fat32
             return first_cluster_;
         }
 
-        FilesystemResultCodes Read(Buffer &buffer) override;
-        FilesystemResultCodes Write(const Buffer &buffer) override;
-        FilesystemResultCodes Append(const Buffer &buffer) override;
+        FilesystemResultCodes Read(minstd::buffer<uint8_t> &buffer) override;
+        FilesystemResultCodes Write(const minstd::buffer<uint8_t> &buffer) override;
+        FilesystemResultCodes Append(const minstd::buffer<uint8_t> &buffer) override;
 
         FilesystemResultCodes SeekEnd() override;
         FilesystemResultCodes Seek(uint32_t position) override;

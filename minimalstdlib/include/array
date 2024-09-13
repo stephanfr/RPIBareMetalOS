@@ -7,6 +7,8 @@
 #include "minstdconfig.h"
 
 #include <stddef.h>
+#include <type_traits>
+#include <utility>
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -38,9 +40,6 @@ namespace MINIMAL_STD_NAMESPACE
         typedef const value_type &const_reference;
         typedef value_type *iterator;
         typedef const value_type *const_iterator;
-
-        array() = default;
-        ~array() = default;
 
         void fill(const value_type &value)
         {
@@ -145,7 +144,6 @@ namespace MINIMAL_STD_NAMESPACE
             return static_cast<const_pointer>(elements_);
         }
 
-    private:
         //  A bit of template type deducation below.  The case of N == 0 results in the 'Zero length flavor'
         //      of ElementType being used.  The zero length version essentially returns a nullptr for the array.
         //
@@ -154,4 +152,17 @@ namespace MINIMAL_STD_NAMESPACE
 
         typename ElementType<T, N>::Type elements_;
     };
+
+    //  Template deduction guide for the array class
+
+    template <typename... T>
+    array(T...) -> array<typename minstd::common_type<T...>::type, sizeof...(T)>;
+
+    //  Helper function to create an array from a list of values
+
+    template <typename T, typename... TValues>
+    constexpr auto make_array(TValues &&...values) -> minstd::array<T, sizeof...(TValues)>
+    {
+        return {minstd::forward<T>(values)...};
+    }
 }

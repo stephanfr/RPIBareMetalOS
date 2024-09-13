@@ -7,7 +7,7 @@
 namespace filesystems
 {
 
-    static_assert((uint32_t)FilesystemResultCodes::__END_OF_FILESYSTEM_RESULT_CODES__ == 39);
+    static_assert((uint32_t)FilesystemResultCodes::__END_OF_FILESYSTEM_RESULT_CODES__ == 40);
 
     const char *ErrorMessage(FilesystemResultCodes code)
     {
@@ -33,6 +33,9 @@ namespace filesystems
 
         case FilesystemResultCodes::FILESYSTEM_DOES_NOT_EXIST:
             return "Filesystem Does Not Exist";
+
+        case FilesystemResultCodes::UNABLE_TO_FIND_BOOT_FILESYSTEM:
+            return "Unable to find boot filesystem";
 
         case FilesystemResultCodes::PATH_TOO_LONG:
             return "Path too long";

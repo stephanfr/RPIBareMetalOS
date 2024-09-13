@@ -1,7 +1,3 @@
-// Copyright 2023 Stephan Friedl. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 //  Almost all of this file is lifted or adapted from John Wellbelove's ETL project.
 //      Attribution and licensing for that project appears below.
 //
@@ -43,6 +39,41 @@ SOFTWARE.
 
 namespace MINIMAL_STD_NAMESPACE
 {
+    //  Void type
+
+    template <typename...>
+    using void_t = void;
+
+    //  Conditional
+
+    template <bool B, typename T, typename F>
+    struct conditional
+    {
+        typedef T type;
+    };
+    template <typename T, typename F>
+    struct conditional<false, T, F>
+    {
+        typedef F type;
+    };
+
+    template <bool B, typename T, typename F>
+    using conditional_t = typename conditional<B, T, F>::type;
+
+    // enable_if
+    template <bool B, typename T = void>
+    struct enable_if
+    {
+    };
+    template <typename T>
+    struct enable_if<true, T>
+    {
+        typedef T type;
+    };
+
+    template <bool B, typename T = void>
+    using enable_if_t = typename enable_if<B, T>::type;
+
     //  Integral constants first, we will need them for the constexpr true and false
 
     template <typename T, T VALUE>
@@ -725,5 +756,213 @@ namespace MINIMAL_STD_NAMESPACE
 
     template <typename T1, typename T2>
     inline constexpr bool is_base_of_v = is_base_of<T1, T2>::value;
+
+    // Provide unsigned type for a signed integer type
+
+    template <typename T>
+    struct make_unsigned
+    {
+        typedef T type;
+    };
+
+    template <>
+    struct make_unsigned<char>
+    {
+        typedef unsigned char type;
+    };
+
+    template <>
+    struct make_unsigned<signed char>
+    {
+        typedef unsigned char type;
+    };
+
+    template <>
+    struct make_unsigned<short>
+    {
+        typedef unsigned short type;
+    };
+
+    template <>
+    struct make_unsigned<int>
+    {
+        typedef unsigned int type;
+    };
+
+    template <>
+    struct make_unsigned<long>
+    {
+        typedef unsigned long type;
+    };
+
+    template <>
+    struct make_unsigned<long long>
+    {
+        typedef unsigned long long type;
+    };
+    /*
+        template <typename T>
+        struct make_unsigned<const T> : add_const<typename make_unsigned<T>::type>
+        {
+        };
+
+        template <typename T>
+        struct make_unsigned<volatile T> : add_volatile<typename make_unsigned<T>::type>
+        {
+        };
+
+        template <typename T>
+        struct make_unsigned<const volatile T> : add_const<typename add_volatile<typename make_unsigned<T>::type>::type>
+        {
+        };
+    */
+    template <typename T>
+    using make_unsigned_t = typename make_unsigned<T>::type;
+
+    //    Remove_extent
+
+    template <typename T>
+    struct remove_extent
+    {
+        typedef T type;
+    };
+    template <typename T>
+    struct remove_extent<T[]>
+    {
+        typedef T type;
+    };
+    template <typename T, size_t MAXN>
+    struct remove_extent<T[MAXN]>
+    {
+        typedef T type;
+    };
+
+    template <typename T>
+    using remove_extent_t = typename remove_extent<T>::type;
+
+    //    Remove_all_extents
+
+    template <typename T>
+    struct remove_all_extents
+    {
+        typedef T type;
+    };
+    template <typename T>
+    struct remove_all_extents<T[]>
+    {
+        typedef typename remove_all_extents<T>::type type;
+    };
+    template <typename T, size_t MAXN>
+    struct remove_all_extents<T[MAXN]>
+    {
+        typedef typename remove_all_extents<T>::type type;
+    };
+
+    template <typename T>
+    using remove_all_extents_t = typename remove_all_extents<T>::type;
+
+    //  Decay
+
+    template <typename T>
+    struct decay
+    {
+        typedef typename minstd::remove_reference<T>::type U;
+        typedef typename minstd::conditional<minstd::is_array<U>::value,
+                                             typename minstd::remove_extent<U>::type *,
+                                             typename minstd::remove_cv<U>::type>::type type;
+    };
+
+    template <typename T>
+    using decay_t = typename decay<T>::type;
+
+    // Common Type
+
+    template <typename...>
+    struct common_type
+    {
+    };
+
+    // One type
+    template <typename T>
+    struct common_type<T> : common_type<T, T>
+    {
+    };
+
+    namespace private_common_type
+    {
+        template <typename T1, typename T2>
+        using conditional_result_t = decltype(false ? declval<T1>() : declval<T2>());
+
+        template <typename, typename, typename = void>
+        struct decay_conditional_result
+        {
+        };
+
+        template <typename T1, typename T2>
+        struct decay_conditional_result<T1, T2, void_t<conditional_result_t<T1, T2>>>
+            : minstd::decay<conditional_result_t<T1, T2>>
+        {
+        };
+
+        template <typename T1, typename T2, typename = void>
+        struct common_type_2_impl : decay_conditional_result<const T1 &, const T2 &>
+        {
+        };
+
+        template <typename T1, typename T2>
+        struct common_type_2_impl<T1, T2, void_t<conditional_result_t<T1, T2>>>
+            : decay_conditional_result<T1, T2>
+        {
+        };
+    }
+
+    // Two types
+    template <typename T1, typename T2>
+    struct common_type<T1, T2>
+        : minstd::conditional<minstd::is_same<T1, typename minstd::decay<T1>::type>::value && minstd::is_same<T2, typename minstd::decay<T2>::type>::value,
+                              private_common_type::common_type_2_impl<T1, T2>,
+                              common_type<typename minstd::decay<T2>::type,
+                                          typename minstd::decay<T2>::type>>::type
+    {
+    };
+
+    // Three or more types
+    namespace private_common_type
+    {
+        template <typename AlwaysVoid, typename T1, typename T2, typename... TRest>
+        struct common_type_multi_impl
+        {
+        };
+
+        template <typename T1, typename T2, typename... TRest>
+        struct common_type_multi_impl<void_t<typename common_type<T1, T2>::type>, T1, T2, TRest...>
+            : common_type<typename common_type<T1, T2>::type, TRest...>
+        {
+        };
+    }
+
+    template <typename T1, typename T2, typename... TRest>
+    struct common_type<T1, T2, TRest...>
+        : private_common_type::common_type_multi_impl<void, T1, T2, TRest...>
+    {
+    };
+
+    template <typename... T>
+    using common_type_t = typename common_type<T...>::type;
+
+    //  Determine if a variadic template list contains a specific type.
+    //      These are functions, not structs, because we need to be able to do the template parameter expansion
+
+    template <typename T>
+    inline constexpr bool contains_type()
+    {
+        return false;
+    }
+
+    template <typename T, typename U, typename... Tail>
+    inline constexpr bool contains_type()
+    {
+        return is_same<T, U>::value ? true : contains_type<T, Tail...>();
+    }
 
 }

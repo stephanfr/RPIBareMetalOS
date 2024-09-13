@@ -1,0 +1,84 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <basic_string>
+#include <new>
+
+#include <format_formatters>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    void BuildFormatOutput(minstd::string &buffer, const char *fmt, const fmt_arg *args[], size_t num_args);
+
+    minstd::string &format(minstd::string &buffer, const char *fmt, auto &&...args)
+    {
+        buffer.clear();
+
+        const size_t num_args = sizeof...(args);
+
+        //  This looks scary but should be pretty bullet proof - so long as we follow the rules...
+        //
+        //  We use fold expressions to iterate over all the arguments and calculate the total storage
+        //      required for all the as 'fmt_arg' types and then we allocate a block on the stack
+        //      of this size.  We then use placement new to create the 'fmt_arg' objects in this block
+        //      with correct offsets for each argument.  We save a pointer to each argument in an array
+        //      as the abstract base class so we can just invoke 'Append' as needed.  We will not call
+        //      destructors - so if you add a new argument type, make sure it is trivially destructible.
+        //
+        //  Given all the template folding action is happening at compile time, it should be safe to
+        //      do dynamic allocation in a stack block.  It should also be pretty performant, though
+        //      it will chew up some extra space in the compiled binary compared to 'printf'.
+
+        //  Get the sizes required for all the arguments and the total storage required.
+        //      We offset by 1 to allow for the first argument being stored at offset 0.
+
+        //  Suppress the warning about unused but set variables, those are used in the template folding action.
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+        size_t arg_offset[num_args + 1] = {0};
+        size_t total_arg_storage_required = 0;
+        size_t current_arg = 1;
+#pragma GCC diagnostic pop
+
+        //  Template folding action to calculate the total storage required and the offsets for each argument.
+        //      We use type deduction to invoke the correct function based on the type of the argument.
+
+        ([&]
+         { size_t space_required = FMT_FORMATTERS_NAMESPACE::GetFmtArgSize(args);
+               arg_offset[current_arg] = arg_offset[current_arg-1] + space_required;
+               total_arg_storage_required += space_required;
+               current_arg++; }(), ...);
+
+        //  We have the total storage required, allocate a buffer on the stack to hold all the arguments
+        //      created by placement new and save a pointer to each argument as well.
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+        unsigned char arg_storage[total_arg_storage_required];
+        const fmt_arg *all_args[num_args];
+        size_t i = 0;
+#pragma GCC diagnostic pop
+
+        //  Template folding action to create all the argument wrapper classes and save a pointer to each.
+        //      Again, type deduction gets us to the correct factory function.
+
+        ([&]
+         { all_args[i] = FMT_FORMATTERS_NAMESPACE::GetFmtArg(arg_storage + arg_offset[i], args);
+               i++; }(), ...);
+
+        //  Build the formatted output
+
+        BuildFormatOutput(buffer, fmt, all_args, num_args);
+
+        //  Return the buffer
+
+        return buffer;
+    }
+
+} // namespace minstd

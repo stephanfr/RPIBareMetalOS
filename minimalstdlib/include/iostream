@@ -1,0 +1,228 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <basic_string>
+#include <buffer>
+#include <character_io>
+#include <type_traits>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename T>
+    struct stream_traits
+    {
+        typedef T char_type;
+        struct append_trailing_null;
+        struct ascii_terminal;
+    };
+
+    class basic_ios
+    {
+    public:
+        basic_ios() = default;
+        basic_ios(const basic_ios &) = delete;
+        basic_ios(basic_ios &&) = delete;
+
+        virtual ~basic_ios() = default;
+
+        basic_ios &operator=(const basic_ios &) = delete;
+        basic_ios &operator=(basic_ios &&) = delete;
+
+        bool good() const noexcept { return good_; }
+        bool bad() const noexcept { return !good_; }
+
+        bool eof() const noexcept { return eof_; }
+
+    protected:
+        bool good_ = true;
+        bool eof_ = false;
+    };
+
+    template <typename T>
+    class istream : public basic_ios
+    {
+    public:
+        virtual ~istream() = default;
+
+        virtual istream &getline(buffer<T> &buffer, T delimiter) = 0;
+    };
+
+    template <typename T>
+    class ostream : public basic_ios
+    {
+    public:
+        virtual ~ostream() = default;
+
+        virtual ostream<T> &operator<<(const minstd::string &output) = 0;
+        virtual ostream<T> &operator<<(const T *output) = 0;
+    };
+
+    template <typename T, typename U, typename... traits>
+    class character_istream : public istream<T>
+    {
+    public:
+        character_istream() = delete;
+        character_istream(character_istream &) = delete;
+        character_istream(character_istream &&) = delete;
+
+        character_istream(character_io_interface<U> &io)
+            : io_(io)
+        {
+        }
+
+        virtual ~character_istream() = default;
+
+        character_istream &operator=(const character_istream &) = delete;
+        character_istream &operator=(character_istream &&) = delete;
+
+        istream<T> &getline(buffer<T> &buffer, T delimiter) override
+        {
+            do
+            {
+                U raw_c = io_.getc();
+
+                //  If the character types are the same, then just output the character
+                //      otherwise cast to the correct output type.
+
+                T c;
+
+                if constexpr (is_same_v<T, U>)
+                {
+                    c = raw_c;
+                }
+                else
+                {
+                    c = static_cast<T>(raw_c);
+                }
+
+                if (c != delimiter)
+                {
+                    //  If we have the ascii_terminal trait specified, then we need to handle delete characters
+                    
+                    if constexpr (minstd::contains_type<typename stream_traits<T>::ascii_terminal, traits...>())
+                    {
+                        if (c == 0x7F)
+                        {
+                            buffer.pop_back();
+                        }
+                        else
+                        {
+                            buffer.append(c);
+                        }
+                    }
+                    else
+                    {
+                        buffer.append(c);
+                    }
+                }
+                else
+                {
+                    break;
+                }
+            } while (true);
+
+            //  If the stream_traits::append_trailing_null trait is specified for the stream, then append a null character to the buffer
+
+            if constexpr (minstd::contains_type<typename stream_traits<T>::append_trailing_null, traits...>())
+            {
+                buffer.append((T)'\0'); // Null-terminate the string
+            }
+
+            return static_cast<istream<T> &>(*this);
+        }
+
+    private:
+        character_io_interface<U> &io_;
+    };
+
+    template <typename T, typename U, typename... traits>
+    class character_ostream : public ostream<T>
+    {
+    public:
+        character_ostream() = delete;
+        character_ostream(character_ostream &) = delete;
+        character_ostream(character_ostream &&) = delete;
+
+        character_ostream(character_io_interface<U> &io)
+            : io_(io)
+        {
+        }
+
+        virtual ~character_ostream() = default;
+
+        character_ostream &operator=(const character_ostream &) = delete;
+        character_ostream &operator=(character_ostream &&) = delete;
+
+        ostream<T> &operator<<(const minstd::string &output)
+        {
+            for (size_t i = 0; i < output.size(); ++i)
+            {
+                //  If the character types are the same, then just output the character
+                //      otherwise cast to the correct output type.
+
+                if constexpr (is_same_v<minstd::string::ValueType, U>)
+                {
+                    io_.putc(output[i]);
+                }
+                else
+                {
+                    io_.putc(static_cast<minstd::string::ValueType>(output[i]));
+                }
+            }
+
+            return static_cast<ostream<T> &>(*this);
+        }
+
+        ostream<T> &operator<<(const T *output)
+        {
+            size_t length = strnlen(output, __LONG_MAX__);
+
+            for (size_t i = 0; i < length; ++i)
+            {
+                //  If the character types are the same, then just output the character
+                //      otherwise cast to the correct output type.
+
+                if constexpr (is_same_v<T, U>)
+                {
+                    io_.putc(output[i]);
+                }
+                else
+                {
+                    io_.putc(static_cast<T>(output[i]));
+                }
+            }
+
+            return static_cast<ostream<T> &>(*this);
+        }
+
+    private:
+        character_io_interface<U> &io_;
+    };
+
+    template <size_t MAX_SIZE, typename T, typename... traits>
+    character_istream<T, traits...> &getline(character_istream<T, traits...> &input_stream, string &output_string, T delimiter)
+    {
+        minstd::stack_buffer<T, MAX_SIZE> input_buffer;
+
+        input_stream.getline(input_buffer, delimiter);
+
+        for (size_t i = 0; i < input_buffer.size(); ++i)
+        {
+            if (input_buffer[i] == '\0')
+            {
+                break;
+            }
+
+            output_string.push_back(*(reinterpret_cast<string::ValueType *>(&input_buffer[i])));
+        }
+
+        return input_stream;
+    }
+
+} // namespace minstd

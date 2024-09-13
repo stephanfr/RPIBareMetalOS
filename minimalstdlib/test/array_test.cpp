@@ -15,8 +15,9 @@ namespace
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    TEST_GROUP(ArrayTests)
-    {};
+    TEST_GROUP (ArrayTests)
+    {
+    };
 #pragma GCC diagnostic pop
 
     class TestElement
@@ -57,7 +58,6 @@ namespace
         CHECK_EQUAL(test_array.begin(), test_array.end());
         CHECK(test_array.empty());
     }
-
 
     TEST(ArrayTests, TestArrayWithIntrinsic)
     {
@@ -159,5 +159,27 @@ namespace
         {
             CHECK_EQUAL(itr->value(), value);
         }
+    }
+
+    TEST(ArrayTests, Initialization)
+    {
+        minstd::array<int, 5> test_array = {1, 2, 3, 4, 5};
+
+        CHECK_EQUAL(test_array[0], 1);
+        CHECK_EQUAL(test_array[1], 2);
+        CHECK_EQUAL(test_array[2], 3);
+        CHECK_EQUAL(test_array[3], 4);
+        CHECK_EQUAL(test_array[4], 5);
+    }
+
+    TEST(ArrayTests, MakeArray)
+    {
+        minstd::array<int, 5> test_array = minstd::make_array<int>(1, 2, 3, 4, 5);
+
+        CHECK_EQUAL(test_array[0], 1);
+        CHECK_EQUAL(test_array[1], 2);
+        CHECK_EQUAL(test_array[2], 3);
+        CHECK_EQUAL(test_array[3], 4);
+        CHECK_EQUAL(test_array[4], 5);
     }
 }
