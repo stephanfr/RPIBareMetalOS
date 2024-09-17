@@ -16,10 +16,20 @@ typedef enum class Interrupts : int32_t
     SYSTEM_TIMER_3 = 3
 } Interrupts;
 
+typedef enum InterruptServiceRoutineType : uint32_t
+{
+    UNIDENTIFIED = 0,
+
+    SYSTEM_TIMER_RESCHEDULE = 1,
+    TASK_SCHEDULER = 2
+} InterruptServiceRoutineType;
+
 class InterruptServiceRoutine
 {
 public:
     virtual constexpr Interrupts InterruptType() const noexcept = 0;
+
+    virtual constexpr InterruptServiceRoutineType ISRType() const noexcept = 0;
 
     virtual const char *Name() const noexcept = 0;
 

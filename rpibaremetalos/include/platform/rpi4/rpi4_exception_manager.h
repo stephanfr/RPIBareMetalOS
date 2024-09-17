@@ -7,6 +7,8 @@
 #include "platform/exception_manager.h"
 #include "platform/platform_info.h"
 
+#include <devices/log.h>
+
 typedef enum class BCM2711GenericInterruptControllerRegisters : uint32_t
 {
     ENABLE_IRQ_BASE = 0x00001100,
@@ -49,26 +51,46 @@ public:
 
     void HandleInterrupt() override
     {
+        LogEntryAndExit("Entering HandleInterrupt");
+
         unsigned int irq_ack_reg = GetGICRegister(BCM2711GenericInterruptControllerRegisters::INTERRUPT_ACKNOWLEDGE);
         unsigned int irq = irq_ack_reg & 0x2FF;
 
         ISRPointerList *isrs = GetISRs(GetInterruptType(irq));
 
+        //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
+
+        InterruptServiceRoutine *task_switch_isr = nullptr;
+
         if (isrs != nullptr)
         {
             for (InterruptServiceRoutine *current_isr : *isrs)
             {
-                current_isr->HandleInterrupt();
+                if( current_isr->ISRType() != InterruptServiceRoutineType::TASK_SCHEDULER )
+                {
+                    current_isr->HandleInterrupt();
+                }
+                else
+                {
+                    task_switch_isr = current_isr;
+                }
             }
-
-            //  Let the GIC know we have serviced the interrupt.  End of interrupt ordering MUST mirror the acknowledge ordering,
-            //      this needs to be enforced even with nested interrupts.
-
-            SetGICRegister(BCM2711GenericInterruptControllerRegisters::END_OF_INTERRUPT, irq_ack_reg);
         }
         else
         {
-            printf("No ISRs found for Interrupt: %u\n", irq);
+            LogInfo("No ISRs found for Interrupt: %u\n", irq);
+        }
+
+        //  Let the GIC know we have serviced the interrupt.  End of interrupt ordering MUST mirror the acknowledge ordering,
+        //      this needs to be enforced even with nested interrupts.
+
+        SetGICRegister(BCM2711GenericInterruptControllerRegisters::END_OF_INTERRUPT, irq_ack_reg);
+
+        //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
+
+        if( task_switch_isr != nullptr )
+        {
+            task_switch_isr->HandleInterrupt();
         }
     }
 

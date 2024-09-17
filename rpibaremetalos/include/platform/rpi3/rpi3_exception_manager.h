@@ -8,7 +8,7 @@
 #include "platform/platform_info.h"
 #include "platform/exception_manager.h"
 
-#include <minimalstdio.h>
+#include "devices/log.h"
 
 
 typedef enum class BCM2837ARMCInterruptRequestRegisters
@@ -61,20 +61,41 @@ public:
 
     void HandleInterrupt() override
     {
+        LogEntryAndExit("Entering HandleInterrupt\n");
+
         uint32_t irq = GetRegister(BCM2837ARMCInterruptRequestRegisters::REQUEST_PENDING_1);
 
         ISRPointerList *isrs = GetISRs(GetInterruptType(irq));
+
+        //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
+
+        InterruptServiceRoutine *task_switch_isr = nullptr;
 
         if (isrs != nullptr)
         {
             for (InterruptServiceRoutine *current_isr : *isrs)
             {
-                current_isr->HandleInterrupt();
+                if( current_isr->ISRType() != InterruptServiceRoutineType::TASK_SCHEDULER )
+                {
+                    current_isr->HandleInterrupt();
+                }
+                else
+                {
+                    task_switch_isr = current_isr;
+                }
             }
         }
         else
         {
-            printf("No ISRs found for Interrupt: %u\n", irq);
+            LogInfo("No ISRs found for Interrupt: %u\n", irq);
+        }
+
+        //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
+
+        if( task_switch_isr != nullptr )
+        {
+            LogDebug1("Executing Task Switch ISR\n");
+            task_switch_isr->HandleInterrupt();
         }
     }
 
