@@ -17,15 +17,15 @@ typedef enum class SystemTimerCompares : uint32_t
 class SystemTimer
 {
 public:
-    virtual uint64_t GetMsec() const = 0;
+    virtual uint64_t GetMicroseconds() const = 0;
 
-    virtual void WaitInMsec(uint32_t msecToWait) const = 0;
+    virtual void WaitInMicroseconds(uint32_t microseconds_to_wait) const = 0;
 
-    virtual void StartRecurringInterrupt(SystemTimerCompares compare_register, uint32_t period_in_msec) = 0;
+    virtual void StartRecurringInterrupt(SystemTimerCompares compare_register, uint32_t period_in_microseconds) = 0;
 
     virtual void CancelRecurringInterrupt(SystemTimerCompares compare_register) = 0;
 
-    virtual void RescheduleRecurringInterrupt(SystemTimerCompares compare_register, uint32_t new_period_in_msec = 0) = 0;
+    virtual void RescheduleRecurringInterrupt(SystemTimerCompares compare_register, uint32_t new_period_in_microseconds = 0) = 0;
 };
 
 SystemTimer &GetSystemTimer();

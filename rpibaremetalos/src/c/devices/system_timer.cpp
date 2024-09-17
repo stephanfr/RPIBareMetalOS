@@ -16,7 +16,7 @@ public:
     {
     }
 
-    uint64_t GetMsec() const override
+    uint64_t GetMicroseconds() const override
     {
         uint32_t h;
         uint32_t l;
@@ -40,25 +40,25 @@ public:
         return ((uint64_t)h << 32) | l;
     }
 
-    void WaitInMsec(uint32_t msecToWait) const override
+    void WaitInMicroseconds(uint32_t microseconds_to_wait) const override
     {
-        uint64_t startTime = GetMsec();
+        uint64_t start_time = GetMicroseconds();
 
         //  Insure the time is non-zero, because qemu does not emulate system timer.
         //      Left unchecked, a qemu VM would just loop forever here....
 
-        if (startTime)
+        if (start_time)
         {
-            while (GetMsec() - startTime < msecToWait)
+            while (GetMicroseconds() - start_time < microseconds_to_wait)
             {
             };
         }
     }
 
     void StartRecurringInterrupt(SystemTimerCompares compare_register,
-                                 uint32_t period_in_msec) override
+                                 uint32_t period_in_microseconds) override
     {
-        if (period_in_msec == 0)
+        if (period_in_microseconds == 0)
         {
             return;
         }
@@ -66,11 +66,11 @@ public:
         RecurringTimerConfig &config = GetRecurringTimerConfig(compare_register);
 
         config.running_ = true;
-        config.period_in_msec_ = period_in_msec;
+        config.period_in_microseconds_ = period_in_microseconds;
 
         uint32_t starting_compare = GetRegister(SystemTimerRegisters::SYSTEM_TIMER_LOW);
 
-        config.next_interrupt_ = starting_compare + period_in_msec;
+        config.next_interrupt_ = starting_compare + period_in_microseconds;
 
         SetCompareRegister(compare_register, config.next_interrupt_);
     }
@@ -80,11 +80,11 @@ public:
         RecurringTimerConfig &config = GetRecurringTimerConfig(compare_register);
 
         config.running_ = false;
-        config.period_in_msec_ = 0;
+        config.period_in_microseconds_ = 0;
     }
 
     void RescheduleRecurringInterrupt(SystemTimerCompares compare_register,
-                                      uint32_t new_period_in_msec = 0) override
+                                      uint32_t new_period_in_microseconds = 0) override
     {
         //  If the timer is still active, reschedule now
 
@@ -92,13 +92,13 @@ public:
 
         if (config.running_)
         {
-            config.period_in_msec_ = new_period_in_msec > 0 ? new_period_in_msec : config.period_in_msec_;
+            config.period_in_microseconds_ = new_period_in_microseconds > 0 ? new_period_in_microseconds : config.period_in_microseconds_;
 
             //  If the new period is greater than zero, then set the next interrupt time
 
-            if (config.period_in_msec_ > 0)
+            if (config.period_in_microseconds_ > 0)
             {
-                config.next_interrupt_ += config.period_in_msec_;
+                config.next_interrupt_ += config.period_in_microseconds_;
 
                 SetCompareRegister(compare_register, config.next_interrupt_);
             }
@@ -134,7 +134,7 @@ private:
         bool running_ = false;
 
         uint32_t next_interrupt_ = 0;
-        uint32_t period_in_msec_ = 0;
+        uint32_t period_in_microseconds_ = 0;
     } RecurringTimerConfig;
 
     RecurringTimerConfig recurring_timer_configs_[NUM_SYSTEM_TIMER_COMPARE_REGISTERS];
