@@ -42,6 +42,7 @@ typedef enum class OSEntityTypes
     SOFTWARE_RNG,
     CHARACTER_DEVICE,
     BLOCK_DEVICE,
+    TASK_MANAGER,
     FILESYSTEM,
     USER_INTERFACE
 } OSEntityTypes;

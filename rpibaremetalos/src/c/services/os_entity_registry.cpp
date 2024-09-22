@@ -145,7 +145,7 @@ OSEntityRegistryResultCodes OSEntityRegistryImpl::AddEntityInternal(minstd::uniq
 
 OSEntityRegistryResultCodes OSEntityRegistryImpl::RemoveEntityByIdInternal(const UUID &id)
 {
-    char buffer[64];
+    UUID::ToStringBuffer buffer;
 
     LogDebug1("Removing Entity with ID: %s\n", id.ToString(buffer));
 

@@ -196,7 +196,7 @@ running_in_el1:
 
     //  Set up exception handlers
 
-	adr	    x0, _exception_vectors
+	adr	    x0, __exception_vectors
 	msr	    VBAR_EL1, x0		        //  Put the address of the exception vector table into VBAR_EL1
 
     //  Set top of stack.

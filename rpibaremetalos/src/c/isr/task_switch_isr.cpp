@@ -4,9 +4,9 @@
 
 #include "isr/task_switch_isr.h"
 
-#include <minimalstdio.h>
+#include "task/task_manager.h"
 
 void TaskSwitchISR::HandleInterrupt()
 {
-//    printf("In task switch ISR\n");
+    task::TaskManagerImpl::Instance().PreemptiveSchedule();
 }

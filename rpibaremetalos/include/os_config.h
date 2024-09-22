@@ -42,7 +42,9 @@ constexpr uint32_t DEFAULT_SERIAL_CONSOLE_BAUD_RATE = 115200;
 //  OS Entity Limits
 //
 
-constexpr size_t MAX_OS_ENTITY_NAME_LENGTH = 255;
+constexpr size_t MAX_OS_ENTITY_NAME_LENGTH = 64;
+
+constexpr size_t MAX_TASK_NAME_LENGTH = 64;
 
 //
 //  Filesystem limits

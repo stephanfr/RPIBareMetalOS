@@ -21,11 +21,39 @@ $(BUILD_ROOT)/c/devices/rpi4 \
 $(BUILD_ROOT)/c/isr \
 $(BUILD_ROOT)/c/filesystem \
 $(BUILD_ROOT)/c/services \
+$(BUILD_ROOT)/c/task \
+$(BUILD_ROOT)/c/userspace_api \
 $(BUILD_ROOT)/c/cli
 
 ASM_DIRS   := asm
-C_DIRS     := c c/utility c/platform c/platform/rpi3 c/platform/rpi4 c/devices c/devices/rpi3 c/devices/rpi4 c/isr c/filesystem c/services c/cli
-CPP_DIRS   := c c/utility c/platform c/platform/rpi3 c/platform/rpi4 c/devices c/devices/rpi3 c/devices/rpi4 c/isr c/filesystem c/services c/cli
+C_DIRS     := c \
+			  c/utility \
+			  c/platform \
+			  c/platform/rpi3 \
+			  c/platform/rpi4 \
+			  c/devices \
+			  c/devices/rpi3 \
+			  c/devices/rpi4 \
+			  c/isr \
+			  c/filesystem \
+			  c/services \
+			  c/task \
+			  c/userspace_api \
+			  c/cli
+CPP_DIRS   := c \
+			  c/utility \
+			  c/platform \
+			  c/platform/rpi3 \
+			  c/platform/rpi4 \
+			  c/devices \
+			  c/devices/rpi3 \
+			  c/devices/rpi4 \
+			  c/isr \
+			  c/filesystem \
+			  c/services \
+			  c/task \
+			  c/userspace_api \
+			  c/cli
 
 ASM_SRC_DIRS := $(addprefix $(SRC_ROOT)/,$(ASM_DIRS))
 C_SRC_DIRS   := $(addprefix $(SRC_ROOT)/,$(C_DIRS))

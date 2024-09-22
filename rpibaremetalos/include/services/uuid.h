@@ -34,6 +34,10 @@ public:
 
     static const UUID NIL;
     static const UUID MAX;
+    static const size_t UUID_STRING_LENGTH = 36;
+    static const size_t UUID_STRING_BUFFER_SIZE = UUID_STRING_LENGTH + 2;   //  Pad a bit for the trailing null
+
+    typedef char ToStringBuffer[UUID_STRING_BUFFER_SIZE];
 
     Versions Version() const noexcept
     {

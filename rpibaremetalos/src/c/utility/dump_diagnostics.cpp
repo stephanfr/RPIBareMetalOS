@@ -63,6 +63,9 @@ void DumpDiagnostics()
     printf("EL0 Stack Top: %p\n", (uint8_t *)&__el0_stack_top);
     printf("EL0 Stack Bottom: %p\n", (uint8_t *)&__el0_stack_bottom);
     printf("Current Stack Location: %p\n", (uint8_t *)get_stack_pointer());
+    printf("OS Process Start: %p\n", (uint8_t *)&__os_process_start);
+    printf("OS Process End: %p\n", (uint8_t *)&__os_process_end);
+    printf("OS Process Size: %p\n", (uint32_t *)&__os_process_size_in_bytes);
 
     printf("\nKernal Command Line: %s\n", KernelCommandLine::RawCommandLine().c_str());
     

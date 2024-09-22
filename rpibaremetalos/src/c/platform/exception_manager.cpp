@@ -32,12 +32,12 @@ const char *entry_error_messages[] = {
 //  C linkage entry points for exceptions and interrupts
 //
 
-extern "C" void show_invalid_entry_message(unsigned int type, unsigned long esr, unsigned long address)
+extern "C" void ShowInvalidExceptionTableEntryMessage(unsigned int type, unsigned long esr, unsigned long address)
 {
     GetExceptionManager().HandleException(type, esr, address);
 }
 
-extern "C" void handle_irq()
+extern "C" void HandleIRQ()
 {
     GetExceptionManager().HandleInterrupt();
 }
@@ -48,7 +48,7 @@ extern "C" void handle_irq()
 
 void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address)
 {
-    printf("%s, ESR: %x, address: %x\r\n", entry_error_messages[type], (unsigned int)esr, (unsigned int)address);
+    LogError("%s, ESR: %x, address: %x\r\n", entry_error_messages[type], (unsigned int)esr, (unsigned int)address);
 }
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)

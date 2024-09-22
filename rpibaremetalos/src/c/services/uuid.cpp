@@ -23,7 +23,7 @@ UUID UUID::GenerateUUID(Versions version)
                  (GetUUIDGeneratorRNG().Next64BitValue() & ~0xC000000000000000) | 0x8000000000000000 );
 }
 
-char *UUID::ToString(char buffer[36]) const
+char *UUID::ToString(char buffer[UUID_STRING_BUFFER_SIZE]) const
 {
     sprintf(buffer, "%08x-%04x-%04x-%04x-%04x%08x", printf1_, printf2_, printf3_, printf4_, printf5_, printf6_);
 
