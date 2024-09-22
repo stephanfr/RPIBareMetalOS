@@ -7,6 +7,7 @@
 #include "os_entity.h"
 
 #include "filesystem/filesystems.h"
+#include "task/tasks.h"
 
 #include <format>
 #include <list>
@@ -18,6 +19,7 @@ namespace cli::commands
 
     const CLIListDirectoryCommand CLIListDirectoryCommand::instance;
     const CLIListFilesystemsCommand CLIListFilesystemsCommand::instance;
+    const CLIListTasksCommand CLIListTasksCommand::instance;
 
     //  Now for the parent command
 
@@ -122,4 +124,24 @@ namespace cli::commands
         }
     }
 
+    //  Command to list tasks
+
+    void CLIListTasksCommand::ProcessToken(CommandParser &parser,
+                                           CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+        char uuid_buffer[UUID::UUID_STRING_BUFFER_SIZE];
+
+        //  List all the tasks with the visitor callback
+
+        context.output_stream_ << "Tasks:\n";
+
+        auto callback = [&buffer, &uuid_buffer, &context](const task::Task &task) -> task::TaskListVisitorCallbackStatus
+        {
+            context.output_stream_ << minstd::format(buffer, "{}  {:<24} {}\n", task.ID().ToString(uuid_buffer), task.Name(), ToString(task.State()));
+            return task::TaskListVisitorCallbackStatus::NEXT;
+        };
+
+        context.task_manager_.VisitTaskList(callback);
+    }
 } // namespace cli
