@@ -6,14 +6,12 @@
 
 #include "sysregs.h"
 
-#define THREAD_SIZE 64000
-
 namespace task
 {
 
     TaskImpl::FullCPUState &TaskImpl::GetTaskInitialFullCPUState()
     {
-        return *((FullCPUState *)((unsigned long)this + THREAD_SIZE - sizeof(FullCPUState)));
+        return *((FullCPUState *)((unsigned long)this + stack_size_in_bytes_ - sizeof(FullCPUState)));
     }
 
     TaskImpl::FullCPUState &TaskImpl::AllocateTaskInitialFullCPUState()
@@ -21,7 +19,7 @@ namespace task
         //  This reserves space for a complete KernelEntry stack frame at the task top of stack.
         //      This state is swapped in when the task is initiated.
 
-        void *child_regs = (void *)((unsigned long)this + THREAD_SIZE - sizeof(FullCPUState));
+        void *child_regs = (void *)((unsigned long)this + stack_size_in_bytes_ - sizeof(FullCPUState));
         memset(child_regs, 0, sizeof(TaskImpl::FullCPUState));
 
         return *((FullCPUState *)child_regs);
@@ -44,7 +42,7 @@ namespace task
 
         //  Allocate space for the stack
 
-        MemoryPagePointer stack = GetFreePage();
+        MemoryPagePointer stack = GetMemoryManager().GetFreeBlock( stack_size_in_bytes_ );
 
         if (stack == 0)
         {
@@ -53,7 +51,7 @@ namespace task
 
         //  Put the stack pointer at the top of the stack
 
-        regs.sp = stack + PAGE_SIZE;
+        regs.sp = stack + stack_size_in_bytes_;
         stack_ = stack;
 
         //  Mark this as a user space thread

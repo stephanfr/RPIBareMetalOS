@@ -39,7 +39,7 @@ namespace user::task
     {
         using Result = ValueResult<::task::TaskResultCodes, UUID>;
 
-        unsigned long stack = sc_Malloc();
+        unsigned long stack = sc_Malloc(BYTES_16K);
         if (stack < 0)
         {
             LogError("Error while allocating stack for new Userspace Task\n\r");

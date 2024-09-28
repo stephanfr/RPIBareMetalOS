@@ -66,10 +66,10 @@ public:
         return memory_base_address_;
     }
 
-//    uint32_t GetMemorySizeInBytes() const
-//    {
-//        return memory_size_in_bytes_;
-//    }
+    uint64_t GetMemorySizeInBytes() const
+    {
+        return memory_size_in_bytes_;
+    }
 
     void DecodeBoardRevision(minstd::string &buffer) const;
 
@@ -82,7 +82,7 @@ private:
     uint64_t board_serial_number_;
     minstd::array<uint8_t, 6> board_mac_address_;
     uint32_t memory_base_address_;
-    //    uint32_t memory_size_in_bytes_;
+    uint64_t memory_size_in_bytes_;
 };
 
 const PlatformInfo &GetPlatformInfo();

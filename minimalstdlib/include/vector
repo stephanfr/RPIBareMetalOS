@@ -11,8 +11,8 @@
 
 #include "utility" //  For std::forward
 
-#include "type_traits"
 #include "allocator"
+#include "type_traits"
 
 #define DEFAULT_INITIAL_SIZE 12
 
@@ -36,11 +36,12 @@ namespace MINIMAL_STD_NAMESPACE
         class const_iterator;
         friend class const_iterator;
 
-        vector(allocator_type &allocator)
+        vector(allocator_type &allocator,
+               size_t initial_size = INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)
             : allocator_(allocator),
-              begin_(allocator_.allocate(INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)),
+              begin_(allocator_.allocate(initial_size)),
               end_(begin_),
-              current_allocated_size_(INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)
+              current_allocated_size_(initial_size)
         {
         }
 
@@ -54,7 +55,7 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            allocator_.deallocate(begin_, current_allocated_size_ );
+            allocator_.deallocate(begin_, current_allocated_size_);
         }
 
         [[nodiscard]] constexpr bool empty() const noexcept

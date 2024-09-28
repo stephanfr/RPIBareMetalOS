@@ -26,16 +26,16 @@ namespace syscall
         return new_task.Successful() ? SYS_CLONE_SUCCESS : SYS_CLONE_FAILURE;
     }
 
-    unsigned long Malloc()
+    unsigned long Malloc( unsigned long block_size )
     {
-        task::MemoryPagePointer new_page = task::GetFreePage();
+        task::MemoryPagePointer new_page = GetMemoryManager().GetFreeBlock(block_size);
 
         if (new_page == 0)
         {
             return -1;
         }
 
-        return static_cast<uint32_t>(new_page);
+        return static_cast<unsigned long>(new_page);
     }
 
     void Exit()

@@ -30,6 +30,8 @@
 #include "platform/platform_sw_rngs.h"
 #include "services/xoroshiro128plusplus.h"
 
+#include "task/memory_manager.h"
+
 #include "asm_globals.h"
 
 //  Forward declare the assembly language function which returns the board type
@@ -41,10 +43,11 @@ extern "C" void ParkCore();
 
 bool __platform_initialized = false;
 
-//  Globals for platform info and exception manager
+//  Globals for platform info, exception manager and memory manager
 
 static const PlatformInfo *__platform_info = nullptr;
 static ExceptionManager *__exception_manager = nullptr;
+static task::MemoryManager *__memory_manager = nullptr;
 
 //  Global for HW RNG generator
 
@@ -195,6 +198,15 @@ void InitializePlatform()
         ParkCore();
     }
 
+    //  Initialize the memory manager
+
+    auto memory_manager = make_static_unique<task::MemoryManager>(__platform_info->GetMemorySizeInBytes(),
+                                                                                                __platform_info->GetMMIOBase());
+    
+    __memory_manager = memory_manager.get();
+
+    GetOSEntityRegistry().AddEntity(memory_manager);
+
     //  Mark the platform as initialized
 
     __platform_initialized = true;
@@ -212,6 +224,11 @@ const PlatformInfo &GetPlatformInfo()
 ExceptionManager &GetExceptionManager()
 {
     return *__exception_manager;
+}
+
+task::MemoryManager &GetMemoryManager()
+{
+    return *__memory_manager;
 }
 
 RandomNumberGeneratorBase &GetHWRandomNumberGenerator()

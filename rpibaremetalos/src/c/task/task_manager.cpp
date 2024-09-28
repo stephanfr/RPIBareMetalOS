@@ -93,14 +93,14 @@ namespace task
 
         current_task_->PreemptDisable(); //	Disable preemption for this thread during this function
 
-        MemoryPagePointer free_page = GetFreePage();
+        MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock( task_stack_size_in_bytes_ );
 
-        if (free_page == 0)
+        if (free_block == 0)
         {
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
 
-        TaskImpl *new_task = new (free_page) TaskImpl(name, Task::TaskType::KERNEL_TASK);
+        TaskImpl *new_task = new (free_block) TaskImpl(name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState();
 
@@ -129,21 +129,21 @@ namespace task
         using Result = ValueResult<TaskResultCodes, UUID>;
 
         current_task_->PreemptDisable();
-        MemoryPagePointer free_page = GetFreePage();
+        MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock( task_stack_size_in_bytes_ );
 
-        if (free_page == 0)
+        if (free_block == 0)
         {
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
 
-        TaskImpl *new_task = new (free_page) TaskImpl(new_name, Task::TaskType::KERNEL_TASK);
+        TaskImpl *new_task = new (free_block) TaskImpl(new_name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState();
 
         TaskImpl::FullCPUState &cur_regs = current_task_->GetTaskInitialFullCPUState();
         childregs = cur_regs;
         childregs.regs[0] = SYS_CLONE_NEW_TASK; //  This sets x0 to the value which signals to callers that we have a net-new task
-        childregs.sp = stack + PAGE_SIZE;
+        childregs.sp = stack + task_stack_size_in_bytes_;
         new_task->stack_ = stack;
 
         new_task->type_ = current_task_->type_;
@@ -266,7 +266,7 @@ namespace task
 
         if (current_task_->stack_ != 0)
         {
-            ReleasePage(current_task_->stack_);
+            GetMemoryManager().ReleaseBlock(current_task_->stack_, current_task_->stack_size_in_bytes_);
         }
 
         current_task_->PreemptEnable();

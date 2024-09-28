@@ -15,6 +15,17 @@
 #define PACKED __attribute__ ((packed))
 
 //
+//  Some conversion values
+//
+
+constexpr uint64_t BYTES_1K = 1024;
+constexpr uint64_t BYTES_4K = 4 * BYTES_1K;
+constexpr uint64_t BYTES_16K = 16 * BYTES_1K;
+constexpr uint64_t BYTES_1M = BYTES_1K * BYTES_1K;
+constexpr uint64_t BYTES_4M = 4 * BYTES_1M;
+constexpr uint64_t BYTES_1G = BYTES_1K * BYTES_1M;
+
+//
 //  Some timing symbols
 //
 

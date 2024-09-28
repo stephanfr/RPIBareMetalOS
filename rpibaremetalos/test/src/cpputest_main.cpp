@@ -4,6 +4,7 @@
 
 #include <CppUTest/CommandLineTestRunner.h>
 
+#include "os_config.h"
 #include "heaps.h"
 
 #include "platform/platform_sw_rngs.h"
@@ -21,8 +22,8 @@ extern void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_
 //  Define heaps and allocators for tests
 //
 
-#define TEST_STATIC_HEAP_SIZE 1048576
-#define TEST_DYNAMIC_HEAP_SIZE 256 * 1048576
+#define TEST_STATIC_HEAP_SIZE BYTES_4M
+#define TEST_DYNAMIC_HEAP_SIZE 256 * BYTES_1M
 
 static char static_heap_buffer[TEST_STATIC_HEAP_SIZE];
 static char dynamic_heap_buffer[TEST_DYNAMIC_HEAP_SIZE];

@@ -81,6 +81,8 @@ namespace task
         TaskImpl kernel_main_task_;
         TaskImpl *current_task_;
 
+        const uint64_t task_stack_size_in_bytes_ = BYTES_16K;
+
         //  Put the task map in the kernel dynamic heap
 
         TaskMapHeapAllocator task_map_heap_allocator_{__os_dynamic_heap};
@@ -93,7 +95,7 @@ namespace task
         static void ReturnFromFork();
 
         TaskManagerImpl()
-            : kernel_main_task_( "KernelMain", Task::TaskType::KERNEL_TASK),
+            : kernel_main_task_( "KernelMain", Task::TaskType::KERNEL_TASK, BYTES_1M),
               current_task_(&kernel_main_task_)
         {
             task_map_.insert(kernel_main_task_.uuid_, minstd::move(kernel_main_task_));

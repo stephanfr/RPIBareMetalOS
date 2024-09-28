@@ -21,7 +21,7 @@
 #include "task/task_errors.h"
 
 extern "C" int sc_CloneTask(const char* name, unsigned long fn, unsigned long arg, unsigned long stack, task::TaskResultCodes &result_code, UUID &result);
-extern "C" unsigned long sc_Malloc();
+extern "C" unsigned long sc_Malloc(unsigned long block_size);
 extern "C" void sc_Exit();
 
 extern "C" void sc_Write(char * buf);

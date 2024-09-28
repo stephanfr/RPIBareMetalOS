@@ -11,7 +11,7 @@
 
 #include "task/tasks.h"
 
-#include "task/mm.h"
+#include "task/memory_manager.h"
 #include "task/task_errors.h"
 #include "task/runnable.h"
 
@@ -63,15 +63,17 @@ namespace task
         TaskImpl &operator=(TaskImpl &&) = delete;
 
         TaskImpl( const char *name,
-                  TaskType type)
+                  TaskType type,
+                  uint64_t stack_size_in_bytes)
             : uuid_(UUID::GenerateUUID(UUID::Versions::RANDOM)),
               name_(name),  
+              type_(type),
+              stack_size_in_bytes_(stack_size_in_bytes),
               state_(ExecutionState::STARTING),
               counter_(0),
               priority_(1),
               preempt_count_(0),
               stack_(0),
-              type_(TaskType::USER_TASK),
               cpu_state_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}   //  CPU State is zeroed
         {
         }
@@ -104,11 +106,6 @@ namespace task
             return state_;
         }
 
-//        void SetState(State state)
-//        {
-//            state_ = state;
-//        }
-
         TaskType Type() const
         {
             return type_;
@@ -124,13 +121,14 @@ namespace task
 
         const UUID uuid_;
         const minstd::fixed_string<MAX_TASK_NAME_LENGTH> name_;
+        TaskType type_;
+        uint64_t stack_size_in_bytes_;
 
         ExecutionState state_;
         long counter_;
         long priority_;
         long preempt_count_;
         MemoryPagePointer stack_;
-        TaskType type_;
         
         ALIGN TaskContextCPUState cpu_state_;
     };

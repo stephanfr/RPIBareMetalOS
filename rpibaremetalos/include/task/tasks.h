@@ -12,7 +12,7 @@
 
 #include "os_entity.h"
 
-#include "task/mm.h"
+#include "task/memory_manager.h"
 #include "task/runnable.h"
 #include "task/task_errors.h"
 
