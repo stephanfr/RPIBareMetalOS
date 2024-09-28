@@ -96,14 +96,8 @@ SECTIONS
 
     __el0_stack_size_in_bytes = __el0_stack_top - __el0_stack_bottom;
 
-    .os_process (NOLOAD): {
-        . = ALIGN(16);
-        __os_process_start = .;
-        . = . + TOTAL_USER_SPACE_IN_MB * 1M;
-        __os_process_end = .;
-    } > OS_RAM
-
-    __os_process_size_in_bytes = __os_process_end - __os_process_start;
+    . = ALIGN(16);
+    __os_process_start = .;
 
    /DISCARD/ : { *(.comment) *(.gnu*) *(.note*) *(.eh_frame*) }
 }

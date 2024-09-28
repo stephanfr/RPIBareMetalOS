@@ -36,8 +36,6 @@ extern const unsigned int __el0_stack_bottom;
 extern const unsigned int __el0_stack_size_in_bytes;
 
 extern const unsigned int __os_process_start;
-extern const unsigned int __os_process_end;
-extern const unsigned int __os_process_size_in_bytes;
 
 //
 //  Variables defined in assmbly language code
