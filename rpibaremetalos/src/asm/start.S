@@ -4,6 +4,7 @@
 
 #include "cpu_part_nums.h"
 #include "core_states.h"
+#include "os_memory_config.h"
 
 
 #define BIT(x) (1 << (x))
@@ -72,7 +73,7 @@ x24_coreJumpTableAddress .req x24
 x25_arrivedInEL3 .req x25
 x26_numberOfCoresAvailable .req x26
 
-.macro InitializeRegisters
+.macro InitializeLocalRegisterVariables
     mrs     x21_coreNumber, MPIDR_EL1
     and     x21_coreNumber, x21_coreNumber, #3
     bl      IdentifyBoardType
@@ -101,6 +102,31 @@ x26_numberOfCoresAvailable .req x26
     str x22_boardHWId, [x1]
 .endm
 
+//
+//  In the code below, be cautious about alignment for any points to which the code will jump.
+//      There are align directives inline before key locations, but if the code is modified with more jump points
+//      then additional align directives may be needed.  If this is tripped up, then the code will work fine when
+//      the jump points align correctly but then crash when a new instruction is added that throws off alignment.
+//
+//  The code is also pretty run-on, I have added macros and a couple subroutines but mostly this is just linear
+//      intialization code with various internal jump points.  I could break it up more but I doubt that would
+//      improve readability or flow.
+//
+//  There is a state machine, albeit a very simple one.  Core 0 does most of the heavy lifting, including bringing
+//      up the other cores.  Depending on the EL we enter, then either all secondary cores will arrive here in EL3
+//      or they will be spinning in EL2 and have to be released using a low memory location specified by the ARMSTUB
+//      to provide a jump address, when core 0 is ready to release them.  If all the cores arrive here in EL3, as a
+//      result of using a minimal ARMSTUB, then we skip the low memory location jump address and the cores will eventually
+//      spin in EL2 in this code. They then wait for core 0 to give them a jump address - which is currently an entry point for the
+//      cores to configure their stacks and complete control register initialization - before rendezvousing in spins in EL1
+//      waiting for another jump address, this time most likely from a call to CoreExecute() in the C/C++ code.
+//
+//  Only Core 0 will make it to KernelMain, all other cores will spin in EL1 until they get a jump address to a different
+//      void() function in the C code.  The first part of KernelMain is also one-time initialization code.
+//
+//  In general all cores get the same control register configuration, the only real difference is that core 0
+//      initializes the C++ statics and bss space before moving the other cores to EL1 spin loops and going to KernelMain.
+//
 
 .global _start
 
@@ -157,7 +183,7 @@ _start:
     //  Identify the board type and then setup the physical timer
 
     bl      IdentifyBoardType
-    mov     x22_boardHWId, x0                  //  Copy board type into register
+    mov     x22_boardHWId, x0                                   //  Copy board type into register
 
     bl      SetupPhysicalTimer
 
@@ -187,20 +213,19 @@ _start:
 
     //  Running at EL2 - processor will be in EL2 on entry with the default ARMSTUB
 
+.align 4                                                        //  Align the code to a 4 byte boundary
 .running_in_el2:
 
     //  Setup the local registers holding the core number, etc
 
-    InitializeRegisters
+    InitializeLocalRegisterVariables
 
     //  For now, we know the platform will have at most 4 cores
 
-//    adrp    x1, __number_of_cores_available
-//    add     x1, x1, :lo12:__number_of_cores_available
-//    mov     x0, #4
-//    str     w0, [x1]
-
-//    mov     x26_numberOfCoresAvailable, x0
+    adrp    x1, __number_of_cores_available
+    add     x1, x1, :lo12:__number_of_cores_available
+    mov     x26_numberOfCoresAvailable, #4
+    str     w26, [x1]                                           //  Use the lower 32 bits of the register only as __number_of_cores_available is a 32 bit value
 
     //  Update the core state
 
@@ -229,12 +254,14 @@ _start:
 	mov x3, #0
 	br x4
 
+.align 4                                                        //  Align the code to a 4 byte boundary
 .configure_stacks_for_core :
 
     SetCoreState #CORE_CONFIGURING_STACKS_IN_EL2
 
     //  Set up the stack locations for this core
 
+/*
     adrp    x1, el1_stack_top
     add     x1, x1, :lo12:el1_stack_top
     ldr     x0, [x1, x21_coreNumber, lsl #3] 
@@ -244,6 +271,21 @@ _start:
     add     x1, x1, :lo12:el0_stack_top
     ldr     x0, [x1, x21_coreNumber, lsl #3] 
     msr     SP_EL0, x0
+*/
+
+    mov     x3, #EL1_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES
+    mov     x4, #EL0_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES
+
+    add     x2, x3, x4
+    mul     x2, x2, x21_coreNumber
+
+    adrp    x1, __per_core_initialization_stack_bottom
+    add     x1, x1, :lo12:__per_core_initialization_stack_bottom
+    add     x1, x1, x2
+    add     x1, x1, x3
+    msr     SP_EL1, x1
+    add     x1, x1, x4
+    msr     SP_EL0, x1
 
     //  Enable CNTP for lower exception levels
 
@@ -262,8 +304,8 @@ _start:
 
     //  Enable AArch64 in EL1
 
-    mov     x0, #(1 << 31)              // AArch64
-    orr     x0, x0, #(1 << 1)           // SWIO hardwired on Pi3
+    mov     x0, #(1 << 31)                                      // AArch64
+    orr     x0, x0, #(1 << 1)                                   // SWIO hardwired on Pi3
     msr     HCR_EL2, x0
     mrs     x0, HCR_EL2
 
@@ -277,17 +319,17 @@ _start:
 
     mov     x2, SPSR_EL2_VALUE
     msr     SPSR_EL2, x2
-    adr     x2, .running_in_el1             //  Load the EL2 exception return reg with the .running_in_el1 symbol so we go there on eret
+    adr     x2, .running_in_el1                                 //  Load the EL2 exception return reg with the .running_in_el1 symbol so we go there on eret
     msr     ELR_EL2, x2
 
-    eret                                    //  Exception level may only change on an exception return
+    eret                                                        //  Exception level may only change on an exception return
 
 .running_in_el1:
 
     //  Set up exception handlers
 
 	adr	    x0, __exception_vectors
-	msr	    VBAR_EL1, x0		            //  Put the address of the exception vector table into VBAR_EL1
+	msr	    VBAR_EL1, x0		                                //  Put the address of the exception vector table into VBAR_EL1
 
     //  When we set the SPSR_EL2 register to SPSR_EL2_VALUE above, the SPSR_EL2_EL1h bits are set which means
     //      that on the eret above, SPSel set to 1 for execution in EL1.  This matters as it will impact which 
@@ -338,11 +380,11 @@ _start:
     adrp    x1, __bss_start
     add     x1, x1, :lo12:__bss_start
     ldr     w2, =__bss_size_in_double_words
-    cbz     w2, .initialize_cpp_statics             //  Skip the loop if the bss section is zero length
+    cbz     w2, .initialize_cpp_statics                         //  Skip the loop if the bss section is zero length
 
 loop_for_bss_clear:
 
-    str     xzr, [x1], #8                           //  Set 8 bytes at a time - the section in the linker script must match
+    str     xzr, [x1], #8                                       //  Set 8 bytes at a time - the section in the linker script must match
     sub     w2, w2, #1
     cbnz    w2, loop_for_bss_clear
 
@@ -367,8 +409,8 @@ loop_for_bss_clear:
 
 .loop_for_next_static_initializer:
     
-    ldr     x0, [x19], 8                                //  Load the next initializer function address into x0
-    blr     x0                                          //  Call the initializer function
+    ldr     x0, [x19], 8                                        //  Load the next initializer function address into x0
+    blr     x0                                                  //  Call the initializer function
     cmp     x19, x20
     bne     .loop_for_next_static_initializer
 
@@ -376,13 +418,13 @@ loop_for_bss_clear:
 
 .start_additional_cores:
 
-    mov x19, #1                                         //  Start with core 1
+    mov x19, #1                                                 //  Start with core 1
 
 .start_next_core:
     mov x0, x19
     bl StartCore
     add x19, x19, #1
-    cmp x19, #4                 //  Loop until all cores are started
+    cmp x19, x26_numberOfCoresAvailable                         //  Loop until all cores are started
     b.lo .start_next_core
 
     //  Jump to the kernel main function, must have C style linkage
@@ -405,36 +447,22 @@ StartCore:
 
     mov x3, x0
 
-    cmp x25_arrivedInEL3, #1                            //  If we arrived in EL3, then we do not need to release cores from the standard ARMSTUB
+    cmp x25_arrivedInEL3, #1                                    //  If we arrived in EL3, then we do not need to release cores from the standard ARMSTUB
     b.eq .wait_core_ack
 
-    mov x1, #armstub_el2_spin_table					    //  Armstub EL2 spin table
-	ldr x2, =.running_in_el2				            //  Function pointer
-	str	x2, [x1, x3, lsl #3]				            //  Store the function address to core to start
-	sev										            //  Wake up core
+    mov x1, #armstub_el2_spin_table					            //  Armstub EL2 spin table
+	ldr x2, =.running_in_el2				                    //  Function pointer
+	str	x2, [x1, x3, lsl #3]				                    //  Store the function address to core to start
+	sev										                    //  Wake up core
 
 .wait_core_ack:
 	GetCoreState x3
-	cmp	w0, #CORE_SPINNING_IN_EL2			            //  Wait for the core to be spinning in the startup code in EL2
+	cmp	w0, #CORE_SPINNING_IN_EL2			                    //  Wait for the core to be spinning in the startup code in EL2
 	bne	.wait_core_ack
 
-	ldr x2, =.configure_stacks_for_core		            //  We want to configure the stacks next
-	str	x2, [x24_coreJumpTableAddress, x3, lsl #3]      //  Store the function address to the core
-	sev										            //  Wake up core
+	ldr x2, =.configure_stacks_for_core		                    //  We want to configure the stacks next
+	str	x2, [x24_coreJumpTableAddress, x3, lsl #3]              //  Store the function address to the core
+	sev										                    //  Wake up core
 
-    ret                                                 //  Return
-
-//
-//  Values for stack pointers
-//
-
-el1_stack_top: .quad __core0_el1_stack_top
-               .quad __core1_el1_stack_top
-               .quad __core2_el1_stack_top
-               .quad __core3_el1_stack_top  
-
-el0_stack_top: .quad __core0_el0_stack_top
-               .quad __core1_el0_stack_top
-               .quad __core2_el0_stack_top
-               .quad __core3_el0_stack_top
+    ret                                                         //  Return
 

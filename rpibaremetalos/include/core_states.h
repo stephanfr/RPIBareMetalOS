@@ -16,7 +16,9 @@
 
 #ifdef __cplusplus
 
-typedef enum class CoreStates
+#include <cstdint>
+
+typedef enum class CoreInitializationStates : uint32_t
 {
     NotStarted = CORE_NOT_STARTED,
     StartedInEL2 = CORE_STARTED_IN_EL2,
@@ -27,6 +29,6 @@ typedef enum class CoreStates
     JumpedToKernelMain = CORE_JUMPED_TO_KERNEL_MAIN,
     JumpedToApplicationCode = CORE_JUMPED_TO_APPLICATION_CODE,
     Parked = CORE_STATE_PARKED,
-} CoreStates;
+} CoreInitializationStates;
 
 #endif

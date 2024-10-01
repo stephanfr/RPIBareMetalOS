@@ -4,6 +4,7 @@
  *      include only preprocessor directives.
  */
 
+#include "os_config.h"
 #include "os_memory_config.h"
 
 /*
@@ -78,77 +79,19 @@ SECTIONS
 
     __dynamic_heap_size_in_bytes = __dynamic_heap_end - __dynamic_heap_start;
 
-    .core0_el1_stack (NOLOAD): {
-        __core0_el1_stack_bottom = .;
-        . = . + 1M;
+    /* There is probably a better way to do this, but I am just carving out enough space for MAX_CORES of
+     * stack space to be used on boot-up for division amongst active cores.  If MAX_CORES == 16 but with only 4 active cores, then 12 cores
+     * of stack space will be 'wasted' but this will be fixed when we add virtual memory. */
+
+    .per_core_el1_and_el0_initialization_stacks (NOLOAD): {
         . = ALIGN(16);
-        __core0_el1_stack_top = .;
+        __per_core_initialization_stack_bottom = .;
+        . = . + (EL1_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES + EL0_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES) * MAX_CORES;
+        . = ALIGN(16);
+        __per_core_initialization_stack_top = .;
     } > OS_RAM
 
-    __core0_el1_stack_size_in_bytes = __core0_el1_stack_top - __core0_el1_stack_bottom;
-
-    .core0_el0_stack (NOLOAD): {
-        __core0_el0_stack_bottom = .;
-        . = . + 1M;
-        . = ALIGN(16);
-        __core0_el0_stack_top = .;
-    } > OS_RAM
-
-    __core0_el0_stack_size_in_bytes = __core0_el0_stack_top - __core0_el0_stack_bottom;
-
-    .core1_el1_stack (NOLOAD): {
-        __core1_el1_stack_bottom = .;
-        . = . + 1M;
-        . = ALIGN(16);
-        __core1_el1_stack_top = .;
-    } > OS_RAM
-
-    __core1_el1_stack_size_in_bytes = __core1_el1_stack_top - __core1_el1_stack_bottom;
-
-    .core1_el0_stack (NOLOAD): {
-        __core1_el0_stack_bottom = .;
-        . = . + 1M;
-        . = ALIGN(16);
-        __core1_el0_stack_top = .;
-    } > OS_RAM
-
-    __core1_el0_stack_size_in_bytes = __core1_el0_stack_top - __core1_el0_stack_bottom;
-
-    .core2_el1_stack (NOLOAD): {
-        __core2_el1_stack_bottom = .;
-        . = . + 1M;
-        . = ALIGN(16);
-        __core2_el1_stack_top = .;
-    } > OS_RAM
-
-    __core2_el1_stack_size_in_bytes = __core2_el1_stack_top - __core2_el1_stack_bottom;
-
-    .core2_el0_stack (NOLOAD): {
-        __core2_el0_stack_bottom = .;
-        . = . + 1M;
-        . = ALIGN(16);
-        __core2_el0_stack_top = .;
-    } > OS_RAM
-
-    __core2_el0_stack_size_in_bytes = __core2_el0_stack_top - __core2_el0_stack_bottom;
-
-    .core3_el1_stack (NOLOAD): {
-        __core3_el1_stack_bottom = .;
-        . = . + 1M;
-        . = ALIGN(16);
-        __core3_el1_stack_top = .;
-    } > OS_RAM
-
-    __core3_el1_stack_size_in_bytes = __core3_el1_stack_top - __core3_el1_stack_bottom;
-
-    .core3_el0_stack (NOLOAD): {
-        __core3_el0_stack_bottom = .;
-        . = . + 1M;
-        . = ALIGN(16);
-        __core3_el0_stack_top = .;
-    } > OS_RAM
-
-    __core3_el0_stack_size_in_bytes = __core3_el0_stack_top - __core3_el0_stack_bottom;
+    __per_core_initialization_stack_in_bytes = __per_core_initialization_stack_top - __per_core_initialization_stack_bottom;
 
     . = ALIGN(16);
     __os_process_start = .;

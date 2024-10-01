@@ -27,37 +27,9 @@ extern const unsigned int __dynamic_heap_start;
 extern const unsigned int __dynamic_heap_end;
 extern const unsigned int __dynamic_heap_size_in_bytes;
 
-extern const unsigned int __core0_el1_stack_top;
-extern const unsigned int __core0_el1_stack_bottom;
-extern const unsigned int __core0_el1_stack_size_in_bytes;
-
-extern const unsigned int __core0_el0_stack_top;
-extern const unsigned int __core0_el0_stack_bottom;
-extern const unsigned int __core0_el0_stack_size_in_bytes;
-
-extern const unsigned int __core1_el1_stack_top;
-extern const unsigned int __core1_el1_stack_bottom;
-extern const unsigned int __core1_el1_stack_size_in_bytes;
-
-extern const unsigned int __core1_el0_stack_top;
-extern const unsigned int __core1_el0_stack_bottom;
-extern const unsigned int __core1_el0_stack_size_in_bytes;
-
-extern const unsigned int __core2_el1_stack_top;
-extern const unsigned int __core2_el1_stack_bottom;
-extern const unsigned int __core2_el1_stack_size_in_bytes;
-
-extern const unsigned int __core2_el0_stack_top;
-extern const unsigned int __core2_el0_stack_bottom;
-extern const unsigned int __core2_el0_stack_size_in_bytes;
-
-extern const unsigned int __core3_el1_stack_top;
-extern const unsigned int __core3_el1_stack_bottom;
-extern const unsigned int __core3_el1_stack_size_in_bytes;
-
-extern const unsigned int __core3_el0_stack_top;
-extern const unsigned int __core3_el0_stack_bottom;
-extern const unsigned int __core3_el0_stack_size_in_bytes;
+extern const unsigned int __per_core_initialization_stack_bottom;
+extern const unsigned int __per_core_initialization_stack_top;
+extern const unsigned int __per_core_initialization_stack_size_in_bytes;
 
 extern const unsigned int __os_process_start;
 
