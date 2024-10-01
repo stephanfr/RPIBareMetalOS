@@ -25,11 +25,12 @@ public:
     {
     }
 
-    virtual const RPIBoardType GetBoardType() const = 0;
+    virtual RPIBoardType GetBoardType() const = 0;
     virtual const char *GetBoardTypeName() const = 0;
     virtual uint8_t *GetMMIOBase() const = 0;
     virtual uint8_t *GetEMMCBase() const = 0;
-    virtual const uint32_t GetGPUClockRate() const = 0;
+    virtual uint32_t GetGPUClockRate() const = 0;
+    virtual uint32_t GetNumberOfCores() const = 0;
 
     bool IsRPI3() const
     {

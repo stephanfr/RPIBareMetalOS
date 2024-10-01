@@ -4,6 +4,10 @@
 
 #pragma once
 
+#define MAX_CORES 16
+
+#ifdef __cplusplus
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -70,3 +74,5 @@ constexpr size_t MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE = 4;     //  Standard Mas
 constexpr size_t DEFAULT_DIRECTORY_CACHE_SIZE = 4096;
 
 constexpr size_t MAX_FAT32_SHORT_FILENAME_SEARCH_TABLE_SIZE = 100;
+
+#endif

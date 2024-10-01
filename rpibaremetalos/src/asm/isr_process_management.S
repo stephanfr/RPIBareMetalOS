@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 //	This assembly code borrows pretty heavily from Sergey Matyukevich's code in his rapsberry-pi-os github repository.
-//		I am including his license below.  Without his code s a guide, it would have taken me much longer to get this working.
+//		I am including his license below.  Without his code as a guide, it would have taken me much longer to get this working.
 
 /*
 MIT License

@@ -9,7 +9,7 @@ RPI3PlatformInfo::RPI3PlatformInfo()
     GetPlatformDetails(GetMMIOBase());
 }
 
-const RPIBoardType RPI3PlatformInfo::GetBoardType() const
+RPIBoardType RPI3PlatformInfo::GetBoardType() const
 {
     return RPIBoardType::RPI3;
 }
@@ -29,7 +29,12 @@ uint8_t *RPI3PlatformInfo::GetEMMCBase() const
     return const_cast<uint8_t *>(BCM2837_EMMC_BASE);
 }
 
-const uint32_t RPI3PlatformInfo::GetGPUClockRate() const
+uint32_t RPI3PlatformInfo::GetGPUClockRate() const
 {
     return BCM2837_SYSTEM_CLOCK;
+}
+
+uint32_t RPI3PlatformInfo::GetNumberOfCores() const
+{
+    return 4;
 }

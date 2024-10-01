@@ -38,6 +38,8 @@
 
 #include "minimalstdio.h"
 
+#include "asm_utility.h"
+
 //
 //
 //
@@ -119,15 +121,29 @@ public:
         minstd::fixed_string<128> test = "User process started\n\r";
         user::io::Write(const_cast<char *>(test.data()));
 
-        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>( dynamic_new<UserCounter>("12345"), __os_dynamic_heap);
+        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("12345"), __os_dynamic_heap);
 
         auto new_task1 = user::task::ForkTask("Counting Process 1", user_process1);
 
-        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>( dynamic_new<UserCounter>("abcde"), __os_dynamic_heap);
+        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("abcde"), __os_dynamic_heap);
 
         auto new_task2 = user::task::ForkTask("Counting Process 2", user_process2);
     }
 };
+
+void TestCoreMain()
+{
+    const char *array = "Core1";
+    printf("In Test Core Main: %s\n", array);
+
+    RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+
+    while (1)
+    {
+        printf("%s", array);
+        delay(9990 + random_generator.Next32BitValue() % 20);
+    }
+}
 
 extern "C" void kernel_main()
 {
@@ -145,6 +161,8 @@ extern "C" void kernel_main()
 
     DumpDiagnostics();
 
+    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+
     //  Mount the filesystems on the SD card
 
     filesystems::MountSDCardFilesystems();
@@ -160,6 +178,13 @@ extern "C" void kernel_main()
     GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 40000);
 
     printf("Interrupts enabled\n");
+
+    //  Start a task on Core 1
+
+    if( !CoreExecute(3, &TestCoreMain))
+    {
+        printf("Failed to start core 3\n");
+    }
 
     //  Start the command line interface
 
@@ -213,6 +238,8 @@ extern "C" void kernel_main()
         printf("error while starting kernel process");
         return;
     }
+
+    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
     //  Keep the scheduler running
 

@@ -27,18 +27,45 @@ extern const unsigned int __dynamic_heap_start;
 extern const unsigned int __dynamic_heap_end;
 extern const unsigned int __dynamic_heap_size_in_bytes;
 
-extern const unsigned int __el1_stack_top;
-extern const unsigned int __el1_stack_bottom;
-extern const unsigned int __el1_stack_size_in_bytes;
+extern const unsigned int __core0_el1_stack_top;
+extern const unsigned int __core0_el1_stack_bottom;
+extern const unsigned int __core0_el1_stack_size_in_bytes;
 
-extern const unsigned int __el0_stack_top;
-extern const unsigned int __el0_stack_bottom;
-extern const unsigned int __el0_stack_size_in_bytes;
+extern const unsigned int __core0_el0_stack_top;
+extern const unsigned int __core0_el0_stack_bottom;
+extern const unsigned int __core0_el0_stack_size_in_bytes;
+
+extern const unsigned int __core1_el1_stack_top;
+extern const unsigned int __core1_el1_stack_bottom;
+extern const unsigned int __core1_el1_stack_size_in_bytes;
+
+extern const unsigned int __core1_el0_stack_top;
+extern const unsigned int __core1_el0_stack_bottom;
+extern const unsigned int __core1_el0_stack_size_in_bytes;
+
+extern const unsigned int __core2_el1_stack_top;
+extern const unsigned int __core2_el1_stack_bottom;
+extern const unsigned int __core2_el1_stack_size_in_bytes;
+
+extern const unsigned int __core2_el0_stack_top;
+extern const unsigned int __core2_el0_stack_bottom;
+extern const unsigned int __core2_el0_stack_size_in_bytes;
+
+extern const unsigned int __core3_el1_stack_top;
+extern const unsigned int __core3_el1_stack_bottom;
+extern const unsigned int __core3_el1_stack_size_in_bytes;
+
+extern const unsigned int __core3_el0_stack_top;
+extern const unsigned int __core3_el0_stack_bottom;
+extern const unsigned int __core3_el0_stack_size_in_bytes;
 
 extern const unsigned int __os_process_start;
 
 //
-//  Variables defined in assmbly language code
+//  Variables defined or shared with assembly language code
 //
 
 extern uint32_t __hw_board_type;
+extern uint32_t __number_of_cores_available;
+extern uint32_t __core_state[];
+extern uint64_t __core_jmp_table[];

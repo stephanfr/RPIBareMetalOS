@@ -9,8 +9,8 @@
 extern "C"
 {
     void CPUTicksDelay(uint64_t ticks);
-    void put32(uint64_t address, uint32_t value);
-    uint32_t get32(uint64_t address);
 
-    void* get_stack_pointer();
+    void* GetStackPointer();
+
+    bool CoreExecute (uint32_t core, void (*func)(void));
 }

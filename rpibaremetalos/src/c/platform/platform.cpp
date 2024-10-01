@@ -150,6 +150,8 @@ bool SetupSerialConsole()
 
 void InitializePlatform()
 {
+    //  TODO - figure out how to signal error messages
+    
     if (__platform_initialized)
     {
         return;
@@ -180,6 +182,14 @@ void InitializePlatform()
         ParkCore();
         break;
     }
+
+    //  Insure that the number of cores available is less than the max and that they match the number according to the platform
+
+//    if ((__number_of_cores_available > MAX_CORES) ||
+//        (__number_of_cores_available != __platform_info->GetNumberOfCores()))
+//    {
+//        ParkCore();
+//    }
 
     //  Initialize the platform software RNGs from the HW RNG
 

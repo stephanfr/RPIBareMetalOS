@@ -73,11 +73,11 @@ namespace cli::commands
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space Size: {}\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Start: {}\n", __os_dynamic_heap.heap_start());
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap End: {}\n", __os_dynamic_heap.current_end());
-        context.output_stream_ << minstd::format(format_buffer, "EL1 Stack Top: {}\n", (void *)&__el1_stack_top);
-        context.output_stream_ << minstd::format(format_buffer, "EL1 Stack Bottom: {}\n", (void *)&__el1_stack_bottom);
-        context.output_stream_ << minstd::format(format_buffer, "EL0 Stack Top: {}\n", (void *)&__el0_stack_top);
-        context.output_stream_ << minstd::format(format_buffer, "EL0 Stack Bottom: {}\n", (void *)&__el0_stack_bottom);
-        context.output_stream_ << minstd::format(format_buffer, "Current Stack Location: {}\n", (void *)get_stack_pointer());
+        context.output_stream_ << minstd::format(format_buffer, "EL1 Stack Top: {}\n", (void *)&__core0_el1_stack_top);
+        context.output_stream_ << minstd::format(format_buffer, "EL1 Stack Bottom: {}\n", (void *)&__core0_el1_stack_bottom);
+        context.output_stream_ << minstd::format(format_buffer, "EL0 Stack Top: {}\n", (void *)&__core0_el0_stack_top);
+        context.output_stream_ << minstd::format(format_buffer, "EL0 Stack Bottom: {}\n", (void *)&__core0_el0_stack_bottom);
+        context.output_stream_ << minstd::format(format_buffer, "Current Stack Location: {}\n", (void *)GetStackPointer());
 
         context.output_stream_ << "\nKernal Command Line: " << KernelCommandLine::RawCommandLine() << "\n";
 

@@ -78,23 +78,77 @@ SECTIONS
 
     __dynamic_heap_size_in_bytes = __dynamic_heap_end - __dynamic_heap_start;
 
-    .el1_stack (NOLOAD): {
-        __el1_stack_bottom = .;
+    .core0_el1_stack (NOLOAD): {
+        __core0_el1_stack_bottom = .;
         . = . + 1M;
         . = ALIGN(16);
-        __el1_stack_top = .;
+        __core0_el1_stack_top = .;
     } > OS_RAM
 
-    __el1_stack_size_in_bytes = __el1_stack_top - __el1_stack_bottom;
+    __core0_el1_stack_size_in_bytes = __core0_el1_stack_top - __core0_el1_stack_bottom;
 
-    .el0_stack (NOLOAD): {
-        __el0_stack_bottom = .;
+    .core0_el0_stack (NOLOAD): {
+        __core0_el0_stack_bottom = .;
         . = . + 1M;
         . = ALIGN(16);
-        __el0_stack_top = .;
+        __core0_el0_stack_top = .;
     } > OS_RAM
 
-    __el0_stack_size_in_bytes = __el0_stack_top - __el0_stack_bottom;
+    __core0_el0_stack_size_in_bytes = __core0_el0_stack_top - __core0_el0_stack_bottom;
+
+    .core1_el1_stack (NOLOAD): {
+        __core1_el1_stack_bottom = .;
+        . = . + 1M;
+        . = ALIGN(16);
+        __core1_el1_stack_top = .;
+    } > OS_RAM
+
+    __core1_el1_stack_size_in_bytes = __core1_el1_stack_top - __core1_el1_stack_bottom;
+
+    .core1_el0_stack (NOLOAD): {
+        __core1_el0_stack_bottom = .;
+        . = . + 1M;
+        . = ALIGN(16);
+        __core1_el0_stack_top = .;
+    } > OS_RAM
+
+    __core1_el0_stack_size_in_bytes = __core1_el0_stack_top - __core1_el0_stack_bottom;
+
+    .core2_el1_stack (NOLOAD): {
+        __core2_el1_stack_bottom = .;
+        . = . + 1M;
+        . = ALIGN(16);
+        __core2_el1_stack_top = .;
+    } > OS_RAM
+
+    __core2_el1_stack_size_in_bytes = __core2_el1_stack_top - __core2_el1_stack_bottom;
+
+    .core2_el0_stack (NOLOAD): {
+        __core2_el0_stack_bottom = .;
+        . = . + 1M;
+        . = ALIGN(16);
+        __core2_el0_stack_top = .;
+    } > OS_RAM
+
+    __core2_el0_stack_size_in_bytes = __core2_el0_stack_top - __core2_el0_stack_bottom;
+
+    .core3_el1_stack (NOLOAD): {
+        __core3_el1_stack_bottom = .;
+        . = . + 1M;
+        . = ALIGN(16);
+        __core3_el1_stack_top = .;
+    } > OS_RAM
+
+    __core3_el1_stack_size_in_bytes = __core3_el1_stack_top - __core3_el1_stack_bottom;
+
+    .core3_el0_stack (NOLOAD): {
+        __core3_el0_stack_bottom = .;
+        . = . + 1M;
+        . = ALIGN(16);
+        __core3_el0_stack_top = .;
+    } > OS_RAM
+
+    __core3_el0_stack_size_in_bytes = __core3_el0_stack_top - __core3_el0_stack_bottom;
 
     . = ALIGN(16);
     __os_process_start = .;

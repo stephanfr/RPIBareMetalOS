@@ -60,11 +60,11 @@ void DumpDiagnostics()
     printf("Dynamic Heap Reserved Space Size: %p\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
     printf("Dynamic Heap Start: %p\n", __os_dynamic_heap.heap_start());
     printf("Dynamic Heap End: %p\n", __os_dynamic_heap.current_end());
-    printf("EL1 Stack Top: %p\n", (uint8_t *)&__el1_stack_top);
-    printf("EL1 Stack Bottom: %p\n", (uint8_t *)&__el1_stack_bottom);
-    printf("EL0 Stack Top: %p\n", (uint8_t *)&__el0_stack_top);
-    printf("EL0 Stack Bottom: %p\n", (uint8_t *)&__el0_stack_bottom);
-    printf("Current Stack Location: %p\n", (uint8_t *)get_stack_pointer());
+    printf("EL1 Stack Top: %p\n", (uint8_t *)&__core0_el1_stack_top);
+    printf("EL1 Stack Bottom: %p\n", (uint8_t *)&__core0_el1_stack_bottom);
+    printf("EL0 Stack Top: %p\n", (uint8_t *)&__core0_el0_stack_top);
+    printf("EL0 Stack Bottom: %p\n", (uint8_t *)&__core0_el0_stack_bottom);
+    printf("Current Stack Location: %p\n", (uint8_t *)GetStackPointer());
     printf("OS Process Start: %p\n", (uint8_t *)&__os_process_start);
 
     printf("\nHardware Info:\n");

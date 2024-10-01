@@ -13,11 +13,12 @@ class RPI4PlatformInfo final : public PlatformInfo
 public:
     RPI4PlatformInfo();
 
-    const RPIBoardType GetBoardType() const override;
+    RPIBoardType GetBoardType() const override;
     const char *GetBoardTypeName() const override;
     uint8_t *GetMMIOBase() const override;
     uint8_t *GetEMMCBase() const override;
-    const uint32_t GetGPUClockRate() const override;
+    uint32_t GetGPUClockRate() const override;
+    uint32_t GetNumberOfCores() const override;
 
 private:
     const uint8_t *BCM2711_IO_BASE = reinterpret_cast<const uint8_t *>(0xFE000000);
