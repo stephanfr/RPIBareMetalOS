@@ -365,8 +365,7 @@ namespace FMT_FORMATTERS_NAMESPACE
     //  Template function to append strings to the buffer
     //
 
-    template <typename T>
-    void FormattedStringAppend(minstd::string &buffer, const T &value, size_t length, const arg_format_options &format_options)
+    void FormattedStringAppend(minstd::string &buffer, const char *value, size_t length, const arg_format_options &format_options)
     {
         //  Determine if fill is needed for alignment and if yes, the amount of fill needed before and/or after the string
 
@@ -417,7 +416,9 @@ namespace FMT_FORMATTERS_NAMESPACE
     template <>
     void fmt_arg_base<const char>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
     {
-        FormattedStringAppend(buffer, value_, 1, format_options);
+        const char local_buffer[] = { value_, 0 };
+
+        FormattedStringAppend(buffer, local_buffer, 1, format_options);
     }
 
     template <>

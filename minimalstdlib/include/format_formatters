@@ -185,6 +185,13 @@ namespace FMT_FORMATTERS_NAMESPACE
     };
 
     //
+    //  Function to append a string buffer to the format buffer - useful for other formatters.
+    //      This function applies the correct format options when appending the buffer.
+    //
+
+    void FormattedStringAppend(minstd::string &buffer, const char *value, size_t length, const arg_format_options &format_options);
+
+    //
     //  I tried a bunch of different ways to try to get all the formatters to be handled through templates and
     //      type deduction but coould not get to anythign that worked well for other templated types, like minstd::string.
     //      Therefore, I resorted to the macro below to define the formatters for the 'built-in' types.
@@ -244,5 +251,5 @@ namespace FMT_FORMATTERS_NAMESPACE
     //  Undefine the macro before we leave
     //
 
-#undef DECLARE_TYPE_FORMATTER
+//#undef DECLARE_TYPE_FORMATTER
 } // namespace FMT_FORMATTERS_NAMESPACE
