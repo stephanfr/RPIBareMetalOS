@@ -6,5 +6,5 @@
 
 namespace user::io
 {
-    void Write(char *buf);
+    void Write(const char *buf);
 } // namespace user::io

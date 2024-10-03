@@ -4,14 +4,13 @@
 
 #include "task/system_calls.h"
 #include "task/process.h"
-#include "task/task_manager.h"
+#include "task/task_manager_impl.h"
 
 #include <minimalstdio.h>
 
 namespace syscall
 {
-
-    void Write(char *buf)
+    void Write(const char *buf)
     {
         printf("%s", buf);
     }

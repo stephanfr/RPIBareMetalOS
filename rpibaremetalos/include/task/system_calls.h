@@ -24,6 +24,6 @@ extern "C" int sc_CloneTask(const char* name, unsigned long fn, unsigned long ar
 extern "C" unsigned long sc_Malloc(unsigned long block_size);
 extern "C" void sc_Exit();
 
-extern "C" void sc_Write(char * buf);
+extern "C" void sc_Write(const char * buf);
 
 #endif
