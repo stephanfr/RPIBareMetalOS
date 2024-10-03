@@ -68,7 +68,7 @@ SOFTWARE.
 #define EL0						0
 #define EL1						1
 
-#define S_FRAME_SIZE			272 		//  Space needed on stack to save all the registers 
+#define S_FRAME_SIZE			288 		//  Space needed on stack to save all the registers - must match size of 'FullCPUState'
 
 .macro	KernelEntry, el
     sub	sp, sp, #S_FRAME_SIZE
@@ -97,12 +97,20 @@ SOFTWARE.
 	mrs	x22, elr_el1    					//  For preemptive multi-tasking, save the ELR_EL1 and SPSR_EL1 registers as we can context switch in an IRQ Handler
 	mrs	x23, spsr_el1
 
-	stp	x30, x21, [sp, #16 * 15] 
-	stp	x22, x23, [sp, #16 * 16]
+	stp	x30, x21, [sp, #16 * 15] 			//  Register 30 and the EL0 stack pointer
+	stp	x22, x23, [sp, #16 * 16]			//  Program counter (more precisely, the EL1 link register) and pState (the EL1 Saved Program Status Register)
+
+	mrs x22, tpidrro_el0
+	mrs x23, tpidr_el1
+	stp	x22, x23, [sp, #16 * 17]			//  The EL0 and EL1 thread pointers
 
 .endm
 
 .macro	KernelExit, el
+	ldp	x22, x23, [sp, #16 * 17]
+	msr	tpidrro_el0, x22
+	msr	tpidr_el1, x23
+
 	ldp	x22, x23, [sp, #16 * 16]
 	ldp	x30, x21, [sp, #16 * 15] 
 

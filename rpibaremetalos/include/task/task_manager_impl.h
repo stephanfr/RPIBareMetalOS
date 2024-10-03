@@ -19,6 +19,8 @@
 #include "task/runnable.h"
 #include "task/task_impl.h"
 
+extern "C" void SetKernelTaskContext(task::TaskImpl *task);
+
 namespace task
 {
     class TaskManagerImpl : public TaskManager
@@ -49,6 +51,13 @@ namespace task
             return *current_task_;
         }
 
+        void FixupKernelMainTask()
+        {
+            SetKernelTaskContext(&kernel_main_task_);
+            kernel_main_task_.cpu_state_.tpidr_el1 = (unsigned long)&kernel_main_task_;
+            kernel_main_task_.cpu_state_.tpidrro_el0 = 0;
+        }
+
         void VisitTaskList(TaskListVisitorCallback callback) const override;
 
         void Schedule(void);
@@ -63,8 +72,8 @@ namespace task
 
         void ExitProcess();
 
-        ValueResult<TaskResultCodes, UUID> ForkKernelTask(const char* name, Runnable *runnable);
-        ValueResult<TaskResultCodes, UUID> ForkUserTask(const char* name, Runnable *runnable);
+        ValueResult<TaskResultCodes, UUID> ForkKernelTask(const char* name, Runnable *runnable) override;
+        ValueResult<TaskResultCodes, UUID> ForkUserTask(const char* name, Runnable *runnable) override;
 
         ValueResult<TaskResultCodes, UUID> CloneTask(const char* new_name, MemoryPagePointer stack);
 

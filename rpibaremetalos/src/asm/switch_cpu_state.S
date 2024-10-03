@@ -22,13 +22,20 @@ SwitchCPUState:
 	stp	x25, x26, [x0], #16
 	stp	x27, x28, [x0], #16
 	stp	x29, x9, [x0], #16
-	str	x30, [x0]
+	str	x30, [x0], #8
+	mrs x2, tpidrro_el0
+	mrs x3, tpidr_el1
+	stp x2, x3, [x0], #16
+
 	ldp	x19, x20, [x1], #16
 	ldp	x21, x22, [x1], #16
 	ldp	x23, x24, [x1], #16
 	ldp	x25, x26, [x1], #16
 	ldp	x27, x28, [x1], #16
 	ldp	x29, x9, [x1], #16
-	ldr	x30, [x1]
+	ldr	x30, [x1], #8
+	ldp x2, x3, [x1], #16
+	msr tpidrro_el0, x2
+	msr tpidr_el1, x3
 	mov	sp, x9
 	ret

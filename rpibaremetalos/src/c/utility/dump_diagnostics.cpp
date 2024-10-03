@@ -20,8 +20,6 @@
 
 #include "heaps.h"
 
-extern "C" uint32_t GetExceptionLevel();
-
 extern CharacterIODevice *stdout;
 
 void DumpDiagnostics()

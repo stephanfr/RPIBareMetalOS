@@ -41,9 +41,11 @@ namespace task
             unsigned long fp;
             void* sp;
             void* pc;
+            unsigned long tpidrro_el0;      //  Pointer to thread context for user threads
+            unsigned long tpidr_el1;        //  Pointer to thread context for kernel threads
         } PACKED TaskContextCPUState;
 
-        static_assert(sizeof(TaskContextCPUState) == 13 * sizeof(unsigned long), "TaskContextCPUState size is not correct");
+        static_assert(sizeof(TaskContextCPUState) == 15 * sizeof(unsigned long), "TaskContextCPUState size is not correct");
 
         typedef struct ALIGN FullCPUState
         {
@@ -51,9 +53,11 @@ namespace task
             void* sp;
             void* pc;
             unsigned long pstate;
+            unsigned long tpidrro_el0;      //  Pointer to thread context for user threads
+            unsigned long tpidr_el1;        //  Pointer to thread context for kernel threads
         } PACKED FullCPUState;
 
-        static_assert(sizeof(FullCPUState) == 34 * sizeof(unsigned long), "FullCPUState size is not correct");
+        static_assert(sizeof(FullCPUState) == 36 * sizeof(unsigned long), "FullCPUState size is not correct");
 
         TaskImpl() = delete;
         TaskImpl(const TaskImpl &) = delete;
@@ -74,7 +78,7 @@ namespace task
               priority_(1),
               preempt_count_(0),
               stack_(0),
-              cpu_state_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}   //  CPU State is zeroed
+              cpu_state_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}   //  CPU State is zeroed
         {
         }
 
@@ -90,6 +94,9 @@ namespace task
         {
             return name_;
         }
+
+//        void Yield();
+//        void Exit();
 
         void PreemptDisable()
         {

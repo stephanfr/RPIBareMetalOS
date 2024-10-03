@@ -2,13 +2,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include "task/task_manager.h"
+#include "task/task_manager_impl.h"
 
 #include <string.h>
 
 #include "task/system_calls.h"
 
 #include "devices/log.h"
+
+#include <minimalstdio.h>
 
 extern "C" void ParkCore();
 
@@ -114,6 +116,13 @@ namespace task
 
         new_task->cpu_state_.pc = (void*)(&TaskManagerImpl::ReturnFromFork);
         new_task->cpu_state_.sp = &childregs;
+        new_task->cpu_state_.tpidrro_el0 = 0;
+        new_task->cpu_state_.tpidr_el1 = (unsigned long)this;
+
+        //  Set the thask context - this is a kernel task right now
+
+        childregs.tpidr_el1 = (unsigned long)new_task;
+        childregs.tpidrro_el0 = 0;
 
         //  Add the task to our task map
 
@@ -142,7 +151,7 @@ namespace task
 
         TaskImpl::FullCPUState &cur_regs = current_task_->GetTaskInitialFullCPUState();
         childregs = cur_regs;
-        childregs.regs[0] = SYS_CLONE_NEW_TASK; //  This sets x0 to the value which signals to callers that we have a net-new task
+        childregs.regs[0] = SYS_CLONE_NEW_TASK;                         //  This sets x0 to the value which signals to callers that we have a net-new task
         childregs.sp = stack + task_stack_size_in_bytes_;
         new_task->stack_ = stack;
 
@@ -153,6 +162,19 @@ namespace task
 
         new_task->cpu_state_.pc = (void*)&TaskManagerImpl::ReturnFromFork;
         new_task->cpu_state_.sp = &childregs;
+
+        //  Set the task context based on if this is a kernel or user task
+
+        if(new_task->type_ == Task::TaskType::KERNEL_TASK)
+        {
+            childregs.tpidrro_el0 = 0;
+            childregs.tpidr_el1 = (unsigned long)new_task;
+        }
+        else
+        {
+            childregs.tpidrro_el0 = (unsigned long)new_task;
+            childregs.tpidr_el1 = 0;
+        }
 
         //  Add the task to the task map
 
@@ -262,7 +284,7 @@ namespace task
     {
         current_task_->PreemptDisable();
 
-        task_map_.find(current_task_->uuid_)->second().get().state_ = Task::ExecutionState::ZOMBIE;
+        current_task_->state_ = Task::ExecutionState::ZOMBIE;
 
         if (current_task_->stack_ != 0)
         {

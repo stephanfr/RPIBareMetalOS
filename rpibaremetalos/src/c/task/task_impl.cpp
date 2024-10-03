@@ -3,12 +3,43 @@
 // license that can be found in the LICENSE file.
 
 #include "task/task_impl.h"
+#include "task/task_manager_impl.h"
 
+#include "asm_utility.h"
 #include "sysregs.h"
 
 namespace task
 {
+    Task &Task::GetTask()
+    {
+        Task *context = static_cast<Task *>(GetTaskContext());
 
+        return *context;
+    }
+
+/*
+    void TaskImpl::Yield()
+    {
+        counter_++;
+        TaskManagerImpl::Instance().Schedule();
+    }
+
+    void TaskImpl::Exit()
+    {
+        PreemptDisable();
+
+        state_ = Task::ExecutionState::ZOMBIE;
+
+        if (stack_ != 0)
+        {
+            GetMemoryManager().ReleaseBlock(stack_, stack_size_in_bytes_);
+        }
+
+        PreemptEnable();
+
+        Yield();
+    }
+*/
     TaskImpl::FullCPUState &TaskImpl::GetTaskInitialFullCPUState()
     {
         return *((FullCPUState *)((unsigned long)this + stack_size_in_bytes_ - sizeof(FullCPUState)));
@@ -36,13 +67,13 @@ namespace task
 
         FullCPUState &regs = AllocateTaskInitialFullCPUState();
 
-        regs.pc = (void*)entry_point;
+        regs.pc = (void *)entry_point;
         regs.regs[0] = arg;
         regs.pstate = PSR_MODE_EL0t;
 
         //  Allocate space for the stack
 
-        MemoryPagePointer stack = GetMemoryManager().GetFreeBlock( stack_size_in_bytes_ );
+        MemoryPagePointer stack = GetMemoryManager().GetFreeBlock(stack_size_in_bytes_);
 
         if (stack == 0)
         {
@@ -53,6 +84,8 @@ namespace task
 
         regs.sp = stack + stack_size_in_bytes_;
         stack_ = stack;
+        regs.tpidrro_el0 = (unsigned long)stack_;
+        regs.tpidr_el1 = 0;
 
         //  Mark this as a user space thread
 

@@ -4,7 +4,7 @@
 
 #include "isr/task_switch_isr.h"
 
-#include "task/task_manager.h"
+#include "task/task_manager_impl.h"
 
 void TaskSwitchISR::HandleInterrupt()
 {

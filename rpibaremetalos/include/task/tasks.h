@@ -21,6 +21,9 @@ namespace task
     class Task
     {
     public:
+
+        static Task &GetTask();
+
         typedef enum class ExecutionState : uint32_t
         {
             STARTING = 0,
@@ -47,6 +50,9 @@ namespace task
         virtual const minstd::string &Name() const = 0;
         virtual TaskType Type() const = 0;
         virtual ExecutionState State() const = 0;
+
+//        virtual void Yield() = 0;
+//        virtual void Exit() = 0;
     };
 
     inline const char* ToString(Task::TaskType type)
@@ -91,9 +97,12 @@ namespace task
 
         virtual void VisitTaskList(TaskListVisitorCallback callback) const = 0;
 
+        virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(const char* name, Runnable *runnable) = 0;
+        virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(const char* name, Runnable *runnable) = 0;
+
     protected:
         TaskManager()
-            : OSEntity(true, "ProcessManager", "Process Manager")
+            : OSEntity(true, "TaskManager", "Task Manager")
         {
         }
 

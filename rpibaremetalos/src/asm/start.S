@@ -261,27 +261,15 @@ _start:
 
     //  Set up the stack locations for this core
 
-/*
-    adrp    x1, el1_stack_top
-    add     x1, x1, :lo12:el1_stack_top
-    ldr     x0, [x1, x21_coreNumber, lsl #3] 
-    msr     SP_EL1, x0
-
-    adrp    x1, el0_stack_top
-    add     x1, x1, :lo12:el0_stack_top
-    ldr     x0, [x1, x21_coreNumber, lsl #3] 
-    msr     SP_EL0, x0
-*/
-
     mov     x3, #EL1_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES
     mov     x4, #EL0_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES
 
-    add     x2, x3, x4
-    mul     x2, x2, x21_coreNumber
+    add     x0, x3, x4
+    mul     x0, x0, x21_coreNumber
 
     adrp    x1, __per_core_initialization_stack_bottom
     add     x1, x1, :lo12:__per_core_initialization_stack_bottom
-    add     x1, x1, x2
+    add     x1, x1, x0
     add     x1, x1, x3
     msr     SP_EL1, x1
     add     x1, x1, x4

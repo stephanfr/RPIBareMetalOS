@@ -21,15 +21,13 @@
 #include "isr/system_timer_reschedule_isr.h"
 #include "isr/task_switch_isr.h"
 
-#include "task/task_manager.h"
+#include "task/tasks.h"
 
 #include "utility/dump_diagnostics.h"
 
 #include "filesystem/filesystems.h"
 
 #include "cli/cli.h"
-
-#include "task/process.h"
 
 #include "userspace_api/io.h"
 #include "userspace_api/task.h"
@@ -39,6 +37,11 @@
 #include "minimalstdio.h"
 
 #include "asm_utility.h"
+
+#include <format>
+
+#include "task/task_manager_impl.h"
+#include "task/process.h"
 
 //
 //
@@ -67,6 +70,13 @@ public:
     {
         printf("In User process: %s\n", array_.c_str());
 
+        minstd::fixed_string<128> format_buffer;
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+
+        user::io::Write(format_buffer.c_str());
+
+        const UUID task_id = task::Task::GetTask().ID();
+
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
         char buf[2] = {0};
@@ -78,6 +88,12 @@ public:
                 user::io::Write(buf);
                 delay(990 + random_generator.Next32BitValue() % 20);
                 delay(1000);
+            }
+
+            if( task_id != task::Task::GetTask().ID())
+            {
+                printf("Task context changed!!\n");
+                break;
             }
         }
     }
@@ -94,7 +110,14 @@ public:
     void Run()
     {
         const char *array = "Kernel Counter";
-        printf("In User process: %s\n", array);
+        printf("In Kernel process: %s\n", array);
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        minstd::fixed_string<128> format_buffer;
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+
+        printf(format_buffer.c_str());
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
@@ -106,6 +129,12 @@ public:
                 buf[0] = array[i];
                 printf("%c", buf[0]);
                 delay(990 + random_generator.Next32BitValue() % 20);
+            }
+
+            if( task_id != task::Task::GetTask().ID())
+            {
+                printf("Kernel Task context changed!!\n");
+                break;
             }
         }
     }
@@ -121,13 +150,21 @@ public:
         minstd::fixed_string<128> test = "User process started\n\r";
         user::io::Write(const_cast<char *>(test.data()));
 
+        printf("User Process Task Context: %p\n", GetTaskContext());
+
         minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("12345"), __os_dynamic_heap);
+
+        printf("Forking Task 1\n");
 
         auto new_task1 = user::task::ForkTask("Counting Process 1", user_process1);
 
         minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("abcde"), __os_dynamic_heap);
 
+        printf("Forking Task 2\n");
+
         auto new_task2 = user::task::ForkTask("Counting Process 2", user_process2);
+
+        printf("Leaving User Task\n");
     }
 };
 
@@ -162,6 +199,10 @@ extern "C" void kernel_main()
     DumpDiagnostics();
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+
+    task::TaskManagerImpl::Instance().FixupKernelMainTask();
+
+    printf("Kernel Main Task Context: %p\n", GetTaskContext());
 
     //  Mount the filesystems on the SD card
 
@@ -212,7 +253,7 @@ extern "C" void kernel_main()
 
     printf("Forking CLI\n");
 
-    auto new_kernel_process = task::TaskManagerImpl::Instance().ForkKernelTask("CLI", &cli);
+    auto new_kernel_process = task::GetTaskManager().ForkKernelTask("CLI", &cli);
     if (new_kernel_process.Failed())
     {
         printf("error while starting cli");
@@ -221,7 +262,7 @@ extern "C" void kernel_main()
 
     KernelCounter kernel_counter;
 
-    auto new_kernel_counter = task::TaskManagerImpl::Instance().ForkKernelTask("Kernel Counter", &kernel_counter);
+    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
     if (new_kernel_counter.Failed())
     {
         printf("error while starting kernel counter");
@@ -232,14 +273,16 @@ extern "C" void kernel_main()
 
     UserProcess user_process;
 
-    auto new_user_process_wrapper = task::TaskManagerImpl::Instance().ForkUserTask("User Task Forking Task", &user_process);
+    auto new_user_process_wrapper = task::GetTaskManager().ForkUserTask("User Task Forking Task", &user_process);
     if (new_user_process_wrapper.Failed())
     {
-        printf("error while starting kernel process");
+        printf("error while starting user processes");
         return;
     }
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+
+    printf("Kernel Main Task Context: %p\n", GetTaskContext());
 
     //  Keep the scheduler running
 

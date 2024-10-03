@@ -18,7 +18,6 @@
 #include <format>
 #include <minimalstdio.h>
 
-extern "C" uint32_t GetExceptionLevel();
 
 extern CharacterIODevice *stdout;
 
