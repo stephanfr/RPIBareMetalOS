@@ -19,8 +19,8 @@ UUID UUID::GenerateUUID(Versions version)
     //      the version nunmber 4 must be placed in the top 4 bits of time_hi_and_version_
     //      and the rest of the bits are random.
 
-    return UUID( (GetUUIDGeneratorRNG().Next64BitValue() & ~0x000000000000F000) | 0x0000000000004000,
-                 (GetUUIDGeneratorRNG().Next64BitValue() & ~0xC000000000000000) | 0x8000000000000000 );
+    return UUID((GetUUIDGeneratorRNG().Next64BitValue() & ~0x000000000000F000) | 0x0000000000004000,
+                (GetUUIDGeneratorRNG().Next64BitValue() & ~0xC000000000000000) | 0x8000000000000000);
 }
 
 char *UUID::ToString(char buffer[UUID_STRING_BUFFER_SIZE]) const
@@ -28,4 +28,17 @@ char *UUID::ToString(char buffer[UUID_STRING_BUFFER_SIZE]) const
     sprintf(buffer, "%08x-%04x-%04x-%04x-%04x%08x", printf1_, printf2_, printf3_, printf4_, printf5_, printf6_);
 
     return buffer;
+}
+
+namespace FMT_FORMATTERS_NAMESPACE
+{
+    template <>
+    void fmt_arg_base<const UUID &>::AppendInternal(minstd::string &buffer, const ::MINIMAL_STD_NAMESPACE::arg_format_options &format_options) const
+    {
+        char uuid_buffer[UUID::UUID_STRING_BUFFER_SIZE];
+
+        value_.ToString(uuid_buffer);
+
+        FormattedStringAppend(buffer, uuid_buffer, 36, format_options);
+    }
 }

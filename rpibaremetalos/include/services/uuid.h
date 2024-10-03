@@ -7,6 +7,8 @@
 #include "os_config.h"
 #include <stdint.h>
 
+#include <format_formatters>
+
 class UUID
 {
 public:
@@ -113,3 +115,8 @@ private:
 
     } PACKED;
 };
+
+namespace FMT_FORMATTERS_NAMESPACE
+{
+    DECLARE_TYPE_FORMATTER(const UUID&, UUIDFormatter, DEFAULT_STRING_FORMAT)
+}
