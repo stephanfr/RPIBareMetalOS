@@ -16,4 +16,9 @@ extern "C"
     void* GetTaskContext();
 
     bool CoreExecute (uint32_t core, void (*func)(void));
+
+    void ParkCore();
+
+    void EnableIRQ(void);
+    void DisableIRQ(void);
 }

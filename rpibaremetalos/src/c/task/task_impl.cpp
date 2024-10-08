@@ -2,10 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#include "asm_utility.h"
+
 #include "task/task_impl.h"
 #include "task/task_manager_impl.h"
 
-#include "asm_utility.h"
 #include "sysregs.h"
 
 namespace task
@@ -84,8 +85,8 @@ namespace task
 
         regs.sp = stack + stack_size_in_bytes_;
         stack_ = stack;
-        regs.tpidrro_el0 = (unsigned long)stack_;
-        regs.tpidr_el1 = 0;
+        regs.tpidrro_el0 = (unsigned long)this;
+        regs.tpidr_el1 = (unsigned long)this;
 
         //  Mark this as a user space thread
 

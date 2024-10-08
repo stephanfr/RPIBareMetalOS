@@ -19,6 +19,8 @@
 #include "task/runnable.h"
 #include "task/task_impl.h"
 
+#include "asm_utility.h"
+
 extern "C" void SetKernelTaskContext(task::TaskImpl *task);
 
 namespace task
@@ -43,19 +45,12 @@ namespace task
 
         const TaskImpl &CurrentTask() const
         {
-            return *current_task_;
+            return *(TaskImpl *)GetTaskContext();
         }
 
         TaskImpl &CurrentTask()
         {
-            return *current_task_;
-        }
-
-        void FixupKernelMainTask()
-        {
-            SetKernelTaskContext(&kernel_main_task_);
-            kernel_main_task_.cpu_state_.tpidr_el1 = (unsigned long)&kernel_main_task_;
-            kernel_main_task_.cpu_state_.tpidrro_el0 = 0;
+            return *(TaskImpl *)GetTaskContext();
         }
 
         void VisitTaskList(TaskListVisitorCallback callback) const override;
@@ -66,7 +61,7 @@ namespace task
 
         void Yield(void)
         {
-            current_task_->counter_ = 0;
+            CurrentTask().counter_ = 0;
             Schedule();
         }
 
@@ -88,7 +83,6 @@ namespace task
         static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;
 
         TaskImpl kernel_main_task_;
-        TaskImpl *current_task_;
 
         const uint64_t task_stack_size_in_bytes_ = BYTES_16K;
 
@@ -104,9 +98,12 @@ namespace task
         static void ReturnFromFork();
 
         TaskManagerImpl()
-            : kernel_main_task_( "KernelMain", Task::TaskType::KERNEL_TASK, BYTES_1M),
-              current_task_(&kernel_main_task_)
+            : kernel_main_task_( "KernelMain", Task::TaskType::KERNEL_TASK, BYTES_1M)
         {
+            SetKernelTaskContext(&kernel_main_task_);
+            kernel_main_task_.cpu_state_.tpidr_el1 = (unsigned long)&kernel_main_task_;
+            kernel_main_task_.cpu_state_.tpidrro_el0 = (unsigned long)&kernel_main_task_;
+
             task_map_.insert(kernel_main_task_.uuid_, minstd::move(kernel_main_task_));
         }
 

@@ -10,12 +10,10 @@
 
 #include "devices/log.h"
 
-#include <minimalstdio.h>
+#include "asm_utility.h"
 
-extern "C" void ParkCore();
+//  A couple of assembly language functions we will need only in this translation unit
 
-extern "C" void EnableIRQ(void);
-extern "C" void DisableIRQ(void);
 extern "C" void ReturnFromForkASMStub(void);
 extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
 
@@ -34,15 +32,21 @@ namespace task
         //  Wrapper functions to call the Run() method of a Runnable object.
         //      We use extern C to prevent name mangling.
 
-        extern "C" void RunnableWrapperWithExit(Runnable *runnable)
+        extern "C" void KernelRunnableWrapperWithExit(Runnable *runnable)
+        {
+            runnable->Run();
+            task::TaskManagerImpl::Instance().ExitProcess();
+        }
+
+        extern "C" void UserSpaceRunnableWrapperWithExit(Runnable *runnable)
         {
             runnable->Run();
             sc_Exit();
         }
 
-        extern "C" void RunnableUserSpaceWrapper(Runnable *runnable)
+        extern "C" void MoveToUserSpaceWrapper(Runnable *runnable)
         {
-            auto err = task::TaskManagerImpl::Instance().CurrentTask().MoveToUserSpace(&RunnableWrapperWithExit, (unsigned long)runnable);
+            auto err = task::TaskManagerImpl::Instance().CurrentTask().MoveToUserSpace(&UserSpaceRunnableWrapperWithExit, (unsigned long)runnable);
             if (Failed(err))
             {
                 LogError("Failed to move task to user space");
@@ -81,19 +85,19 @@ namespace task
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTask(const char* name, Runnable *runnable)
     {
-        return ForkKernelTaskInternal(name, runnable, &internal::RunnableWrapperWithExit);
+        return ForkKernelTaskInternal(name, runnable, &internal::KernelRunnableWrapperWithExit);
     }
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkUserTask(const char* name, Runnable *runnable)
     {
-        return ForkKernelTaskInternal(name, runnable, &internal::RunnableUserSpaceWrapper);
+        return ForkKernelTaskInternal(name, runnable, &internal::MoveToUserSpaceWrapper);
     }
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(const char* name, Runnable *runnable, void (*wrapper)(Runnable *))
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
-        current_task_->PreemptDisable(); //	Disable preemption for this thread during this function
+        CurrentTask().PreemptDisable(); //	Disable preemption for this thread during this function
 
         MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock( task_stack_size_in_bytes_ );
 
@@ -110,25 +114,25 @@ namespace task
         new_task->cpu_state_.x20 = reinterpret_cast<unsigned long>(runnable);
 
         new_task->type_ = Task::TaskType::KERNEL_TASK;
-        new_task->priority_ = current_task_->priority_;
+        new_task->priority_ = CurrentTask().priority_;
         new_task->counter_ = new_task->priority_;
         new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
 
         new_task->cpu_state_.pc = (void*)(&TaskManagerImpl::ReturnFromFork);
         new_task->cpu_state_.sp = &childregs;
-        new_task->cpu_state_.tpidrro_el0 = 0;
-        new_task->cpu_state_.tpidr_el1 = (unsigned long)this;
+        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task;
+        new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task;
 
         //  Set the thask context - this is a kernel task right now
 
         childregs.tpidr_el1 = (unsigned long)new_task;
-        childregs.tpidrro_el0 = 0;
+        childregs.tpidrro_el0 = (unsigned long)new_task;
 
         //  Add the task to our task map
 
         task_map_.insert(new_task->uuid_, minstd::move(*new_task));
 
-        current_task_->PreemptEnable(); //	Re-enable preemption for this thread
+        CurrentTask().PreemptEnable(); //	Re-enable preemption for this thread
 
         return Result::Success(new_task->uuid_);
     }
@@ -137,7 +141,7 @@ namespace task
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
-        current_task_->PreemptDisable();
+        CurrentTask().PreemptDisable();
         MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock( task_stack_size_in_bytes_ );
 
         if (free_block == 0)
@@ -149,38 +153,32 @@ namespace task
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState();
 
-        TaskImpl::FullCPUState &cur_regs = current_task_->GetTaskInitialFullCPUState();
+        TaskImpl::FullCPUState &cur_regs = CurrentTask().GetTaskInitialFullCPUState();
         childregs = cur_regs;
         childregs.regs[0] = SYS_CLONE_NEW_TASK;                         //  This sets x0 to the value which signals to callers that we have a net-new task
         childregs.sp = stack + task_stack_size_in_bytes_;
         new_task->stack_ = stack;
 
-        new_task->type_ = current_task_->type_;
-        new_task->priority_ = current_task_->priority_;
+        new_task->type_ = CurrentTask().type_;
+        new_task->priority_ = CurrentTask().priority_;
         new_task->counter_ = new_task->priority_;
         new_task->preempt_count_ = 1;
 
         new_task->cpu_state_.pc = (void*)&TaskManagerImpl::ReturnFromFork;
         new_task->cpu_state_.sp = &childregs;
+        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task;
+        new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task;
 
         //  Set the task context based on if this is a kernel or user task
 
-        if(new_task->type_ == Task::TaskType::KERNEL_TASK)
-        {
-            childregs.tpidrro_el0 = 0;
-            childregs.tpidr_el1 = (unsigned long)new_task;
-        }
-        else
-        {
-            childregs.tpidrro_el0 = (unsigned long)new_task;
-            childregs.tpidr_el1 = 0;
-        }
+        childregs.tpidrro_el0 = (unsigned long)new_task;
+        childregs.tpidr_el1 = (unsigned long)new_task;
 
         //  Add the task to the task map
 
         task_map_.insert(new_task->uuid_, minstd::move(*new_task));
 
-        current_task_->PreemptEnable();
+        CurrentTask().PreemptEnable();
 
         return Result::Success(new_task->uuid_);
     }
@@ -194,9 +192,9 @@ namespace task
     {
         //  Do not switch out the current task if it still has counter time or preemption is disabled
 
-        --current_task_->counter_;
+        --CurrentTask().counter_;
 
-        if (current_task_->counter_ > 0 || current_task_->preempt_count_ > 0)
+        if (CurrentTask().counter_ > 0 || CurrentTask().preempt_count_ > 0)
         {
             return;
         }
@@ -204,7 +202,7 @@ namespace task
         //  Switch out the current task.
         //      Enable interrupts before we switch out the task and disable them again after the switch
 
-        current_task_->counter_ = 0;
+        CurrentTask().counter_ = 0;
 
         EnableIRQ();
         Schedule();
@@ -215,7 +213,7 @@ namespace task
     {
         //  Disable preemption for this thread during this function
 
-        current_task_->PreemptDisable();
+        CurrentTask().PreemptDisable();
 
         TaskMap::iterator next_task = task_map_.end();
         int max_counter_value = -1;
@@ -259,19 +257,19 @@ namespace task
 
         //  If the next task is a different task, then context switch
 
-        if (current_task_ != &(next_task->second().get()))
+        if (&CurrentTask() != &(next_task->second().get()))
         {
-            TaskImpl *prev = current_task_;
-            current_task_ = &(next_task->second().get());
+            TaskImpl *prev = &CurrentTask();
+            TaskImpl *next = &(next_task->second().get());
 
-            current_task_->state_ = Task::ExecutionState::RUNNING;   //  Insure the task is marked as running
+            next->state_ = Task::ExecutionState::RUNNING;   //  Insure the task is marked as running
 
-            SwitchCPUState(&(prev->cpu_state_), &(current_task_->cpu_state_));
+            SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
         }
 
         //  Reenable preemption for this thread
 
-        current_task_->PreemptEnable();
+        CurrentTask().PreemptEnable();
     }
 
     void TaskManagerImpl::ReturnFromFork()
@@ -282,16 +280,16 @@ namespace task
 
     void TaskManagerImpl::ExitProcess()
     {
-        current_task_->PreemptDisable();
+        CurrentTask().PreemptDisable();
 
-        current_task_->state_ = Task::ExecutionState::ZOMBIE;
+        CurrentTask().state_ = Task::ExecutionState::ZOMBIE;
 
-        if (current_task_->stack_ != 0)
+        if (CurrentTask().stack_ != 0)
         {
-            GetMemoryManager().ReleaseBlock(current_task_->stack_, current_task_->stack_size_in_bytes_);
+            GetMemoryManager().ReleaseBlock(CurrentTask().stack_, CurrentTask().stack_size_in_bytes_);
         }
 
-        current_task_->PreemptEnable();
+        CurrentTask().PreemptEnable();
 
         Yield();
     }

@@ -102,6 +102,60 @@ private:
     const minstd::fixed_string<128> array_;
 };
 
+
+class UserShortLivedProcess : public Runnable
+{
+public:
+    UserShortLivedProcess(uint32_t id)
+        : id_(id)
+    {
+    }
+
+    void Run()
+    {
+        printf("In User Short Live Process: %d\n", id_);
+
+        minstd::fixed_string<128> format_buffer;
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+
+        user::io::Write(format_buffer.c_str());
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+
+        delay(500 + ( random_generator.Next32BitValue() % 20) * 1000);
+
+        if( task_id != task::Task::GetTask().ID())
+        {
+            printf("Task context changed!!\n");
+        }
+
+        printf("Leaving User Short Lived Task: %d\n", id_);
+    }
+
+private:
+    const uint32_t id_;
+};
+
+
+class ImmediateExitProcess : public Runnable
+{
+public:
+    ImmediateExitProcess(uint32_t id)
+        : id_(id)
+    {
+    }
+
+    void Run()
+    {
+        printf("In ImmediateExitProcess Process: %d\n", id_);
+    }
+
+private:
+    const uint32_t id_;
+};
+
 class KernelCounter : public Runnable
 {
 public:
@@ -140,6 +194,38 @@ public:
     }
 };
 
+
+class ShortLivedKernelProcess : public Runnable
+{
+public:
+    ShortLivedKernelProcess() = default;
+
+    void Run()
+    {
+        printf("In ShortLivedKernelProcess\n");
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        minstd::fixed_string<128> format_buffer;
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+
+        printf(format_buffer.c_str());
+
+        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+
+        delay(100 + (random_generator.Next32BitValue() % 20)*1000);
+
+
+        if( task_id != task::Task::GetTask().ID())
+        {
+            printf("Kernel Task context changed!!\n");
+        }
+
+        printf("Leaving ShortLivedKernelProcess\n");
+    }
+};
+
+
 class UserProcess : public Runnable
 {
 public:
@@ -152,17 +238,37 @@ public:
 
         printf("User Process Task Context: %p\n", GetTaskContext());
 
-        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("12345"), __os_dynamic_heap);
+        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("56789"), __os_dynamic_heap);
 
         printf("Forking Task 1\n");
 
         auto new_task1 = user::task::ForkTask("Counting Process 1", user_process1);
 
-        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("abcde"), __os_dynamic_heap);
+        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("vwxyz"), __os_dynamic_heap);
 
         printf("Forking Task 2\n");
 
         auto new_task2 = user::task::ForkTask("Counting Process 2", user_process2);
+
+        minstd::unique_ptr<Runnable> short_lived_processes[100];
+        minstd::unique_ptr<Runnable> immediate_exit_processes[100];
+
+        minstd::fixed_string<128> format_buffer;
+
+        for( int i = 0; i < 100; i++)
+        {
+            short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<UserShortLivedProcess>(i), __os_dynamic_heap);
+
+            minstd::format(format_buffer, "Short Lived Process: {}\n", i);
+
+            auto new_task = user::task::ForkTask(format_buffer, short_lived_processes[i]);
+
+            immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<ImmediateExitProcess>(i), __os_dynamic_heap);
+
+            minstd::format(format_buffer, "Immediate Exit Process: {}\n", i);
+
+            auto new_immediate_exit_task = user::task::ForkTask(format_buffer, immediate_exit_processes[i]);
+        }
 
         printf("Leaving User Task\n");
     }
@@ -199,8 +305,6 @@ extern "C" void kernel_main()
     DumpDiagnostics();
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
-
-    task::TaskManagerImpl::Instance().FixupKernelMainTask();
 
     printf("Kernel Main Task Context: %p\n", GetTaskContext());
 
@@ -266,6 +370,15 @@ extern "C" void kernel_main()
     if (new_kernel_counter.Failed())
     {
         printf("error while starting kernel counter");
+        return;
+    }
+
+    ShortLivedKernelProcess short_lived_kernel_process;
+
+    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
+    if (new_short_lived_kernel_process.Failed())
+    {
+        printf("error while starting short lived kernel process");
         return;
     }
 

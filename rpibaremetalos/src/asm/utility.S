@@ -31,19 +31,15 @@ GetExceptionLevel:
 .global SetKernelTaskContext
 SetKernelTaskContext:
     msr tpidr_el1, x0
-    mov x0, #0
     msr tpidrro_el0, x0
     ret
 
 //
-//  Only one of the two thread poitner registers will have a value, the other will have zero.
-//      We will return the register with a value.
+//  The same thread context value is placed in both the EL0 and EL1 thread context registers.
+//      The ELO register is read-only in EL0.
 //
 
 .global GetTaskContext
 GetTaskContext:
     mrs x0, tpidrro_el0
-    cbnz x0, .have_task_context
-    mrs x0, tpidr_el1
-.have_task_context:
     ret
