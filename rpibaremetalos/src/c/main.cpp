@@ -238,13 +238,13 @@ public:
 
         printf("User Process Task Context: %p\n", GetTaskContext());
 
-        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("56789"), __os_dynamic_heap);
+        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,UserCounter>("56789"));
 
         printf("Forking Task 1\n");
 
         auto new_task1 = user::task::ForkTask("Counting Process 1", user_process1);
 
-        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<UserCounter>("vwxyz"), __os_dynamic_heap);
+        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,UserCounter>("vwxyz"));
 
         printf("Forking Task 2\n");
 
@@ -257,13 +257,13 @@ public:
 
         for( int i = 0; i < 100; i++)
         {
-            short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<UserShortLivedProcess>(i), __os_dynamic_heap);
+            short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,UserShortLivedProcess>(i));
 
             minstd::format(format_buffer, "Short Lived Process: {}\n", i);
 
             auto new_task = user::task::ForkTask(format_buffer, short_lived_processes[i]);
 
-            immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<ImmediateExitProcess>(i), __os_dynamic_heap);
+            immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,ImmediateExitProcess>(i));
 
             minstd::format(format_buffer, "Immediate Exit Process: {}\n", i);
 

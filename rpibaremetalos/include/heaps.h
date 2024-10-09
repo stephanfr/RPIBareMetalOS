@@ -38,9 +38,15 @@ public:
 };
 
 template <typename T, typename... Args>
-inline T *dynamic_new(Args &&...args)
+inline minstd::unique_ptr<T> dynamic_new(Args &&...args)
 {
-    return new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...);
+    return minstd::unique_ptr<T>( new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...), __os_dynamic_heap);
+}
+
+template <typename T, typename U, typename... Args>
+inline minstd::unique_ptr<T> dynamic_new(Args &&...args)
+{
+    return minstd::unique_ptr<T>( dynamic_cast<T*>( new (__os_dynamic_heap.allocate_block<U>(1)) U(minstd::forward<Args>(args)...)), __os_dynamic_heap);
 }
 
 template <typename T>
@@ -60,7 +66,7 @@ inline minstd::unique_ptr<T> make_dynamic_unique(Args &&...args)
 template <typename T, typename T2, typename... Args>
 inline minstd::unique_ptr<T2> make_dynamic_unique(Args &&...args)
 {
-    T2 *temp = (T *)(new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...));
+    T2 *temp = dynamic_cast<T2*>(new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...));
     return minstd::unique_ptr<T2>(temp, __os_dynamic_heap);
 }
 

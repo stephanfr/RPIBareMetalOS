@@ -37,7 +37,7 @@ namespace filesystems
 
         //  Start parsing
 
-        minstd::unique_ptr<FilesystemPath> path(dynamic_new<FilesystemPath>(FilesystemPath(path_string)), __os_dynamic_heap);
+        minstd::unique_ptr<FilesystemPath> path(dynamic_new<FilesystemPath>(FilesystemPath(path_string)));
 
         //  Check if this is the trivial case of the root directory.  We know the first character is the root directory delimiter above.
 
