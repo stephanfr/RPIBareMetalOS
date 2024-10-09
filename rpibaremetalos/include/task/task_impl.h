@@ -78,6 +78,7 @@ namespace task
               priority_(1),
               preempt_count_(0),
               stack_(0),
+              initial_full_cpu_state_location_(nullptr),
               cpu_state_{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}   //  CPU State is zeroed
         {
         }
@@ -118,8 +119,9 @@ namespace task
             return type_;
         }
 
+        FullCPUState &AllocateTaskInitialFullCPUState( MemoryPagePointer initial_stack );
         FullCPUState &GetTaskInitialFullCPUState();
-        FullCPUState &AllocateTaskInitialFullCPUState();
+        FullCPUState &ResetTaskInitialFullCPUState();
 
         TaskResultCodes MoveToUserSpace(RunnableWrapper pc, unsigned long arg);
 
@@ -136,6 +138,7 @@ namespace task
         long priority_;
         long preempt_count_;
         MemoryPagePointer stack_;
+        TaskImpl::FullCPUState *initial_full_cpu_state_location_;
         
         ALIGN TaskContextCPUState cpu_state_;
     };

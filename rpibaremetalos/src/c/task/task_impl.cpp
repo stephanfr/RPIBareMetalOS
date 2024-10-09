@@ -41,20 +41,27 @@ namespace task
         Yield();
     }
 */
-    TaskImpl::FullCPUState &TaskImpl::GetTaskInitialFullCPUState()
-    {
-        return *((FullCPUState *)((unsigned long)this + stack_size_in_bytes_ - sizeof(FullCPUState)));
-    }
 
-    TaskImpl::FullCPUState &TaskImpl::AllocateTaskInitialFullCPUState()
+    TaskImpl::FullCPUState &TaskImpl::AllocateTaskInitialFullCPUState( MemoryPagePointer initial_stack )
     {
         //  This reserves space for a complete KernelEntry stack frame at the task top of stack.
         //      This state is swapped in when the task is initiated.
 
-        void *child_regs = (void *)((unsigned long)this + stack_size_in_bytes_ - sizeof(FullCPUState));
-        memset(child_regs, 0, sizeof(TaskImpl::FullCPUState));
+        initial_full_cpu_state_location_ = (TaskImpl::FullCPUState*)((unsigned long)initial_stack + stack_size_in_bytes_ - sizeof(TaskImpl::FullCPUState));
+        memset(initial_full_cpu_state_location_, 0, sizeof(TaskImpl::FullCPUState));
 
-        return *((FullCPUState *)child_regs);
+        return *initial_full_cpu_state_location_;
+    }
+
+    TaskImpl::FullCPUState &TaskImpl::GetTaskInitialFullCPUState()
+    {
+        return *initial_full_cpu_state_location_;
+    }
+    
+    TaskImpl::FullCPUState &TaskImpl::ResetTaskInitialFullCPUState()
+    {
+        memset(initial_full_cpu_state_location_, 0, sizeof(TaskImpl::FullCPUState));
+        return *initial_full_cpu_state_location_;
     }
 
     TaskResultCodes TaskImpl::MoveToUserSpace(RunnableWrapper entry_point, unsigned long arg)
@@ -66,7 +73,7 @@ namespace task
         //      We will simply setup the Program Counter and pass 'arg' in register 0 as an argument
         //      to the new process' entry point function.
 
-        FullCPUState &regs = AllocateTaskInitialFullCPUState();
+        FullCPUState &regs = ResetTaskInitialFullCPUState();
 
         regs.pc = (void *)entry_point;
         regs.regs[0] = arg;

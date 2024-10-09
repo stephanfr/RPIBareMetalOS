@@ -21,6 +21,8 @@
 
 #include "asm_utility.h"
 
+#include "os_memory_config.h"
+
 extern "C" void SetKernelTaskContext(task::TaskImpl *task);
 
 namespace task
@@ -84,7 +86,7 @@ namespace task
 
         TaskImpl kernel_main_task_;
 
-        const uint64_t task_stack_size_in_bytes_ = BYTES_16K;
+        const uint64_t task_stack_size_in_bytes_ = DEFAULT_TASK_STACK_SIZE_IN_BYTES;
 
         //  Put the task map in the kernel dynamic heap
 

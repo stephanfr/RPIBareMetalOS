@@ -26,7 +26,6 @@ namespace task
         return TaskManagerImpl::Instance();
     }
 
-
     namespace internal
     {
         //  Wrapper functions to call the Run() method of a Runnable object.
@@ -76,30 +75,30 @@ namespace task
     {
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
-            if( callback( dynamic_cast<const Task&>(task_itr->second().get())) == TaskListVisitorCallbackStatus::FINISHED )
+            if (callback(dynamic_cast<const Task &>(task_itr->second().get())) == TaskListVisitorCallbackStatus::FINISHED)
             {
                 break;
             }
         }
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTask(const char* name, Runnable *runnable)
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTask(const char *name, Runnable *runnable)
     {
         return ForkKernelTaskInternal(name, runnable, &internal::KernelRunnableWrapperWithExit);
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkUserTask(const char* name, Runnable *runnable)
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkUserTask(const char *name, Runnable *runnable)
     {
         return ForkKernelTaskInternal(name, runnable, &internal::MoveToUserSpaceWrapper);
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(const char* name, Runnable *runnable, void (*wrapper)(Runnable *))
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(const char *name, Runnable *runnable, void (*wrapper)(Runnable *))
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
         CurrentTask().PreemptDisable(); //	Disable preemption for this thread during this function
 
-        MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock( task_stack_size_in_bytes_ );
+        MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock(task_stack_size_in_bytes_);
 
         if (free_block == 0)
         {
@@ -108,7 +107,7 @@ namespace task
 
         TaskImpl *new_task = new (free_block) TaskImpl(name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
 
-        TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState();
+        TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
         new_task->cpu_state_.x19 = reinterpret_cast<unsigned long>(wrapper);
         new_task->cpu_state_.x20 = reinterpret_cast<unsigned long>(runnable);
@@ -118,7 +117,7 @@ namespace task
         new_task->counter_ = new_task->priority_;
         new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
 
-        new_task->cpu_state_.pc = (void*)(&TaskManagerImpl::ReturnFromFork);
+        new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
         new_task->cpu_state_.sp = &childregs;
         new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task;
         new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task;
@@ -137,12 +136,12 @@ namespace task
         return Result::Success(new_task->uuid_);
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::CloneTask(const char* new_name, MemoryPagePointer stack)
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::CloneTask(const char *new_name, MemoryPagePointer stack)
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
         CurrentTask().PreemptDisable();
-        MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock( task_stack_size_in_bytes_ );
+        MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock(task_stack_size_in_bytes_);
 
         if (free_block == 0)
         {
@@ -151,11 +150,11 @@ namespace task
 
         TaskImpl *new_task = new (free_block) TaskImpl(new_name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
 
-        TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState();
+        TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
         TaskImpl::FullCPUState &cur_regs = CurrentTask().GetTaskInitialFullCPUState();
         childregs = cur_regs;
-        childregs.regs[0] = SYS_CLONE_NEW_TASK;                         //  This sets x0 to the value which signals to callers that we have a net-new task
+        childregs.regs[0] = SYS_CLONE_NEW_TASK; //  This sets x0 to the value which signals to callers that we have a net-new task
         childregs.sp = stack + task_stack_size_in_bytes_;
         new_task->stack_ = stack;
 
@@ -164,7 +163,7 @@ namespace task
         new_task->counter_ = new_task->priority_;
         new_task->preempt_count_ = 1;
 
-        new_task->cpu_state_.pc = (void*)&TaskManagerImpl::ReturnFromFork;
+        new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
         new_task->cpu_state_.sp = &childregs;
         new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task;
         new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task;
@@ -262,7 +261,7 @@ namespace task
             TaskImpl *prev = &CurrentTask();
             TaskImpl *next = &(next_task->second().get());
 
-            next->state_ = Task::ExecutionState::RUNNING;   //  Insure the task is marked as running
+            next->state_ = Task::ExecutionState::RUNNING; //  Insure the task is marked as running
 
             SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
         }

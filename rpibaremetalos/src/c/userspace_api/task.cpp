@@ -10,6 +10,8 @@
 
 #include "devices/log.h"
 
+#include "os_memory_config.h"
+
 namespace user::task
 {
     namespace internal
@@ -39,7 +41,7 @@ namespace user::task
     {
         using Result = ValueResult<::task::TaskResultCodes, UUID>;
 
-        unsigned long stack = sc_Malloc(BYTES_16K);
+        unsigned long stack = sc_Malloc(DEFAULT_TASK_STACK_SIZE_IN_BYTES);
         if (stack < 0)
         {
             LogError("Error while allocating stack for new Userspace Task\n\r");
