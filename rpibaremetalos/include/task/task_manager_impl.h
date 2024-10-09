@@ -75,7 +75,7 @@ namespace task
         ValueResult<TaskResultCodes, UUID> CloneTask(const char* new_name, MemoryPagePointer stack);
 
     private:
-        using TaskMap = minstd::map<UUID, minstd::reference_wrapper<TaskImpl>>;
+        using TaskMap = minstd::map<UUID, minstd::unique_ptr<TaskImpl>>;
 
         using TaskMapAllocator = minstd::allocator<TaskMap::node_type>;
         using TaskMapHeapAllocator = minstd::heap_allocator<TaskMap::node_type>;
@@ -84,7 +84,7 @@ namespace task
 
         static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;
 
-        TaskImpl kernel_main_task_;
+        minstd::unique_ptr<TaskImpl> kernel_main_task_;
 
         const uint64_t task_stack_size_in_bytes_ = DEFAULT_TASK_STACK_SIZE_IN_BYTES;
 
@@ -100,13 +100,13 @@ namespace task
         static void ReturnFromFork();
 
         TaskManagerImpl()
-            : kernel_main_task_( "KernelMain", Task::TaskType::KERNEL_TASK, BYTES_1M)
+            : kernel_main_task_( dynamic_new<TaskImpl>( "KernelMain", Task::TaskType::KERNEL_TASK, EL1_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES))
         {
-            SetKernelTaskContext(&kernel_main_task_);
-            kernel_main_task_.cpu_state_.tpidr_el1 = (unsigned long)&kernel_main_task_;
-            kernel_main_task_.cpu_state_.tpidrro_el0 = (unsigned long)&kernel_main_task_;
+            SetKernelTaskContext(kernel_main_task_.get());
+            kernel_main_task_->cpu_state_.tpidr_el1 = (unsigned long)kernel_main_task_.get();
+            kernel_main_task_->cpu_state_.tpidrro_el0 = (unsigned long)kernel_main_task_.get();
 
-            task_map_.insert(kernel_main_task_.uuid_, minstd::move(kernel_main_task_));
+            task_map_.insert(kernel_main_task_->uuid_, minstd::move(kernel_main_task_));
         }
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal(const char* name, Runnable *runnable, void (*wrapper)(Runnable *));

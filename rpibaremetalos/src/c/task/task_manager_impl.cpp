@@ -75,7 +75,7 @@ namespace task
     {
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
-            if (callback(dynamic_cast<const Task &>(task_itr->second().get())) == TaskListVisitorCallbackStatus::FINISHED)
+            if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)
             {
                 break;
             }
@@ -105,7 +105,7 @@ namespace task
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
 
-        TaskImpl *new_task = new (free_block) TaskImpl(name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
+        minstd::unique_ptr<TaskImpl> new_task = dynamic_new<TaskImpl>(name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
@@ -119,17 +119,17 @@ namespace task
 
         new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
         new_task->cpu_state_.sp = &childregs;
-        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task;
-        new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task;
+        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task.get();
+        new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Set the thask context - this is a kernel task right now
 
-        childregs.tpidr_el1 = (unsigned long)new_task;
-        childregs.tpidrro_el0 = (unsigned long)new_task;
+        childregs.tpidr_el1 = (unsigned long)new_task.get();
+        childregs.tpidrro_el0 = (unsigned long)new_task.get();
 
         //  Add the task to our task map
 
-        task_map_.insert(new_task->uuid_, minstd::move(*new_task));
+        task_map_.insert(new_task->uuid_, minstd::move(new_task));
 
         CurrentTask().PreemptEnable(); //	Re-enable preemption for this thread
 
@@ -148,7 +148,7 @@ namespace task
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
 
-        TaskImpl *new_task = new (free_block) TaskImpl(new_name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
+        minstd::unique_ptr<TaskImpl> new_task = dynamic_new<TaskImpl>(new_name, Task::TaskType::KERNEL_TASK, task_stack_size_in_bytes_);
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
@@ -165,17 +165,17 @@ namespace task
 
         new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
         new_task->cpu_state_.sp = &childregs;
-        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task;
-        new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task;
+        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task.get();
+        new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Set the task context based on if this is a kernel or user task
 
-        childregs.tpidrro_el0 = (unsigned long)new_task;
-        childregs.tpidr_el1 = (unsigned long)new_task;
+        childregs.tpidrro_el0 = (unsigned long)new_task.get();
+        childregs.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Add the task to the task map
 
-        task_map_.insert(new_task->uuid_, minstd::move(*new_task));
+        task_map_.insert(new_task->uuid_, minstd::move(new_task));
 
         CurrentTask().PreemptEnable();
 
@@ -227,7 +227,7 @@ namespace task
 
             for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
             {
-                TaskImpl &task = task_itr->second().get();
+                TaskImpl &task = *(task_itr->second());
 
                 if (((task.State() == Task::ExecutionState::RUNNING) || (task.State() == Task::ExecutionState::STARTING)) &&
                     (task.counter_ > max_counter_value))
@@ -248,7 +248,7 @@ namespace task
 
             for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
             {
-                TaskImpl &task = task_itr->second().get();
+                TaskImpl &task = *(task_itr->second());
 
                 task.counter_ = (task.counter_ >> 1) + task.priority_;
             }
@@ -256,14 +256,14 @@ namespace task
 
         //  If the next task is a different task, then context switch
 
-        if (&CurrentTask() != &(next_task->second().get()))
+        if (&CurrentTask() != next_task->second().get())
         {
-            TaskImpl *prev = &CurrentTask();
-            TaskImpl *next = &(next_task->second().get());
+            TaskImpl &prev = CurrentTask();
+            TaskImpl &next = *(next_task->second());
 
-            next->state_ = Task::ExecutionState::RUNNING; //  Insure the task is marked as running
+            next.state_ = Task::ExecutionState::RUNNING; //  Insure the task is marked as running
 
-            SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
+            SwitchCPUState(&(prev.cpu_state_), &(next.cpu_state_));
         }
 
         //  Reenable preemption for this thread
