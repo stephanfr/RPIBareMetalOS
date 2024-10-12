@@ -13,10 +13,20 @@
 
 #include "isr/isr.h"
 
+typedef enum class InterprocessorInterrupts : uint32_t
+{
+    NO_SUCH_IPI = 0,
+    IPI_HALT = 1
+} InterprocessorInterrupts;
+
+
 class ExceptionManager
 {
-
 public:
+    virtual bool Initialize() = 0;
+
+    virtual bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) = 0;
+
     virtual bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr) = 0;
 
     virtual void HandleInterrupt() = 0;
@@ -37,12 +47,12 @@ protected:
 
     ExceptionManager()
     {
-        asm volatile("msr    daifclr, #2");     //  Enables interrupts on the processor
+        asm volatile("msr    daifclr, #2"); //  Enables interrupts on the processor
     }
 
     ~ExceptionManager()
     {
-        asm volatile("msr	daifset, #2");     //  Disables interrupts on the processor
+        asm volatile("msr	daifset, #2"); //  Disables interrupts on the processor
     }
 
     virtual bool EnableInterrupt(Interrupts interrupt_to_enable) = 0;
@@ -59,6 +69,19 @@ protected:
         }
 
         return map_itr->second();
+    }
+
+    Interrupts AsInterrupt(InterprocessorInterrupts ipi)
+    {
+        switch (ipi)
+        {
+        case InterprocessorInterrupts::IPI_HALT:
+            return Interrupts::CORE_HALT;
+        default:
+            return Interrupts::NO_SUCH_INTERRUPT;
+        }
+
+        return Interrupts::NO_SUCH_INTERRUPT;
     }
 };
 

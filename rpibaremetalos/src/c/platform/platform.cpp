@@ -217,6 +217,10 @@ void InitializePlatform()
 
     GetOSEntityRegistry().AddEntity(memory_manager);
 
+    //  Initialize the exception manager
+
+    GetExceptionManager().Initialize();
+
     //  Mark the platform as initialized
 
     __platform_initialized = true;

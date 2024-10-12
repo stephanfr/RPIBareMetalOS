@@ -10,6 +10,7 @@ extern "C"
 {
     void CPUTicksDelay(uint64_t ticks);
 
+    uint32_t GetCoreID();
     void* GetStackPointer();
 
     uint32_t GetExceptionLevel();

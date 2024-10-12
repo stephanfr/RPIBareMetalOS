@@ -27,6 +27,7 @@ public:
 
     virtual RPIBoardType GetBoardType() const = 0;
     virtual const char *GetBoardTypeName() const = 0;
+    virtual uint8_t *GetARMLocalBase() const = 0;
     virtual uint8_t *GetMMIOBase() const = 0;
     virtual uint8_t *GetEMMCBase() const = 0;
     virtual uint32_t GetGPUClockRate() const = 0;

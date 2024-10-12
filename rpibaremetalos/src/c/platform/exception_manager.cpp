@@ -53,6 +53,8 @@ void ExceptionManager::HandleException(unsigned int type, unsigned long esr, uns
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)
 {
+    LogEntryAndExit("AddISR: %s\n", ToString(isr->InterruptType()));
+
     ISRMap::iterator map_itr = isrs_.find(isr->InterruptType());
 
     //  If we do not already have an ISR for the Interrupt, then we must add an entry to the map

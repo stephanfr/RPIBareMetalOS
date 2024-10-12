@@ -20,6 +20,7 @@
 
 #include "isr/system_timer_reschedule_isr.h"
 #include "isr/task_switch_isr.h"
+#include "isr/halt_core_isr.h"
 
 #include "task/tasks.h"
 
@@ -274,10 +275,26 @@ public:
     }
 };
 
+class ExceptionGeneratingProcess : public Runnable
+{
+public:
+    ExceptionGeneratingProcess() = default;
+
+    void Run()
+    {
+        printf("In ExceptionGeneratingProcess\n");
+
+        task::Task* bad_address = nullptr;
+
+        printf("Dereferencing nullptr: %s\n", bad_address->Name().c_str());
+    }
+};
+
+
 void TestCoreMain()
 {
-    const char *array = "Core1";
-    printf("In Test Core Main: %s\n", array);
+    const char *array = "Core3";
+//    printf("In Test Core Main running on core: %d\n", GetCoreID());
 
     RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
@@ -296,7 +313,7 @@ extern "C" void kernel_main()
 
     const PlatformInfo &platformInfo = GetPlatformInfo();
 
-    SetLogLevel(LogLevel::ERROR);
+    SetLogLevel(LogLevel::WARNING);
 
     printf("SEF RPI Bare Metal OS V0.01\n");
 
@@ -316,9 +333,13 @@ extern "C" void kernel_main()
 
     SystemTimerRescheduleISR timerRescheduleISR;
     TaskSwitchISR taskSwitchISR;
+    HaltCoreISR haltCoreISR;
 
     GetExceptionManager().AddInterruptServiceRoutine(&taskSwitchISR);
     GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR);
+
+    printf("Adding Halt Core ISR\n");
+    GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR);
 
     GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 40000);
 
@@ -363,7 +384,7 @@ extern "C" void kernel_main()
         printf("error while starting cli");
         return;
     }
-
+/*
     KernelCounter kernel_counter;
 
     auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
@@ -392,10 +413,31 @@ extern "C" void kernel_main()
         printf("error while starting user processes");
         return;
     }
+*/
+    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+
+
+//    printf("Starting exception generating process\n");
+
+//    ExceptionGeneratingProcess ex_process;
+
+//    auto exception_generating_process_wrapper = task::GetTaskManager().ForkUserTask("Exception Generating Task", &ex_process);
+//    if (exception_generating_process_wrapper.Failed())
+//    {
+//        printf("error while starting exception generating process");
+//        return;
+//    }
+
+delay(1000);
+
+    printf("writing to core 3 ipi mailbox\n");
+
+    GetExceptionManager().SendInterprocessorInterrupt(3, InterprocessorInterrupts::IPI_HALT);
+
+delay(100);
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
-    printf("Kernel Main Task Context: %p\n", GetTaskContext());
 
     //  Keep the scheduler running
 

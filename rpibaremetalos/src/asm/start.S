@@ -339,14 +339,16 @@ _start:
 
 .el1_spin:
 	wfe
-	ldr x4, [x24_coreJumpTableAddress, x21_coreNumber, lsl #3]
-	cbz x4, .el1_spin
+	ldr x0, [x24_coreJumpTableAddress, x21_coreNumber, lsl #3]
+	cbz x0, .el1_spin
 
-	mov x0, #0
-	mov x1, #0
-	mov x2, #0
-	mov x3, #0
-	br x4
+    //  Enable interrupts on the core
+
+    bl EnableIRQ
+
+    //  Jump to the function pointed to by the jump table
+
+	br x0
 
     //  We should never get here, but if we do, park the core
 

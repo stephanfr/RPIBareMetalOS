@@ -2,6 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+
+.global GetCoreID
+GetCoreID:
+    mrs     x0, MPIDR_EL1
+    and     x0, x0, #3
+    ret
+
+
 .global CPUTicksDelay
 CPUTicksDelay:
     subs x0, x0, #1

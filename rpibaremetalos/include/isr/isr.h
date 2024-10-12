@@ -8,20 +8,24 @@
 
 typedef enum class Interrupts : int32_t
 {
-    NO_SUCH_INTERRUPT = -1,
+    NO_SUCH_INTERRUPT = 0,
 
-    SYSTEM_TIMER_0 = 0,
-    SYSTEM_TIMER_1 = 1,
-    SYSTEM_TIMER_2 = 2,
-    SYSTEM_TIMER_3 = 3
+    CORE_HALT = 1,
+    SYSTEM_TIMER_0 = 2,
+    SYSTEM_TIMER_1 = 3,
+    SYSTEM_TIMER_2 = 4,
+    SYSTEM_TIMER_3 = 5,
 } Interrupts;
+
+const char *ToString(Interrupts interrupt);
 
 typedef enum InterruptServiceRoutineType : uint32_t
 {
     UNIDENTIFIED = 0,
 
-    SYSTEM_TIMER_RESCHEDULE = 1,
-    TASK_SCHEDULER = 2
+    HALT_CORE = 1,
+    SYSTEM_TIMER_RESCHEDULE = 2,
+    TASK_SCHEDULER = 3
 } InterruptServiceRoutineType;
 
 class InterruptServiceRoutine

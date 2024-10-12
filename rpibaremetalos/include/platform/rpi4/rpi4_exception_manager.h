@@ -9,6 +9,16 @@
 
 #include <devices/log.h>
 
+//
+//  For the RPI4, the interrupt controller is the GIC-400 and we will use Software Generated Interrupts (SGI) to
+//      send inter-processor interrupts.  I tried to use core mailboxes but could not find a way to get them to work
+//      nor could I find any documentation showing how to use them.  Other examples used SGIs which should work
+//      pretty much the same for the RPI5 and successive versions using the GIC400 or backward compatibles.
+//
+//  For the RPI3, there is no Generic Interrupt Controller, so we use the ARM Core Local Interrupt Controller and
+//      the core mailboxes to send inter-processor interrupts.
+//
+
 typedef enum class BCM2711GenericInterruptControllerRegisters : uint32_t
 {
     ENABLE_IRQ_BASE = 0x00001100,
@@ -23,6 +33,7 @@ typedef enum class BCM2711Interrupts : int32_t
 {
     NO_SUCH_INTERRUPT = -1,
 
+    HALT_CORE = static_cast<uint32_t>(InterprocessorInterrupts::IPI_HALT),
     SYSTEM_TIMER_0 = 0x60,
     SYSTEM_TIMER_1 = 0x61,
     SYSTEM_TIMER_2 = 0x62,
@@ -37,64 +48,22 @@ public:
     {
     }
 
+    bool Initialize() override;
+
     bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr) override
     {
-        BCM2711Interrupts interrupt_type = GetBCM2711InterruptType(isr->InterruptType());
-
-        if (interrupt_type == BCM2711Interrupts::NO_SUCH_INTERRUPT)
-        {
-            return false;
-        }
-
         return ExceptionManager::AddISR(isr);
     }
 
-    void HandleInterrupt() override
-    {
-        LogEntryAndExit("Entering HandleInterrupt");
+    bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) override;
 
-        unsigned int irq_ack_reg = GetGICRegister(BCM2711GenericInterruptControllerRegisters::INTERRUPT_ACKNOWLEDGE);
-        unsigned int irq = irq_ack_reg & 0x2FF;
-
-        ISRPointerList *isrs = GetISRs(GetInterruptType(irq));
-
-        //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
-
-        InterruptServiceRoutine *task_switch_isr = nullptr;
-
-        if (isrs != nullptr)
-        {
-            for (InterruptServiceRoutine *current_isr : *isrs)
-            {
-                if( current_isr->ISRType() != InterruptServiceRoutineType::TASK_SCHEDULER )
-                {
-                    current_isr->HandleInterrupt();
-                }
-                else
-                {
-                    task_switch_isr = current_isr;
-                }
-            }
-        }
-        else
-        {
-            LogInfo("No ISRs found for Interrupt: %u\n", irq);
-        }
-
-        //  Let the GIC know we have serviced the interrupt.  End of interrupt ordering MUST mirror the acknowledge ordering,
-        //      this needs to be enforced even with nested interrupts.
-
-        SetGICRegister(BCM2711GenericInterruptControllerRegisters::END_OF_INTERRUPT, irq_ack_reg);
-
-        //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
-
-        if( task_switch_isr != nullptr )
-        {
-            task_switch_isr->HandleInterrupt();
-        }
-    }
+    void HandleInterrupt() override;
 
 private:
+    constexpr static uint32_t ARM_GICD_BASE = 0xFF841000;
+    constexpr static uint32_t GICD_SGIR = ARM_GICD_BASE + 0xF00;
+    constexpr static uint32_t GICD_SGIR_CPU_TARGET_LIST__SHIFT = 16;
+
     const PlatformInfo &platform_info;
 
     const uint8_t *BCM2711_GIC400_BASE = reinterpret_cast<const uint8_t *>(0xFF840000);
