@@ -6,11 +6,11 @@
 
 #include "asm_utility.h"
 
-#include <minimalstdio.h>
+#include <devices/log.h>
 
 void HaltCoreISR::HandleInterrupt()
 {
-    printf("HaltCoreISR::HandleInterrupt\n");
+    LogEntryAndExit("HaltCoreISR::HandleInterrupt\n");
 
     //  Halt the core
 

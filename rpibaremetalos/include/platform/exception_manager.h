@@ -16,7 +16,8 @@
 typedef enum class InterprocessorInterrupts : uint32_t
 {
     NO_SUCH_IPI = 0,
-    IPI_HALT = 1
+    HALT = 1,
+    CORE_TASK_SWITCH = 2
 } InterprocessorInterrupts;
 
 
@@ -75,8 +76,10 @@ protected:
     {
         switch (ipi)
         {
-        case InterprocessorInterrupts::IPI_HALT:
+        case InterprocessorInterrupts::HALT:
             return Interrupts::CORE_HALT;
+        case InterprocessorInterrupts::CORE_TASK_SWITCH:
+            return Interrupts::SWITCH_TASK;
         default:
             return Interrupts::NO_SUCH_INTERRUPT;
         }

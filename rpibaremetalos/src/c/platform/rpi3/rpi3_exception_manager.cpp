@@ -79,6 +79,7 @@ void BCM2837ExceptionManager::HandleInterrupt()
     //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
 
     InterruptServiceRoutine *task_switch_isr = nullptr;
+    InterruptServiceRoutine *core_task_switch_isr = nullptr;
 
     if (isrs != nullptr)
     {
@@ -87,6 +88,10 @@ void BCM2837ExceptionManager::HandleInterrupt()
             if (current_isr->ISRType() != InterruptServiceRoutineType::TASK_SCHEDULER)
             {
                 current_isr->HandleInterrupt();
+            }
+            else if(current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
+            {
+                core_task_switch_isr = current_isr;
             }
             else
             {
@@ -105,5 +110,10 @@ void BCM2837ExceptionManager::HandleInterrupt()
     {
         LogDebug1("Executing Task Switch ISR\n");
         task_switch_isr->HandleInterrupt();
+    }
+    else if(core_task_switch_isr != nullptr)
+    {
+        LogDebug1("Executing Core Task Switch ISR\n");
+        core_task_switch_isr->HandleInterrupt();
     }
 }

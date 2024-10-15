@@ -202,8 +202,8 @@ private:
         case Interrupts::SYSTEM_TIMER_2:
             return false;
 
-        case Interrupts::CORE_HALT:     //  Already enabled in 'Initialize'
-            *reinterpret_cast<uint32_t*>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET) = 0x0000000F;
+        case Interrupts::CORE_HALT:             //  Already enabled in 'Initialize'
+        case Interrupts::SWITCH_TASK:
             return true;
 
         case Interrupts::SYSTEM_TIMER_1:

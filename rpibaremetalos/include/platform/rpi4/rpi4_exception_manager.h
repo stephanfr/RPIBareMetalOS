@@ -33,7 +33,7 @@ typedef enum class BCM2711Interrupts : int32_t
 {
     NO_SUCH_INTERRUPT = -1,
 
-    HALT_CORE = static_cast<uint32_t>(InterprocessorInterrupts::IPI_HALT),
+    HALT_CORE = static_cast<uint32_t>(InterprocessorInterrupts::HALT),
     SYSTEM_TIMER_0 = 0x60,
     SYSTEM_TIMER_1 = 0x61,
     SYSTEM_TIMER_2 = 0x62,
