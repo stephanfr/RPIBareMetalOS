@@ -7,6 +7,8 @@
 #include "platform/rpi3/rpi3_exception_manager.h"
 #include "platform/rpi4/rpi4_exception_manager.h"
 
+#include "asm_utility.h"
+
 const char *entry_error_messages[] = {
     "SYNC_INVALID_EL1t",
     "IRQ_INVALID_EL1t",
@@ -48,7 +50,7 @@ extern "C" void HandleIRQ()
 
 void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address)
 {
-    LogError("%s, ESR: %x, address: %x\r\n", entry_error_messages[type], (unsigned int)esr, (unsigned int)address);
+    LogError("%s, Core: %d ESR: %x, address: %x\r\n", entry_error_messages[type], GetCoreID(), (unsigned int)esr, (unsigned int)address);
 }
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)

@@ -6,6 +6,8 @@
 
 #include <fixed_string>
 
+#include <atomic>
+
 #include "heaps.h"
 
 #include "platform/exception_manager.h"
@@ -18,9 +20,10 @@
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
 
+#include "isr/core_task_switch_isr.h"
+#include "isr/halt_core_isr.h"
 #include "isr/system_timer_reschedule_isr.h"
 #include "isr/task_switch_isr.h"
-#include "isr/halt_core_isr.h"
 
 #include "task/tasks.h"
 
@@ -41,8 +44,8 @@
 
 #include <format>
 
-#include "task/task_manager_impl.h"
 #include "task/process.h"
+#include "task/task_manager_impl.h"
 
 //
 //
@@ -72,7 +75,7 @@ public:
         printf("In User process: %s\n", array_.c_str());
 
         minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
         user::io::Write(format_buffer.c_str());
 
@@ -91,7 +94,7 @@ public:
                 delay(1000);
             }
 
-            if( task_id != task::Task::GetTask().ID())
+            if (task_id != task::Task::GetTask().ID())
             {
                 printf("Task context changed!!\n");
                 break;
@@ -102,7 +105,6 @@ public:
 private:
     const minstd::fixed_string<128> array_;
 };
-
 
 class UserShortLivedProcess : public Runnable
 {
@@ -117,7 +119,7 @@ public:
         printf("In User Short Live Process: %d\n", id_);
 
         minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
         user::io::Write(format_buffer.c_str());
 
@@ -125,9 +127,9 @@ public:
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
-        delay(500 + ( random_generator.Next32BitValue() % 20) * 1000);
+        delay(500 + (random_generator.Next32BitValue() % 20) * 1000);
 
-        if( task_id != task::Task::GetTask().ID())
+        if (task_id != task::Task::GetTask().ID())
         {
             printf("Task context changed!!\n");
         }
@@ -138,7 +140,6 @@ public:
 private:
     const uint32_t id_;
 };
-
 
 class ImmediateExitProcess : public Runnable
 {
@@ -170,7 +171,7 @@ public:
         const UUID task_id = task::Task::GetTask().ID();
 
         minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
         printf(format_buffer.c_str());
 
@@ -186,7 +187,7 @@ public:
                 delay(990 + random_generator.Next32BitValue() % 20);
             }
 
-            if( task_id != task::Task::GetTask().ID())
+            if (task_id != task::Task::GetTask().ID())
             {
                 printf("Kernel Task context changed!!\n");
                 break;
@@ -194,7 +195,6 @@ public:
         }
     }
 };
-
 
 class ShortLivedKernelProcess : public Runnable
 {
@@ -208,16 +208,15 @@ public:
         const UUID task_id = task::Task::GetTask().ID();
 
         minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID() );
+        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
         printf(format_buffer.c_str());
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
-        delay(100 + (random_generator.Next32BitValue() % 20)*1000);
+        delay(100 + (random_generator.Next32BitValue() % 20) * 1000);
 
-
-        if( task_id != task::Task::GetTask().ID())
+        if (task_id != task::Task::GetTask().ID())
         {
             printf("Kernel Task context changed!!\n");
         }
@@ -225,7 +224,6 @@ public:
         printf("Leaving ShortLivedKernelProcess\n");
     }
 };
-
 
 class UserProcess : public Runnable
 {
@@ -239,37 +237,41 @@ public:
 
         printf("User Process Task Context: %p\n", GetTaskContext());
 
-        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,UserCounter>("56789"));
+        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserCounter>("56789"));
 
         printf("Forking Task 1\n");
 
         auto new_task1 = user::task::ForkTask("Counting Process 1", user_process1);
 
-        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,UserCounter>("vwxyz"));
+        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserCounter>("vwxyz"));
 
         printf("Forking Task 2\n");
 
         auto new_task2 = user::task::ForkTask("Counting Process 2", user_process2);
 
+/*
         minstd::unique_ptr<Runnable> short_lived_processes[100];
         minstd::unique_ptr<Runnable> immediate_exit_processes[100];
 
         minstd::fixed_string<128> format_buffer;
 
-        for( int i = 0; i < 100; i++)
+        for (int i = 0; i < 100; i++)
         {
-            short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,UserShortLivedProcess>(i));
+            short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserShortLivedProcess>(i));
 
-            minstd::format(format_buffer, "Short Lived Process: {}\n", i);
+            minstd::format(format_buffer, "Short Lived Process: {}", i);
 
             auto new_task = user::task::ForkTask(format_buffer, short_lived_processes[i]);
 
-            immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable,ImmediateExitProcess>(i));
+            immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, ImmediateExitProcess>(i));
 
-            minstd::format(format_buffer, "Immediate Exit Process: {}\n", i);
+            minstd::format(format_buffer, "Immediate Exit Process: {}", i);
 
             auto new_immediate_exit_task = user::task::ForkTask(format_buffer, immediate_exit_processes[i]);
         }
+    */
+
+        delay(1000);
 
         printf("Leaving User Task\n");
     }
@@ -284,17 +286,16 @@ public:
     {
         printf("In ExceptionGeneratingProcess\n");
 
-        task::Task* bad_address = nullptr;
+        task::Task *bad_address = nullptr;
 
         printf("Dereferencing nullptr: %s\n", bad_address->Name().c_str());
     }
 };
 
-
 void TestCoreMain()
 {
     const char *array = "Core3";
-//    printf("In Test Core Main running on core: %d\n", GetCoreID());
+    //    printf("In Test Core Main running on core: %d\n", GetCoreID());
 
     RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
@@ -305,11 +306,33 @@ void TestCoreMain()
     }
 }
 
+void SecondaryCoreMain()
+{
+    //  Add this task to the task manager
+
+    uint32_t core_id = GetCoreID();
+
+    auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, 0x02);
+
+    task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
+
+    printf("Core Main started for core: %d\n", core_id);
+
+    //  Keep the scheduler running
+
+    while (1)
+    {
+        delay(10);
+        task::Yield();
+    }
+}
+
 extern "C" void kernel_main()
 {
     //  Call InitializePlatform() first
 
     InitializePlatform();
+    task::TaskManagerImpl::Instance();
 
     const PlatformInfo &platformInfo = GetPlatformInfo();
 
@@ -334,24 +357,34 @@ extern "C" void kernel_main()
     SystemTimerRescheduleISR timerRescheduleISR;
     TaskSwitchISR taskSwitchISR;
     HaltCoreISR haltCoreISR;
+    CoreTaskSwitchISR coreTaskSwitchISR;
 
     GetExceptionManager().AddInterruptServiceRoutine(&taskSwitchISR);
     GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR);
-
-    printf("Adding Halt Core ISR\n");
     GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR);
+    GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR);
 
     GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 40000);
 
     printf("Interrupts enabled\n");
 
-    //  Start a task on Core 1
+    //  Start Cores 1, 2, and 3
 
-    if( !CoreExecute(3, &TestCoreMain))
-    {
-        printf("Failed to start core 3\n");
-    }
+//    if (!CoreExecute(1, &SecondaryCoreMain))
+//    {
+//        printf("Failed to start core 1\n");
+//    }
+    /*
+        if( !CoreExecute(2, &SecondaryCoreMain))
+        {
+            printf("Failed to start core 2\n");
+        }
 
+        if( !CoreExecute(3, &SecondaryCoreMain))
+        {
+            printf("Failed to start core 3\n");
+        }
+    */
     //  Start the command line interface
 
     EchoingCharacterIODevice echoing_stdin(*stdin, *stdout);
@@ -384,24 +417,24 @@ extern "C" void kernel_main()
         printf("error while starting cli");
         return;
     }
-/*
-    KernelCounter kernel_counter;
 
-    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
-    if (new_kernel_counter.Failed())
-    {
-        printf("error while starting kernel counter");
-        return;
-    }
+//    KernelCounter kernel_counter;
 
-    ShortLivedKernelProcess short_lived_kernel_process;
+//    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
+//    if (new_kernel_counter.Failed())
+//    {
+//        printf("error while starting kernel counter");
+//        return;
+//    }
 
-    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
-    if (new_short_lived_kernel_process.Failed())
-    {
-        printf("error while starting short lived kernel process");
-        return;
-    }
+//    ShortLivedKernelProcess short_lived_kernel_process;
+
+//    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
+//    if (new_short_lived_kernel_process.Failed())
+//    {
+//        printf("error while starting short lived kernel process");
+//        return;
+//    }
 
     printf("Starting user processes\n");
 
@@ -413,36 +446,35 @@ extern "C" void kernel_main()
         printf("error while starting user processes");
         return;
     }
-*/
-    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
-
-
-//    printf("Starting exception generating process\n");
-
-//    ExceptionGeneratingProcess ex_process;
-
-//    auto exception_generating_process_wrapper = task::GetTaskManager().ForkUserTask("Exception Generating Task", &ex_process);
-//    if (exception_generating_process_wrapper.Failed())
-//    {
-//        printf("error while starting exception generating process");
-//        return;
-//    }
-
-delay(1000);
-
-    printf("writing to core 3 ipi mailbox\n");
-
-    GetExceptionManager().SendInterprocessorInterrupt(3, InterprocessorInterrupts::IPI_HALT);
-
-delay(100);
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
+    //    printf("Starting exception generating process\n");
+
+    //    ExceptionGeneratingProcess ex_process;
+
+    //    auto exception_generating_process_wrapper = task::GetTaskManager().ForkUserTask("Exception Generating Task", &ex_process);
+    //    if (exception_generating_process_wrapper.Failed())
+    //    {
+    //        printf("error while starting exception generating process");
+    //        return;
+    //    }
+
+    delay(1000);
+
+    //    printf("writing to core 3 ipi mailbox\n");
+
+    //    GetExceptionManager().SendInterprocessorInterrupt(3, InterprocessorInterrupts::HALT);
+
+    delay(100);
+
+    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
     //  Keep the scheduler running
 
     while (1)
     {
+        delay(10);
         task::Yield();
     }
 }

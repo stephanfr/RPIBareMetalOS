@@ -68,11 +68,14 @@ namespace task
 
         TaskImpl( const char *name,
                   TaskType type,
-                  uint64_t stack_size_in_bytes)
+                  uint64_t stack_size_in_bytes,
+                  uint64_t restrict_to_cores = 0xFFFFFFFFFFFFFFFF)
             : uuid_(UUID::GenerateUUID(UUID::Versions::RANDOM)),
               name_(name),  
               type_(type),
               stack_size_in_bytes_(stack_size_in_bytes),
+              core_restriction_mask_(restrict_to_cores),
+              running_on_core_(-1),
               state_(ExecutionState::STARTING),
               counter_(0),
               priority_(1),
@@ -94,6 +97,11 @@ namespace task
         const minstd::string &Name() const
         {
             return name_;
+        }
+
+        uint64_t CoreRestrictionMask() const
+        {
+            return core_restriction_mask_;
         }
 
 //        void Yield();
@@ -127,11 +135,15 @@ namespace task
 
     private:
         friend class TaskManagerImpl;
+        friend class TaskSchedulingQueue;
 
         const UUID uuid_;
         const minstd::fixed_string<MAX_TASK_NAME_LENGTH> name_;
         TaskType type_;
         uint64_t stack_size_in_bytes_;
+        uint64_t core_restriction_mask_;
+
+        int32_t running_on_core_;
 
         ExecutionState state_;
         long counter_;

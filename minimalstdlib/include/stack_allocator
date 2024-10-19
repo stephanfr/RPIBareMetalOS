@@ -19,6 +19,17 @@ namespace MINIMAL_STD_NAMESPACE
     public:
         stack_allocator() = default;
 
+        virtual ~stack_allocator()
+        {            
+            if constexpr (minstd::is_class_v<T>)
+            {
+                for (size_t i = 0; i < current_size_; i++)
+                {
+                    (elements_ + i)->~T();
+                }
+            }
+        }
+
         size_t max_size() const noexcept override
         {
             return FIXED_SIZE;

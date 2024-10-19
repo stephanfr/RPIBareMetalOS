@@ -33,6 +33,7 @@ namespace task
 
         typedef enum class TaskType : uint32_t
         {
+            CORE_MAIN_TASK = 0,
             KERNEL_TASK = 1,
             USER_TASK = 2,
         } TaskType;

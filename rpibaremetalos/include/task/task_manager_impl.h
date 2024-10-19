@@ -6,6 +6,7 @@
 
 #include <functional> //  For minstd::reference_wrapper
 #include <optional>
+#include <array>
 
 #include "result.h"
 
@@ -21,12 +22,94 @@
 
 #include "asm_utility.h"
 
+#include "synchronization.h"
+
 #include "os_memory_config.h"
 
 extern "C" void SetKernelTaskContext(task::TaskImpl *task);
 
 namespace task
 {
+    class TaskSchedulingQueue
+    {
+    public:
+        constexpr static size_t MAX_SIZE = 12;
+
+        TaskSchedulingQueue() = default;
+        TaskSchedulingQueue(const TaskSchedulingQueue &) = delete;
+        TaskSchedulingQueue(TaskSchedulingQueue &&) = delete;
+
+        ~TaskSchedulingQueue() = default;
+
+        TaskSchedulingQueue &operator=(const TaskSchedulingQueue &) = delete;
+        TaskSchedulingQueue &operator=(TaskSchedulingQueue &&) = delete;
+
+        void clear()
+        {
+            current_num_elements_ = 0;
+         }
+
+        size_t size() const
+        {
+            return current_num_elements_;
+        }
+
+        void insert(TaskImpl &element)
+        {
+            if((current_num_elements_ == MAX_SIZE) && (element.counter_ <= tasks_[MAX_SIZE - 1]->counter_))
+            {
+                return;
+            }
+
+            bool inserted = false;
+
+            for (size_t i = 0; i < current_num_elements_; ++i)
+            {
+                if (tasks_[i]->counter_ < element.counter_)
+                {
+                    if(current_num_elements_ - i > 1)
+                    {
+                        memmove(&tasks_[i], &tasks_[i + 1], (current_num_elements_ - i - 1) * sizeof(TaskImpl*));
+                    }
+
+                    tasks_[i] = &element;
+                    inserted = true;
+                    break;
+                }
+            }
+
+            if (!inserted && current_num_elements_ < MAX_SIZE)
+            {
+                tasks_[current_num_elements_++] = &element;
+            }
+        }
+
+        TaskImpl &top() const
+        {
+            return *tasks_[0];
+        }
+
+        void pop()
+        {
+            if(current_num_elements_ > 0)
+            {
+                if(current_num_elements_ > 1)
+                {
+                    memmove(&tasks_[0], &tasks_[1], (current_num_elements_ - 1) * sizeof(TaskImpl*));
+                }
+
+                --current_num_elements_;
+            }
+        }
+
+//    private:
+
+
+        size_t current_num_elements_ = 0;
+
+        minstd::array<TaskImpl*, MAX_SIZE> tasks_;
+    };
+
     class TaskManagerImpl : public TaskManager
     {
     public:
@@ -57,14 +140,16 @@ namespace task
 
         void VisitTaskList(TaskListVisitorCallback callback) const override;
 
-        void Schedule(void);
-
         void PreemptiveSchedule(void);
+
+        void Schedule(void);
+        void SwitchToNextTask(void);
 
         void Yield(void)
         {
             CurrentTask().counter_ = 0;
-            Schedule();
+//            Schedule();
+            SwitchToNextTask();
         }
 
         void ExitProcess();
@@ -73,6 +158,19 @@ namespace task
         ValueResult<TaskResultCodes, UUID> ForkUserTask(const char* name, Runnable *runnable) override;
 
         ValueResult<TaskResultCodes, UUID> CloneTask(const char* new_name, MemoryPagePointer stack);
+
+        void SetCoreMainTaskContext( minstd::unique_ptr<TaskImpl> &task)
+        {
+            kernel_main_tasks_[GetCoreID()] = task.get();
+
+            task->running_on_core_ = GetCoreID();
+
+            SetKernelTaskContext(task.get());
+            task->cpu_state_.tpidr_el1 = (unsigned long)task.get();
+            task->cpu_state_.tpidrro_el0 = (unsigned long)task.get();
+
+            task_map_.insert(task->uuid_, minstd::move(task));
+        }
 
     private:
         using TaskMap = minstd::map<UUID, minstd::unique_ptr<TaskImpl>>;
@@ -84,9 +182,13 @@ namespace task
 
         static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;
 
-        minstd::unique_ptr<TaskImpl> kernel_main_task_;
+        minstd::array<TaskImpl*,MAX_CORES> kernel_main_tasks_;
+        minstd::array<TaskSchedulingQueue, MAX_CORES> task_scheduling_queues_;
 
         const uint64_t task_stack_size_in_bytes_ = DEFAULT_TASK_STACK_SIZE_IN_BYTES;
+
+        Mutex task_scheduling_queue_mutex_;
+//        TaskSchedulingQueue task_scheduling_queue_;
 
         //  Put the task map in the kernel dynamic heap
 
@@ -100,15 +202,20 @@ namespace task
         static void ReturnFromFork();
 
         TaskManagerImpl()
-            : kernel_main_task_( dynamic_new<TaskImpl>( "KernelMain", Task::TaskType::KERNEL_TASK, EL1_CORE_INITIALIZATION_STACK_SIZE_IN_BYTES))
         {
-            SetKernelTaskContext(kernel_main_task_.get());
-            kernel_main_task_->cpu_state_.tpidr_el1 = (unsigned long)kernel_main_task_.get();
-            kernel_main_task_->cpu_state_.tpidrro_el0 = (unsigned long)kernel_main_task_.get();
+            auto kernel_main_task = dynamic_new<TaskImpl>("Kernel Main Task", Task::TaskType::CORE_MAIN_TASK, task_stack_size_in_bytes_, 0x01);
+            
+            SetCoreMainTaskContext(kernel_main_task);
 
-            task_map_.insert(kernel_main_task_->uuid_, minstd::move(kernel_main_task_));
+//            SetKernelTaskContext(kernel_main_tasks_[0].get());
+//            kernel_main_task_->cpu_state_.tpidr_el1 = (unsigned long)kernel_main_tasks_[0].get();
+//            kernel_main_task_->cpu_state_.tpidrro_el0 = (unsigned long)kernel_main_tasks_[0].get();
+
+//            task_map_.insert(kernel_main_tasks_[0]->uuid_, minstd::move(kernel_main_tasks_[0]));
         }
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal(const char* name, Runnable *runnable, void (*wrapper)(Runnable *));
+
+        void FillSchedulingQueue(void);
     };
 } // namespace task
