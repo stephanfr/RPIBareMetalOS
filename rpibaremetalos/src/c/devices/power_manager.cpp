@@ -54,7 +54,7 @@ void PowerManager::Halt()
 
     for (unsigned int i = 0; i < 1E08; i++)
     {
-        PhysicalTimer().WaitMsec(1000);
+        PhysicalTimer::WaitMsec(1000);
         printf("Halting\n");
     }
 }
@@ -73,7 +73,7 @@ void PowerManager::Reboot()
 
     for (unsigned int i = 0; i < 1E08; i++)
     {
-        PhysicalTimer().WaitMsec(1000);
+        PhysicalTimer::WaitMsec(1000);
         printf("Waiting to reboot\n");
     }
 }
