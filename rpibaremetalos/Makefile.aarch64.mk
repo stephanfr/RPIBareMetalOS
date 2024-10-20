@@ -142,12 +142,12 @@ ARMSTUB_ROOT := armstub
 ARMSTUB_DIRS := $(ARMSTUB_ROOT)/build $(ARMSTUB_ROOT)/image
 
 
-armstub_all : armstub_clean armstub_checkdirs armstub
+armstub : armstub_clean armstub_checkdirs armstub_bin
 
 armstub/build/armstub_minimal.o: armstub/src/armstub_minimal.S
 	$(CC) $(ASMFLAGS) -c $< -o $@
 
-armstub: armstub/build/armstub_minimal.o
+armstub_bin: armstub/build/armstub_minimal.o
 	$(LD) -nostdlib --section-start=.text=0 -o armstub/build/armstub_minimal.elf armstub/build/armstub_minimal.o
 	$(OBJCOPY) -O binary armstub/build/armstub_minimal.elf armstub/image/armstub_minimal.bin
 
