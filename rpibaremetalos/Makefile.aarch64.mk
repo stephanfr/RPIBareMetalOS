@@ -76,8 +76,9 @@ LINKER_SCRIPT_TEMPLATE=link.template.ld
 LINKER_SCRIPT=$(BUILD_ROOT)/link.ld
 
 
-all: clean checkdirs $(IMG)
+all: checkdirs $(IMG)
 
+all_clean: clean all
 
 $(IMG): $(ELF)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
