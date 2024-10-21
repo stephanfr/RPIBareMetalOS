@@ -58,7 +58,8 @@
         "ctype.h": "c",
         "utility": "cpp",
         "cpu_context.h": "c",
-        "atomic": "cpp"
+        "atomic": "cpp",
+        "spsc_queue": "cpp"
     },
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.errorSquiggles": "disabled",

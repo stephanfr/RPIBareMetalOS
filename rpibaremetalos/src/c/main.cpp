@@ -249,27 +249,27 @@ public:
 
         auto new_task2 = user::task::ForkTask("Counting Process 2", user_process2);
 
-/*
-        minstd::unique_ptr<Runnable> short_lived_processes[100];
-        minstd::unique_ptr<Runnable> immediate_exit_processes[100];
+        /*
+                minstd::unique_ptr<Runnable> short_lived_processes[100];
+                minstd::unique_ptr<Runnable> immediate_exit_processes[100];
 
-        minstd::fixed_string<128> format_buffer;
+                minstd::fixed_string<128> format_buffer;
 
-        for (int i = 0; i < 100; i++)
-        {
-            short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserShortLivedProcess>(i));
+                for (int i = 0; i < 100; i++)
+                {
+                    short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserShortLivedProcess>(i));
 
-            minstd::format(format_buffer, "Short Lived Process: {}", i);
+                    minstd::format(format_buffer, "Short Lived Process: {}", i);
 
-            auto new_task = user::task::ForkTask(format_buffer, short_lived_processes[i]);
+                    auto new_task = user::task::ForkTask(format_buffer, short_lived_processes[i]);
 
-            immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, ImmediateExitProcess>(i));
+                    immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, ImmediateExitProcess>(i));
 
-            minstd::format(format_buffer, "Immediate Exit Process: {}", i);
+                    minstd::format(format_buffer, "Immediate Exit Process: {}", i);
 
-            auto new_immediate_exit_task = user::task::ForkTask(format_buffer, immediate_exit_processes[i]);
-        }
-    */
+                    auto new_immediate_exit_task = user::task::ForkTask(format_buffer, immediate_exit_processes[i]);
+                }
+            */
 
         delay(1000);
 
@@ -312,18 +312,45 @@ void SecondaryCoreMain()
 
     uint32_t core_id = GetCoreID();
 
-    auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, 0x02);
+    auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id));
 
     task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
 
     printf("Core Main started for core: %d\n", core_id);
+
+    EnableIRQ();
 
     //  Keep the scheduler running
 
     while (1)
     {
         delay(10);
+        //        printf("Core %d\n", core_id);
         task::Yield();
+        //        asm volatile("wfi");
+    }
+}
+
+void PauseCoreMain()
+{
+    //  Add this task to the task manager
+
+    uint32_t core_id = GetCoreID();
+
+    //    auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id));
+
+    //    task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
+
+    printf("Pause Core Main started for core: %d\n", core_id);
+
+    //  Keep the scheduler running
+
+    while (1)
+    {
+        //        delay(10000);
+        //        printf("Core %d\n", core_id);
+        //        task::Yield();
+        asm volatile("wfi");
     }
 }
 
@@ -364,27 +391,27 @@ extern "C" void kernel_main()
     GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR);
     GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR);
 
-    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 40000);
+    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 100000);
 
     printf("Interrupts enabled\n");
 
     //  Start Cores 1, 2, and 3
 
-//    if (!CoreExecute(1, &SecondaryCoreMain))
-//    {
-//        printf("Failed to start core 1\n");
-//    }
-    /*
-        if( !CoreExecute(2, &SecondaryCoreMain))
-        {
-            printf("Failed to start core 2\n");
-        }
+    if (!CoreExecute(1, &SecondaryCoreMain))
+    {
+        printf("Failed to start core 1\n");
+    }
 
-        if( !CoreExecute(3, &SecondaryCoreMain))
-        {
-            printf("Failed to start core 3\n");
-        }
-    */
+    if (!CoreExecute(2, &SecondaryCoreMain))
+    {
+        printf("Failed to start core 2\n");
+    }
+
+    if (!CoreExecute(3, &SecondaryCoreMain))
+    {
+        printf("Failed to start core 3\n");
+    }
+
     //  Start the command line interface
 
     EchoingCharacterIODevice echoing_stdin(*stdin, *stdout);
@@ -418,23 +445,23 @@ extern "C" void kernel_main()
         return;
     }
 
-//    KernelCounter kernel_counter;
+    KernelCounter kernel_counter;
 
-//    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
-//    if (new_kernel_counter.Failed())
-//    {
-//        printf("error while starting kernel counter");
-//        return;
-//    }
+    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
+    if (new_kernel_counter.Failed())
+    {
+        printf("error while starting kernel counter");
+        return;
+    }
 
-//    ShortLivedKernelProcess short_lived_kernel_process;
+    //    ShortLivedKernelProcess short_lived_kernel_process;
 
-//    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
-//    if (new_short_lived_kernel_process.Failed())
-//    {
-//        printf("error while starting short lived kernel process");
-//        return;
-//    }
+    //    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
+    //    if (new_short_lived_kernel_process.Failed())
+    //    {
+    //        printf("error while starting short lived kernel process");
+    //        return;
+    //    }
 
     printf("Starting user processes\n");
 
@@ -460,13 +487,7 @@ extern "C" void kernel_main()
     //        return;
     //    }
 
-    delay(1000);
-
-    //    printf("writing to core 3 ipi mailbox\n");
-
-    //    GetExceptionManager().SendInterprocessorInterrupt(3, InterprocessorInterrupts::HALT);
-
-    delay(100);
+    //    delay(1000);
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
@@ -476,5 +497,6 @@ extern "C" void kernel_main()
     {
         delay(10);
         task::Yield();
+        //        asm volatile("wfi");
     }
 }

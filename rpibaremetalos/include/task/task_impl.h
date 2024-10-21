@@ -8,6 +8,7 @@
 
 #include <map>
 #include <fixed_string>
+#include <atomic>
 
 #include "task/tasks.h"
 
@@ -75,7 +76,7 @@ namespace task
               type_(type),
               stack_size_in_bytes_(stack_size_in_bytes),
               core_restriction_mask_(restrict_to_cores),
-              running_on_core_(-1),
+              schedule_on_core_(0),
               state_(ExecutionState::STARTING),
               counter_(0),
               priority_(1),
@@ -143,7 +144,9 @@ namespace task
         uint64_t stack_size_in_bytes_;
         uint64_t core_restriction_mask_;
 
-        int32_t running_on_core_;
+        minstd::atomic<uint32_t> schedule_on_core_;
+        
+        uint64_t switched_out_last_;
 
         ExecutionState state_;
         long counter_;

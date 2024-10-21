@@ -28,6 +28,8 @@ namespace task
         {
             STARTING = 0,
             RUNNING,
+            RUNNABLE_WAITING,
+            WAITING,
             ZOMBIE,
         } ExecutionState;
 

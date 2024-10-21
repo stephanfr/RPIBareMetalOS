@@ -139,11 +139,11 @@ private:
         case BCM2711Interrupts::SYSTEM_TIMER_3:
             return Interrupts::SYSTEM_TIMER_3;
 
-        default:
-            return Interrupts::NO_SUCH_INTERRUPT;
+//        default:
+//            return Interrupts::NO_SUCH_INTERRUPT;
         }
 
-        return Interrupts::NO_SUCH_INTERRUPT;
+        return ExceptionManager::AsInterrupt(static_cast<InterprocessorInterrupts>(interrupt));
     }
 
     bool EnableInterrupt(Interrupts interrupt_to_enable) override
@@ -154,10 +154,8 @@ private:
         {
             Assign2711InterruptCPU0Target(bcm_2711_interrupt);
             Enable2711Interrupt(bcm_2711_interrupt);
-
-            return true;
         }
 
-        return false;
+        return true;
     }
 };

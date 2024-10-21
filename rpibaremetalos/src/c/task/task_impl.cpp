@@ -18,30 +18,6 @@ namespace task
         return *context;
     }
 
-/*
-    void TaskImpl::Yield()
-    {
-        counter_++;
-        TaskManagerImpl::Instance().Schedule();
-    }
-
-    void TaskImpl::Exit()
-    {
-        PreemptDisable();
-
-        state_ = Task::ExecutionState::ZOMBIE;
-
-        if (stack_ != 0)
-        {
-            GetMemoryManager().ReleaseBlock(stack_, stack_size_in_bytes_);
-        }
-
-        PreemptEnable();
-
-        Yield();
-    }
-*/
-
     TaskImpl::FullCPUState &TaskImpl::AllocateTaskInitialFullCPUState( MemoryPagePointer initial_stack )
     {
         //  This reserves space for a complete KernelEntry stack frame at the task top of stack.

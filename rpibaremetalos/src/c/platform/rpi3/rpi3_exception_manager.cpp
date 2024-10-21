@@ -85,9 +85,9 @@ void BCM2837ExceptionManager::HandleInterrupt()
     {
         for (InterruptServiceRoutine *current_isr : *isrs)
         {
-            if (current_isr->ISRType() != InterruptServiceRoutineType::TASK_SCHEDULER)
+            if (current_isr->ISRType() == InterruptServiceRoutineType::TASK_SCHEDULER)
             {
-                current_isr->HandleInterrupt();
+                task_switch_isr = current_isr;
             }
             else if(current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
             {
@@ -95,7 +95,7 @@ void BCM2837ExceptionManager::HandleInterrupt()
             }
             else
             {
-                task_switch_isr = current_isr;
+                current_isr->HandleInterrupt();
             }
         }
     }
