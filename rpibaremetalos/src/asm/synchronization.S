@@ -5,6 +5,14 @@
 .equ LOCKED, 1
 .equ UNLOCKED, 0
 
+
+//
+//  Mutex using Exclusive loads and stores
+//
+//  This Mutex will only work when the MMU is enabled.
+//
+
+
 .globl LockMutex
 LockMutex:
     mrs	    x4, daif				// Hold DAIF flags

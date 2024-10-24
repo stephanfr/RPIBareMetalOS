@@ -66,8 +66,8 @@ namespace cli
     //  Factory method for the CLI
     //
 
-    ReferenceResult<CLIResultCodes, CommandLineInterface> StartCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
-                                                                                    UUID filesystem_id_,
-                                                                                    const minstd::string &current_directory_path);
+    ReferenceResult<CLIResultCodes, CommandLineInterface> InitializeCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                                                                                         UUID filesystem_id_,
+                                                                                         const minstd::string &current_directory_path);
 
 } // namespace cli

@@ -18,7 +18,80 @@ extern "C"
     void UnlockMutex(void *mutex);
 }
 
-class Mutex
+
+class LockableObject
+{
+    public :
+
+    typedef enum State
+    {
+        UNLOCKED = 0,
+        LOCKED = 1
+    } State;
+
+    LockableObject() = default;
+    ~LockableObject() = default;
+
+    LockableObject(const LockableObject &) = delete;
+    LockableObject(LockableObject &&) = delete;
+    LockableObject &operator=(const LockableObject &) = delete;
+    LockableObject &operator=(LockableObject &&) = delete;
+
+    virtual void Lock() = 0;
+    virtual void Unlock() = 0;
+};  
+
+
+/**
+ * @class __TasklessMutex
+ * @brief A mutex class for synchronization without task awareness.
+ * 
+ * This class provides a simple mutex mechanism for locking and unlocking
+ * critical sections in a bare-metal environment. It is not aware of tasks
+ * or threads, making it suitable for low-level synchronization.
+ * 
+ * Do not use this class except in cases where a critical section exists
+ * outside of a task or thread context.
+ * 
+ * @note This class is non-copyable and non-movable.
+ */
+class __TasklessMutex : public LockableObject
+{
+    public :
+
+    __TasklessMutex() = default;
+    ~__TasklessMutex() = default;
+
+    __TasklessMutex(const __TasklessMutex &) = delete;
+    __TasklessMutex(__TasklessMutex &&) = delete;
+    __TasklessMutex &operator=(const __TasklessMutex &) = delete;
+    __TasklessMutex &operator=(__TasklessMutex &&) = delete;
+
+    void Lock()
+    {
+        LockMutex(&lock_);
+    }
+
+    void Unlock()
+    {
+        UnlockMutex(&lock_);
+    }
+
+private:
+
+    ALIGN uint32_t lock_ = State::UNLOCKED;
+};
+
+/**
+ * @class Mutex
+ * @brief A simple mutex class for synchronization.
+ *
+ * The Mutex class provides a mechanism for mutual exclusion, allowing only one task to own the mutex at a time.
+ * It supports basic lock and unlock operations and ensures that the same task cannot lock the mutex multiple times.
+ *
+ * @note This class is non-copyable and non-movable.
+ */
+class Mutex : public LockableObject
 {
     public :
 
@@ -40,7 +113,8 @@ class Mutex
     {
         if(owner_ == GetCurrentTaskId())
         {
-            LogError("Mutex already owned by current task\n");
+            char buffer[128];
+            LogError("Mutex already owned by current task: %s\n", owner_.ToString(buffer));
             return;
         }
 
@@ -52,7 +126,8 @@ class Mutex
     {
         if(( lock_ != 0 ) && ( owner_ != GetCurrentTaskId()))
         {
-            LogError("Mutex not owned by current task\n");
+            char buffer[128];
+            LogError("Mutex not owned by current task: %s\n", owner_.ToString(buffer));
             return;
         }
 
@@ -62,31 +137,30 @@ class Mutex
 
 private:
 
-    uint32_t lock_ = State::UNLOCKED;
     UUID owner_ = UUID::NIL;
+    ALIGN uint32_t lock_ = State::UNLOCKED;
 };
 
-template <typename T>
 class LockGuard
 {
     public:
-    LockGuard(T &synch_object)
-        : synch_object_(synch_object)
+    LockGuard(LockableObject &lockable_object)
+        : lockable_object_(lockable_object)
     {
-        synch_object_.Lock();
+        lockable_object_.Lock();
     }
 
     ~LockGuard()
     {
-        synch_object_.Unlock();
+        lockable_object_.Unlock();
     }
 
     void Unlock()
     {
-        synch_object_.Unlock();
+        lockable_object_.Unlock();
     }
 
 private:
-    T &synch_object_;
+    LockableObject &lockable_object_;
 };
 

@@ -35,6 +35,8 @@ namespace task
 
     MemoryPagePointer MemoryManager::GetFreeBlock( uint64_t block_size )
     {
+//        LockGuard lock(memory_map_mutex_);
+
         const uint64_t num_pages_in_block = PagesInBlock(block_size);
         uint64_t starting_page = 0;
         bool found = false;
@@ -74,6 +76,8 @@ namespace task
 
     void MemoryManager::ReleaseBlock(MemoryPagePointer page_to_free, uint64_t block_size )
     {
+//        LockGuard lock(memory_map_mutex_);
+
         const uint64_t num_pages_in_block = PagesInBlock(block_size);
         const uint64_t starting_page = (static_cast<uint64_t>(page_to_free) - free_memory_start_) / page_size_;
 

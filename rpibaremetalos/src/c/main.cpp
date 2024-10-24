@@ -90,8 +90,9 @@ public:
             {
                 buf[0] = array_.data()[i];
                 user::io::Write(buf);
-                delay(990 + random_generator.Next32BitValue() % 20);
-                delay(1000);
+                CPUTicksDelay(((uint64_t)990 + random_generator.Next32BitValue() % 20) * 100000);
+//                delay(990 + random_generator.Next32BitValue() % 20);
+//                delay(1000);
             }
 
             if (task_id != task::Task::GetTask().ID())
@@ -248,7 +249,6 @@ public:
         printf("Forking Task 2\n");
 
         auto new_task2 = user::task::ForkTask("Counting Process 2", user_process2);
-
         /*
                 minstd::unique_ptr<Runnable> short_lived_processes[100];
                 minstd::unique_ptr<Runnable> immediate_exit_processes[100];
@@ -269,8 +269,7 @@ public:
 
                     auto new_immediate_exit_task = user::task::ForkTask(format_buffer, immediate_exit_processes[i]);
                 }
-            */
-
+        */
         delay(1000);
 
         printf("Leaving User Task\n");
@@ -291,68 +290,6 @@ public:
         printf("Dereferencing nullptr: %s\n", bad_address->Name().c_str());
     }
 };
-
-void TestCoreMain()
-{
-    const char *array = "Core3";
-    //    printf("In Test Core Main running on core: %d\n", GetCoreID());
-
-    RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
-
-    while (1)
-    {
-        printf("%s", array);
-        delay(9990 + random_generator.Next32BitValue() % 20);
-    }
-}
-
-void SecondaryCoreMain()
-{
-    //  Add this task to the task manager
-
-    uint32_t core_id = GetCoreID();
-
-    auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id));
-
-    task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
-
-    printf("Core Main started for core: %d\n", core_id);
-
-    EnableIRQ();
-
-    //  Keep the scheduler running
-
-    while (1)
-    {
-        delay(10);
-        //        printf("Core %d\n", core_id);
-        task::Yield();
-        //        asm volatile("wfi");
-    }
-}
-
-void PauseCoreMain()
-{
-    //  Add this task to the task manager
-
-    uint32_t core_id = GetCoreID();
-
-    //    auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id));
-
-    //    task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
-
-    printf("Pause Core Main started for core: %d\n", core_id);
-
-    //  Keep the scheduler running
-
-    while (1)
-    {
-        //        delay(10000);
-        //        printf("Core %d\n", core_id);
-        //        task::Yield();
-        asm volatile("wfi");
-    }
-}
 
 extern "C" void kernel_main()
 {
@@ -379,6 +316,8 @@ extern "C" void kernel_main()
 
     filesystems::MountSDCardFilesystems();
 
+    task::TaskManagerImpl::Instance().StartSecondaryCores();
+
     //  Setup the ISRs
 
     SystemTimerRescheduleISR timerRescheduleISR;
@@ -391,26 +330,11 @@ extern "C" void kernel_main()
     GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR);
     GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR);
 
-    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 100000);
+    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 50000);
 
     printf("Interrupts enabled\n");
 
-    //  Start Cores 1, 2, and 3
-
-    if (!CoreExecute(1, &SecondaryCoreMain))
-    {
-        printf("Failed to start core 1\n");
-    }
-
-    if (!CoreExecute(2, &SecondaryCoreMain))
-    {
-        printf("Failed to start core 2\n");
-    }
-
-    if (!CoreExecute(3, &SecondaryCoreMain))
-    {
-        printf("Failed to start core 3\n");
-    }
+//    CPUTicksDelay(10000000);
 
     //  Start the command line interface
 
@@ -424,7 +348,7 @@ extern "C" void kernel_main()
         PowerManager().Halt();
     }
 
-    auto start_cli_result = cli::StartCommandLineInterface(echoing_stdin, boot_filesystem->Id(), minstd::fixed_string<>("/"));
+    auto start_cli_result = cli::InitializeCommandLineInterface(echoing_stdin, boot_filesystem->Id(), minstd::fixed_string<>("/"));
 
     if (start_cli_result.Failed())
     {
@@ -454,14 +378,14 @@ extern "C" void kernel_main()
         return;
     }
 
-    //    ShortLivedKernelProcess short_lived_kernel_process;
+    ShortLivedKernelProcess short_lived_kernel_process;
 
-    //    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
-    //    if (new_short_lived_kernel_process.Failed())
-    //    {
-    //        printf("error while starting short lived kernel process");
-    //        return;
-    //    }
+    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
+    if (new_short_lived_kernel_process.Failed())
+    {
+        printf("error while starting short lived kernel process");
+        return;
+    }
 
     printf("Starting user processes\n");
 
@@ -487,16 +411,24 @@ extern "C" void kernel_main()
     //        return;
     //    }
 
-    //    delay(1000);
-
-    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+//    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
     //  Keep the scheduler running
 
     while (1)
     {
-        delay(10);
-        task::Yield();
-        //        asm volatile("wfi");
+//        printf("Task List:   **********************************************\n");
+
+ //       task::TaskManagerImpl::Instance().VisitTaskList([](const task::Task &task) -> task::TaskListVisitorCallbackStatus
+//                                                        {
+//            if( task.State() != task::Task::ExecutionState::ZOMBIE )
+//            {
+//            printf("Task: %s  Status: %s  Core: %d\n", task.Name().c_str(), ToString(task.State()), task.CurrentCore());
+//            }
+//            return task::TaskListVisitorCallbackStatus::NEXT; });
+
+//        CPUTicksDelay(50000000);
+
+        task::TaskManagerImpl::Instance().Yield();
     }
 }

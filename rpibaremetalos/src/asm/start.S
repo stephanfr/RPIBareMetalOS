@@ -78,6 +78,8 @@ x26_numberOfCoresAvailable .req x26
     and     x21_coreNumber, x21_coreNumber, #3
     bl      IdentifyBoardType
     mov     x22_boardHWId, x0
+    bl      DetermineNumberOfCores
+    mov     x26_numberOfCoresAvailable, x0
     adrp    x23_coreStateTableAddress, __core_state
     add     x23_coreStateTableAddress, x23_coreStateTableAddress, :lo12:__core_state
     adrp    x24_coreJumpTableAddress, __core_jump_table
@@ -100,6 +102,14 @@ x26_numberOfCoresAvailable .req x26
     adrp x1, __hw_board_type
     add x1, x1, :lo12:__hw_board_type
     str x22_boardHWId, [x1]
+.endm
+
+//  Saves the number of cores available.  Only works in EL1
+
+.macro SaveNumberOfCoresAvailable
+    adrp x1, __number_of_cores_available
+    add x1, x1, :lo12:__number_of_cores_available
+    str x26_numberOfCoresAvailable, [x1]
 .endm
 
 //
@@ -219,13 +229,6 @@ _start:
     //  Setup the local registers holding the core number, etc
 
     InitializeLocalRegisterVariables
-
-    //  For now, we know the platform will have at most 4 cores
-
-    adrp    x1, __number_of_cores_available
-    add     x1, x1, :lo12:__number_of_cores_available
-    mov     x26_numberOfCoresAvailable, #4
-    str     w26, [x1]                                           //  Use the lower 32 bits of the register only as __number_of_cores_available is a 32 bit value
 
     //  Update the core state
 
@@ -363,6 +366,7 @@ _start:
     //  Save the board HW type in a global C variable so the C code may access it.
 
     SaveBoardHWType
+    SaveNumberOfCoresAvailable
 
     //  Clear bss
     //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length

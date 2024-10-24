@@ -100,6 +100,11 @@ namespace task
             return name_;
         }
 
+        uint32_t CurrentCore() const
+        {
+            return schedule_on_core_;
+        }
+
         uint64_t CoreRestrictionMask() const
         {
             return core_restriction_mask_;

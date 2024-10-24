@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "asm_globals.h"
+#include "synchronization.h"
 
 #include "os_entity.h"
 
@@ -73,6 +74,8 @@ namespace task
         void* mmio_base_ = 0;
         uint64_t free_memory_start_ = 0;
         uint64_t num_pages_ = 0;
+
+        Mutex memory_map_mutex_;
 
         minstd::heap_allocator<minstd::vector<uint8_t>::element_type> mem_map_allocator_;
         minstd::vector<uint8_t> mem_map_;

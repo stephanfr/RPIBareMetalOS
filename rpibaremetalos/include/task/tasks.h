@@ -54,6 +54,8 @@ namespace task
         virtual TaskType Type() const = 0;
         virtual ExecutionState State() const = 0;
 
+        virtual uint32_t CurrentCore() const = 0;
+
 //        virtual void Yield() = 0;
 //        virtual void Exit() = 0;
     };
@@ -62,6 +64,8 @@ namespace task
     {
         switch (type)
         {
+            case Task::TaskType::CORE_MAIN_TASK:
+                return "Core Main Task";
             case Task::TaskType::KERNEL_TASK:
                 return "Kernel Task";
             case Task::TaskType::USER_TASK:
@@ -79,6 +83,10 @@ namespace task
                 return "Starting";
             case Task::ExecutionState::RUNNING:
                 return "Running";
+            case Task::ExecutionState::RUNNABLE_WAITING:    
+                return "Runnable Waiting";
+            case Task::ExecutionState::WAITING:
+                return "Waiting";
             case Task::ExecutionState::ZOMBIE:
                 return "Zombie";
             default:
@@ -110,6 +118,7 @@ namespace task
         }
 
         virtual ~TaskManager() = default;
+
     };
 
     TaskManager &GetTaskManager(void);

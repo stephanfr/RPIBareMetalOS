@@ -12,7 +12,9 @@
 #include "devices/physical_timer.h"
 
 #include "asm_utility.h"
+
 #include "platform/exception_manager.h"
+#include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 
 #include <minimalstdio.h>
@@ -62,13 +64,57 @@ namespace task
                 LogError("Failed to move task to user space");
             }
         }
+
+        extern "C" void SecondaryCoreMain()
+        {
+            //  We need to serialize the creation of the secondary core main task as the UUID generator is not thread-reentrant,
+            //      but we are not in a task context (it will not exist until after the task itself is created and SetCoreMainTaskContext is called)
+            //      so use the __TasklessMutex.
+
+            static Mutex secondary_core_main_;
+
+            printf("Secondary Core Main Task\n");
+
+            EnableIRQ();
+
+            //  Add this task to the task manager
+
+            uint32_t core_id = GetCoreID();
+
+            {
+//                LockGuard lock(secondary_core_main_);
+
+                auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id));
+
+                task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
+
+                task::TaskManagerImpl::Instance().AddTask(core_main_task);
+            }
+
+            printf("Secondary Core Main Task on core %d\n", core_id);
+
+            //  Wait for an interrupt - this will be the first task switch message
+
+            asm volatile("wfi");
+
+            //  Keep the scheduler running - we should really never return here
+
+            while (1)
+            {
+                task::TaskManagerImpl::Instance().Yield();
+            }
+        }
+
     } // namespace internal
 
     TaskManagerImpl::TaskManagerImpl()
+        : number_of_cores_(GetPlatformInfo().GetNumberOfCores())
     {
         auto kernel_main_task = dynamic_new<TaskImpl>("Kernel Main Task", Task::TaskType::CORE_MAIN_TASK, task_stack_size_in_bytes_, 0x01);
 
         SetCoreMainTaskContext(kernel_main_task);
+
+        task_map_.insert(kernel_main_task->uuid_, minstd::move(kernel_main_task));
     }
 
     TaskManagerImpl &TaskManagerImpl::Instance()
@@ -89,13 +135,46 @@ namespace task
         return *instance_;
     }
 
+    TaskResultCodes TaskManagerImpl::StartSecondaryCores()
+    {
+        for (uint32_t core_id = 1; core_id < number_of_cores_; core_id++)
+        {
+            if (!CoreExecute(core_id, &task::internal::SecondaryCoreMain))
+            {
+                LogFatal("Failed to start core %d\n", core_id);
+                return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
+            }
+
+            CPUTicksDelay(1000000);
+        }
+
+        return TaskResultCodes::SUCCESS;
+    }
+
+    void TaskManagerImpl::SetCoreMainTaskContext(minstd::unique_ptr<TaskImpl> &task)
+    {
+        kernel_main_tasks_[GetCoreID()] = task.get();
+
+        task->schedule_on_core_ = GetCoreID();
+
+        SetKernelTaskContext(task.get());
+        task->cpu_state_.tpidr_el1 = (unsigned long)task.get();
+        task->cpu_state_.tpidrro_el0 = (unsigned long)task.get();
+
+        //        task_map_.insert(task->uuid_, minstd::move(task));
+    }
+
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
     {
-        for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
-            if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)
+    //        LockGuard lock(const_cast<Mutex &>(task_map_mutex_));
+
+            for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
             {
-                break;
+                if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)
+                {
+                    break;
+                }
             }
         }
     }
@@ -150,7 +229,7 @@ namespace task
 
         //  Add the task to our task map
 
-        task_map_.insert(new_task->uuid_, minstd::move(new_task));
+        AddTask(new_task);
 
         CurrentTask().PreemptEnable(); //	Re-enable preemption for this thread
 
@@ -201,7 +280,7 @@ namespace task
 
         //  Add the task to the task map
 
-        task_map_.insert(new_task->uuid_, minstd::move(new_task));
+        AddTask(new_task);
 
         CurrentTask().PreemptEnable();
 
@@ -224,21 +303,25 @@ namespace task
     {
         //   Check for new tasks to run and assign them to cores
 
-        for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
         {
-            if ((itr->second())->State() == Task::ExecutionState::STARTING)
+            //            LockGuard lock(task_map_mutex_);
+
+            for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
             {
-                uint32_t schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
-
-                while (((itr->second())->CoreRestrictionMask() & (1 << schedule_on_core)) == 0)
+                if ((itr->second())->State() == Task::ExecutionState::STARTING)
                 {
-                    schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
+                    uint32_t schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
+
+                    while (((itr->second())->CoreRestrictionMask() & (1 << schedule_on_core)) == 0)
+                    {
+                        schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
+                    }
+
+                    (itr->second())->schedule_on_core_ = schedule_on_core;
+                    (itr->second())->state_ = Task::ExecutionState::RUNNABLE_WAITING;
+
+                    printf("Scheduled Task: %s on Core: %d\n", (itr->second())->Name().c_str(), schedule_on_core);
                 }
-
-                (itr->second())->schedule_on_core_ = schedule_on_core;
-                (itr->second())->state_ = Task::ExecutionState::RUNNABLE_WAITING;
-
-                printf("Scheduled Task: %s on Core: %d\n", (itr->second())->Name().c_str(), schedule_on_core);
             }
         }
 
@@ -258,44 +341,52 @@ namespace task
 
         while (true)
         {
-            max_counter = -1;
-            next_task = task_map_.end();
-
-            for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
             {
-                TaskImpl &task = *(itr->second());
+                //                LockGuard lock(task_map_mutex_);
 
-                if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
+                //        char buffer[128];
+
+                //        printf("FindNextTask: Core: %d  Task Id: %s\n", core_id, CurrentTask().ID().ToString( buffer ));
+
+                max_counter = -1;
+                next_task = task_map_.end();
+
+                for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
                 {
-                    continue;
+                    TaskImpl &task = *(itr->second());
+
+                    if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
+                    {
+                        continue;
+                    }
+
+                    if (((task.State() == Task::ExecutionState::RUNNING) ||
+                         (task.State() == Task::ExecutionState::RUNNABLE_WAITING)) &&
+                        (task.counter_ > max_counter))
+                    {
+                        max_counter = task.counter_;
+                        next_task = itr;
+                    }
                 }
 
-                if (((task.State() == Task::ExecutionState::RUNNING) ||
-                     (task.State() == Task::ExecutionState::RUNNABLE_WAITING)) &&
-                    (task.counter_ > max_counter))
+                //  If we do not have a task counter with a value > 0, update the counters
+
+                if (max_counter)
                 {
-                    max_counter = task.counter_;
-                    next_task = itr;
-                }
-            }
-
-            //  If we do not have a task counter with a value > 0, update the counters
-
-            if (max_counter)
-            {
-                break;
-            }
-
-            for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
-            {
-                TaskImpl &task = *(itr->second());
-
-                if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
-                {
-                    continue;
+                    break;
                 }
 
-                task.counter_ = (task.counter_ >> 1) + task.priority_;
+                for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
+                {
+                    TaskImpl &task = *(itr->second());
+
+                    if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
+                    {
+                        continue;
+                    }
+
+                    task.counter_ = (task.counter_ >> 1) + task.priority_;
+                }
             }
         }
 
@@ -376,7 +467,7 @@ namespace task
     {
         LogEntryAndExit("Exiting Task: %s\n", CurrentTask().Name().c_str());
 
-        CurrentTask().PreemptDisable();
+        //        CurrentTask().PreemptDisable();
 
         CurrentTask().state_ = Task::ExecutionState::ZOMBIE;
 

@@ -7,7 +7,7 @@
 namespace task
 {
 
-    static_assert((uint32_t)TaskResultCodes::__END_OF_TASK_RESULT_CODES__ == 5);
+    static_assert((uint32_t)TaskResultCodes::__END_OF_TASK_RESULT_CODES__ == 6);
 
     const char *ErrorMessage(TaskResultCodes code)
     {
@@ -21,6 +21,9 @@ namespace task
 
         case TaskResultCodes::INTERNAL_ERROR:
             return "Internal Error";
+
+        case TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES:
+            return "Unable to start secondary cores";
 
         case TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK:
             return "Unable to allocate memory for new task";

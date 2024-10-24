@@ -63,9 +63,9 @@ namespace cli
     //
 
     ReferenceResult<CLIResultCodes, CommandLineInterface>
-    StartCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
-                              UUID filesystem_id,
-                              const minstd::string &current_directory_path)
+    InitializeCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                                   UUID filesystem_id,
+                                   const minstd::string &current_directory_path)
     {
         using Result = ReferenceResult<CLIResultCodes, CommandLineInterface>;
 
