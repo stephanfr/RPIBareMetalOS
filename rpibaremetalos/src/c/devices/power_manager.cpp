@@ -12,7 +12,7 @@ void PowerManager::Halt()
 {
     Mailbox mbox;
 
-    //  Power off all the devices once at a time
+    //  Power off all the devices one at a time
 
     for (uint32_t deviceId = 0; deviceId < 16; deviceId++)
     {
