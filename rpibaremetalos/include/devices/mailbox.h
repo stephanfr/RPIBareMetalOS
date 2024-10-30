@@ -176,7 +176,7 @@ public:
 //      getting all the buffer sizes correct.  The structure is able to compute sizes for the
 //      buffers based on the sizes of the request and response structure template parameters.
 //
-//  Overall, better I think that alternatives which require hard-coding the buffer sizes.  QEMU is
+//  Overall, better I think than alternatives which require hard-coding the buffer sizes.  QEMU is
 //      much more forgiving for getting the sizes wrong than real hardware. 
 //
 
@@ -262,6 +262,11 @@ public:
     {
         message_buffer_.header_.buffer_size_ = sizeof(Header);
         message_buffer_.header_.request_response_code_ = static_cast<uint32_t>(MailboxMessageTypes::REQUEST);
+    }
+
+    uint32_t GetMessageSize() const
+    {
+        return message_buffer_.header_.buffer_size_;
     }
 
     //  Old-school list of constructors in lieu of varargs or initializer lists.
@@ -500,7 +505,7 @@ private:
         WRITE = 0x0000B880 + 0x20
     } MailboxRegister;
 
-    const uint32_t MBOX_STATUS_RESPONSE = 0x80000000;
+    const uint32_t MBOX_STATUS_RESPONSE_SUCCESS = 0x80000000;
     const uint32_t MBOX_STATUS_REQUEST_PARSING_ERROR = 0x80000001;
     const uint32_t MBOX_STATUS_FULL = 0x80000000;
     const uint32_t MBOX_STATUS_EMPTY = 0x40000000;

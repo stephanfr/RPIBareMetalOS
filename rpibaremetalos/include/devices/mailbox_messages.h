@@ -160,10 +160,43 @@ public:
         return GetResponse().base_address_;
     }
 
-    //    uint32_t GetSizeInBytes() const
-    //    {
-    //        return GetResponse().size_in_bytes_;
-    //    }
+    uint32_t GetSizeInBytes() const
+    {
+        return GetResponse().size_in_bytes_limited_to_1gb_;
+    }
+};
+
+
+//
+//  Videocore Memory Tag
+//
+//
+
+typedef struct GetVideocoreMemoryTagResponse
+{
+    uint32_t base_address_;
+    uint32_t size_in_bytes_;
+} GetVideocoreMemoryTagResponse;
+
+class GetVideocoreMemoryTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetVideocoreMemoryTagResponse, MailboxTags::GET_VIDEOCORE_MEMORY>
+{
+public:
+    GetVideocoreMemoryTag() = default;
+
+    const char *Name() const override
+    {
+        return "GetVideocoreMemoryTag";
+    }
+
+    uint32_t GetBaseAddress() const
+    {
+        return GetResponse().base_address_;
+    }
+
+    uint32_t GetSizeInBytes() const
+    {
+        return GetResponse().size_in_bytes_;
+    }
 };
 
 //
