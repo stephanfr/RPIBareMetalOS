@@ -58,22 +58,22 @@ SetupPhysicalTimer :
 
     //  BCM2837 follows 
 	
-	ldr x0, =BCM2837_LOCAL_CONTROL
-	str wzr, [x0]
+	ldr x9, =BCM2837_LOCAL_CONTROL
+	str wzr, [x9]
 
-	mov w1, 0x80000000
-	str w1, [x0, #(BCM2837_LOCAL_PRESCALER - BCM2837_LOCAL_CONTROL)]
+	mov w10, 0x80000000
+	str w10, [x9, #(BCM2837_LOCAL_PRESCALER - BCM2837_LOCAL_CONTROL)]
 
 	//  Set the oscillator frequency
 
-	ldr x0, =BCM2837_OSC_FREQ
-	msr CNTFRQ_EL0, x0
+	ldr x9, =BCM2837_OSC_FREQ
+	msr CNTFRQ_EL0, x9
 
-    ldr x0, =0
-    msr CNTKCTL_EL1, x0
+    ldr x9, =0
+    msr CNTKCTL_EL1, x9
 
-    ldr x0, =3
-    msr CNTP_CTL_EL0, x0                        //  Enable the timer but without interrupts
+    ldr x9, =3
+    msr CNTP_CTL_EL0, x9                        //  Enable the timer but without interrupts
 
     msr CNTVOFF_EL2, xzr                        //  No virtual offset
 
@@ -90,22 +90,22 @@ spt_notRpi3 :
 
     //  BCM2711 follows 
 	
-	ldr x0, =BCM2711_LOCAL_CONTROL
-	str wzr, [x0]
+	ldr x9, =BCM2711_LOCAL_CONTROL
+	str wzr, [x9]
 
-	mov w1, 0x80000000
-	str w1, [x0, #(BCM2711_LOCAL_PRESCALER - BCM2711_LOCAL_CONTROL)]
+	mov w10, 0x80000000
+	str w10, [x9, #(BCM2711_LOCAL_PRESCALER - BCM2711_LOCAL_CONTROL)]
 
 	//  Set the oscillator frequency
 
-	ldr x0, =BCM2711_OSC_FREQ
-	msr CNTFRQ_EL0, x0
+	ldr x9, =BCM2711_OSC_FREQ
+	msr CNTFRQ_EL0, x9
 
-    ldr x0, =0
-    msr CNTKCTL_EL1, x0
+    ldr x9, =0
+    msr CNTKCTL_EL1, x9
 
-    ldr x0, =3
-    msr CNTP_CTL_EL0, x0                        //  Enable the timer but without interrupts
+    ldr x9, =3
+    msr CNTP_CTL_EL0, x9                        //  Enable the timer but without interrupts
 
     msr CNTVOFF_EL2, xzr                        //  No virtual offset
 

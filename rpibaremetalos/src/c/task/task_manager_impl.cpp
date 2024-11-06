@@ -6,6 +6,7 @@
 
 #include <string.h>
 
+#include "processor_cores.h"
 #include "task/system_calls.h"
 
 #include "devices/log.h"
@@ -14,6 +15,7 @@
 #include "asm_utility.h"
 
 #include "platform/exception_manager.h"
+#include "platform/mmu.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 
@@ -23,6 +25,8 @@
 
 extern "C" void ReturnFromForkASMStub(void);
 extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
+
+extern void EnableGICMailboxInterrupts(void);
 
 UUID GetCurrentTaskId(void)
 {
@@ -51,6 +55,7 @@ namespace task
 
         extern "C" void UserSpaceRunnableWrapperWithExit(Runnable *runnable)
         {
+            printf("User Space Runnable Entry\n");
             runnable->Run();
             printf("User Space Runnable Exit\n");
             sc_Exit();
@@ -71,31 +76,39 @@ namespace task
             //      but we are not in a task context (it will not exist until after the task itself is created and SetCoreMainTaskContext is called)
             //      so use the __TasklessMutex.
 
-            static Mutex secondary_core_main_;
+            uint32_t core_id = GetCoreID();
 
-            printf("Secondary Core Main Task\n");
+//EnableGICMailboxInterrupts();
 
-            EnableIRQ();
+            UUID task_id = UUID::NIL;
+
+//            static __TasklessMutex secondary_core_main_get_uuid_mutex_;
+
+            {
+//                LockGuard lock(secondary_core_main_get_uuid_mutex_);
+
+                task_id = UUID::GenerateUUID(UUID::Versions::RANDOM);
+            }
+
+            auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id), task_id);
+
+            task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
 
             //  Add this task to the task manager
 
-            uint32_t core_id = GetCoreID();
-
-            {
-//                LockGuard lock(secondary_core_main_);
-
-                auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id));
-
-                task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
-
-                task::TaskManagerImpl::Instance().AddTask(core_main_task);
-            }
-
-            printf("Secondary Core Main Task on core %d\n", core_id);
+            task::TaskManagerImpl::Instance().AddTask(core_main_task);
 
             //  Wait for an interrupt - this will be the first task switch message
 
+            *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::WaitingInSecondaryMain;
+            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
+
+            EnableIRQ();
+
             asm volatile("wfi");
+
+            *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::ExecutingApplicationCode;
+            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
 
             //  Keep the scheduler running - we should really never return here
 
@@ -106,6 +119,20 @@ namespace task
         }
 
     } // namespace internal
+
+    class NonPreemptableSection
+    {
+    public:
+        NonPreemptableSection()
+        {
+            TaskManagerImpl::Instance().CurrentTask().PreemptDisable();
+        }
+
+        ~NonPreemptableSection()
+        {
+            TaskManagerImpl::Instance().CurrentTask().PreemptEnable();
+        }
+    };
 
     TaskManagerImpl::TaskManagerImpl()
         : number_of_cores_(GetPlatformInfo().GetNumberOfCores())
@@ -145,7 +172,13 @@ namespace task
                 return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
             }
 
-            CPUTicksDelay(1000000);
+            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
+
+            while (*(((uint32_t *)__core_state) + core_id) != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain)
+            {
+                CPUTicksDelay(1000);
+                __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
+            }
         }
 
         return TaskResultCodes::SUCCESS;
@@ -160,14 +193,12 @@ namespace task
         SetKernelTaskContext(task.get());
         task->cpu_state_.tpidr_el1 = (unsigned long)task.get();
         task->cpu_state_.tpidrro_el0 = (unsigned long)task.get();
-
-        //        task_map_.insert(task->uuid_, minstd::move(task));
     }
 
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
     {
         {
-    //        LockGuard lock(const_cast<Mutex &>(task_map_mutex_));
+            //        LockGuard lock(const_cast<Mutex &>(task_map_mutex_));
 
             for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
             {
@@ -193,9 +224,9 @@ namespace task
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
-        printf("Forking Kernel Task: %s\n", name);
+        //        CurrentTask().PreemptDisable(); //	Disable preemption for this thread during this function
 
-        CurrentTask().PreemptDisable(); //	Disable preemption for this thread during this function
+        NonPreemptableSection non_preemptable_section;
 
         MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock(task_stack_size_in_bytes_);
 
@@ -231,9 +262,7 @@ namespace task
 
         AddTask(new_task);
 
-        CurrentTask().PreemptEnable(); //	Re-enable preemption for this thread
-
-        printf("Forking Kernel Task: %s completed\n", name);
+        //        CurrentTask().PreemptEnable(); //	Re-enable preemption for this thread
 
         return Result::Success(new_task->uuid_);
     }
@@ -242,9 +271,9 @@ namespace task
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
-        printf("Cloning Task: %s\n", new_name);
+        //        CurrentTask().PreemptDisable();
+        NonPreemptableSection non_preemptable_section;
 
-        CurrentTask().PreemptDisable();
         MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock(task_stack_size_in_bytes_);
 
         if (free_block == 0)
@@ -282,9 +311,7 @@ namespace task
 
         AddTask(new_task);
 
-        CurrentTask().PreemptEnable();
-
-        printf("Cloning Task: %s completed\n", new_name);
+        //        CurrentTask().PreemptEnable();
 
         return Result::Success(new_task->uuid_);
     }
@@ -303,25 +330,21 @@ namespace task
     {
         //   Check for new tasks to run and assign them to cores
 
+        for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
         {
-            //            LockGuard lock(task_map_mutex_);
-
-            for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
+            if ((itr->second())->State() == Task::ExecutionState::STARTING)
             {
-                if ((itr->second())->State() == Task::ExecutionState::STARTING)
+                uint32_t schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
+
+                while (((itr->second())->CoreRestrictionMask() & (1 << schedule_on_core)) == 0)
                 {
-                    uint32_t schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
-
-                    while (((itr->second())->CoreRestrictionMask() & (1 << schedule_on_core)) == 0)
-                    {
-                        schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
-                    }
-
-                    (itr->second())->schedule_on_core_ = schedule_on_core;
-                    (itr->second())->state_ = Task::ExecutionState::RUNNABLE_WAITING;
-
-                    printf("Scheduled Task: %s on Core: %d\n", (itr->second())->Name().c_str(), schedule_on_core);
+                    schedule_on_core = GetGeneralRNG().Next32BitValue() % 4;
                 }
+
+                (itr->second())->schedule_on_core_ = schedule_on_core;
+                (itr->second())->state_ = Task::ExecutionState::RUNNABLE_WAITING;
+
+                printf("Scheduled Task: %s on Core: %d\n", (itr->second())->Name().c_str(), schedule_on_core);
             }
         }
 
@@ -337,56 +360,59 @@ namespace task
         uint32_t core_id = GetCoreID();
 
         long max_counter = -1;
+        uint32_t num_runnables = 0;
         TaskMap::iterator next_task = task_map_.end();
 
         while (true)
         {
+            max_counter = -1;
+            next_task = task_map_.end();
+            num_runnables = 0;
+
+            for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
             {
-                //                LockGuard lock(task_map_mutex_);
+                TaskImpl &task = *(itr->second());
 
-                //        char buffer[128];
-
-                //        printf("FindNextTask: Core: %d  Task Id: %s\n", core_id, CurrentTask().ID().ToString( buffer ));
-
-                max_counter = -1;
-                next_task = task_map_.end();
-
-                for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
+                if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
                 {
-                    TaskImpl &task = *(itr->second());
+                    continue;
+                }
 
-                    if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
-                    {
-                        continue;
-                    }
+                if (((task.State() == Task::ExecutionState::RUNNING) ||
+                     (task.State() == Task::ExecutionState::RUNNABLE_WAITING)))
+                {
+                    num_runnables++;
 
-                    if (((task.State() == Task::ExecutionState::RUNNING) ||
-                         (task.State() == Task::ExecutionState::RUNNABLE_WAITING)) &&
-                        (task.counter_ > max_counter))
+                    //                        if(core_id == 1)
+                    //                        {
+                    //                            printf("Core: %d    Task: %s  counter: %ld  preempt_count: %ld\n", core_id, task.Name().c_str(), task.counter_, task.preempt_count_);
+                    //                        }
+
+                    if (task.counter_ > max_counter)
                     {
                         max_counter = task.counter_;
                         next_task = itr;
                     }
                 }
+            }
 
-                //  If we do not have a task counter with a value > 0, update the counters
+            //  If we do not have a task counter with a value > 0, update the counters
 
-                if (max_counter)
+            if ((max_counter) || (num_runnables == 0))
+            {
+                break;
+            }
+
+            for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
+            {
+                TaskImpl &task = *(itr->second());
+
+                if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
                 {
-                    break;
+                    continue;
                 }
 
-                for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
-                {
-                    TaskImpl &task = *(itr->second());
-
-                    if ((task.schedule_on_core_ != core_id) || (task.State() == Task::ExecutionState::ZOMBIE))
-                    {
-                        continue;
-                    }
-
-                    task.counter_ = (task.counter_ >> 1) + task.priority_;
-                }
+                task.counter_ = (task.counter_ >> 1) + task.priority_;
             }
         }
 
@@ -401,12 +427,9 @@ namespace task
     }
 
     void TaskManagerImpl::SwitchToNextTask()
-
     {
-        //        if(GetCoreID() != 0)
-        //        {
-        //            printf("Core: %d    SwitchToNextTask from task:  %s  with counter: %ld  preempt_count: %ld\n", GetCoreID(), CurrentTask().Name().c_str(), CurrentTask().counter_ , CurrentTask().preempt_count_);
-        //        }
+        //  Decrement the task counter and if it is still > 0 or is not premeptaable
+        //      then return without switching tasks.
 
         --CurrentTask().counter_;
 
@@ -419,33 +442,34 @@ namespace task
 
         EnableIRQ();
 
-        CurrentTask().PreemptDisable();
-
         TaskImpl *const prev = &CurrentTask();
-        TaskImpl *const next = &FindNextTask();
+        TaskImpl *next = nullptr;
 
-        if (prev == next)
+        //        CurrentTask().PreemptDisable();
         {
-            CurrentTask().PreemptEnable();
+            NonPreemptableSection non_preemptable_section;
 
-            return;
+            next = &FindNextTask();
+
+            if (prev == next)
+            {
+                CurrentTask().PreemptEnable();
+
+                return;
+            }
+
+            next->state_ = Task::ExecutionState::RUNNING;
+
+            if (prev->state_ != Task::ExecutionState::ZOMBIE)
+            {
+                prev->state_ = Task::ExecutionState::RUNNABLE_WAITING;
+            }
+
+            prev->switched_out_last_ = PhysicalTimer::CurrentTicks();
+
+            //        printf("Core: %d    Switching from %s to %s\n", GetCoreID(), prev->Name().c_str(), next->Name().c_str());
         }
-
-        next->state_ = Task::ExecutionState::RUNNING;
-
-        if (prev->state_ != Task::ExecutionState::ZOMBIE)
-        {
-            prev->state_ = Task::ExecutionState::RUNNABLE_WAITING;
-        }
-
-        prev->switched_out_last_ = PhysicalTimer::CurrentTicks();
-
-        //        if(GetCoreID() != 0)
-        //        {
-        //            printf("Core: %d    Switching from %s to %s\n", GetCoreID(), prev->Name().c_str(), next->Name().c_str());
-        //        }
-
-        CurrentTask().PreemptEnable();
+        //        CurrentTask().PreemptEnable();
 
         SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
 
@@ -467,8 +491,6 @@ namespace task
     {
         LogEntryAndExit("Exiting Task: %s\n", CurrentTask().Name().c_str());
 
-        //        CurrentTask().PreemptDisable();
-
         CurrentTask().state_ = Task::ExecutionState::ZOMBIE;
 
         if (CurrentTask().stack_ != 0)
@@ -476,7 +498,6 @@ namespace task
             GetMemoryManager().ReleaseBlock(CurrentTask().stack_, CurrentTask().stack_size_in_bytes_);
         }
 
-        //        CurrentTask().PreemptEnable();
         CurrentTask().preempt_count_ = 0;
         CurrentTask().counter_ = 0;
 

@@ -10,6 +10,7 @@
 #include <memory>
 
 #include "heaps.h"
+#include "processor_cores.h"
 
 #include "isr/isr.h"
 
@@ -28,7 +29,7 @@ public:
 
     virtual bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) = 0;
 
-    virtual bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr) = 0;
+    virtual bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr, CoreList on_cores) = 0;
 
     virtual void HandleInterrupt() = 0;
 
@@ -56,9 +57,9 @@ protected:
         asm volatile("msr	daifset, #2"); //  Disables interrupts on the processor
     }
 
-    virtual bool EnableInterrupt(Interrupts interrupt_to_enable) = 0;
+    virtual bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) = 0;
 
-    bool AddISR(InterruptServiceRoutine *isr);
+    bool AddISR(InterruptServiceRoutine *isr, CoreList on_cores);
 
     ISRPointerList *GetISRs(Interrupts interrupt_raised)
     {

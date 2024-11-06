@@ -7,6 +7,10 @@
 #include "asm_utility.h"
 #include "devices/log.h"
 
+extern bool __mmu_enabled;
+extern void *__uncached_memory_base;
+
+
 bool MailboxPropertyMessage::AddTag(MailboxPropertyMessageTag &tag)
 {
     if ((num_tags_ >= MAX_TAGS_PER_MESSAGE) ||
@@ -76,11 +80,25 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
         return false;
     }
 
-    //  Write the address of our message to the mailbox with channel identifier
+    //  Write the address of our message to the mailbox with channel identifier.
+    //      If the MMU is not enabled, then we can write the address directly - if the MMU is
+    //      enabled, then we need to copy the message to the non-cached block and 
+    //      adjust the address of the block so the GPU can see it.
 
-    Register(MailboxRegister::WRITE) = r;
+    if( !__mmu_enabled )
+    {
+        Register(MailboxRegister::WRITE) = r;
+    }
+    else
+    {
+        memcpy(__uncached_memory_base, message.AsUint32Buffer(), 2048);
 
-    //  Now wait for the response.  Timeout if we have to wiat too long.
+        uint32_t uncached_r = ((uint32_t)(((uint64_t)(__uncached_memory_base)) & 0xFFFFFFF0)) | ((uint32_t)MailboxChannels::PROP & 0x0000000F);
+
+        Register(MailboxRegister::WRITE) = ARMaddrToGPUaddr((void*)uncached_r);
+    }
+
+    //  Now wait for the response.  Timeout if we have to wait too long.
 
     retries = 0;
 
@@ -105,21 +123,33 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
         //  Loop until we read a response on the property channel.
         //      This *should* be a response to our request.
 
-        r = Register(MailboxRegister::READ);
+//        r = Register(MailboxRegister::READ);
 
-        unsigned char read_channel = (unsigned char)(r & 0x0F);
+        uint32_t result = Register(MailboxRegister::READ);
+
+        unsigned char read_channel = (unsigned char)(result & 0x0F);
 
         if (read_channel != (unsigned char)MailboxChannels::PROP)
         {
             continue;
         }
 
+uint32_t *response_message = reinterpret_cast<uint32_t *>(r & 0xFFFFFFF0);
+
+        if( __mmu_enabled )
+        {
+//            __asm volatile ("dc civac, %0" : : "r" (__uncached_memory_base) : "memory");
+//            memcpy((void*)message.AsUint32Buffer(), __uncached_memory_base, 2048);
+
+            response_message = reinterpret_cast<uint32_t *>((uint64_t)__uncached_memory_base & 0xFFFFFFF0);
+        }
+
         //  Get a pointer to the new buffer.  This should always be the same address we passed.
         //      The pointer is the upper 28 bits of the return value, so it is implicitly 16 byte aligned.
 
-        uint32_t *response_message = reinterpret_cast<uint32_t *>(r & 0xFFFFFFF0);
+//        uint32_t *response_message = reinterpret_cast<uint32_t *>(r & 0xFFFFFFF0);
 
-        if (response_message[1] == MBOX_STATUS_RESPONSE)
+        if (response_message[1] == MBOX_STATUS_RESPONSE_SUCCESS)
         {
             //  If it is a successful response, then return the tag responses and reset the message so it can be re-used.
             //      We ought to exit here 99.9999% of the time.

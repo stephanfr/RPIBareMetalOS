@@ -6,38 +6,39 @@
 //  and execute a function.  The core number is passed in x0 and the function pointer in x1.  This function
 //  computes the correct slot in the core jump table for the core and places the function pointer there.
 
-#include "core_states.h"
+#include "processor_cores.h"
 
 .globl CoreExecute;
 
 CoreExecute:
 
-	// Insure the core number is valid and if so, that the core is in the correct state
+	// Insure the core number is valid and the core is in the correct state
 
-	ldr		x4, =__number_of_cores_available
-	ldr		w5, [x4]
-	cmp		w0, w5
-	b.ge	.core_execute_error
+	ldr		x9, =__number_of_cores_available
+	ldr		w10, [x9]
+	cmp		w0, w10
+	b.ge	CoreExecuteError
 
-	adrp    x4, __core_state
-    add     x4, x4, :lo12:__core_state
-	ldr		w5, [x4, x0, lsl #2]
+	adrp    x9, __core_state
+    add     x9, x9, :lo12:__core_state
+	ldr		w10, [x9, x0, lsl #2]
 
-	cmp		w5, #CORE_SPINNING_IN_EL1					// Core must be spinning in EL1	before we can ask it to execute code
-	b.ne	.core_execute_error
+	cmp		w10, #CORE_SPINNING_IN_EL1					// 	Core must be spinning in EL1 before we can ask it to execute code
+	b.ne	CoreExecuteError
 
-	mov		w5, #CORE_JUMPED_TO_APPLICATION_CODE
-	str		w5, [x4, x0, lsl #2]						// Mark the core as having jumped to application code
+	adrp    x9, __core_jump_table
+    add     x9, x9, :lo12:__core_jump_table
+	mov		x0, x0, lsl #3								// 	Compute the address of the correct jump table slot
+	add		x9, x9, x0									// 	Compute the address of the correct jump table slot
+	str		x1, [x9]									// 	Store the function pointer in the correct jump table slot
+	dc 		civac, x9									// 	Invalidate the cache line containing the function pointer
 
-	adrp    x4, __core_jump_table
-    add     x4, x4, :lo12:__core_jump_table
-	str		x1, [x4, x0, lsl #3]						// Store the function pointer in the correct jump table slot
+	sev													// 	Wake up the core
 
-	sev													// Wake up the core
-
- 	mov		x0, #1										// Return success
+ 	mov		x0, #1										// 	Return success
 	ret
 
-.core_execute_error:
-	mov		x0, #0										// Return failure
+CoreExecuteError:
+	mov		x0, #0										// 	Return failure
 	ret
+

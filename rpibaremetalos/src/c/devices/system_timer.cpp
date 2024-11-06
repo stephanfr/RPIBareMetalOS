@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "devices/log.h"
 #include "heaps.h"
 
 class SystemTimerImpl : public SystemTimer
@@ -99,6 +100,14 @@ public:
             if (config.period_in_microseconds_ > 0)
             {
                 config.next_interrupt_ += config.period_in_microseconds_;
+
+                //  If we missed or are close to missing an interrupt, issue a warning and reschedule for the next period
+
+                if( config.next_interrupt_ < ( GetSystemTimer().GetMicroseconds() + (config.period_in_microseconds_ / 10)))
+                {
+                    LogWarning("******Missed interrupt******\n");
+                    config.next_interrupt_ = GetSystemTimer().GetMicroseconds() + config.period_in_microseconds_;
+                }
 
                 SetCompareRegister(compare_register, config.next_interrupt_);
             }
@@ -197,16 +206,14 @@ private:
     }
 };
 
+static SystemTimer *system_timer_ = nullptr;
 
-static SystemTimer* system_timer_ = nullptr;
-
-SystemTimer& GetSystemTimer()
+SystemTimer &GetSystemTimer()
 {
-    if( system_timer_ == nullptr )
+    if (system_timer_ == nullptr)
     {
         system_timer_ = static_new<SystemTimerImpl>();
     }
 
     return *system_timer_;
 }
-

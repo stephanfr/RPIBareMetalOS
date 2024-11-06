@@ -13,12 +13,13 @@
 #include "platform/exception_manager.h"
 #include "platform/platform.h"
 #include "platform/platform_info.h"
-
 #include "platform/platform_sw_rngs.h"
+#include "platform/mmu.h"
 
 #include "devices/character_io.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
+#include "devices/mailbox_messages.h"
 
 #include "isr/core_task_switch_isr.h"
 #include "isr/halt_core_isr.h"
@@ -47,9 +48,18 @@
 #include "task/process.h"
 #include "task/task_manager_impl.h"
 
+#include "synchronization.h"
+
+extern uint32_t __vc_message_mailbox_buffer[];
+
 //
 //
 //
+
+bool __mmu_enabled = false;
+void *__uncached_memory_base = nullptr;
+
+extern uint8_t __core_jump_table[16*16];
 
 void delay(uint32_t count)
 {
@@ -62,17 +72,70 @@ void delay(uint32_t count)
     }
 }
 
-class UserCounter : public Runnable
+
+#define ISENABLER_SHIFT		5
+#define ICENABLER_SHIFT		ISENABLER_SHIFT
+#define GICD_ISENABLER		0x100
+#define GICD_ICENABLER		0x180
+#define GICD_ITARGETSR_SPI	0x820
+
+unsigned int gicd_read_isenabler(uintptr_t base, unsigned int id)
+{
+	return *(volatile uint32_t*)(base + GICD_ISENABLER + id );
+}
+
+unsigned int gicd_read_icenabler(uintptr_t base, unsigned int id)
+{
+	return *(volatile uint32_t*)(base + GICD_ICENABLER + (id << 2));
+}
+
+void gicd_write_isenabler(uintptr_t base, unsigned int id, unsigned int val)
+{
+	*(volatile uint32_t*)(base + GICD_ISENABLER + id) = val;
+}
+
+void gicd_write_icenabler(uintptr_t base, unsigned int id, unsigned int val)
+{
+	*(volatile uint32_t*)(base + GICD_ICENABLER + (id << 2)) = val;
+}
+
+void gicd_write_itargetsr(uintptr_t base, unsigned int id, unsigned int val)
+{
+	*(volatile uint32_t*)(base + GICD_ITARGETSR_SPI + id) = val;
+}
+
+
+void EnableGICMailboxInterrupts()
+{
+    uint32_t core_id = GetCoreID();
+
+    printf("Enabling GIC Mailbox Interrupts on core %d\n", core_id);
+
+    printf("GICD_ISENABLER[0]: 0x%08x\n", gicd_read_isenabler(0xff841000, 4));      //  SPI registers start at 0x0104
+
+gicd_write_isenabler(0xff841000, 4, 0x0000FFFF);
+
+    printf("\nGICD_ISENABLER[0]: 0x%08x\n", gicd_read_isenabler(0xff841000, 4));
+
+gicd_write_itargetsr(0xff841000,0,0x02020202);
+gicd_write_itargetsr(0xff841000,4,0x02020202);
+gicd_write_itargetsr(0xff841000,8,0x02020202);
+gicd_write_itargetsr(0xff841000,12,0x02020202);
+gicd_write_itargetsr(0xff841000,16,0x02020202);
+}
+
+
+class Counter : public Runnable
 {
 public:
-    UserCounter(const char *array)
+    Counter(const char *array)
         : array_(array)
     {
     }
 
     void Run()
     {
-        printf("In User process: %s\n", array_.c_str());
+        printf("In process: %s\n", array_.c_str());
 
         minstd::fixed_string<128> format_buffer;
         minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
@@ -86,13 +149,11 @@ public:
         char buf[2] = {0};
         while (1)
         {
-            for (int i = 0; i < 5; i++)
+            for (int i = 0; i < strnlen(array_, 127); i++)
             {
                 buf[0] = array_.data()[i];
                 user::io::Write(buf);
                 CPUTicksDelay(((uint64_t)990 + random_generator.Next32BitValue() % 20) * 100000);
-//                delay(990 + random_generator.Next32BitValue() % 20);
-//                delay(1000);
             }
 
             if (task_id != task::Task::GetTask().ID())
@@ -238,13 +299,13 @@ public:
 
         printf("User Process Task Context: %p\n", GetTaskContext());
 
-        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserCounter>("56789"));
+        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, Counter>("56789"));
 
         printf("Forking Task 1\n");
 
         auto new_task1 = user::task::ForkTask("Counting Process 1", user_process1);
 
-        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserCounter>("vwxyz"));
+        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, Counter>("vwxyz"));
 
         printf("Forking Task 2\n");
 
@@ -291,6 +352,9 @@ public:
     }
 };
 
+extern "C" void SecondaryCoreMain();
+extern "C" void* GetPhysicalAddress(void* virtual_address);
+
 extern "C" void kernel_main()
 {
     //  Call InitializePlatform() first
@@ -302,9 +366,20 @@ extern "C" void kernel_main()
 
     SetLogLevel(LogLevel::WARNING);
 
-    printf("SEF RPI Bare Metal OS V0.01\n");
+    printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
     printf("Running on RPI Version: %s\n", platformInfo.GetBoardTypeName());
+
+//EnableGICMailboxInterrupts();
+
+    //  Setup the MMU
+
+//    MMU_setup_pagetable();
+//    MMU_enable();
+
+//    __mmu_enabled = true;
+
+    task::TaskManagerImpl::Instance().StartSecondaryCores();
 
     DumpDiagnostics();
 
@@ -316,25 +391,23 @@ extern "C" void kernel_main()
 
     filesystems::MountSDCardFilesystems();
 
-    task::TaskManagerImpl::Instance().StartSecondaryCores();
-
     //  Setup the ISRs
+
+    EnableIRQ();
 
     SystemTimerRescheduleISR timerRescheduleISR;
     TaskSwitchISR taskSwitchISR;
     HaltCoreISR haltCoreISR;
     CoreTaskSwitchISR coreTaskSwitchISR;
 
-    GetExceptionManager().AddInterruptServiceRoutine(&taskSwitchISR);
-    GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR);
-    GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR);
-    GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR);
+    GetExceptionManager().AddInterruptServiceRoutine(&taskSwitchISR, CoreList( CoreList::CoreID::CORE0 ));
+    GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR, CoreList( CoreList::CoreID::CORE0 ));
+    GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR, CoreList( CoreList::CoreID::ALL_CORES ));
+    GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR, CoreList( CoreList::CoreID::ALL_CORES ));
 
     GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 50000);
 
     printf("Interrupts enabled\n");
-
-//    CPUTicksDelay(10000000);
 
     //  Start the command line interface
 
@@ -369,6 +442,8 @@ extern "C" void kernel_main()
         return;
     }
 
+    printf("Starting kernel counter process\n");
+
     KernelCounter kernel_counter;
 
     auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
@@ -378,6 +453,26 @@ extern "C" void kernel_main()
         return;
     }
 
+    Counter counter1("1234567890");
+
+    auto new_counter1 = task::GetTaskManager().ForkKernelTask("Counter1", &counter1);
+    if (new_counter1.Failed())
+    {
+        printf("error while starting counter 1");
+        return;
+    }
+
+    Counter counter2("vwxyz");
+
+    auto new_counter2 = task::GetTaskManager().ForkKernelTask("Counter2", &counter2);
+    if (new_counter2.Failed())
+    {
+        printf("error while starting counter 2");
+        return;
+    }
+
+    printf("Starting short lived kernel process\n");
+
     ShortLivedKernelProcess short_lived_kernel_process;
 
     auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
@@ -386,7 +481,7 @@ extern "C" void kernel_main()
         printf("error while starting short lived kernel process");
         return;
     }
-
+/*
     printf("Starting user processes\n");
 
     UserProcess user_process;
@@ -397,6 +492,7 @@ extern "C" void kernel_main()
         printf("error while starting user processes");
         return;
     }
+*/
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
@@ -427,8 +523,8 @@ extern "C" void kernel_main()
 //            }
 //            return task::TaskListVisitorCallbackStatus::NEXT; });
 
-//        CPUTicksDelay(50000000);
+        CPUTicksDelay(50000000);
 
-        task::TaskManagerImpl::Instance().Yield();
+//        task::TaskManagerImpl::Instance().Yield();
     }
 }

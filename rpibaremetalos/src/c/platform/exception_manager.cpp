@@ -53,9 +53,9 @@ void ExceptionManager::HandleException(unsigned int type, unsigned long esr, uns
     LogError("%s, Core: %d ESR: %x, address: %x\r\n", entry_error_messages[type], GetCoreID(), (unsigned int)esr, (unsigned int)address);
 }
 
-bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)
+bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
 {
-    LogEntryAndExit("AddISR: %s\n", ToString(isr->InterruptType()));
+    printf("AddISR: %s to cores: 0x%08X\n", ToString(isr->InterruptType()), on_cores.Cores());
 
     ISRMap::iterator map_itr = isrs_.find(isr->InterruptType());
 
@@ -75,7 +75,7 @@ bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)
 
         map_itr = insert_result.first();
 
-        if (!EnableInterrupt(isr->InterruptType()))
+        if (!EnableInterrupt(isr->InterruptType(), on_cores))
         {
             isrs_.erase(map_itr);
 

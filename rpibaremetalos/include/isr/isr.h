@@ -12,6 +12,10 @@ typedef enum class Interrupts : int32_t
 
     CORE_HALT = 1,
     SWITCH_TASK = 2,
+    CORE_MAILBOX_0 = 3,
+    CORE_MAILBOX_1 = 4,
+    CORE_MAILBOX_2 = 5,
+    CORE_MAILBOX_3 = 6,
     SYSTEM_TIMER_0 = 64,
     SYSTEM_TIMER_1 = 65,
     SYSTEM_TIMER_2 = 66,

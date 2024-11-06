@@ -12,6 +12,14 @@
 
 __hw_board_type : .word RPI_BOARD_ENUM_UNKNOWN
 
+//  Global variable for holding the bottom of videocore memory
+
+.global __videocore_memory_base
+.data
+.align 4
+
+__videocore_memory_base : .double
+
 //  Global variable for holding the number of cores available
 
 .global __number_of_cores_available
@@ -49,20 +57,20 @@ __core_state : .word 0
 .data
 .align 4
 
-__core_jump_table : .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
-                    .quad 0
+__core_jump_table : .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
+                    .double 0
 

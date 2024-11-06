@@ -188,7 +188,7 @@ __exception_vectors:
     //  This second set of four entries is for exceptions raised when execution is at EL1 and the SPSel register holds 1.
     //      When SPSel = 1, there are separate stack pointers (SP) for EL1 and EL0 (and EL2 and EL3 also).
 
-	ExceptionVectorTableEntry	sync_invalid_el1h			// Synchronous EL1h
+	ExceptionVectorTableEntry	EL1_SynchronousException	// Synchronous EL1h
 	ExceptionVectorTableEntry	EL1_IRQ		                // IRQ EL1h
 	ExceptionVectorTableEntry	fiq_invalid_el1h			// FIQ EL1h
 	ExceptionVectorTableEntry	error_invalid_el1h			// Error EL1h
@@ -270,33 +270,71 @@ EL0_IRQ:
 	bl	HandleIRQ
 	KernelExit EL0 
 
+//
+//	Setup Synchronous Exception handling for both EL0 and EL1.  This will allow us to make system calls
+//		from withing kernel mode (EL1) as well as from user mode (EL0).  The advantage of this is that tasks
+//		can be written with sys calls and be moved seamlessly between Kernal or User mode.
+//
+
+exception_syndrome	.req	x25									//	syndrome register aliased to register 25
+num_system_calls	.req	x26									//	number of system calls aliased to register 25
+syscall_number		.req	x27									//	syscall number aliased to register 26
+syscall_table_ptr	.req	x28									//	syscall table pointer aliased to register 27
+
+//	EL1 synchronous exception handler
+
+EL1_SynchronousException:
+	KernelEntry EL1
+	mrs		exception_syndrome, esr_el1							//	Read the syndrome register
+	lsr		x24, exception_syndrome, #ESR_ELx_EC_SHIFT			//	Shift right to get Exception class in lower 6 bits
+	and		x24, x24, #0x3F										//	Isolate the exception class - there is another field in the register if FEAT_LS64 is implemented
+	cmp		x24, #ESR_ELx_EC_SVC64								//	If the exception is from SVC in 64-bit state, then
+	b.eq	EL1_SyscallDispatcher								//		branch to the syscall dispatcher
+	HandleInvalidEntry EL1, SYNC_ERROR
+
+EL1_SyscallDispatcher:
+	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
+	uxtw	syscall_number, w8									//	syscall number in w8
+	mov		num_system_calls, #NUMBER_OF_SYSTEM_CALLS
+	bl		EnableIRQ
+	cmp     syscall_number, num_system_calls        			//	check upper syscall limit
+	b.hs	EL1_SyscallIndexOutOfRange
+
+	ldr		x16, [syscall_table_ptr, syscall_number, lsl #3]	//	address in the syscall table
+	blr		x16													//	call system_call routine
+	bl		DisableIRQ				
+	str		x0, [sp, 0]											// returned x0 - zero is offset of x0 in the stack frame
+	KernelExit EL1
+
+EL1_SyscallIndexOutOfRange:
+	HandleInvalidEntry EL1, SYSCALL_ERROR
+
+//	EL0 synchronous exception handler
+
 EL0_SynchronousException:
 	KernelEntry EL0
-	mrs	x25, esr_el1										//	Read the syndrome register
-	lsr	x24, x25, #ESR_ELx_EC_SHIFT							//	Exception class
-	cmp	x24, #ESR_ELx_EC_SVC64								//	SVC in 64-bit state
-	b.eq	EL0_SyscallDispatcher
+	mrs		exception_syndrome, esr_el1							//	Read the syndrome register
+	lsr		x24, exception_syndrome, #ESR_ELx_EC_SHIFT			//	Shift right to get Exception class
+	and		x24, x24, #0x3F										//	Isolate the exception class - there is another field in the register if FEAT_LS64 is implemented
+	cmp		x24, #ESR_ELx_EC_SVC64								//	If the exception is from SVC in 64-bit state, then
+	b.eq	EL0_SyscallDispatcher								//		branch to the syscall dispatcher
 	HandleInvalidEntry EL0, SYNC_ERROR
 
-num_system_calls	.req	x25								//	number of system calls aliased to register 25
-syscall_number		.req	x26								//	syscall number aliased to register 26
-syscall_table_ptr	.req	x27								//	syscall table pointer aliased to register 27
-
 EL0_SyscallDispatcher:
-	adr	syscall_table_ptr, __system_call_table				//	load syscall table pointer
-	uxtw	syscall_number, w8								//	syscall number in w8
-	mov	num_system_calls, #NUMBER_OF_SYSTEM_CALLS
-	bl	EnableIRQ
-	cmp     syscall_number, num_system_calls        		//	check upper syscall limit
-	b.hs	SyscallIndexOutOfRange
+	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
+	uxtw	syscall_number, w8									//	syscall number in w8
+	mov		num_system_calls, #NUMBER_OF_SYSTEM_CALLS
+	bl		EnableIRQ
+	cmp     syscall_number, num_system_calls        			//	check upper syscall limit
+	b.hs	EL0_SyscallIndexOutOfRange
 
-	ldr	x16, [syscall_table_ptr, syscall_number, lsl #3]	//	address in the syscall table
-	blr	x16													//	call system_call routine
-	bl	DisableIRQ				
-	str	x0, [sp, 0]											// returned x0 - zero is offset of x0 in the stack frame
+	ldr		x16, [syscall_table_ptr, syscall_number, lsl #3]	//	address in the syscall table
+	blr		x16													//	call system_call routine
+	bl		DisableIRQ				
+	str		x0, [sp, 0]											// returned x0 - zero is offset of x0 in the stack frame
 	KernelExit EL0
 
-SyscallIndexOutOfRange:
+EL0_SyscallIndexOutOfRange:
 	HandleInvalidEntry EL0, SYSCALL_ERROR
 
 //

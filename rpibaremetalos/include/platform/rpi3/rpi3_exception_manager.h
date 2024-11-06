@@ -88,15 +88,14 @@ public:
 
     bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) override;
 
-    bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr) override
+    bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr, CoreList on_cores) override
     {
-        return ExceptionManager::AddISR(isr);
+        return ExceptionManager::AddISR(isr, on_cores);
     }
 
     void HandleInterrupt() override;
 
 private:
-
     static constexpr uint32_t IPI_MAILBOX_ID = 3;
 
     const PlatformInfo &platform_info;
@@ -114,28 +113,28 @@ private:
 
     uint32_t GetCoreLocalInterruptSource(uint32_t core)
     {
-        volatile uint32_t *reg = reinterpret_cast<uint32_t*>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::INTERRUPT_SOURCE_OFFSET + (core * 4));
+        volatile uint32_t *reg = reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::INTERRUPT_SOURCE_OFFSET + (core * 4));
 
         return *reg;
     }
 
     void SetCoreMailbox(uint32_t core, uint32_t mailbox_id, uint32_t value)
     {
-        volatile uint32_t *reg = reinterpret_cast<uint32_t*>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_WRITE_OFFSET + (core * 16) + (mailbox_id * 4));
+        volatile uint32_t *reg = reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_WRITE_OFFSET + (core * 16) + (mailbox_id * 4));
 
         *reg = value;
     }
 
     void ResetCoreMailbox(uint32_t core, uint32_t mailbox_id, uint32_t value)
     {
-        volatile uint32_t *reg = reinterpret_cast<uint32_t*>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_READ_CLEAR_OFFSET + (core * 16) + (mailbox_id * 4));
+        volatile uint32_t *reg = reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_READ_CLEAR_OFFSET + (core * 16) + (mailbox_id * 4));
 
         *reg = value;
     }
 
     uint32_t GetCoreMailbox(uint32_t core, uint32_t mailbox_id)
     {
-        volatile uint32_t *reg = reinterpret_cast<uint32_t*>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_READ_CLEAR_OFFSET + (core * 16) + (mailbox_id * 4));
+        volatile uint32_t *reg = reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_READ_CLEAR_OFFSET + (core * 16) + (mailbox_id * 4));
 
         return *reg;
     }
@@ -193,7 +192,7 @@ private:
         return Interrupts::NO_SUCH_INTERRUPT;
     }
 
-    bool EnableInterrupt(Interrupts interrupt_to_enable) override
+    bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) override
     {
         switch (interrupt_to_enable)
         {
@@ -202,8 +201,48 @@ private:
         case Interrupts::SYSTEM_TIMER_2:
             return false;
 
-        case Interrupts::CORE_HALT:             //  Already enabled in 'Initialize'
+        case Interrupts::CORE_HALT: //  Already enabled in 'Initialize'
         case Interrupts::SWITCH_TASK:
+            return true;
+
+        case Interrupts::CORE_MAILBOX_0:
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0x00000001;
+                }
+            }
+            return true;
+
+        case Interrupts::CORE_MAILBOX_1:
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0x00000001 << 1;
+                }
+            }
+            return true;
+
+        case Interrupts::CORE_MAILBOX_2:
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0x00000001 << 2;
+                }
+            }
+            return true;
+
+        case Interrupts::CORE_MAILBOX_3:
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0x00000001 << 3;
+                }
+            }
             return true;
 
         case Interrupts::SYSTEM_TIMER_1:

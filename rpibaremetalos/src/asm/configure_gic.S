@@ -33,49 +33,49 @@ ConfigureGIC400:
 
 	//	We will be a bit pathological here and double-check that the board is correct and we are in secure mode.
 
-    mrs     x0, CurrentEL					//	Insure we are in secure mode
-    and     x0, x0, #12                 	// 	Clear reserved bits
+    mrs     x9, CurrentEL					//	Insure we are in secure mode
+    and     x9, x9, #12                 	// 	Clear reserved bits
 
-    cmp     x0, #12
+    cmp     x9, #12
     b.eq    test_for_gic_400              	//  Running on EL3, test for the board type next
 
 	ret										//	Not running in EL3, return now
 
 test_for_gic_400:
 
-	adrp x1, __hw_board_type				//	Insure this is not a RPI3
-    add x1, x1, :lo12:__hw_board_type
-    ldr w0, [x1]
-    cmp x0, #RPI_BOARD_ENUM_RPI3
-	b.ne has_gic_400						//	Board has a GIC-400
+	adrp 	x10, __hw_board_type				//	Insure this is not a RPI3
+    add 	x10, x10, :lo12:__hw_board_type
+    ldr 	w9, [x10]
+    cmp 	x9, #RPI_BOARD_ENUM_RPI3
+	b.ne 	has_gic_400						//	Board has a GIC-400
 
 	ret										//	Board does not have a GIC-400, so return now
 
 has_gic_400:
 
-	mrs	x0, MPIDR_EL1
-	ldr	x2, =GIC_DISTB
-	tst	x0, #0x3
-	b.eq	skip_to_for_core_zero			//	Skip next for core 0
+	mrs		x9, MPIDR_EL1
+	ldr		x11, =GIC_DISTB
+	tst		x9, #0x3
+	b.eq	skip_to_for_core_zero					//	Skip next for core 0
 
-	mov	w0, #3								//	Enable Group 0 and 1 IRQs from distributor for all cores except core 0
-	str	w0, [x2, #GICD_CTRLR]
+	mov		w9, #3									//	Enable Group 0 and 1 IRQs from distributor for all cores except core 0
+	str		w9, [x11, #GICD_CTRLR]
 
 skip_to_for_core_zero:
 
-	add	x1, x2, #(GIC_CPUB - GIC_DISTB)
-	mov	w0, #0x1e7
-	str	w0, [x1, #GICC_CTRLR]				//	Enable Ggroup 1 IRQs from CPU interface
-	mov	w0, #0xff
-	str	w0, [x1, #GICC_PMR]					//	Priority mask
-	add	x2, x2, #GICD_IGROUPR
-	mov	x0, #(IT_NR * 4)
-	mov	w1, #~0								//	Put all interrupts into Group 1
+	add		x10, x11, #(GIC_CPUB - GIC_DISTB)
+	mov		w9, #0x1e7
+	str		w9, [x10, #GICC_CTRLR]					//	Enable Group 1 IRQs from CPU interface
+	mov		w9, #0xff
+	str		w9, [x10, #GICC_PMR]					//	Priority mask
+	add		x11, x11, #GICD_IGROUPR
+	mov		x9, #(IT_NR * 4)
+	mov		w10, #~0								//	Put all interrupts into Group 1
 
 interrupt_grouping_loop :
 
-	subs	x0, x0, #4
-	str	w1, [x2, x0]
+	subs	x9, x9, #4
+	str		w10, [x11, x9]
 	b.ne	interrupt_grouping_loop
 
 	ret

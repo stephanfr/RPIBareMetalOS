@@ -11,19 +11,20 @@
 //      a C enum which will be used in the higher level code.
 //
 
+
 .global IdentifyBoardType
 
 IdentifyBoardType :
-    mrs     x0, midr_el1
-    ldr     x1, =MIDR_EL1_PARTNUM_MASK
-    and     x0, x0, x1
-    ldr     x1, =MIDR_EL1_PARTNUM_CORTEX_A53
-    cmp     x0, x1
+    mrs     x9, midr_el1
+    ldr     x10, =MIDR_EL1_PARTNUM_MASK
+    and     x9, x9, x10
+    ldr     x10, =MIDR_EL1_PARTNUM_CORTEX_A53
+    cmp     x9, x10
     b.eq    .is_cortex_a53
-    ldr     x1, =MIDR_EL1_PARTNUM_CORTEX_A72
-    cmp     x0, x1
+    ldr     x10, =MIDR_EL1_PARTNUM_CORTEX_A72
+    cmp     x9, x10
     b.eq    .is_cortex_a72
-    ldr     x0, =RPI_BOARD_ENUM_UNKNOWN
+    ldr     x9, =RPI_BOARD_ENUM_UNKNOWN
     ret
 
 .is_cortex_a53 :

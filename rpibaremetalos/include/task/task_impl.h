@@ -70,8 +70,9 @@ namespace task
         TaskImpl( const char *name,
                   TaskType type,
                   uint64_t stack_size_in_bytes,
-                  uint64_t restrict_to_cores = 0xFFFFFFFFFFFFFFFF)
-            : uuid_(UUID::GenerateUUID(UUID::Versions::RANDOM)),
+                  uint64_t restrict_to_cores = 0xFFFFFFFFFFFFFFFF,
+                  UUID uuid = UUID::GenerateUUID(UUID::Versions::RANDOM))
+            : uuid_(uuid),
               name_(name),  
               type_(type),
               stack_size_in_bytes_(stack_size_in_bytes),

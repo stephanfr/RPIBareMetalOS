@@ -8,6 +8,11 @@
 
 extern "C"
 {
+    void enable_mmu_tables ( uint64_t map1to1, uint64_t virtalmap);
+    uint32_t ARMaddrToGPUaddr (void* ARMaddress);
+    uint32_t GPUaddrToARMaddr (uint32_t GPUaddress);
+    void* GetPhysicalAddress(void* virtual_address);
+
     void CPUTicksDelay(uint64_t ticks);
 
     uint32_t GetCoreID();
