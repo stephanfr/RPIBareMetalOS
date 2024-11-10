@@ -20,7 +20,7 @@ public:
 
     void EnableMMU() override
     {
-        enable_mmu_tables((uint64_t)&kernel_page_table_1_to_1_[0], 0);
+        EnableMMUTables((uint64_t)&kernel_page_table_1_to_1_[0], 0);
     }
 
     void *DMAUncachedMemoryBase() const override

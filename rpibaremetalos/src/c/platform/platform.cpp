@@ -210,8 +210,6 @@ void InitializePlatform()
         ParkCore();
     }
 
-    MemoryManager::Initialize(MemoryManager::MemoryModel::KERNEL_ONLY_1_TO_1);
-
     //  Initialize the memory manager
 
     auto memory_manager = make_static_unique<task::MemoryManager>(__platform_info->GetMemorySizeInBytes(),

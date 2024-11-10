@@ -9,10 +9,6 @@
 
 #include "platform/mmu.h"
 
-//extern bool __mmu_enabled;
-//extern void *__uncached_memory_base;
-
-
 bool MailboxPropertyMessage::AddTag(MailboxPropertyMessageTag &tag)
 {
     if ((num_tags_ >= MAX_TAGS_PER_MESSAGE) ||
@@ -62,7 +58,7 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
 
     message.AddLastTag();
 
-    uint32_t r = ((uint32_t)(((uint64_t) & (message.AsUint32Buffer()[0])) & 0xFFFFFFF0)) | ((uint32_t)MailboxChannels::PROP & 0x0000000F);
+    //    uint32_t r = ((uint32_t)(((uint64_t) & (message.AsUint32Buffer()[0])) & 0xFFFFFFF0)) | ((uint32_t)MailboxChannels::PROP & 0x0000000F);
 
     //  Wait until we can write to the mailbox
 
@@ -83,27 +79,22 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
     }
 
     //  Write the address of our message to the mailbox with channel identifier.
-    //      If the MMU is not enabled, then we can write the address directly - if the MMU is
-    //      enabled, then we need to copy the message to the non-cached block and 
+    //      The MMU is enabled, so we need to copy the message to the non-cached block and
     //      adjust the address of the block so the GPU can see it.
+    //
+    //  Insert an instruction cache barrier to ensure the data is visible to the GPU, as
+    //    instructions *could* be reordered such that the write to the register occurs before
+    //    the data is written to the uncached memory.
 
-    if( !MemoryManager::IsMMUEnabled() )
-    {
-        Register(MailboxRegister::WRITE) = r;
-    }
-    else
-    {
-        void* uncached_memory_base = MemoryManager::Instance().DMAUncachedMemoryBase();
+    void *uncached_memory_base = MemoryManager::Instance().DMAUncachedMemoryBase();
 
-        memcpy(uncached_memory_base, message.AsUint32Buffer(), MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES);
+    memcpy(uncached_memory_base, message.AsUint32Buffer(), MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES);
 
-        uint32_t uncached_r = ((uint32_t)(((uint64_t)(uncached_memory_base)) & 0xFFFFFFF0)) | ((uint32_t)MailboxChannels::PROP & 0x0000000F);
+    void *message_ARM_address = reinterpret_cast<void *>(((uint64_t)(uncached_memory_base) & 0xFFFFFFFFFFFFFFF0) | ((uint64_t)MailboxChannels::PROP & 0x000000000000000F));
 
-        INSTRUCTION_CACHE_BARRIER;
+    INSTRUCTION_CACHE_BARRIER;
 
-        Register(MailboxRegister::WRITE) = (uint32_t)reinterpret_cast<uint64_t>(MemoryManager::Instance().ARMToGPUAddress((void*)uncached_r));
-//        Register(MailboxRegister::WRITE) = uncached_r;
-    }
+    Register(MailboxRegister::WRITE) = (uint32_t) reinterpret_cast<uint64_t>(MemoryManager::Instance().ARMToGPUAddress(message_ARM_address));
 
     //  Now wait for the response.  Timeout if we have to wait too long.
 
@@ -130,8 +121,6 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
         //  Loop until we read a response on the property channel.
         //      This *should* be a response to our request.
 
-//        r = Register(MailboxRegister::READ);
-
         uint32_t result = Register(MailboxRegister::READ);
 
         unsigned char read_channel = (unsigned char)(result & 0x0F);
@@ -141,34 +130,10 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
             continue;
         }
 
-        uint32_t *response_message = nullptr;
-
-        if( !MemoryManager::IsMMUEnabled() )
-        {
-            response_message = reinterpret_cast<uint32_t *>(result & 0xFFFFFFF0);
-        }
-        else
-        {
-            response_message = reinterpret_cast<uint32_t *>(GPUaddrToARMaddr(result) & 0xFFFFFFF0);
-        }
-
-        printf("Result: 0x%08X, ARM address: 0x%08X, msg: 0x%08X\n", result, GPUaddrToARMaddr(result), response_message);
-
-//__asm volatile ("dc civac, %0" : : "r" (__uncached_memory_base) : "memory");
-//__asm volatile ("dsb sy");
-//__asm volatile ("isb sy");
-//        if( __mmu_enabled )
-//        {
-//            __asm volatile ("dc civac, %0" : : "r" (__uncached_memory_base) : "memory");
-//            memcpy((void*)message.AsUint32Buffer(), __uncached_memory_base, 2048);
-//
-//            response_message = reinterpret_cast<uint32_t *>((uint64_t)__uncached_memory_base & 0xFFFFFFF0);
-//        }
-
-        //  Get a pointer to the new buffer.  This should always be the same address we passed.
+        //  Get a pointer to the new buffer.  This should always be the same address we passed to the GPU.
         //      The pointer is the upper 28 bits of the return value, so it is implicitly 16 byte aligned.
 
-//        uint32_t *response_message = reinterpret_cast<uint32_t *>(r & 0xFFFFFFF0);
+        uint32_t *response_message = reinterpret_cast<uint32_t *>(reinterpret_cast<uint64_t>(message_ARM_address) & 0xFFFFFFFFFFFFFFF0);
 
         if (response_message[1] == MBOX_STATUS_RESPONSE_SUCCESS)
         {

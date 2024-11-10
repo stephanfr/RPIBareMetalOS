@@ -103,7 +103,7 @@ namespace task
 
         //  Data members
 
-        static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;
+        static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;        
 
         const uint32_t number_of_cores_;
 

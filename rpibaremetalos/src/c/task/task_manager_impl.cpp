@@ -76,17 +76,7 @@ namespace task
 
             uint32_t core_id = GetCoreID();
 
-            UUID task_id = UUID::NIL;
-
-            static __TasklessMutex secondary_core_main_get_uuid_mutex_;
-
-            {
-                LockGuard lock(secondary_core_main_get_uuid_mutex_);
-
-                task_id = UUID::GenerateUUID(UUID::Versions::RANDOM);
-            }
-
-            auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id), task_id);
+            auto core_main_task = dynamic_new<task::TaskImpl>("Secondary Core Main Task", task::Task::TaskType::KERNEL_TASK, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id));
 
             task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
 
@@ -97,14 +87,14 @@ namespace task
             //  Wait for an interrupt - this will be the first task switch message
 
             *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::WaitingInSecondaryMain;
-            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
+//            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
 
             EnableIRQ();
 
-            asm volatile("wfi");
+            WAIT_FOR_INTERRUPT;
 
             *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::ExecutingApplicationCode;
-            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
+//            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
 
             //  Keep the scheduler running - we should really never return here
 
@@ -153,6 +143,10 @@ namespace task
                 LogFatal("TaskManagerImpl::Instance() - Unable to add TaskManagerImpl to OSEntityRegistry");
                 ParkCore();
             }
+
+            //  Start the secondary cores
+
+            instance_->get().StartSecondaryCores();
         }
 
         return *instance_;
@@ -181,9 +175,9 @@ namespace task
             while (__core_state[core_id] != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain)
             {
                 CPUTicksDelay(1000);
-                
+
                 INVALIDATE_CACHE_LINE(&(__core_state[core_id]));
-                SEND_EVENT;                                             //  Send another SEV to nudge the core if it has gone into WFE
+                SEND_EVENT; //  Send another SEV to nudge the core if it has gone into WFE
             }
         }
 
@@ -203,13 +197,11 @@ namespace task
 
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
     {
+        for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
-            for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
+            if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)
             {
-                if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)
-                {
-                    break;
-                }
+                break;
             }
         }
     }

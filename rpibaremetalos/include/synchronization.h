@@ -16,6 +16,9 @@ extern "C"
 {
     void LockMutex(void *mutex);
     void UnlockMutex(void *mutex);
+
+    void LockSpinLock(void *spinlock);
+    void UnlockSpinLock(void *spinlock);
 }
 
 
@@ -95,12 +98,6 @@ class Mutex : public LockableObject
 {
     public :
 
-    typedef enum State
-    {
-        UNLOCKED = 0,
-        LOCKED = 1
-    } State;
-
     Mutex() = default;
     ~Mutex() = default;
 
@@ -124,7 +121,7 @@ class Mutex : public LockableObject
 
     void Unlock()
     {
-        if(( lock_ != 0 ) && ( owner_ != GetCurrentTaskId()))
+        if(( lock_ != UNLOCKED ) && ( owner_ != GetCurrentTaskId()))
         {
             char buffer[128];
             LogError("Mutex not owned by current task: %s\n", owner_.ToString(buffer));
@@ -140,6 +137,83 @@ private:
     UUID owner_ = UUID::NIL;
     ALIGN uint32_t lock_ = State::UNLOCKED;
 };
+
+
+/**
+ * @class SpinLock
+ * @brief A simple Spin Lock class for synchronization.
+ *
+ * The SpinLock class provides a mechanism for mutual exclusion, allowing only one task to own the Spin Lock at a time.
+ * It supports basic lock and unlock operations and optionall allows the lock to track the owning task
+ *
+ * The Spinlock is lighter weight than the mutex.
+ * 
+ * @note This class is non-copyable and non-movable.
+ */
+class SpinLock : public LockableObject
+{
+    public :
+
+    SpinLock( bool track_owning_task = false )
+        : track_owning_task_(track_owning_task)
+    {
+    }
+
+    ~SpinLock() = default;
+
+    SpinLock(const SpinLock &) = delete;
+    SpinLock(SpinLock &&) = delete;
+    SpinLock &operator=(const SpinLock &) = delete;
+    SpinLock &operator=(SpinLock &&) = delete;
+
+    void Lock()
+    {
+        if( track_owning_task_ && ( owner_ == GetCurrentTaskId()))
+        {
+            char buffer[128];
+            LogError("SpinLock already owned by current task: %s\n", owner_.ToString(buffer));
+            return;
+        }
+
+        LockSpinLock(&lock_);
+
+        if( track_owning_task_ )
+        {
+            owner_ = GetCurrentTaskId();
+        }
+    }
+
+    void Unlock()
+    {
+        if(( lock_ != UNLOCKED ) && ( track_owning_task_ && ( owner_ != GetCurrentTaskId())))
+        {
+            char buffer[128];
+            LogError("SpinLock not owned by current task: %s\n", owner_.ToString(buffer));
+            return;
+        }
+
+        owner_ = UUID::NIL;
+        UnlockSpinLock(&lock_);
+    }
+
+private:
+
+    bool track_owning_task_;
+
+    UUID owner_ = UUID::NIL;
+    ALIGN uint32_t lock_ = State::UNLOCKED;
+};
+
+/**
+ * @class LockGuard
+ * @brief A simple RAII class for locking and unlocking a LockableObject.
+ *
+ * The LockGuard class provides a simple RAII mechanism for locking and unlocking a LockableObject.
+ * When the LockGuard object is created, it locks the LockableObject. When the LockGuard object goes out of scope,
+ * it unlocks the LockableObject.
+ *
+ * @note This class is non-copyable and non-movable.
+ */
 
 class LockGuard
 {

@@ -37,19 +37,17 @@
 					  (1 << 1)   |		/* A, Alignment check enable bit */\
 					  (1 << 0) )		/* set M, enable MMU */
 
-/* "PROVIDE C Function: void enable_mmu_tables ( RegType_t map1to1, RegType_t virtalmap);" */
-.section .text.enable_mmu_tables, "ax", %progbits
-.balign	4
-.globl enable_mmu_tables;
-.type enable_mmu_tables, %function
-enable_mmu_tables:
+//	void EnableMMUTables ( RegType_t map1to1, RegType_t virtalmap);
+.align	4
+.globl EnableMMUTables;
+EnableMMUTables:
 	dsb sy
 
-	/* Set the memattrs values into mair_el1*/
+	// Set the memattrs values into mair_el1
 	ldr x2, =MAIR1VAL
     msr mair_el1, x2
 
-	/* Bring both tables online and execute memory barrier */
+	// Bring both tables online and execute instruction barrier
 	msr ttbr0_el1, x0
 	msr ttbr1_el1, x1
 	isb
@@ -64,42 +62,32 @@ enable_mmu_tables:
 	msr sctlr_el1, x0
 
 	ret									
-.balign	4
-.ltorg										// Tell assembler ltorg data for this code can go here
-.size	.enable_mmu_tables, .-enable_mmu_tables
+.ltorg
 
 
 
-/* "PROVIDE C FUNCTION: uint32_t ARMaddrToGPUaddr (void* ARMaddress);" */
-.section .text.ARMaddrToGPUaddr, "ax", %progbits
-.balign	4
+//	uint32_t ARMaddrToGPUaddr (void* ARMaddress);
+.align	4
 .globl ARMaddrToGPUaddr;		
-.type ARMaddrToGPUaddr, %function
 ARMaddrToGPUaddr:
-	mov x1, #0xC0000000						// ARM to VC conversion value
-	orr x0, x0, x1							// Create bus address
-	ret										// Return
-.balign	4
-.ltorg										// Tell assembler ltorg data for this code can go here
-.size	ARMaddrToGPUaddr, .-ARMaddrToGPUaddr
+	mov x1, #0xC0000000						//	ARM to VC conversion value
+	orr x0, x0, x1							//	Create bus address
+	ret
+.ltorg
 
 
-/* "PROVIDE C FUNCTION: uint32_t GPUaddrToARMaddr (uint32_t BUSaddress);" */
-.section .text.GPUaddrToARMaddr, "ax", %progbits
-.balign	4
+//	void* GPUaddrToARMaddr (uint32_t GPUaddress);
+.align	4
 .globl GPUaddrToARMaddr;		
-.type GPUaddrToARMaddr, %function
 GPUaddrToARMaddr:
-	mov x1, ~0xC0000000						// ARM to VC conversion value	
-	and x0, x0, x1							// Create arm address
-	ret										// Return
-.balign	4
-.ltorg										// Tell assembler ltorg data for this code can go here
-.size	GPUaddrToARMaddr, .-GPUaddrToARMaddr
+	mov x1, ~0xC0000000						//	ARM to VC conversion value	
+	and x0, x0, x1							//	Create arm address
+	ret
+.ltorg
 
 
-
-
+//	uint64_t GetPhysicalAddress (uint64_t virtualAddress);
+.align	4
 .global GetPhysicalAddress
 GetPhysicalAddress:
 	mov		x1, x0
@@ -109,3 +97,4 @@ GetPhysicalAddress:
 	and		x1, x1, #0x0000000000000FFF
 	orr		x0, x0, x1
 	ret
+.ltorg

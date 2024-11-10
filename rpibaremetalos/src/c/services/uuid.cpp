@@ -8,6 +8,8 @@
 
 #include "platform/platform_sw_rngs.h"
 
+#include "synchronization.h"
+
 const UUID UUID::NIL(0UL, 0UL);
 const UUID UUID::MAX(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
@@ -18,6 +20,10 @@ UUID UUID::GenerateUUID(Versions version)
     //   The top two bits of clock_seq_hi_and_reserved_ must be set to 1 and zero (bit 7 and 6),
     //      the version nunmber 4 must be placed in the top 4 bits of time_hi_and_version_
     //      and the rest of the bits are random.
+
+    static SpinLock uuid_generator_lock_;
+
+    LockGuard lock(uuid_generator_lock_);
 
     return UUID((GetUUIDGeneratorRNG().Next64BitValue() & ~0x000000000000F000) | 0x0000000000004000,
                 (GetUUIDGeneratorRNG().Next64BitValue() & ~0xC000000000000000) | 0x8000000000000000);

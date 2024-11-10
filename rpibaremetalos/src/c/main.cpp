@@ -351,29 +351,25 @@ public:
 
 extern "C" void kernel_main()
 {
-    //  Call InitializePlatform() first
+    //  Initialize the MMU
 
-    InitializePlatform();
+    MemoryManager::Initialize(MemoryManager::MemoryModel::KERNEL_ONLY_1_TO_1);
 
-    task::TaskManagerImpl::Instance();
-
-    const PlatformInfo &platformInfo = GetPlatformInfo();
+    //  Initialize the rest of the platform
 
     SetLogLevel(LogLevel::WARNING);
 
+    InitializePlatform();
+
+    //  Initialize the task manager
+
+    task::TaskManagerImpl::Instance();
+
     printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
-    printf("Running on RPI Version: %s\n", platformInfo.GetBoardTypeName());
-
-    task::TaskManagerImpl::Instance().StartSecondaryCores();
-
-    printf("Secondary cores started\n");
+    printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
 
     DumpDiagnostics();
-
-    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
-
-    printf("Kernel Main Task Context: %p\n", GetTaskContext());
 
     //  Mount the filesystems on the SD card
 
