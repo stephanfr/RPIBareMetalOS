@@ -3,8 +3,7 @@
 // license that can be found in the LICENSE file.
 
 //  This function is intended only to be used from the boot assembly stub to permit the
-//      memory manager to determine the start of the VideoCore memory and setup the page
-//      tables accordingly.
+//      memory manager to determine the board revision so the MMU can be configured properly.
 //
 //  This function cannot be called after the MMU is enabled nor should it be used if other
 //      cores might be accessing the mailbox simultaneously.  In short - use this only during
@@ -24,24 +23,23 @@
 
 .global __vc_message_mailbox_buffer
 .data
-.align 16                                                   //  Align to 16 bytes - as the mailbox only uses the top 28 bits
+.align 16                                                           //  Align to 16 bytes - as the mailbox only uses the top 28 bits
 
-__vc_message_mailbox_buffer :   .word 32                    //  Buffer size in bytes
-                                .word 0                     //  Response code
-                                .word 0x00010006            //  Videocore memory request code
-                                .word 8                     //  Response buffer size in bytes
-                                .word 0
-                                .word 0                     //  Videocore memory start address
-                                .word 0                     //  Videocore memory size
-                                .word 0                     //  End Tag - must be zero
-                                .word 0
+__board_version_message_mailbox_buffer : .word 28                    //  Buffer size in bytes
+                                         .word 0                     //  Response code
+                                         .word 0x00010002            //  Board revision request code
+                                         .word 4                     //  Response buffer size in bytes
+                                         .word 0
+                                         .word 0                     //  Board revision
+                                         .word 0                     //  End Tag - must be zero
+                                         .word 0
+
 x15_mmiobase .req x15
 
+//  extern "C" uint32_t GetBoardVersion( uint32_t core_type );
 
-//  extern "C" uint32_t GetVideocoreMemoryStart( uint32_t boardType );
-
-.globl GetVideocoreMemoryStart;
-GetVideocoreMemoryStart:
+.globl GetBoardVersion;
+GetBoardVersion:
 
     cmp x0, #RPI_BOARD_ENUM_RPI3
 	b.ne not_rpi3
@@ -58,8 +56,8 @@ not_rpi3:
 
 have_mmiobase:
 
-    adrp x14, __vc_message_mailbox_buffer
-    add x14, x14, :lo12:__vc_message_mailbox_buffer
+    adrp x14, __board_version_message_mailbox_buffer
+    add x14, x14, :lo12:__board_version_message_mailbox_buffer
     mov x13, #0xFFFFFFF0
     and x14, x14, x13
     add x14, x14, #MAILBOX_PROPETY_CHANNEL
@@ -70,8 +68,8 @@ have_mmiobase:
     mov x13, #MAILBOX_READ
     mov x10, #MAILBOX_STATUS
 
-    adrp x14, __vc_message_mailbox_buffer
-    add x14, x14, :lo12:__vc_message_mailbox_buffer
+    adrp x14, __board_version_message_mailbox_buffer
+    add x14, x14, :lo12:__board_version_message_mailbox_buffer
 
 loop_until_message_processed:
 

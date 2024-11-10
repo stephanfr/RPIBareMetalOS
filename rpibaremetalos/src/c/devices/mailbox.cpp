@@ -7,8 +7,10 @@
 #include "asm_utility.h"
 #include "devices/log.h"
 
-extern bool __mmu_enabled;
-extern void *__uncached_memory_base;
+#include "platform/mmu.h"
+
+//extern bool __mmu_enabled;
+//extern void *__uncached_memory_base;
 
 
 bool MailboxPropertyMessage::AddTag(MailboxPropertyMessageTag &tag)
@@ -85,17 +87,22 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
     //      enabled, then we need to copy the message to the non-cached block and 
     //      adjust the address of the block so the GPU can see it.
 
-    if( !__mmu_enabled )
+    if( !MemoryManager::IsMMUEnabled() )
     {
         Register(MailboxRegister::WRITE) = r;
     }
     else
     {
-        memcpy(__uncached_memory_base, message.AsUint32Buffer(), 2048);
+        void* uncached_memory_base = MemoryManager::Instance().DMAUncachedMemoryBase();
 
-        uint32_t uncached_r = ((uint32_t)(((uint64_t)(__uncached_memory_base)) & 0xFFFFFFF0)) | ((uint32_t)MailboxChannels::PROP & 0x0000000F);
+        memcpy(uncached_memory_base, message.AsUint32Buffer(), MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES);
 
-        Register(MailboxRegister::WRITE) = ARMaddrToGPUaddr((void*)uncached_r);
+        uint32_t uncached_r = ((uint32_t)(((uint64_t)(uncached_memory_base)) & 0xFFFFFFF0)) | ((uint32_t)MailboxChannels::PROP & 0x0000000F);
+
+        INSTRUCTION_CACHE_BARRIER;
+
+        Register(MailboxRegister::WRITE) = (uint32_t)reinterpret_cast<uint64_t>(MemoryManager::Instance().ARMToGPUAddress((void*)uncached_r));
+//        Register(MailboxRegister::WRITE) = uncached_r;
     }
 
     //  Now wait for the response.  Timeout if we have to wait too long.
@@ -134,15 +141,29 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
             continue;
         }
 
-uint32_t *response_message = reinterpret_cast<uint32_t *>(r & 0xFFFFFFF0);
+        uint32_t *response_message = nullptr;
 
-        if( __mmu_enabled )
+        if( !MemoryManager::IsMMUEnabled() )
         {
+            response_message = reinterpret_cast<uint32_t *>(result & 0xFFFFFFF0);
+        }
+        else
+        {
+            response_message = reinterpret_cast<uint32_t *>(GPUaddrToARMaddr(result) & 0xFFFFFFF0);
+        }
+
+        printf("Result: 0x%08X, ARM address: 0x%08X, msg: 0x%08X\n", result, GPUaddrToARMaddr(result), response_message);
+
+//__asm volatile ("dc civac, %0" : : "r" (__uncached_memory_base) : "memory");
+//__asm volatile ("dsb sy");
+//__asm volatile ("isb sy");
+//        if( __mmu_enabled )
+//        {
 //            __asm volatile ("dc civac, %0" : : "r" (__uncached_memory_base) : "memory");
 //            memcpy((void*)message.AsUint32Buffer(), __uncached_memory_base, 2048);
-
-            response_message = reinterpret_cast<uint32_t *>((uint64_t)__uncached_memory_base & 0xFFFFFFF0);
-        }
+//
+//            response_message = reinterpret_cast<uint32_t *>((uint64_t)__uncached_memory_base & 0xFFFFFFF0);
+//        }
 
         //  Get a pointer to the new buffer.  This should always be the same address we passed.
         //      The pointer is the upper 28 bits of the return value, so it is implicitly 16 byte aligned.

@@ -19,8 +19,6 @@
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 
-#include <minimalstdio.h>
-
 //  A couple of assembly language functions we will need only in this translation unit
 
 extern "C" void ReturnFromForkASMStub(void);
@@ -78,14 +76,12 @@ namespace task
 
             uint32_t core_id = GetCoreID();
 
-//EnableGICMailboxInterrupts();
-
             UUID task_id = UUID::NIL;
 
-//            static __TasklessMutex secondary_core_main_get_uuid_mutex_;
+            static __TasklessMutex secondary_core_main_get_uuid_mutex_;
 
             {
-//                LockGuard lock(secondary_core_main_get_uuid_mutex_);
+                LockGuard lock(secondary_core_main_get_uuid_mutex_);
 
                 task_id = UUID::GenerateUUID(UUID::Versions::RANDOM);
             }
@@ -164,6 +160,8 @@ namespace task
 
     TaskResultCodes TaskManagerImpl::StartSecondaryCores()
     {
+        printf("Starting secondary cores\n");
+
         for (uint32_t core_id = 1; core_id < number_of_cores_; core_id++)
         {
             if (!CoreExecute(core_id, &task::internal::SecondaryCoreMain))
@@ -172,12 +170,20 @@ namespace task
                 return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
             }
 
-            __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
+            //  Delay briefly to allow the other core to get started and change its state
 
-            while (*(((uint32_t *)__core_state) + core_id) != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain)
+            CPUTicksDelay(1000);
+
+            //  Invalidate the cache line for the core state as the other core has updated it
+
+            INVALIDATE_CACHE_LINE(&(__core_state[core_id]));
+
+            while (__core_state[core_id] != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain)
             {
                 CPUTicksDelay(1000);
-                __asm volatile("dc civac, %0" : : "r"((((uint32_t *)__core_state) + core_id)) : "memory");
+                
+                INVALIDATE_CACHE_LINE(&(__core_state[core_id]));
+                SEND_EVENT;                                             //  Send another SEV to nudge the core if it has gone into WFE
             }
         }
 
@@ -198,8 +204,6 @@ namespace task
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
     {
         {
-            //        LockGuard lock(const_cast<Mutex &>(task_map_mutex_));
-
             for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
             {
                 if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)

@@ -245,7 +245,7 @@ running_in_el2:
 
     //  Spin on all but Core 0
 
-    cbz     x19_coreNumber, setup_mmu                          //  Core zero will build the MMU tables.  The other cores will just point to them.
+    cbz     x19_coreNumber, configure_stacks_for_core                          //  Core zero will build the MMU tables.  The other cores will just point to them.
 
     //  Spin on cores 1->3
 
@@ -262,14 +262,6 @@ el2_spin:
 	str     x10, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
 
 	br      x9
-
-.align 4                                                        //  Align the code to a 4 byte boundary
-setup_mmu :
-
-    mov     x0, x20_boardHWId                                       //  Board HW id must be passed in x0
-    bl      GetVideocoreMemoryStart
-
-    b       configure_stacks_for_core
 
 .align 4                                                        //  Align the code to a 4 byte boundary
 configure_stacks_for_core :
@@ -356,10 +348,18 @@ running_in_el1:
 
     SetCoreState #CORE_SPINNING_IN_EL1
 
+    mov     x10, x22_coreJumpTableAddress
+    add     x10, x10, x19_coreNumber, lsl #3        //  Compute the address of the correct jump table slot, we need this in a register for the cache line invalidation  
+
 el1_spin:
 	wfe
-	ldr     x9, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
+    dc 		civac, x10                               //  Invalidate the cache line containing the jump address as it is written by the master core
+	ldr     x9, [x10]
 	cbz     x9, el1_spin
+
+    //  Enable the memory manager on the core
+
+    bl      EnableMMUForCore
 
     //  Enable interrupts on the core
 
@@ -368,10 +368,6 @@ el1_spin:
     //  Mark the core as having jumped to application code
 
     SetCoreState #CORE_JUMPED_TO_SECONDARY_MAIN
-
-    //  Enable the memory manager on the core
-
-//    bl MMU_enable
 
     //  Jump to the function pointed to by the jump table
 

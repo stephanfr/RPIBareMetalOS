@@ -22,7 +22,7 @@ public:
     uint32_t GetNumberOfCores() const override;
 
 private:
-//    const uint8_t *ARM_LOCAL_BASE = reinterpret_cast<const uint8_t *>(0x4C0000000);
+//    const uint8_t *ARM_LOCAL_BASE = reinterpret_cast<const uint8_t *>(0x4C0000000);           //  If peripherals_high is enabled
     const uint8_t *ARM_LOCAL_BASE = reinterpret_cast<const uint8_t *>(0xFF800000);
     const uint8_t *BCM2711_IO_BASE = reinterpret_cast<const uint8_t *>(0xFE000000);
     const uint8_t *BCM2711_EMMC_BASE = reinterpret_cast<const uint8_t *>(BCM2711_IO_BASE + 0x00340000);

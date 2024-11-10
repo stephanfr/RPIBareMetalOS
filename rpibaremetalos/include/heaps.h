@@ -80,7 +80,7 @@ inline minstd::unique_ptr<T> make_static_unique(Args &&...args)
 template <typename T, typename T2, typename... Args>
 inline minstd::unique_ptr<T2> make_static_unique(Args &&...args)
 {
-    T2 *temp = (T *)(new (__os_static_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...));
+    T2 *temp = dynamic_cast<T2*>(new (__os_static_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...));
     return minstd::unique_ptr<T2>(temp, __os_static_heap);
 }
 

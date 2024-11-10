@@ -8,6 +8,7 @@
 
 #include "processor_cores.h"
 
+.align 4
 .globl CoreExecute;
 
 CoreExecute:
@@ -32,6 +33,7 @@ CoreExecute:
 	add		x9, x9, x0									// 	Compute the address of the correct jump table slot
 	str		x1, [x9]									// 	Store the function pointer in the correct jump table slot
 	dc 		civac, x9									// 	Invalidate the cache line containing the function pointer
+	isb 	sy											// 	Instruction synchronization barrier, sometimes it looks like the cache line invalidation does not run before the sev
 
 	sev													// 	Wake up the core
 

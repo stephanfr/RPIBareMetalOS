@@ -89,7 +89,7 @@ namespace task
 
         void AddTask(minstd::unique_ptr<TaskImpl> &task)
         {
-//            LockGuard lock(task_map_mutex_);
+            LockGuard lock(task_map_mutex_);
 
             task_map_.insert(task->ID(), minstd::move(task));
         }

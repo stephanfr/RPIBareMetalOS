@@ -28,3 +28,7 @@ extern "C"
     void EnableIRQ(void);
     void DisableIRQ(void);
 }
+
+#define INVALIDATE_CACHE_LINE(address)  asm volatile("dc cvau, %0" : : "r" (address) : "memory")
+#define INSTRUCTION_CACHE_BARRIER       asm volatile ("isb sy")
+#define SEND_EVENT                      asm volatile("sev")

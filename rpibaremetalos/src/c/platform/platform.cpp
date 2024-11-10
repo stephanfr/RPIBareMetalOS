@@ -32,6 +32,8 @@
 
 #include "task/memory_manager.h"
 
+#include "platform/mmu.h"
+
 #include "asm_globals.h"
 
 //  Forward declare the assembly language function which returns the board type
@@ -183,6 +185,10 @@ void InitializePlatform()
         break;
     }
 
+    //  Get the kernel command line
+
+    KernelCommandLine::LoadCommandLine(__platform_info->GetMMIOBase()); //  TODO handle error condition
+
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
 //    if ((__number_of_cores_available > MAX_CORES) ||
@@ -197,16 +203,14 @@ void InitializePlatform()
                                        Xoroshiro128PlusPlusRNG::Seed(__hw_random_number_generator->Next64BitValue(),
                                                                      __hw_random_number_generator->Next64BitValue()));
 
-    //  Get the kernel command line
-
-    KernelCommandLine::LoadCommandLine(__platform_info->GetMMIOBase()); //  TODO handle error condition
-
     //  Setup the serial console
 
     if (!SetupSerialConsole())
     {
         ParkCore();
     }
+
+    MemoryManager::Initialize(MemoryManager::MemoryModel::KERNEL_ONLY_1_TO_1);
 
     //  Initialize the memory manager
 

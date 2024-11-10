@@ -6,26 +6,43 @@
 
 #include <stdint.h>
 
-#define MEMORY_ATTRIBUTE_DEVICE_NO_GATHER_NO_REORDER_NO_EARLY_WRITE_ACK	    0
-#define MEMORY_ATTRIBUTE_DEVICE_NO_GATHER_NO_REORDER_EARLY_WRITE_ACK		1
-#define MEMORY_ATTRIBUTE_DEVICE_GATHER_REORDER_EARLY_WRITE_ACK		        2
-#define MEMORY_ATTRIBUTE_NORMAL_NO_CACHING		                            3
-#define MEMORY_ATTRIBUTE_NORMAL		                                        4
+#include "asm_utility.h"
 
+extern "C" void EnableMMUForCore();
 
-/*-[ MMU_setup_pagetable ]--------------------------------------------------}
-.  Sets up a default TLB table. This needs to be called by only once by one 
-.  core on a multicore system. Each core can use the same default table.
-.--------------------------------------------------------------------------*/
-void MMU_setup_pagetable (void);
+class MemoryManager
+{
+public:
+    typedef enum class MemoryModel : uint32_t
+    {
+        KERNEL_ONLY_1_TO_1,
+    } MemoryModel;
 
-/*-[ MMU_enable ]-----------------------------------------------------------}
-.  Enables the MMU system to the previously created TLB tables. This needs 
-.  to be called by each individual core on a multicore system.
-.--------------------------------------------------------------------------*/
-extern "C" void MMU_enable(void);
+    static void Initialize(MemoryModel memory_model);
 
+    static MemoryManager &Instance()
+    {
+        if (platform_memory_manager_ == nullptr)
+        {
+            ParkCore();
+        }
 
-uint64_t  virtualmap (uint32_t phys_addr, uint8_t memattrs);
+        return *platform_memory_manager_;
+    }
 
+    virtual void *DMAUncachedMemoryBase() const = 0;
 
+    virtual void *ARMToGPUAddress(void *ARMaddress) const = 0;
+
+    static bool IsMMUEnabled()
+    {
+        return (platform_memory_manager_ != nullptr);
+    }
+
+private:
+    friend void EnableMMUForCore();
+
+    static inline MemoryManager *platform_memory_manager_ = nullptr;
+
+    virtual void EnableMMU() = 0;
+};

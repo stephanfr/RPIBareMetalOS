@@ -47,6 +47,8 @@ bool KernelCommandLine::FindSetting(const char *setting, minstd::string &value)
     LogEntryAndExit("Looking for: %s\n", setting);
 
     minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_KEY + 16> setting_regex = setting;
+    uint32_t setting_length = setting_regex.size();
+
     setting_regex += "=\\S*";
 
     int match_length;
@@ -59,7 +61,7 @@ bool KernelCommandLine::FindSetting(const char *setting, minstd::string &value)
 
     LogDebug1("Found Kernel Command line setting: %s at %d\n", setting, match_location);
 
-    raw_command_line_.substr(value, match_location + (setting_regex.size() - 3), match_length - (setting_regex.size() - 3));
+    raw_command_line_.substr(value, match_location + setting_length, match_length - setting_length);
 
     LogDebug1("Command line setting: %s\n", value.c_str() );
 
