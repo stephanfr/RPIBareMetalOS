@@ -5,6 +5,7 @@
 #include "platform/platform_info.h"
 
 #include "devices/rpi4/rpi4_hw_rng.h"
+#include "asm_utility.h"
 
 #define RNG_CTRL_OFFSET 0x00
 #define RNG_TOTAL_BIT_COUNT_OFFSET 0x0C
@@ -35,7 +36,7 @@ bool RPi4HardwareRandomNumberGenerator::Initialize()
 
     while (registers_->total_bit_count_ < 16)
     {
-        asm volatile("nop");
+        CPUTicksDelay(1000);        //  Wait one millisecond
     }
 
     return true;

@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include "devices/rpi3/rpi3_hw_rng.h"
+#include "asm_utility.h"
 
 #include "devices/log.h"
 
@@ -48,7 +49,7 @@ uint32_t RPi3HardwareRandomNumberGenerator::Next32BitValueInternal()
 
     while ((registers_->status_ >> 24) == 0)
     {
-        asm volatile("nop");
+        CPUTicksDelay(1000);        //  Wait one millisecond
     }
 
     return registers_->data_;
