@@ -26,10 +26,10 @@
 #include "devices/uart0.h"
 #include "devices/uart1.h"
 
-#include "platform/mmu_manager.h"
 #include "platform/kernel_command_line.h"
-#include "platform/platform_sw_rngs.h"
 #include "platform/memory_manager.h"
+#include "platform/mmu_manager.h"
+#include "platform/platform_sw_rngs.h"
 
 #include "services/xoroshiro128plusplus.h"
 
@@ -48,7 +48,7 @@ bool __platform_initialized = false;
 
 static const PlatformInfo *__platform_info = nullptr;
 static ExceptionManager *__exception_manager = nullptr;
-static task::MemoryManager *__memory_manager = nullptr;
+static MemoryManager *__memory_manager = nullptr;
 
 //  Global for HW RNG generator
 
@@ -152,7 +152,7 @@ bool SetupSerialConsole()
 void InitializePlatform()
 {
     //  TODO - figure out how to signal error messages
-    
+
     if (__platform_initialized)
     {
         return;
@@ -208,17 +208,17 @@ void InitializePlatform()
 
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
-//    if ((__number_of_cores_available > MAX_CORES) ||
-//        (__number_of_cores_available != __platform_info->GetNumberOfCores()))
-//    {
-//        ParkCore();
-//    }
+    //    if ((__number_of_cores_available > MAX_CORES) ||
+    //        (__number_of_cores_available != __platform_info->GetNumberOfCores()))
+    //    {
+    //        ParkCore();
+    //    }
 
     //  Initialize the memory manager
 
-    auto memory_manager = make_static_unique<task::MemoryManager>(__platform_info->GetMemorySizeInBytes(),
-                                                                                                __platform_info->GetMMIOBase());
-    
+    auto memory_manager = make_static_unique<MemoryManager>(__platform_info->GetMemorySizeInBytes(),
+                                                            __platform_info->GetMMIOBase());
+
     __memory_manager = memory_manager.get();
 
     GetOSEntityRegistry().AddEntity(memory_manager);
@@ -246,7 +246,7 @@ ExceptionManager &GetExceptionManager()
     return *__exception_manager;
 }
 
-task::MemoryManager &GetMemoryManager()
+MemoryManager &GetMemoryManager()
 {
     return *__memory_manager;
 }

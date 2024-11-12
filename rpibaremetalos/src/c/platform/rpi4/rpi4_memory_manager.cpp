@@ -46,7 +46,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     //  Initialize the page tables to invalid
 
-    for (int i = 0; i < number_of_pagetable_entries_; i++)
+    for (uint64_t i = 0; i < number_of_pagetable_entries_; i++)
     {
         kernel_page_table_1_to_1_[i] = 0;
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){.Raw64 = 0};
@@ -54,7 +54,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     // 	Initialize the memory from 0x00 up to the Videocore memory as normal, cacheable memory
 
-    for (int i = 0; i < videocore_memory_start_block_; i++)
+    for (uint64_t i = 0; i < videocore_memory_start_block_; i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -68,7 +68,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     //	Videocore ram up to 0x40000000
 
-    for (int i = videocore_memory_start_block_; i < (0x40000000 / level1_blocksize_); i++)
+    for (uint64_t i = videocore_memory_start_block_; i < (0x40000000 / level1_blocksize_); i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -81,7 +81,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     //  Normal memory again 0x40000000 to the end of the physical memory pagetable entries
 
-    for (int i = (0x40000000 / level1_blocksize_); i < last_physical_memory_entry; i++)
+    for (uint64_t i = (0x40000000 / level1_blocksize_); i < last_physical_memory_entry; i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -95,7 +95,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     //  Main peripherals from 0xFC000000 - 0xFF800000
 
-    for (int i = (0xFC000000 / level1_blocksize_); i < (0xFF800000 / level1_blocksize_); i++)
+    for (uint64_t i = (0xFC000000 / level1_blocksize_); i < (0xFF800000 / level1_blocksize_); i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -108,7 +108,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     //  ARM peripherals from 0xFF800000 - 0x100000000
 
-    for (int i = (0xFF800000 / level1_blocksize_); i < (0x100000000 / level1_blocksize_); i++)
+    for (uint64_t i = (0xFF800000 / level1_blocksize_); i < (0x100000000 / level1_blocksize_); i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -122,7 +122,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     // Finish the mapping to the end of memory
 
-    for (int i = (0x100000000 / level1_blocksize_); i < last_physical_memory_entry; i++)
+    for (uint64_t i = (0x100000000 / level1_blocksize_); i < last_physical_memory_entry; i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -146,7 +146,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
 
     // Map the kernel 1 to 1 tables in the the stage 2 map
 
-    for (int i = 0; i < number_of_pagetable_entries_ / entries_per_level1_block; i++)
+    for (uint64_t i = 0; i < number_of_pagetable_entries_ / entries_per_level1_block; i++)
     {
         kernel_page_table_1_to_1_[i] = (0x8000000000000000) | (uintptr_t)&Stage2map1to1_[i * entries_per_level1_block] | 3;
     }

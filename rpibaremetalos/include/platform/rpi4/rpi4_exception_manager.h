@@ -221,8 +221,8 @@ private:
         case BCM2711Interrupts::SYSTEM_TIMER_3:
             return Interrupts::SYSTEM_TIMER_3;
 
-            //        default:
-            //            return Interrupts::NO_SUCH_INTERRUPT;
+        default:
+            break;
         }
 
         return ExceptionManager::AsInterrupt(static_cast<InterprocessorInterrupts>(interrupt));

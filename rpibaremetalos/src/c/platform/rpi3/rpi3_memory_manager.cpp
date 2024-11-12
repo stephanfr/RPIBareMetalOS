@@ -42,7 +42,7 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
 
     //  Initialize the page tables to invalid
 
-    for (int i = 0; i < number_of_pagetable_entries_; i++)
+    for (uint64_t i = 0; i < number_of_pagetable_entries_; i++)
     {
         kernel_page_table_1_to_1_[i] = 0;
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){.Raw64 = 0};
@@ -50,7 +50,7 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
 
     // 	Initialize the memory from 0x00 up to the Videocore memory as normal, cacheable memory
 
-    for (int i = 0; i < videocore_memory_start_block_; i++)
+    for (uint64_t i = 0; i < videocore_memory_start_block_; i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -64,7 +64,7 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
 
     //	Videocore ram up to 0x3F000000
 
-    for (int i = videocore_memory_start_block_; i < (0x3F000000 / level1_blocksize_); i++)
+    for (uint64_t i = videocore_memory_start_block_; i < (0x3F000000 / level1_blocksize_); i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -77,7 +77,7 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
 
     //  Main peripherals from 0x3F000000 - 0x40000000
 
-    for (int i = (0x3F000000 / level1_blocksize_); i < (0x40000000 / level1_blocksize_); i++)
+    for (uint64_t i = (0x3F000000 / level1_blocksize_); i < (0x40000000 / level1_blocksize_); i++)
     {
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){

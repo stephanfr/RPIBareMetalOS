@@ -118,14 +118,14 @@ protected:
     uint32_t board_revision_;
     uint64_t platform_memory_in_bytes_;
 
-    uint32_t number_of_pagetable_entries_;
-    uint32_t level1_blocksize_;
-    uint32_t level2_blocksize_;
-    uint32_t granule_size_shift_;
+    uint64_t number_of_pagetable_entries_;
+    uint64_t level1_blocksize_;
+    uint64_t level2_blocksize_;
+    uint64_t granule_size_shift_;
 
-    uint32_t videocore_memory_start_block_;
-    uint32_t dma_block_;
-    uint32_t page_table_block_;
+    uint64_t videocore_memory_start_block_;
+    uint64_t dma_block_;
+    uint64_t page_table_block_;
 
     uint64_t *kernel_page_table_1_to_1_;
     VMSAv8_64_DESCRIPTOR *Stage2map1to1_;

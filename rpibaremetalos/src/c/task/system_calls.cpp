@@ -15,7 +15,7 @@ namespace syscall
         printf("%s", buf);
     }
 
-    int CloneTask( const char* name, task::MemoryPagePointer stack, task::TaskResultCodes &result_code, UUID &result)
+    int CloneTask( const char* name, MemoryPagePointer stack, task::TaskResultCodes &result_code, UUID &result)
     {
         auto new_task = task::TaskManagerImpl::Instance().CloneTask(name, stack);
 
@@ -27,7 +27,7 @@ namespace syscall
 
     unsigned long Malloc( unsigned long block_size )
     {
-        task::MemoryPagePointer new_page = GetMemoryManager().GetFreeBlock(block_size);
+        MemoryPagePointer new_page = GetMemoryManager().GetFreeBlock(block_size);
 
         if (new_page == 0)
         {
