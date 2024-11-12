@@ -4,9 +4,7 @@
 
 #include "platform/rpi3/rpi3_memory_manager.h"
 
-#include "asm_globals.h"
-
-#include <minimalstdio.h>
+extern "C" uint32_t GetVideocoreMemoryStart(uint32_t board_type);
 
 RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
     : AARCH64PlatformMemoryManager(memory_model)
@@ -48,6 +46,9 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){.Raw64 = 0};
     }
 
+    //  Set the AccessFlag to ACCESSED for all entries in the page table.  If this flag is set to zero,
+    //      the MMU will generate a fault on first access.
+
     // 	Initialize the memory from 0x00 up to the Videocore memory as normal, cacheable memory
 
     for (uint64_t i = 0; i < videocore_memory_start_block_; i++)
@@ -55,9 +56,10 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
             .EntryType = TableType::BLOCK_TABLE,
-            .MemAttr = MEMORY_ATTRIBUTE_NORMAL,
-            .SH = Stage2Sharability::STAGE2_SH_INNER_SHAREABLE,
-            .AF = 1,
+            .MemAttr = MemoryAttribute::NORMAL,
+            .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
+            .SH = Stage2Sharability::INNER_SHAREABLE,
+            .AF = AccessFlag::ACCESSED,
             .Address = (uintptr_t)i << granule_size_shift_,
         };
     }
@@ -69,8 +71,9 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
             .EntryType = TableType::BLOCK_TABLE,
-            .MemAttr = MEMORY_ATTRIBUTE_NORMAL_NO_CACHING,
-            .AF = 1,
+            .MemAttr = MemoryAttribute::NORMAL_NO_CACHING,
+            .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
+            .AF = AccessFlag::ACCESSED,
             .Address = (uintptr_t)i << granule_size_shift_,
         };
     }
@@ -82,8 +85,9 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
         // Each block descriptor (2 MB)
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
             .EntryType = TableType::BLOCK_TABLE,
-            .MemAttr = MEMORY_ATTRIBUTE_DEVICE_NO_GATHER_NO_REORDER_NO_EARLY_WRITE_ACK,
-            .AF = 1,
+            .MemAttr = MemoryAttribute::DEVICE_NO_GATHER_NO_REORDER_NO_EARLY_WRITE_ACK,
+            .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
+            .AF = AccessFlag::ACCESSED,
             .Address = (uintptr_t)i << granule_size_shift_,
         };
     }
@@ -92,8 +96,9 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
 
     Stage2map1to1_[(0x40000000 / level1_blocksize_)] = (VMSAv8_64_DESCRIPTOR){
         .EntryType = TableType::BLOCK_TABLE,
-        .MemAttr = MEMORY_ATTRIBUTE_DEVICE_NO_GATHER_NO_REORDER_NO_EARLY_WRITE_ACK,
-        .AF = 1,
+        .MemAttr = MemoryAttribute::DEVICE_NO_GATHER_NO_REORDER_NO_EARLY_WRITE_ACK,
+        .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
+        .AF = AccessFlag::ACCESSED,
         .Address = (uintptr_t)(0x40000000 / level1_blocksize_) << granule_size_shift_,
     };
 
@@ -101,9 +106,10 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
 
     Stage2map1to1_[dma_block_] = (VMSAv8_64_DESCRIPTOR){
         .EntryType = TableType::BLOCK_TABLE,
-        .MemAttr = MEMORY_ATTRIBUTE_NORMAL_NO_CACHING,
-        .SH = Stage2Sharability::STAGE2_SH_INNER_SHAREABLE,
-        .AF = 1,
+        .MemAttr = MemoryAttribute::NORMAL_NO_CACHING,
+        .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
+        .SH = Stage2Sharability::INNER_SHAREABLE,
+        .AF = AccessFlag::ACCESSED,
         .Address = (uintptr_t)dma_block_ << granule_size_shift_,
     };
 
