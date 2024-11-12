@@ -26,13 +26,12 @@
 #include "devices/uart0.h"
 #include "devices/uart1.h"
 
+#include "platform/mmu_manager.h"
 #include "platform/kernel_command_line.h"
 #include "platform/platform_sw_rngs.h"
+#include "platform/memory_manager.h"
+
 #include "services/xoroshiro128plusplus.h"
-
-#include "task/memory_manager.h"
-
-#include "platform/mmu.h"
 
 #include "asm_globals.h"
 
@@ -159,6 +158,11 @@ void InitializePlatform()
         return;
     }
 
+    //  First thing, initialize the MMU manager
+    //      The GPU Mailbox assumes that the MMU is enabled, so we need to do this first.
+
+    MMUManager::Initialize(MMUManager::MemoryModel::KERNEL_ONLY_1_TO_1);
+
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
 
@@ -185,9 +189,22 @@ void InitializePlatform()
         break;
     }
 
+    //  Initialize the platform software RNGs from the HW RNG
+
+    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(__hw_random_number_generator->Next64BitValue()),
+                                       Xoroshiro128PlusPlusRNG::Seed(__hw_random_number_generator->Next64BitValue(),
+                                                                     __hw_random_number_generator->Next64BitValue()));
+
     //  Get the kernel command line
 
     KernelCommandLine::LoadCommandLine(__platform_info->GetMMIOBase()); //  TODO handle error condition
+
+    //  Setup the serial console
+
+    if (!SetupSerialConsole())
+    {
+        ParkCore();
+    }
 
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
@@ -196,19 +213,6 @@ void InitializePlatform()
 //    {
 //        ParkCore();
 //    }
-
-    //  Initialize the platform software RNGs from the HW RNG
-
-    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(__hw_random_number_generator->Next64BitValue()),
-                                       Xoroshiro128PlusPlusRNG::Seed(__hw_random_number_generator->Next64BitValue(),
-                                                                     __hw_random_number_generator->Next64BitValue()));
-
-    //  Setup the serial console
-
-    if (!SetupSerialConsole())
-    {
-        ParkCore();
-    }
 
     //  Initialize the memory manager
 

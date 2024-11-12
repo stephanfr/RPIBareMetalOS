@@ -13,7 +13,7 @@ class RPI3BPlusMemoryManager : public AARCH64PlatformMemoryManager
 {
 
     using VMSAv8_64_DESCRIPTOR = AARCH64PlatformMemoryManager::VMSAv8_64_DESCRIPTOR;
-    using MemoryModel = MemoryManager::MemoryModel;
+    using MemoryModel = MMUManager::MemoryModel;
 
 public:
     RPI3BPlusMemoryManager(MemoryModel memory_model);

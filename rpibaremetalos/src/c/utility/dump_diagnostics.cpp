@@ -16,7 +16,7 @@
 
 #include "devices/character_io.h"
 
-#include "task/memory_manager.h"
+#include "platform/memory_manager.h"
 
 #include "heaps.h"
 

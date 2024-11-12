@@ -10,9 +10,9 @@
 #include <fixed_string>
 #include <atomic>
 
-#include "task/tasks.h"
+#include "platform/memory_manager.h"
 
-#include "task/memory_manager.h"
+#include "task/tasks.h"
 #include "task/task_errors.h"
 #include "task/runnable.h"
 

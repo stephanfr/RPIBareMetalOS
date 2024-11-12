@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include "task/memory_manager.h"
+#include "platform/memory_manager.h"
 
 #include "asm_globals.h"
 #include "heaps.h"

@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include "os_config.h"
-#include "devices/mailbox_messages.h"
+#include "platform/gpu_mailbox_messages.h"
 
 const char *rpiTypeNames[] = {"A", "B", "A+", "B+", "2B", "Alpha", "CM1", "Error", "3B", "Zero", "CM3", "Error",
                               "Zero W", "3B+", "3A+", "Internal Use Only", "CM3+", "4B", "Zero 2W", "400", "CM4", "CM4S"};
@@ -32,7 +32,7 @@ typedef union RevisionCodeWithUint
 
 void PlatformInfo::GetPlatformDetails(uint8_t *mmio_base)
 {
-    Mailbox mbox(mmio_base);
+    GPUMailbox mbox(mmio_base);
 
     GetBoardModelTag getBoardModelTag;
     GetBoardRevisionTag getBoardRevisionTag;
@@ -40,7 +40,7 @@ void PlatformInfo::GetPlatformDetails(uint8_t *mmio_base)
     GetBoardSerialNumberTag getBoardSerialNumberTag;
     GetARMMemoryTag getARMMemoryTag;
 
-    MailboxPropertyMessage getBoardInfoMessage(getBoardModelTag,
+    GPUMailboxPropertyMessage getBoardInfoMessage(getBoardModelTag,
                                                getBoardRevisionTag,
                                                getBoardMACAddressTag,
                                                getBoardSerialNumberTag,

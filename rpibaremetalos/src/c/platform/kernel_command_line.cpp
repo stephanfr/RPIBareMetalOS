@@ -6,7 +6,7 @@
 
 #include "platform/platform_info.h"
 
-#include "devices/mailbox_messages.h"
+#include "platform/gpu_mailbox_messages.h"
 
 #include "utility/regex.h"
 
@@ -24,11 +24,11 @@ bool KernelCommandLine::LoadCommandLine(uint8_t *mmio_base)
 {
     LogEntryAndExit("\n");
 
-    Mailbox mbox(mmio_base);
+    GPUMailbox mbox(mmio_base);
 
     GetCommandLineTag getCommandLineTag;
 
-    MailboxPropertyMessage getCommandLineMessage(getCommandLineTag);
+    GPUMailboxPropertyMessage getCommandLineMessage(getCommandLineTag);
 
     //  TODO Handle potential failure on mailbox operation
 

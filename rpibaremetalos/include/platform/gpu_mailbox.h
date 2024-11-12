@@ -6,8 +6,8 @@
 
 #include "platform/platform_info.h"
 
-#include <string.h>
 #include <minimalstdio.h>
+#include <string.h>
 
 #define MAX_TAGS_PER_MESSAGE 24
 #define MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES 4096
@@ -156,11 +156,11 @@ typedef enum class MailboxMessageTypes
 } MessageType;
 
 //
-//  Abstract interface to permit the MailboxPropertyMessage class to access the
+//  Abstract interface to permit the GPUMailboxPropertyMessage class to access the
 //      buffer of a tag to add it to the message buffer.
-// 
+//
 
-class MailboxPropertyMessageTag
+class GPUMailboxPropertyMessageTag
 {
 public:
     virtual const char *Name() const = 0;
@@ -170,21 +170,20 @@ public:
     virtual size_t SetPayload(volatile const char *response_buffer) = 0;
 };
 
-
 //
 //  This template is a bit clumsy but... it permits tags to be defined without having to worry about
 //      getting all the buffer sizes correct.  The structure is able to compute sizes for the
 //      buffers based on the sizes of the request and response structure template parameters.
 //
 //  Overall, better I think than alternatives which require hard-coding the buffer sizes.  QEMU is
-//      much more forgiving for getting the sizes wrong than real hardware. 
+//      much more forgiving for getting the sizes wrong than real hardware.
 //
 
 template <typename TREQ, typename TRESP, MailboxTags tag>
-class MailboxPropertyMessageTagBase : public MailboxPropertyMessageTag
+class GPUMailboxPropertyMessageTagBase : public GPUMailboxPropertyMessageTag
 {
 public:
-    MailboxPropertyMessageTagBase() = default;
+    GPUMailboxPropertyMessageTagBase() = default;
 
     MailboxTags Tag() const override
     {
@@ -235,7 +234,7 @@ protected:
 
     //  Compile time check on the size of the ValueBuffer
 
-    static_assert ( (sizeof(ValueBuffer) % 4) == 0, "Value Buffer must be a multiple of 4 bytes");
+    static_assert((sizeof(ValueBuffer) % 4) == 0, "Value Buffer must be a multiple of 4 bytes");
 
     Payload payload_;
 
@@ -255,10 +254,10 @@ protected:
     }
 };
 
-class MailboxPropertyMessage
+class GPUMailboxPropertyMessage
 {
 public:
-    MailboxPropertyMessage()
+    GPUMailboxPropertyMessage()
     {
         message_buffer_.header_.buffer_size_ = sizeof(Header);
         message_buffer_.header_.request_response_code_ = static_cast<uint32_t>(MailboxMessageTypes::REQUEST);
@@ -271,35 +270,35 @@ public:
 
     //  Old-school list of constructors in lieu of varargs or initializer lists.
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
         AddTag(tag3);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3,
-                           MailboxPropertyMessageTag &tag4)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3,
+                              GPUMailboxPropertyMessageTag &tag4)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
@@ -307,12 +306,12 @@ public:
         AddTag(tag4);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3,
-                           MailboxPropertyMessageTag &tag4,
-                           MailboxPropertyMessageTag &tag5)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3,
+                              GPUMailboxPropertyMessageTag &tag4,
+                              GPUMailboxPropertyMessageTag &tag5)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
@@ -321,13 +320,13 @@ public:
         AddTag(tag5);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3,
-                           MailboxPropertyMessageTag &tag4,
-                           MailboxPropertyMessageTag &tag5,
-                           MailboxPropertyMessageTag &tag6)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3,
+                              GPUMailboxPropertyMessageTag &tag4,
+                              GPUMailboxPropertyMessageTag &tag5,
+                              GPUMailboxPropertyMessageTag &tag6)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
@@ -337,14 +336,14 @@ public:
         AddTag(tag6);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3,
-                           MailboxPropertyMessageTag &tag4,
-                           MailboxPropertyMessageTag &tag5,
-                           MailboxPropertyMessageTag &tag6,
-                           MailboxPropertyMessageTag &tag7)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3,
+                              GPUMailboxPropertyMessageTag &tag4,
+                              GPUMailboxPropertyMessageTag &tag5,
+                              GPUMailboxPropertyMessageTag &tag6,
+                              GPUMailboxPropertyMessageTag &tag7)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
@@ -355,15 +354,15 @@ public:
         AddTag(tag7);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3,
-                           MailboxPropertyMessageTag &tag4,
-                           MailboxPropertyMessageTag &tag5,
-                           MailboxPropertyMessageTag &tag6,
-                           MailboxPropertyMessageTag &tag7,
-                           MailboxPropertyMessageTag &tag8)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3,
+                              GPUMailboxPropertyMessageTag &tag4,
+                              GPUMailboxPropertyMessageTag &tag5,
+                              GPUMailboxPropertyMessageTag &tag6,
+                              GPUMailboxPropertyMessageTag &tag7,
+                              GPUMailboxPropertyMessageTag &tag8)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
@@ -375,16 +374,16 @@ public:
         AddTag(tag8);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3,
-                           MailboxPropertyMessageTag &tag4,
-                           MailboxPropertyMessageTag &tag5,
-                           MailboxPropertyMessageTag &tag6,
-                           MailboxPropertyMessageTag &tag7,
-                           MailboxPropertyMessageTag &tag8,
-                           MailboxPropertyMessageTag &tag9)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3,
+                              GPUMailboxPropertyMessageTag &tag4,
+                              GPUMailboxPropertyMessageTag &tag5,
+                              GPUMailboxPropertyMessageTag &tag6,
+                              GPUMailboxPropertyMessageTag &tag7,
+                              GPUMailboxPropertyMessageTag &tag8,
+                              GPUMailboxPropertyMessageTag &tag9)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
@@ -397,17 +396,17 @@ public:
         AddTag(tag9);
     }
 
-    MailboxPropertyMessage(MailboxPropertyMessageTag &tag1,
-                           MailboxPropertyMessageTag &tag2,
-                           MailboxPropertyMessageTag &tag3,
-                           MailboxPropertyMessageTag &tag4,
-                           MailboxPropertyMessageTag &tag5,
-                           MailboxPropertyMessageTag &tag6,
-                           MailboxPropertyMessageTag &tag7,
-                           MailboxPropertyMessageTag &tag8,
-                           MailboxPropertyMessageTag &tag9,
-                           MailboxPropertyMessageTag &tag10)
-        : MailboxPropertyMessage()
+    GPUMailboxPropertyMessage(GPUMailboxPropertyMessageTag &tag1,
+                              GPUMailboxPropertyMessageTag &tag2,
+                              GPUMailboxPropertyMessageTag &tag3,
+                              GPUMailboxPropertyMessageTag &tag4,
+                              GPUMailboxPropertyMessageTag &tag5,
+                              GPUMailboxPropertyMessageTag &tag6,
+                              GPUMailboxPropertyMessageTag &tag7,
+                              GPUMailboxPropertyMessageTag &tag8,
+                              GPUMailboxPropertyMessageTag &tag9,
+                              GPUMailboxPropertyMessageTag &tag10)
+        : GPUMailboxPropertyMessage()
     {
         AddTag(tag1);
         AddTag(tag2);
@@ -421,12 +420,11 @@ public:
         AddTag(tag10);
     }
 
-
     //
     //  Methods
     //
 
-    bool AddTag(MailboxPropertyMessageTag &tag);
+    bool AddTag(GPUMailboxPropertyMessageTag &tag);
 
     void Reset()
     {
@@ -448,9 +446,8 @@ public:
         printf("\n");
     }
 
-
 protected:
-    friend class Mailbox;
+    friend class GPUMailbox;
 
     typedef struct Header
     {
@@ -464,7 +461,7 @@ protected:
         volatile char buffer_[MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES] __attribute__((aligned(16)));
     } MessageBuffer;
 
-    MailboxPropertyMessageTag *tags_[MAX_TAGS_PER_MESSAGE];
+    GPUMailboxPropertyMessageTag *tags_[MAX_TAGS_PER_MESSAGE];
     size_t num_tags_ = 0;
 
     MessageBuffer message_buffer_;
@@ -473,26 +470,26 @@ protected:
 
     void ReturnTags(volatile const char *response_buffer);
 
-    const uint32_t* AsUint32Buffer() const
+    const uint32_t *AsUint32Buffer() const
     {
         return (const uint32_t *)(message_buffer_.buffer_);
     }
 };
 
-class Mailbox
+class GPUMailbox
 {
 public:
-    Mailbox()
+    GPUMailbox()
         : mmio_base_(GetPlatformInfo().GetMMIOBase())
     {
     }
 
-    Mailbox(uint8_t *mmio_base)
+    GPUMailbox(uint8_t *mmio_base)
         : mmio_base_(mmio_base)
     {
     }
 
-    bool sendMessage(MailboxPropertyMessage &message);
+    bool sendMessage(GPUMailboxPropertyMessage &message);
 
 private:
     typedef enum class MailboxRegister
@@ -512,10 +509,8 @@ private:
 
     const uint8_t *mmio_base_;
 
-
     volatile uint32_t &Register(MailboxRegister reg)
     {
         return *((volatile uint32_t *)(mmio_base_ + (uint32_t)reg));
     }
-
 };

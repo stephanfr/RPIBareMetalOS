@@ -8,7 +8,7 @@
 
 #include "asm_globals.h"
 
-#include "platform/mmu.h"
+#include "platform/mmu_manager.h"
 
 #include <minimalstdio.h>
 
@@ -21,9 +21,9 @@ extern "C" uint32_t GetBoardVersion( uint32_t core_type );
 #define MEMORY_ATTRIBUTE_NORMAL_NO_CACHING 3
 #define MEMORY_ATTRIBUTE_NORMAL 4
 
-class AARCH64PlatformMemoryManager : public MemoryManager
+class AARCH64PlatformMemoryManager : public MMUManager
 {
-    using MemoryModel = MemoryManager::MemoryModel;
+    using MemoryModel = MMUManager::MemoryModel;
 
 protected:
     typedef enum TableType : uint32_t

@@ -12,7 +12,7 @@ class RPI4BMemoryManager : public AARCH64PlatformMemoryManager
 {
 
     using VMSAv8_64_DESCRIPTOR = AARCH64PlatformMemoryManager::VMSAv8_64_DESCRIPTOR;
-    using MemoryModel = MemoryManager::MemoryModel;
+    using MemoryModel = MMUManager::MemoryModel;
 
 public:
     RPI4BMemoryManager(MemoryModel memory_model);

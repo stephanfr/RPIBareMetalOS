@@ -8,7 +8,7 @@
 
 #include "devices/gpio.h"
 
-#include "devices/mailbox_messages.h"
+#include "platform/gpu_mailbox_messages.h"
 
 #define DELAY_LOOPS 200
 
@@ -24,13 +24,13 @@ UART0::UART0( BaudRates  baud_rate, const char* alias )
     //  Set the UART clock rate
     //      We are initializing it to 4Mhz
 
-    MailboxPropertyMessage setClockRateMessage;
+    GPUMailboxPropertyMessage setClockRateMessage;
 
     SetClockRateTag setClockRateTag(MailboxClockIdentifiers::UART, FREQUENCY_4MHZ);
 
     setClockRateMessage.AddTag(setClockRateTag);
 
-    Mailbox().sendMessage(setClockRateMessage);
+    GPUMailbox().sendMessage(setClockRateMessage);
 
     //  Compute the baud rate divisors we will use below
     //      IBRD gets set to the floor of the clock rate divided by the baud rate

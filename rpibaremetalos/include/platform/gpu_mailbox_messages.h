@@ -4,19 +4,19 @@
 
 #pragma once
 
-#include "mailbox.h"
+#include "platform/gpu_mailbox.h"
 
 //
-//  Defining Mailbox Messages:
+//  Defining GPUMailbox Messages:
 //
 //  Refer to the following link for documentation of the different messages:
 //
-//      https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
+//      https://github.com/raspberrypi/firmware/wiki/GPUMailbox-property-interface
 //
 
 //
 //  NB - Do not initialize any data members in the Request or Response structs.  This will cause
-//      the union created in MailboxPropertyMessageTagBase to have a non-trivial constructor
+//      the union created in GPUMailboxPropertyMessageTagBase to have a non-trivial constructor
 //      which will break compilation.
 //
 //  Also, when creating request and response structs, avoid primitives larger than 4 bytes.  That
@@ -38,7 +38,7 @@ typedef struct GetBoardModelTagResponse
     uint32_t board_model_;
 } GetBoardModelTagResponse;
 
-class GetBoardModelTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardModelTagResponse, MailboxTags::GET_BOARD_MODEL>
+class GetBoardModelTag : public GPUMailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardModelTagResponse, MailboxTags::GET_BOARD_MODEL>
 {
 public:
     GetBoardModelTag() = default;
@@ -63,7 +63,7 @@ typedef struct GetBoardRevisionTagResponse
     uint32_t board_revision_;
 } GetBoardRevisionTagResponse;
 
-class GetBoardRevisionTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardRevisionTagResponse, MailboxTags::GET_BOARD_REVISION>
+class GetBoardRevisionTag : public GPUMailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardRevisionTagResponse, MailboxTags::GET_BOARD_REVISION>
 {
 public:
     GetBoardRevisionTag() = default;
@@ -90,7 +90,7 @@ typedef struct GetBoardMACAddressTagResponse
     char padding[2]; //  Pad to 4 byte multiple
 } GetBoardMACAddressTagResponse;
 
-class GetBoardMACAddressTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardMACAddressTagResponse, MailboxTags::GET_BOARD_MAC_ADDRESS>
+class GetBoardMACAddressTag : public GPUMailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardMACAddressTagResponse, MailboxTags::GET_BOARD_MAC_ADDRESS>
 {
 public:
     GetBoardMACAddressTag() = default;
@@ -116,7 +116,7 @@ typedef struct GetBoardSerialNumberTagResponse
     uint32_t board_serial_number_lsb_;
 } GetBoardSerialNumberTagResponse;
 
-class GetBoardSerialNumberTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardSerialNumberTagResponse, MailboxTags::GET_BOARD_SERIAL_NUMBER>
+class GetBoardSerialNumberTag : public GPUMailboxPropertyMessageTagBase<EmptyRequestOrReply, GetBoardSerialNumberTagResponse, MailboxTags::GET_BOARD_SERIAL_NUMBER>
 {
 public:
     GetBoardSerialNumberTag() = default;
@@ -145,7 +145,7 @@ typedef struct GetARMMemoryTagResponse
     uint32_t size_in_bytes_limited_to_1gb_;
 } GetARMMemoryTagResponse;
 
-class GetARMMemoryTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetARMMemoryTagResponse, MailboxTags::GET_ARM_MEMORY>
+class GetARMMemoryTag : public GPUMailboxPropertyMessageTagBase<EmptyRequestOrReply, GetARMMemoryTagResponse, MailboxTags::GET_ARM_MEMORY>
 {
 public:
     GetARMMemoryTag() = default;
@@ -178,7 +178,7 @@ typedef struct GetVideocoreMemoryTagResponse
     uint32_t size_in_bytes_;
 } GetVideocoreMemoryTagResponse;
 
-class GetVideocoreMemoryTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetVideocoreMemoryTagResponse, MailboxTags::GET_VIDEOCORE_MEMORY>
+class GetVideocoreMemoryTag : public GPUMailboxPropertyMessageTagBase<EmptyRequestOrReply, GetVideocoreMemoryTagResponse, MailboxTags::GET_VIDEOCORE_MEMORY>
 {
 public:
     GetVideocoreMemoryTag() = default;
@@ -214,7 +214,7 @@ typedef struct GetClockRateTagResponse
     uint32_t rate_in_hz_;
 } GetClockRateTagResponse;
 
-class GetClockRateTag : public MailboxPropertyMessageTagBase<GetClockRateTagRequest, GetClockRateTagResponse, MailboxTags::GET_CLOCK_RATE>
+class GetClockRateTag : public GPUMailboxPropertyMessageTagBase<GetClockRateTagRequest, GetClockRateTagResponse, MailboxTags::GET_CLOCK_RATE>
 {
 public:
     GetClockRateTag(MailboxClockIdentifiers clock_id)
@@ -255,7 +255,7 @@ typedef struct SetClockRateTagResponse
     uint32_t rate_in_hz_;
 } SetClockRateTagResponse;
 
-class SetClockRateTag : public MailboxPropertyMessageTagBase<SetClockRateTagRequest, SetClockRateTagResponse, MailboxTags::SET_CLOCK_RATE>
+class SetClockRateTag : public GPUMailboxPropertyMessageTagBase<SetClockRateTagRequest, SetClockRateTagResponse, MailboxTags::SET_CLOCK_RATE>
 {
 public:
     SetClockRateTag(MailboxClockIdentifiers clock_id,
@@ -291,7 +291,7 @@ typedef struct GetCommandLineTagResponse
     char command_line_[2048];
 } GetCommandLineTagResponse;
 
-class GetCommandLineTag : public MailboxPropertyMessageTagBase<EmptyRequestOrReply, GetCommandLineTagResponse, MailboxTags::GET_COMMAND_LINE>
+class GetCommandLineTag : public GPUMailboxPropertyMessageTagBase<EmptyRequestOrReply, GetCommandLineTagResponse, MailboxTags::GET_COMMAND_LINE>
 {
 public:
     GetCommandLineTag()
@@ -330,7 +330,7 @@ typedef struct SetBoardPowerStateTagResponse
     uint32_t state_;
 } SetBoardPowerStateResponse;
 
-class SetBoardPowerStateTag : public MailboxPropertyMessageTagBase<SetBoardPowerStateTagRequest, SetBoardPowerStateTagResponse, MailboxTags::SET_POWER_STATE>
+class SetBoardPowerStateTag : public GPUMailboxPropertyMessageTagBase<SetBoardPowerStateTagRequest, SetBoardPowerStateTagResponse, MailboxTags::SET_POWER_STATE>
 {
 public:
     SetBoardPowerStateTag(MailboxPowerDeviceIdentifiers device_id,

@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include "devices/mailbox.h"
+#include "platform/gpu_mailbox.h"
 
 #include "asm_utility.h"
 #include "devices/log.h"
 
-#include "platform/mmu.h"
+#include "platform/mmu_manager.h"
 
-bool MailboxPropertyMessage::AddTag(MailboxPropertyMessageTag &tag)
+bool GPUMailboxPropertyMessage::AddTag(GPUMailboxPropertyMessageTag &tag)
 {
     if ((num_tags_ >= MAX_TAGS_PER_MESSAGE) ||
         (message_buffer_.header_.buffer_size_ + tag.GetPayloadSize() >= MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES))
@@ -25,7 +25,7 @@ bool MailboxPropertyMessage::AddTag(MailboxPropertyMessageTag &tag)
     return true;
 }
 
-bool MailboxPropertyMessage::AddLastTag()
+bool GPUMailboxPropertyMessage::AddLastTag()
 {
     if (message_buffer_.header_.buffer_size_ + sizeof(uint32_t) >= MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES)
     {
@@ -40,7 +40,7 @@ bool MailboxPropertyMessage::AddLastTag()
     return true;
 }
 
-void MailboxPropertyMessage::ReturnTags(volatile const char *response_buffer)
+void GPUMailboxPropertyMessage::ReturnTags(volatile const char *response_buffer)
 {
     volatile const char *current_loc = response_buffer + sizeof(Header);
 
@@ -50,15 +50,13 @@ void MailboxPropertyMessage::ReturnTags(volatile const char *response_buffer)
     }
 }
 
-bool Mailbox::sendMessage(MailboxPropertyMessage &message)
+bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 {
     const uint32_t MAX_RETRIES = 10000;
 
     //  Append the 'Last Tag' to the message
 
     message.AddLastTag();
-
-    //    uint32_t r = ((uint32_t)(((uint64_t) & (message.AsUint32Buffer()[0])) & 0xFFFFFFF0)) | ((uint32_t)MailboxChannels::PROP & 0x0000000F);
 
     //  Wait until we can write to the mailbox
 
@@ -74,7 +72,7 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
 
     if (retries >= MAX_RETRIES)
     {
-        LogError("Timeout waiting for Mailbox to become available\n");
+        LogError("Timeout waiting for GPUMailbox to become available\n");
         return false;
     }
 
@@ -86,7 +84,7 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
     //    instructions *could* be reordered such that the write to the register occurs before
     //    the data is written to the uncached memory.
 
-    void *uncached_memory_base = MemoryManager::Instance().DMAUncachedMemoryBase();
+    void *uncached_memory_base = MMUManager::Instance().DMAUncachedMemoryBase();
 
     memcpy(uncached_memory_base, message.AsUint32Buffer(), MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES);
 
@@ -94,7 +92,7 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
 
     INSTRUCTION_CACHE_BARRIER;
 
-    Register(MailboxRegister::WRITE) = (uint32_t) reinterpret_cast<uint64_t>(MemoryManager::Instance().ARMToGPUAddress(message_ARM_address));
+    Register(MailboxRegister::WRITE) = (uint32_t) reinterpret_cast<uint64_t>(MMUManager::Instance().ARMToGPUAddress(message_ARM_address));
 
     //  Now wait for the response.  Timeout if we have to wait too long.
 
@@ -114,7 +112,7 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
 
         if (retries >= MAX_RETRIES)
         {
-            LogError("Timeout waiting for Mailbox response\n");
+            LogError("Timeout waiting for GPUMailbox response\n");
             return false;
         }
 
@@ -153,11 +151,11 @@ bool Mailbox::sendMessage(MailboxPropertyMessage &message)
 
         if (response_message[1] == MBOX_STATUS_REQUEST_PARSING_ERROR)
         {
-            LogError("Mailbox Request Parsing Error\n");
+            LogError("GPUMailbox Request Parsing Error\n");
         }
         else
         {
-            LogError("Mailbox error, Response Code: %u\n", response_message[1]);
+            LogError("GPUMailbox error, Response Code: %u\n", response_message[1]);
         }
 
         return false;

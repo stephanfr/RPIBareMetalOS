@@ -15,7 +15,7 @@
 #include "asm_utility.h"
 
 #include "platform/exception_manager.h"
-#include "platform/mmu.h"
+#include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 

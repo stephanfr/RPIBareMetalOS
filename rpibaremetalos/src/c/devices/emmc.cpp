@@ -12,7 +12,7 @@
 
 #include "devices/gpio.h"
 #include "devices/log.h"
-#include "devices/mailbox_messages.h"
+#include "platform/gpu_mailbox_messages.h"
 #include "devices/physical_timer.h"
 
 #include "devices/emmc.h"
@@ -703,11 +703,11 @@ namespace EmmcImpl
 
         //  Get the current EMMC clock rate from the mailbox service
 
-        Mailbox mbox(GetPlatformInfo().GetMMIOBase());
+        GPUMailbox mbox(GetPlatformInfo().GetMMIOBase());
 
         GetClockRateTag getEMMCClockRateTag(MailboxClockIdentifiers(1));
 
-        MailboxPropertyMessage getEMMCClockRateMessage(getEMMCClockRateTag);
+        GPUMailboxPropertyMessage getEMMCClockRateMessage(getEMMCClockRateTag);
 
         mbox.sendMessage(getEMMCClockRateMessage);
 

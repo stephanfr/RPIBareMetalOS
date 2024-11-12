@@ -5,18 +5,18 @@
 #include "devices/power_manager.h"
 
 #include "devices/gpio.h"
-#include "devices/mailbox_messages.h"
+#include "platform/gpu_mailbox_messages.h"
 #include "devices/physical_timer.h"
 
 void PowerManager::Halt()
 {
-    Mailbox mbox;
+    GPUMailbox mbox;
 
     //  Power off all the devices one at a time
 
     for (uint32_t deviceId = 0; deviceId < 16; deviceId++)
     {
-        MailboxPropertyMessage  setBoardPowerStateMessage;
+        GPUMailboxPropertyMessage  setBoardPowerStateMessage;
         SetBoardPowerStateTag getBoardPowerStateTag( deviceId, 0 );
 
         setBoardPowerStateMessage.AddTag( getBoardPowerStateTag );

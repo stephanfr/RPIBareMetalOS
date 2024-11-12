@@ -6,11 +6,13 @@
 
 #include <stdint.h>
 
+#include "os_entity.h"
+
 #include "asm_utility.h"
 
 extern "C" void EnableMMUForCore();
 
-class MemoryManager
+class MMUManager
 {
 public:
     typedef enum class MemoryModel : uint32_t
@@ -20,7 +22,7 @@ public:
 
     static void Initialize(MemoryModel memory_model);
 
-    static MemoryManager &Instance()
+    static MMUManager &Instance()
     {
         if (platform_memory_manager_ == nullptr)
         {
@@ -42,7 +44,7 @@ public:
 private:
     friend void EnableMMUForCore();
 
-    static inline MemoryManager *platform_memory_manager_ = nullptr;
+    static inline MMUManager *platform_memory_manager_ = nullptr;
 
     virtual void EnableMMU() = 0;
 };

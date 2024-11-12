@@ -14,27 +14,25 @@
 
 #include "devices/log.h"
 
-void MemoryManager::Initialize(MemoryModel memory_model)
+void MMUManager::Initialize(MemoryModel memory_model)
 {
     if(platform_memory_manager_ != nullptr)
     {
-        LogError("MemoryManager::Initialize() called more than once\n");
+        LogError("MMUManager::Initialize() called more than once\n");
         return;
     }
 
     switch (__hw_board_type)
     {
         case RPI_BOARD_ENUM_RPI3 :
-            platform_memory_manager_ = dynamic_cast<MemoryManager*>(static_new<RPI3BPlusMemoryManager>(memory_model));
+            platform_memory_manager_ = dynamic_cast<MMUManager*>(static_new<RPI3BPlusMemoryManager>(memory_model));
             break;
 
         case RPI_BOARD_ENUM_RPI4 :
-            printf("RPI4 Memory Manager\n");
-            platform_memory_manager_ = dynamic_cast<MemoryManager*>(static_new<RPI4BMemoryManager>(memory_model));
+            platform_memory_manager_ = dynamic_cast<MMUManager*>(static_new<RPI4BMemoryManager>(memory_model));
             break;
 
         default:
-            printf("MemoryManager::Initialize() unknown board type\n");
             ParkCore();
     }
 
@@ -43,5 +41,5 @@ void MemoryManager::Initialize(MemoryModel memory_model)
 
 extern "C" void EnableMMUForCore()
 {
-    MemoryManager::Instance().EnableMMU();
+    MMUManager::Instance().EnableMMU();
 }
