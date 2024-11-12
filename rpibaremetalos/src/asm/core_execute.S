@@ -18,14 +18,14 @@ CoreExecute:
 	ldr		x9, =__number_of_cores_available
 	ldr		w10, [x9]
 	cmp		w0, w10
-	b.ge	CoreExecuteError
+	b.ge	core_execute_error
 
 	adrp    x9, __core_state
     add     x9, x9, :lo12:__core_state
 	ldr		w10, [x9, x0, lsl #2]
 
 	cmp		w10, #CORE_SPINNING_IN_EL1					// 	Core must be spinning in EL1 before we can ask it to execute code
-	b.ne	CoreExecuteError
+	b.ne	core_execute_error
 
 	adrp    x9, __core_jump_table
     add     x9, x9, :lo12:__core_jump_table
@@ -40,7 +40,7 @@ CoreExecute:
  	mov		x0, #1										// 	Return success
 	ret
 
-CoreExecuteError:
+core_execute_error:
 	mov		x0, #0										// 	Return failure
 	ret
 

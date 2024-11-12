@@ -20,18 +20,18 @@ IdentifyBoardType :
     and     x9, x9, x10
     ldr     x10, =MIDR_EL1_PARTNUM_CORTEX_A53
     cmp     x9, x10
-    b.eq    .is_cortex_a53
+    b.eq    is_cortex_a53
     ldr     x10, =MIDR_EL1_PARTNUM_CORTEX_A72
     cmp     x9, x10
-    b.eq    .is_cortex_a72
+    b.eq    is_cortex_a72
     ldr     x9, =RPI_BOARD_ENUM_UNKNOWN
     ret
 
-.is_cortex_a53 :
+is_cortex_a53 :
     ldr x0, =RPI_BOARD_ENUM_RPI3
     ret
     
-.is_cortex_a72 :
+is_cortex_a72 :
     ldr x0, =RPI_BOARD_ENUM_RPI4
     ret
 
