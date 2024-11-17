@@ -17,9 +17,9 @@
 #include "platform/platform_sw_rngs.h"
 
 #include "devices/character_io.h"
-#include "platform/gpu_mailbox_messages.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
+#include "platform/gpu_mailbox_messages.h"
 
 #include "isr/core_task_switch_isr.h"
 #include "isr/halt_core_isr.h"
@@ -72,56 +72,6 @@ void delay(uint32_t count)
     }
 }
 
-#define ISENABLER_SHIFT 5
-#define ICENABLER_SHIFT ISENABLER_SHIFT
-#define GICD_ISENABLER 0x100
-#define GICD_ICENABLER 0x180
-#define GICD_ITARGETSR_SPI 0x820
-
-unsigned int gicd_read_isenabler(uintptr_t base, unsigned int id)
-{
-    return *(volatile uint32_t *)(base + GICD_ISENABLER + id);
-}
-
-unsigned int gicd_read_icenabler(uintptr_t base, unsigned int id)
-{
-    return *(volatile uint32_t *)(base + GICD_ICENABLER + (id << 2));
-}
-
-void gicd_write_isenabler(uintptr_t base, unsigned int id, unsigned int val)
-{
-    *(volatile uint32_t *)(base + GICD_ISENABLER + id) = val;
-}
-
-void gicd_write_icenabler(uintptr_t base, unsigned int id, unsigned int val)
-{
-    *(volatile uint32_t *)(base + GICD_ICENABLER + (id << 2)) = val;
-}
-
-void gicd_write_itargetsr(uintptr_t base, unsigned int id, unsigned int val)
-{
-    *(volatile uint32_t *)(base + GICD_ITARGETSR_SPI + id) = val;
-}
-
-void EnableGICMailboxInterrupts()
-{
-    uint32_t core_id = GetCoreID();
-
-    printf("Enabling GIC Mailbox Interrupts on core %d\n", core_id);
-
-    printf("GICD_ISENABLER[0]: 0x%08x\n", gicd_read_isenabler(0xff841000, 4)); //  SPI registers start at 0x0104
-
-    gicd_write_isenabler(0xff841000, 4, 0x0000FFFF);
-
-    printf("\nGICD_ISENABLER[0]: 0x%08x\n", gicd_read_isenabler(0xff841000, 4));
-
-    gicd_write_itargetsr(0xff841000, 0, 0x02020202);
-    gicd_write_itargetsr(0xff841000, 4, 0x02020202);
-    gicd_write_itargetsr(0xff841000, 8, 0x02020202);
-    gicd_write_itargetsr(0xff841000, 12, 0x02020202);
-    gicd_write_itargetsr(0xff841000, 16, 0x02020202);
-}
-
 class Counter : public Runnable
 {
 public:
@@ -134,10 +84,10 @@ public:
     {
         printf("In process: %s\n", array_.c_str());
 
-        minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+//        minstd::fixed_string<128> format_buffer;
+//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-        user::io::Write(format_buffer.c_str());
+//        user::io::Write(format_buffer.c_str());
 
         const UUID task_id = task::Task::GetTask().ID();
 
@@ -150,7 +100,7 @@ public:
             {
                 buf[0] = array_.data()[i];
                 user::io::Write(buf);
-                CPUTicksDelay(((uint64_t)990 + random_generator.Next32BitValue() % 20) * 100000);
+                CPUTicksDelay(((uint64_t)990 + random_generator.Next32BitValue() % 20 ) * 100000);
             }
 
             if (task_id != task::Task::GetTask().ID())
@@ -177,10 +127,10 @@ public:
     {
         printf("In User Short Live Process: %d\n", id_);
 
-        minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+//        minstd::fixed_string<128> format_buffer;
+//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-        user::io::Write(format_buffer.c_str());
+//        user::io::Write(format_buffer.c_str());
 
         const UUID task_id = task::Task::GetTask().ID();
 
@@ -229,10 +179,10 @@ public:
 
         const UUID task_id = task::Task::GetTask().ID();
 
-        minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+//        minstd::fixed_string<128> format_buffer;
+//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-        printf(format_buffer.c_str());
+//        printf(format_buffer.c_str());
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
@@ -266,10 +216,10 @@ public:
 
         const UUID task_id = task::Task::GetTask().ID();
 
-        minstd::fixed_string<128> format_buffer;
-        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+//        minstd::fixed_string<128> format_buffer;
+//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-        printf(format_buffer.c_str());
+//        printf(format_buffer.c_str());
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
@@ -353,30 +303,19 @@ extern "C" void kernel_main()
 {
     //  Initialize the MMU
 
-
     //  Initialize the rest of the platform
 
     SetLogLevel(LogLevel::WARNING);
 
     InitializePlatform();
 
-    //  Initialize the task manager
-
-    task::TaskManagerImpl::Instance();
-
     printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
     printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
 
-    DumpDiagnostics();
-
-    //  Mount the filesystems on the SD card
-
-    filesystems::MountSDCardFilesystems();
+    EnableIRQ();
 
     //  Setup the ISRs
-
-    EnableIRQ();
 
     SystemTimerRescheduleISR timerRescheduleISR;
     TaskSwitchISR taskSwitchISR;
@@ -387,6 +326,18 @@ extern "C" void kernel_main()
     GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR, CoreList(CoreList::CoreID::CORE0));
     GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR, CoreList(CoreList::CoreID::ALL_CORES));
     GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR, CoreList(CoreList::CoreID::ALL_CORES));
+
+    //  Initialize the task manager
+
+    task::TaskManagerImpl::Instance().Initialize();
+
+    //    DumpDiagnostics();
+
+    //  Mount the filesystems on the SD card
+
+    filesystems::MountSDCardFilesystems();
+
+    printf("Starting recurring interrupt\n");
 
     GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 50000);
 
@@ -418,7 +369,7 @@ extern "C" void kernel_main()
 
     printf("Forking CLI\n");
 
-    auto new_kernel_process = task::GetTaskManager().ForkKernelTask("CLI", &cli);
+    auto new_kernel_process = task::GetTaskManager().ForkKernelTask(&cli, "CLI");
     if (new_kernel_process.Failed())
     {
         printf("error while starting cli");
@@ -429,7 +380,7 @@ extern "C" void kernel_main()
 
     KernelCounter kernel_counter;
 
-    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask("Kernel Counter", &kernel_counter);
+    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask(&kernel_counter, "Kernel Counter");
     if (new_kernel_counter.Failed())
     {
         printf("error while starting kernel counter");
@@ -438,7 +389,7 @@ extern "C" void kernel_main()
 
     Counter counter1("1234567890");
 
-    auto new_counter1 = task::GetTaskManager().ForkKernelTask("Counter1", &counter1);
+    auto new_counter1 = task::GetTaskManager().ForkKernelTask(&counter1, "Counter1");
     if (new_counter1.Failed())
     {
         printf("error while starting counter 1");
@@ -447,7 +398,7 @@ extern "C" void kernel_main()
 
     Counter counter2("vwxyz");
 
-    auto new_counter2 = task::GetTaskManager().ForkKernelTask("Counter2", &counter2);
+    auto new_counter2 = task::GetTaskManager().ForkKernelTask(&counter2, "Counter2");
     if (new_counter2.Failed())
     {
         printf("error while starting counter 2");
@@ -458,7 +409,7 @@ extern "C" void kernel_main()
 
     ShortLivedKernelProcess short_lived_kernel_process;
 
-    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask("Short Lived Kernel Process", &short_lived_kernel_process);
+    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process, "Short Lived Kernel Process");
     if (new_short_lived_kernel_process.Failed())
     {
         printf("error while starting short lived kernel process");
@@ -477,7 +428,7 @@ extern "C" void kernel_main()
         }
     */
 
-    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+    printf("Cores active: %d, %d, %d, %d\n", __core_state[0].load(), __core_state[1].load(), __core_state[2].load(), __core_state[3].load());
 
     //    printf("Starting exception generating process\n");
 
@@ -494,6 +445,8 @@ extern "C" void kernel_main()
 
     //  Keep the scheduler running
 
+    WAIT_FOR_INTERRUPT;
+
     while (1)
     {
         //        printf("Task List:   **********************************************\n");
@@ -506,8 +459,8 @@ extern "C" void kernel_main()
         //            }
         //            return task::TaskListVisitorCallbackStatus::NEXT; });
 
-        CPUTicksDelay(50000000);
+        CPUTicksDelay(1000);
 
-        //        task::TaskManagerImpl::Instance().Yield();
+        task::TaskManagerImpl::Instance().Yield();
     }
 }

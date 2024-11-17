@@ -6,6 +6,8 @@
 
 #include "asm_utility.h"
 
+#include <minimalstdio.h>
+
 bool BCM2711ExceptionManager::Initialize()
 {
     LogEntryAndExit("Entering Initialize");

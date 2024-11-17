@@ -20,6 +20,7 @@
 #include "task/runnable.h"
 #include "task/task_errors.h"
 #include "task/task_impl.h"
+#include "task/task_execution_context.h"
 
 #include "asm_utility.h"
 
@@ -51,6 +52,8 @@ namespace task
             return OSEntityTypes::TASK_MANAGER;
         }
 
+        TaskResultCodes Initialize();
+
         TaskResultCodes StartSecondaryCores();
 
         const TaskImpl &CurrentTask() const
@@ -70,48 +73,45 @@ namespace task
         void Schedule(void);
         void SwitchToNextTask(void);
 
-        void Yield(void)
-        {
-            CurrentTask().counter_ = 0;
-            CurrentTask().preempt_count_ = 0;
-
-            SwitchToNextTask();
-        }
+        void Yield(void);
+//        {
+//            CurrentTask().counter_ = 0;
+//            CurrentTask().preempt_count_ = 0;
+//
+//            SwitchToNextTask();
+//        GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
+//
+//        }
 
         void ExitProcess();
 
-        ValueResult<TaskResultCodes, UUID> ForkKernelTask(const char *name, Runnable *runnable) override;
-        ValueResult<TaskResultCodes, UUID> ForkUserTask(const char *name, Runnable *runnable) override;
+        ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
+        ValueResult<TaskResultCodes, UUID> ForkUserTask(Runnable *runnable, const TaskDefinition& task_definition) override;
 
-        ValueResult<TaskResultCodes, UUID> CloneTask(const char *new_name, MemoryPagePointer stack);
+        ValueResult<TaskResultCodes, UUID> CloneTask(const TaskDefinition& task_definition, MemoryPagePointer stack);
 
         void SetCoreMainTaskContext(minstd::unique_ptr<TaskImpl> &task);
 
-        void AddTask(minstd::unique_ptr<TaskImpl> &task)
-        {
-            LockGuard lock(task_map_mutex_);
+        void AddTask(minstd::unique_ptr<TaskImpl> &task);
 
-            task_map_.insert(task->ID(), minstd::move(task));
-        }
+        minstd::array<TaskImpl *, MAX_CORES> idle_tasks_;
 
-    private:
+        minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
 
+    //private:
         using TaskMap = minstd::map<UUID, minstd::unique_ptr<TaskImpl>>;
-
         using TaskMapAllocator = minstd::allocator<TaskMap::node_type>;
         using TaskMapHeapAllocator = minstd::heap_allocator<TaskMap::node_type>;
 
         //  Data members
 
-        static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;        
+        static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;
 
         const uint32_t number_of_cores_;
 
         minstd::array<TaskImpl *, MAX_CORES> kernel_main_tasks_;
 
-        const uint64_t task_stack_size_in_bytes_ = DEFAULT_TASK_STACK_SIZE_IN_BYTES;
-
-        //  Put the task map and the per-core queues in the kernel dynamic heap
+        //  Put the task map in the kernel dynamic heap
 
         TaskMapHeapAllocator task_map_heap_allocator_{__os_dynamic_heap};
         TaskMap task_map_{task_map_heap_allocator_};
@@ -126,7 +126,7 @@ namespace task
 
         TaskManagerImpl();
 
-        ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal(const char *name, Runnable *runnable, void (*wrapper)(Runnable *));
+        ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition& task_definition);
 
         TaskImpl &FindNextTask(void);
     };

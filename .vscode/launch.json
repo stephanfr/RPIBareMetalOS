@@ -7,23 +7,13 @@
         
         {
             "name": "(gdb) Remote Attach",
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/rpibaremetalos/test/build/cpputest_main.exe",
-            "MIMode": "gdb",
-            "cwd":"${workspaceFolder}/rpibaremetalos",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                },
-                {
-                    "description": "Set Disassembly Flavor to Intel",
-                    "text": "-gdb-set disassembly-flavor intel",
-                    "ignoreFailures": true
-                }
-            ]
+            "type": "gdb",
+            "request": "attach",
+            "executable": "${workspaceFolder}/dev/RPIBareMetalOS/rpibaremetalos/image/kernel8.img",
+            "target": "localhost:1234",
+            "remote": true,
+            "cwd": "${workspaceRoot}", 
+            "gdbpath": "/home/steve/dev_tools/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-gdb"
         }
     ]
 }

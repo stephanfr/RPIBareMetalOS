@@ -69,11 +69,9 @@ public:
         config.running_ = true;
         config.period_in_microseconds_ = period_in_microseconds;
 
-        uint32_t starting_compare = GetRegister(SystemTimerRegisters::SYSTEM_TIMER_LOW);
+        config.next_interrupt_ = GetMicroseconds() + period_in_microseconds;
 
-        config.next_interrupt_ = starting_compare + period_in_microseconds;
-
-        SetCompareRegister(compare_register, config.next_interrupt_);
+        SetCompareRegister(compare_register, (uint32_t)(config.next_interrupt_ & 0x00000000FFFFFFFF));
     }
 
     void CancelRecurringInterrupt(SystemTimerCompares compare_register) override
@@ -103,13 +101,15 @@ public:
 
                 //  If we missed or are close to missing an interrupt, issue a warning and reschedule for the next period
 
-                if( config.next_interrupt_ < ( GetSystemTimer().GetMicroseconds() + (config.period_in_microseconds_ / 10)))
+                if( config.next_interrupt_ < ( GetMicroseconds() + (config.period_in_microseconds_ / 10)))
                 {
                     LogWarning("******Missed interrupt******\n");
-                    config.next_interrupt_ = GetSystemTimer().GetMicroseconds() + config.period_in_microseconds_;
+                    config.next_interrupt_ = GetMicroseconds() + config.period_in_microseconds_;
                 }
 
-                SetCompareRegister(compare_register, config.next_interrupt_);
+                //  The compare register only compares the bottom 32 bits of the 64 bit timer value
+
+                SetCompareRegister(compare_register, (uint32_t)(config.next_interrupt_ & 0x00000000FFFFFFFF));
             }
         }
 
@@ -119,32 +119,39 @@ public:
     }
 
 private:
-    typedef enum class SystemTimerRegisters : uint32_t
+    enum class SystemTimerRegisters : uint32_t
     {
         SYSTEM_TIMER_CONTROL_STATUS = 0x00003000,
         SYSTEM_TIMER_LOW = 0x00003004,
         SYSTEM_TIMER_HIGH = 0x00003008
-    } SystemTimerRegisters;
+    };
 
-    typedef enum class SystemTimerInterruptAcknowledgeMasks : uint32_t
+    enum class SystemTimerInterruptAcknowledgeMasks : uint32_t
     {
         TIMER_CS_COMPARE_0_MASK = 1,
         TIMER_CS_COMPARE_1_MASK = 2,
         TIMER_CS_COMPARE_2_MASK = 4,
         TIMER_CS_COMPARE_3_MASK = 8
-    } SystemTimerInterruptAcknowledgeMasks;
+    };
 
     constexpr static uint32_t NUM_SYSTEM_TIMER_COMPARE_REGISTERS = 4;
 
     const PlatformInfo &platform_info;
 
-    typedef struct RecurringTimerConfig
+    struct RecurringTimerConfig
     {
-        bool running_ = false;
+        RecurringTimerConfig()
+            : running_(false),
+              next_interrupt_(0),
+              period_in_microseconds_(0)
+        {
+        }
 
-        uint32_t next_interrupt_ = 0;
-        uint32_t period_in_microseconds_ = 0;
-    } RecurringTimerConfig;
+        bool running_;
+
+        uint64_t next_interrupt_;
+        uint32_t period_in_microseconds_;
+    };
 
     RecurringTimerConfig recurring_timer_configs_[NUM_SYSTEM_TIMER_COMPARE_REGISTERS];
 

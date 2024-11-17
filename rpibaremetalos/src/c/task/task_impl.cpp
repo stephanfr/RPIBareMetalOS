@@ -18,6 +18,13 @@ namespace task
         return *context;
     }
 
+    TaskImpl &TaskImpl::GetTask()
+    {
+        TaskImpl *context = static_cast<TaskImpl *>(GetTaskContext());
+
+        return *context;
+    }
+
     TaskImpl::FullCPUState &TaskImpl::AllocateTaskInitialFullCPUState( MemoryPagePointer initial_stack )
     {
         //  This reserves space for a complete KernelEntry stack frame at the task top of stack.

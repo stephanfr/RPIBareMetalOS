@@ -5,10 +5,11 @@
 #pragma once
 
 #include "os_config.h"
+#include "os_memory_config.h"
 
 #include <fixed_string>
-#include <map>
 #include <functional>
+#include <map>
 
 #include "os_entity.h"
 
@@ -19,10 +20,81 @@
 
 namespace task
 {
+    //  Class to model a core restriction mask
+
+    class CoreRestrictionMask
+    {
+    public:
+        static constexpr uint64_t ALL_CORES = 0xFFFFFFFFFFFFFFFF;
+
+        CoreRestrictionMask(uint64_t mask)
+            : mask_(mask)
+        {
+        }
+
+        CoreRestrictionMask(const CoreRestrictionMask &mask_to_copy)
+            : mask_(mask_to_copy.mask_)
+        {
+        }
+
+        ~CoreRestrictionMask() = default;
+
+        CoreRestrictionMask &operator=(uint64_t mask)
+        {
+            mask_ = mask;
+
+            return *this;
+        }
+
+        CoreRestrictionMask &operator=(const CoreRestrictionMask &mask_to_copy)
+        {
+            mask_ = mask_to_copy.mask_;
+
+            return *this;
+        }
+
+        bool ContainsCore(uint32_t core_id) const
+        {
+            return (mask_ & (1 << core_id)) != 0;
+        }
+
+    private:
+        uint64_t mask_;
+    };
+
+    struct TaskDefinition
+    {
+        TaskDefinition(const minstd::string &name,
+                       uint32_t priority = 1,
+                       uint64_t stack_size_in_bytes = DEFAULT_TASK_STACK_SIZE_IN_BYTES,
+                       CoreRestrictionMask core_mask = CoreRestrictionMask::ALL_CORES)
+            : name_(name),
+              priority_(priority),
+              stack_size_in_bytes_(stack_size_in_bytes),
+              core_mask_(core_mask)
+        {
+        }
+
+        TaskDefinition(const char *name,
+                       uint32_t priority = 1,
+                       uint64_t stack_size_in_bytes = DEFAULT_TASK_STACK_SIZE_IN_BYTES,
+                       CoreRestrictionMask core_mask = CoreRestrictionMask::ALL_CORES)
+            : name_(name),
+              priority_(priority),
+              stack_size_in_bytes_(stack_size_in_bytes),
+              core_mask_(core_mask)
+        {
+        }
+
+        const minstd::fixed_string<64> name_;
+        const uint32_t priority_;
+        const uint64_t stack_size_in_bytes_;
+        const CoreRestrictionMask core_mask_;
+    };
+
     class Task
     {
     public:
-
         static Task &GetTask();
 
         typedef enum class ExecutionState : uint32_t
@@ -57,43 +129,43 @@ namespace task
 
         virtual uint32_t CurrentCore() const = 0;
 
-//        virtual void Yield() = 0;
-//        virtual void Exit() = 0;
+        //        virtual void Yield() = 0;
+        //        virtual void Exit() = 0;
     };
 
-    inline const char* ToString(Task::TaskType type)
+    inline const char *ToString(Task::TaskType type)
     {
         switch (type)
         {
-            case Task::TaskType::CORE_MAIN_TASK:
-                return "Core Main Task";
-            case Task::TaskType::KERNEL_TASK:
-                return "Kernel Task";
-            case Task::TaskType::USER_TASK:
-                return "User Task";
-            default:
-                return "Unknown Task Type";
+        case Task::TaskType::CORE_MAIN_TASK:
+            return "Core Main Task";
+        case Task::TaskType::KERNEL_TASK:
+            return "Kernel Task";
+        case Task::TaskType::USER_TASK:
+            return "User Task";
+        default:
+            return "Unknown Task Type";
         }
     }
 
-    inline const char* ToString(Task::ExecutionState state)
+    inline const char *ToString(Task::ExecutionState state)
     {
         switch (state)
         {
-            case Task::ExecutionState::STARTING:
-                return "Starting";
-            case Task::ExecutionState::RUNNING:
-                return "Running";
-            case Task::ExecutionState::RUNNABLE_WAITING:    
-                return "Runnable Waiting";
-            case Task::ExecutionState::WAITING:
-                return "Waiting";
-            case Task::ExecutionState::ZOMBIE:
-                return "Zombie";
-            default:
-                return "Unknown State";
+        case Task::ExecutionState::STARTING:
+            return "Starting";
+        case Task::ExecutionState::RUNNING:
+            return "Running";
+        case Task::ExecutionState::RUNNABLE_WAITING:
+            return "Runnable Waiting";
+        case Task::ExecutionState::WAITING:
+            return "Waiting";
+        case Task::ExecutionState::ZOMBIE:
+            return "Zombie";
+        default:
+            return "Unknown State";
         }
-    }    
+    }
 
     typedef enum class TaskListVisitorCallbackStatus
     {
@@ -106,11 +178,10 @@ namespace task
     class TaskManager : public OSEntity
     {
     public:
-
         virtual void VisitTaskList(TaskListVisitorCallback callback) const = 0;
 
-        virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(const char* name, Runnable *runnable) = 0;
-        virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(const char* name, Runnable *runnable) = 0;
+        virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
+        virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
 
     protected:
         TaskManager()
@@ -119,7 +190,6 @@ namespace task
         }
 
         virtual ~TaskManager() = default;
-
     };
 
     TaskManager &GetTaskManager(void);
