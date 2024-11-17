@@ -415,6 +415,7 @@ extern "C" void kernel_main()
         printf("error while starting short lived kernel process");
         return;
     }
+
     /*
         printf("Starting user processes\n");
 

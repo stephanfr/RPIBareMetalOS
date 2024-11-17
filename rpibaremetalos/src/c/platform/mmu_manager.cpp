@@ -37,6 +37,8 @@ void MMUManager::Initialize(MemoryModel memory_model)
     }
 
     platform_memory_manager_->EnableMMU();
+
+    __mmu_enabled = true;
 }
 
 extern "C" void EnableMMUForCore()

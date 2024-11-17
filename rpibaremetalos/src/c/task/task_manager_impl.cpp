@@ -55,7 +55,7 @@ namespace task
                 {
                     WAIT_FOR_EVENT;
                     task::TaskManagerImpl::Instance().Yield();
-//CPUTicksDelay(10000);
+                    CPUTicksDelay(1000);
                 }
             }
         };
@@ -496,7 +496,7 @@ namespace task
     {
         //  First, groom the task list.  Remmove any Zombies and then add any new tasks in the queue.
 
-//        printf("TaskManagerImpl::SwitchToNextTask\n");
+        //        printf("TaskManagerImpl::SwitchToNextTask\n");
 
         uint32_t core_id = GetCoreID();
 
@@ -588,16 +588,14 @@ namespace task
         ReturnFromForkASMStub(); //  Assembly function
     }
 
-       void TaskManagerImpl::Yield(void)
-        {
-            CurrentTask().counter_ = 0;
-            CurrentTask().preempt_count_ = 0;
+    void TaskManagerImpl::Yield(void)
+    {
+        CurrentTask().counter_ = 0;
+        CurrentTask().preempt_count_ = 0;
 
-//            SwitchToNextTask();
+        //            SwitchToNextTask();
         GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
-
-        }
-
+    }
 
     void TaskManagerImpl::ExitProcess()
     {
@@ -615,7 +613,8 @@ namespace task
 
         printf("Exiting Task before switching: %s\n", CurrentTask().Name().c_str());
 
-        task_execution_contexts_[GetCoreID()].SwitchTasks();
+        //        task_execution_contexts_[GetCoreID()].SwitchTasks();
+        GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
         LogError("Returned from SwitchToNextTask - should never be here: %s\n", CurrentTask().Name().c_str());
     }

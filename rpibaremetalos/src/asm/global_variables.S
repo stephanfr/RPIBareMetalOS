@@ -6,6 +6,14 @@
 
 //  Global variable for holding the hw board type
 
+.global __mmu_enabled
+.data
+.align 4
+
+__mmu_enabled : .word 0
+
+//  Global variable for holding the hw board type
+
 .global __hw_board_type
 .data
 .align 4

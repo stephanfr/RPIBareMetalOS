@@ -7,8 +7,8 @@
 #include <memory>
 
 
-extern minstd::single_block_memory_heap __os_static_heap;
-extern minstd::single_block_memory_heap __os_dynamic_heap;
+extern minstd::single_block_memory_heap &__os_static_heap;
+extern minstd::single_block_memory_heap &__os_dynamic_heap;
 extern minstd::single_block_memory_heap &__os_filesystem_cache_heap;
 
 template <typename T>
