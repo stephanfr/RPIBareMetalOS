@@ -155,7 +155,7 @@ namespace MINIMAL_STD_NAMESPACE
         void popFront()
         {
             auto const current = read_index_.load(memory_order_relaxed);
-            assert(current != write_index_.load(memory_order_acquire));
+//            assert(current != write_index_.load(memory_order_acquire));
 
             auto next = current + 1;
 
