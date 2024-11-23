@@ -15,7 +15,7 @@ void __exit( int status_code );
 #define exit __exit
 
 void __assert (const char *msg, const char *file, int line);
-#define assert( expression ) (void)((expression) || __assert( #expression, __FILE__, __LINE__ ))
+#define assert( expression ) (void)((expression) || (__assert( #expression, __FILE__, __LINE__ ), 0))
 
 char* itoa( int value, char *str, int base );
 char* utoa( unsigned int value, char *str, int base );

@@ -138,7 +138,7 @@ namespace cli::commands
 
         auto callback = [&buffer, &uuid_buffer, &context](const task::Task &task) -> task::TaskListVisitorCallbackStatus
         {
-            context.output_stream_ << minstd::format(buffer, "{}  {:<24} {}\n", task.ID().ToString(uuid_buffer), task.Name(), ToString(task.State()));
+            context.output_stream_ << minstd::format(buffer, "{} {} {:<24} {}\n", task.ID().ToString(uuid_buffer), task.CurrentCore(), task.Name(), ToString(task.State()));
             return task::TaskListVisitorCallbackStatus::NEXT;
         };
 

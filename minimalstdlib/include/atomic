@@ -113,6 +113,21 @@ namespace MINIMAL_STD_NAMESPACE
             return __atomic_compare_exchange_n(&value_, &expected, new_value, false, static_cast<int>(order), static_cast<int>(order));
         }
 
+        T fetch_add(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_fetch_add(&value_, value, static_cast<int>(order));
+        }
+
+        T add_fetch(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_add_fetch(&value_, value, static_cast<int>(order));
+        }
+
+        T and_fetch(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_and_fetch(&value_, value, static_cast<int>(order));
+        }
+
     private:
         T value_;
     };

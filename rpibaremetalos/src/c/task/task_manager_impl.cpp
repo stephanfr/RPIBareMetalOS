@@ -54,7 +54,7 @@ namespace task
                 while (1)
                 {
                     WAIT_FOR_EVENT;
-                    task::TaskManagerImpl::Instance().Yield();
+//                    task::TaskManagerImpl::Instance().Yield();
                     CPUTicksDelay(1000);
                 }
             }
@@ -599,8 +599,6 @@ namespace task
 
     void TaskManagerImpl::ExitProcess()
     {
-        printf("Exiting Task: %s\n", CurrentTask().Name().c_str());
-
         CurrentTask().state_ = Task::ExecutionState::ZOMBIE;
 
         if (CurrentTask().stack_ != 0)
@@ -611,9 +609,6 @@ namespace task
         CurrentTask().preempt_count_ = 0;
         CurrentTask().counter_ = 0;
 
-        printf("Exiting Task before switching: %s\n", CurrentTask().Name().c_str());
-
-        //        task_execution_contexts_[GetCoreID()].SwitchTasks();
         GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
         LogError("Returned from SwitchToNextTask - should never be here: %s\n", CurrentTask().Name().c_str());

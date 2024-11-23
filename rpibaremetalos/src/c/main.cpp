@@ -84,10 +84,10 @@ public:
     {
         printf("In process: %s\n", array_.c_str());
 
-//        minstd::fixed_string<128> format_buffer;
-//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-//        user::io::Write(format_buffer.c_str());
+        //        user::io::Write(format_buffer.c_str());
 
         const UUID task_id = task::Task::GetTask().ID();
 
@@ -100,7 +100,7 @@ public:
             {
                 buf[0] = array_.data()[i];
                 user::io::Write(buf);
-                CPUTicksDelay(((uint64_t)990 + random_generator.Next32BitValue() % 20 ) * 100000);
+                CPUTicksDelay(((uint64_t)990 + random_generator.Next32BitValue() % 20) * 100000);
             }
 
             if (task_id != task::Task::GetTask().ID())
@@ -127,10 +127,10 @@ public:
     {
         printf("In User Short Live Process: %d\n", id_);
 
-//        minstd::fixed_string<128> format_buffer;
-//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-//        user::io::Write(format_buffer.c_str());
+        //        user::io::Write(format_buffer.c_str());
 
         const UUID task_id = task::Task::GetTask().ID();
 
@@ -179,10 +179,10 @@ public:
 
         const UUID task_id = task::Task::GetTask().ID();
 
-//        minstd::fixed_string<128> format_buffer;
-//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-//        printf(format_buffer.c_str());
+        //        printf(format_buffer.c_str());
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
@@ -216,10 +216,10 @@ public:
 
         const UUID task_id = task::Task::GetTask().ID();
 
-//        minstd::fixed_string<128> format_buffer;
-//        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-//        printf(format_buffer.c_str());
+        //        printf(format_buffer.c_str());
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
@@ -228,6 +228,40 @@ public:
         if (task_id != task::Task::GetTask().ID())
         {
             printf("Kernel Task context changed!!\n");
+        }
+
+        printf("Leaving ShortLivedKernelProcess\n");
+    }
+};
+
+class ShortLivedKernelTaskForkingTask : public Runnable
+{
+public:
+    ShortLivedKernelTaskForkingTask() = default;
+
+    void Run()
+    {
+        minstd::array<ShortLivedKernelProcess, 256> short_lived_kernel_processes;
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+
+        for (int i = 0; i < 256; i++)
+        {
+            auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_processes[i], "Short Lived Kernel Process");
+            if (new_short_lived_kernel_process.Failed())
+            {
+                printf("error while starting short lived kernel process");
+                return;
+            }
+
+            delay(50 + (random_generator.Next32BitValue() % 20) * 1000);
+
+            if (task_id != task::Task::GetTask().ID())
+            {
+                printf("Kernel Task context changed!!\n");
+            }
         }
 
         printf("Leaving ShortLivedKernelProcess\n");
@@ -416,6 +450,44 @@ extern "C" void kernel_main()
         return;
     }
 
+    printf("Starting short lived kernel process forking processes\n");
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process;
+
+    auto new_short_lived_kernel_process_forking_process = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process, "Short Lived Kernel Process Forking Process");
+    if (new_short_lived_kernel_process_forking_process.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process2;
+
+    auto new_short_lived_kernel_process_forking_process2 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process2, "Short Lived Kernel Process Forking Process");
+    if (new_short_lived_kernel_process_forking_process2.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process3;
+
+    auto new_short_lived_kernel_process_forking_process3 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process3, "Short Lived Kernel Process Forking Process");
+    if (new_short_lived_kernel_process_forking_process3.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process4;
+
+    auto new_short_lived_kernel_process_forking_process4 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process4, "Short Lived Kernel Process Forking Process");
+    if (new_short_lived_kernel_process_forking_process4.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
     /*
         printf("Starting user processes\n");
 
@@ -446,7 +518,7 @@ extern "C" void kernel_main()
 
     //  Keep the scheduler running
 
-    WAIT_FOR_INTERRUPT;
+    //    WAIT_FOR_INTERRUPT;
 
     while (1)
     {
@@ -462,6 +534,6 @@ extern "C" void kernel_main()
 
         CPUTicksDelay(1000);
 
-        task::TaskManagerImpl::Instance().Yield();
+        //        task::TaskManagerImpl::Instance().Yield();
     }
 }

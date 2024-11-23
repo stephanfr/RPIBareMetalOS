@@ -59,7 +59,9 @@
         "utility": "cpp",
         "cpu_context.h": "c",
         "atomic": "cpp",
-        "spsc_queue": "cpp"
+        "spsc_queue": "cpp",
+        "ticket_dispener": "cpp",
+        "token_dispenser": "cpp"
     },
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.errorSquiggles": "disabled",
