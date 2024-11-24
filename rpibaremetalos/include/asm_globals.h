@@ -39,8 +39,12 @@ extern const unsigned int __os_process_start;
 //  Variables defined or shared with assembly language code
 //
 
-extern bool __mmu_enabled;
 extern uint32_t __hw_board_type;
 extern uint32_t __number_of_cores_available;
 extern minstd::atomic<uint32_t> __core_state[];
 extern uint64_t __core_jmp_table[];
+
+extern uint32_t __board_version;
+extern uint32_t __vc_memory_start;
+extern uint32_t __vc_memory_size;
+extern char __kernel_command_line;

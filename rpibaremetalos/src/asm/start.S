@@ -397,6 +397,10 @@ continue_on_core0:
     SaveBoardHWType
     SaveNumberOfCoresAvailable
 
+    //  Get the board version, VC memory start, and kernel command line
+
+    bl GetBootTimeSettings
+
     //  Clear bss
     //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length
 
@@ -449,6 +453,10 @@ start_next_core:
     add x19, x19, #1
     cmp x19, x24_numberOfCoresAvailable                         //  Loop until all cores are started
     b.lo start_next_core
+
+    //  Initialize the platform
+
+    bl      InitializePlatform
 
     //  Jump to the kernel main function, must have C style linkage
 

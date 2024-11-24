@@ -12,10 +12,10 @@ class RPI4BMemoryManager : public AARCH64PlatformMemoryManager
 {
 
     using VMSAv8_64_DESCRIPTOR = AARCH64PlatformMemoryManager::VMSAv8_64_DESCRIPTOR;
-    using MemoryModel = MMUManager::MemoryModel;
+    using MemoryModelTypes = MMUManager::MemoryModelTypes;
 
 public:
-    RPI4BMemoryManager(MemoryModel memory_model);
+    RPI4BMemoryManager(MemoryModelTypes memory_model);
 
     void EnableMMU() override
     {

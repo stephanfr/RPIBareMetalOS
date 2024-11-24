@@ -6,7 +6,7 @@
 
 extern "C" uint32_t GetVideocoreMemoryStart(uint32_t board_type);
 
-RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
+RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModelTypes memory_model)
     : AARCH64PlatformMemoryManager(memory_model)
 {
     level1_blocksize_ = BYTES_1M * 2; //  2MB
@@ -19,7 +19,7 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModel memory_model)
 
     number_of_pagetable_entries_ = 1024;
 
-    videocore_memory_start_block_ = GetVideocoreMemoryStart(__hw_board_type) / level1_blocksize_;
+    videocore_memory_start_block_ = (uint64_t)videocore_memory_start_ / level1_blocksize_;
 
     //  Reserve a couple 'special purpose' blocks.  First, a 2MB block to hold the page tables.  Second, a 2MB block
     //      of uncached memory for GPU to ARM communication (.e. mailboxes and frame buffers).  The 'dma_block' allows

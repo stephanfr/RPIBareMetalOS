@@ -6,7 +6,7 @@
 
 extern "C" uint32_t GetVideocoreMemoryStart(uint32_t board_type);
 
-RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
+RPI4BMemoryManager::RPI4BMemoryManager(MemoryModelTypes memory_model)
     : AARCH64PlatformMemoryManager(memory_model)
 {
     level1_blocksize_ = BYTES_1M * 2;   //  2MB
@@ -21,7 +21,7 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModel memory_model)
     uint32_t last_physical_memory_entry = platform_memory_in_bytes_ / level1_blocksize_;
     uint32_t entries_per_level1_block = (level1_blocksize_ / level2_blocksize_);
 
-    videocore_memory_start_block_ = GetVideocoreMemoryStart(__hw_board_type) / level1_blocksize_;
+    videocore_memory_start_block_ = (uint64_t)videocore_memory_start_ / level1_blocksize_;
 
     //  Reserve a couple 'special purpose' blocks.  First, a 2MB block to hold the page tables.  Second, a 2MB block
     //      of uncached memory for GPU to ARM communication (.e. mailboxes and frame buffers).  The 'dma_block' allows

@@ -13,10 +13,10 @@ class RPI3BPlusMemoryManager : public AARCH64PlatformMemoryManager
 {
 
     using VMSAv8_64_DESCRIPTOR = AARCH64PlatformMemoryManager::VMSAv8_64_DESCRIPTOR;
-    using MemoryModel = MMUManager::MemoryModel;
+    using MemoryModelTypes = MMUManager::MemoryModelTypes;
 
 public:
-    RPI3BPlusMemoryManager(MemoryModel memory_model);
+    RPI3BPlusMemoryManager(MemoryModelTypes memory_model);
 
     void EnableMMU() override
     {

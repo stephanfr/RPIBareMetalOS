@@ -14,8 +14,6 @@ public:
     KernelCommandLine()
     {}
 
-    static bool    LoadCommandLine( uint8_t *mmio_base );
-
     static const minstd::string &RawCommandLine()
     {
         return raw_command_line_;
@@ -26,7 +24,5 @@ public:
 private:
 
     static minstd::fixed_string <MAX_KERNEL_COMMAND_LINE_LENGTH>  raw_command_line_;
-
-    bool SetupConsole();
 };
 

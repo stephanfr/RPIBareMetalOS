@@ -35,6 +35,7 @@
 
 #include "asm_globals.h"
 
+
 //  Forward declare the assembly language function which returns the board type
 
 extern "C" uint32_t IdentifyBoardType();
@@ -148,6 +149,9 @@ bool SetupSerialConsole()
 }
 
 //  Function to setup platform specific code
+//      Declare it as 'extern "C"' so that it is not mangled and we can call it from the startup assembly code.
+
+extern "C" void InitializePlatform() __attribute__((used));
 
 void InitializePlatform()
 {
@@ -161,7 +165,7 @@ void InitializePlatform()
     //  First thing, initialize the MMU manager
     //      The GPU Mailbox assumes that the MMU is enabled, so we need to do this first.
 
-    MMUManager::Initialize(MMUManager::MemoryModel::KERNEL_ONLY_1_TO_1);
+    MMUManager::Initialize();
 
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
@@ -194,10 +198,6 @@ void InitializePlatform()
     InitializeSWRandomNumberGenerators(MurmurHash64ASeed(__hw_random_number_generator->Next64BitValue()),
                                        Xoroshiro128PlusPlusRNG::Seed(__hw_random_number_generator->Next64BitValue(),
                                                                      __hw_random_number_generator->Next64BitValue()));
-
-    //  Get the kernel command line
-
-    KernelCommandLine::LoadCommandLine(__platform_info->GetMMIOBase()); //  TODO handle error condition
 
     //  Setup the serial console
 

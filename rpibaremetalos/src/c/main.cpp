@@ -4,31 +4,23 @@
 
 #include <stdint.h>
 
-#include <fixed_string>
-
-#include <atomic>
-
 #include "heaps.h"
 
-#include "platform/exception_manager.h"
-#include "platform/mmu_manager.h"
-#include "platform/platform.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 
+#include "devices/system_timer.h"
 #include "devices/character_io.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
-#include "platform/gpu_mailbox_messages.h"
 
 #include "isr/core_task_switch_isr.h"
 #include "isr/halt_core_isr.h"
 #include "isr/system_timer_reschedule_isr.h"
 #include "isr/task_switch_isr.h"
+#include "platform/exception_manager.h"
 
 #include "task/tasks.h"
-
-#include "utility/dump_diagnostics.h"
 
 #include "filesystem/filesystems.h"
 
@@ -37,29 +29,13 @@
 #include "userspace_api/io.h"
 #include "userspace_api/task.h"
 
-#include "devices/log.h"
-
 #include "minimalstdio.h"
 
 #include "asm_utility.h"
 
-#include <format>
-
-#include "task/process.h"
 #include "task/task_manager_impl.h"
 
-#include "synchronization.h"
 
-extern uint32_t __vc_message_mailbox_buffer[];
-
-//
-//
-//
-
-extern bool __mmu_enabled;
-// void *__uncached_memory_base = nullptr;
-
-extern uint8_t __core_jump_table[16 * 16];
 
 void delay(uint32_t count)
 {
@@ -335,17 +311,15 @@ public:
 
 extern "C" void kernel_main()
 {
-    //  Initialize the MMU
+    //  Initialize the platform
 
-    //  Initialize the rest of the platform
-
-    SetLogLevel(LogLevel::WARNING);
-
-    InitializePlatform();
+//    InitializePlatform();
 
     printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
     printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
+
+    SetLogLevel(LogLevel::WARNING);
 
     EnableIRQ();
 

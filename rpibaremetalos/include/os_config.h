@@ -42,7 +42,7 @@ constexpr uint32_t FREQUENCY_4MHZ = 4000000;
 //  Init Sequence limits
 //
 
-constexpr size_t MAX_KERNEL_COMMAND_LINE_LENGTH = 2048;
+constexpr size_t MAX_KERNEL_COMMAND_LINE_LENGTH = 2048;         //  Change the #define below if this value changes
 constexpr size_t MAX_KERNEL_COMMAND_LINE_KEY = 64;
 constexpr size_t MAX_KERNEL_COMMAND_LINE_VALUE = 64;
 
@@ -74,5 +74,9 @@ constexpr size_t MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE = 4;     //  Standard Mas
 constexpr size_t DEFAULT_DIRECTORY_CACHE_SIZE = 4096;
 
 constexpr size_t MAX_FAT32_SHORT_FILENAME_SEARCH_TABLE_SIZE = 100;
+
+#else
+
+#define MAX_KERNEL_COMMAND_LINE_LENGTH 2048
 
 #endif

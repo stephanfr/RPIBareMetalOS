@@ -51,11 +51,6 @@ public:
     
     void *allocate_raw_block(size_t element_size_in_bytes, size_t num_elements) override
     {
-        if( !__mmu_enabled )
-        {
-            return minstd::single_block_memory_heap::allocate_raw_block(element_size_in_bytes, num_elements);
-        }
-
         LockGuard lock(mutex_);
 
         return minstd::single_block_memory_heap::allocate_raw_block(element_size_in_bytes, num_elements);
@@ -63,11 +58,6 @@ public:
     
     void deallocate_raw_block(void *block) override
     {
-        if( !__mmu_enabled )
-        {
-            return minstd::single_block_memory_heap::deallocate_raw_block(block);
-        }
-        
         LockGuard lock(mutex_);
 
         minstd::single_block_memory_heap::deallocate_raw_block(block);

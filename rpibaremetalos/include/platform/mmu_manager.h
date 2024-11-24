@@ -15,12 +15,14 @@ extern "C" void EnableMMUForCore();
 class MMUManager
 {
 public:
-    typedef enum class MemoryModel : uint32_t
+    typedef enum class MemoryModelTypes : uint32_t
     {
         KERNEL_ONLY_1_TO_1,
-    } MemoryModel;
+    } MemoryModelTypes;
 
-    static void Initialize(MemoryModel memory_model);
+    static constexpr const char* KERNEL_ONLY_1_TO_1_STRING = "kernel_only_1_to_1";
+
+    static void Initialize();
 
     static MMUManager &Instance()
     {
@@ -35,6 +37,8 @@ public:
     virtual void *DMAUncachedMemoryBase() const = 0;
 
     virtual void *ARMToGPUAddress(void *ARMaddress) const = 0;
+
+    virtual MemoryModelTypes MemoryModel() const = 0;
 
     static bool IsMMUEnabled()
     {
