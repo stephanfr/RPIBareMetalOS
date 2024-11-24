@@ -9,13 +9,15 @@
 #include <atomic>
 #include <fixed_string>
 #include <map>
-#include <atomic>
 
+#include "platform/exception_manager.h"
 #include "platform/memory_manager.h"
 
 #include "task/runnable.h"
 #include "task/task_errors.h"
 #include "task/tasks.h"
+
+#include "asm_utility.h"
 
 namespace task
 {
@@ -107,8 +109,30 @@ namespace task
             return core_restriction_mask_;
         }
 
-        //        void Yield();
-        //        void Exit();
+        void Yield()
+        {
+            counter_ = 0;
+            preempt_count_ = 0;
+
+            GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
+        }
+
+        void Exit()
+        {
+            state_ = Task::ExecutionState::ZOMBIE;
+
+            if (stack_ != 0)
+            {
+                GetMemoryManager().ReleaseBlock(stack_, stack_size_in_bytes_);
+            }
+
+            preempt_count_ = 0;
+            counter_ = 0;
+
+            GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
+
+            LogError("Returned from SwitchToNextTask - should never be here: %s\n", name_.c_str());
+        }
 
         void PreemptDisable()
         {
@@ -156,19 +180,19 @@ namespace task
         long priority_;
         long preempt_count_;
         MemoryPagePointer stack_;
+
         TaskImpl::FullCPUState *initial_full_cpu_state_location_;
 
-    public :
+    public:
         ALIGN TaskContextCPUState cpu_state_;
     };
 
     class NonPreemptableSection
     {
     public:
-
         //  We need to keep a record of the task on entry as it is possible the task on exit
         //      is different if the task has been preempted and switched out.
-        
+
         NonPreemptableSection()
             : task_(TaskImpl::GetTask())
         {
@@ -182,12 +206,11 @@ namespace task
         {
             task_.PreemptEnable();
         }
-        
+
         NonPreemptableSection &operator=(const NonPreemptableSection &) = delete;
         NonPreemptableSection &operator=(NonPreemptableSection &&) = delete;
 
-        private :
-
+    private:
         TaskImpl &task_;
     };
 } // namespace task

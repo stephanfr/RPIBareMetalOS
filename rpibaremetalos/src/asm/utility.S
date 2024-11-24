@@ -9,7 +9,6 @@ GetCoreID:
     and     x0, x0, #3
     ret
 
-
 .global CPUTicksDelay
 CPUTicksDelay:
     subs x0, x0, #1

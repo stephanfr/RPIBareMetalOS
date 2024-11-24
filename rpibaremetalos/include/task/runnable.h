@@ -9,4 +9,7 @@ class Runnable
     public:
 
         virtual void Run() = 0;
+
+        void Yield();
+        void Exit();
 };

@@ -1,3 +1,24 @@
+//	The symbols below come from Leon de Boer's RPi-SmartStart project.
+//		Only the MMU helper symbols and MMU enable code are used.
+
+//"+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++"
+//"																			"			
+//"      Filename: smartstart64.s											"
+//"      Copyright(c): Leon de Boer(LdB) 2017, 2018, 2019					"
+//"      Version: 2.14														"
+//"																			"		
+//"***************[ THIS CODE IS FREEWARE UNDER CC Attribution]*************"
+//"																			"
+//"    This sourcecode is released for the purpose to promote programming   "
+//"  on the Raspberry Pi. You may redistribute it and/or modify with the    "
+//"  following disclaimer and condition.									"
+//"																			"
+//"      The SOURCE CODE is distributed "AS IS" WITHOUT WARRANTIES AS TO	"
+//"   PERFORMANCE OF MERCHANTABILITY WHETHER EXPRESSED OR IMPLIED.			"
+//"   Redistributions of source code must retain the copyright notices to	"
+//"   maintain the author credit (attribution) .							"
+//"																			"
+//"*************************************************************************"
 
 /*++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++}
 {			MMU HELPER ROUTINES PROVIDE BY RPi-SmartStart API			    }
@@ -37,9 +58,9 @@
 					  (1 << 1)   |		/* A, Alignment check enable bit */\
 					  (1 << 0) )		/* set M, enable MMU */
 
-//	void EnableMMUTables ( RegType_t map1to1, RegType_t virtalmap);
-.align	4
 .globl EnableMMUTables;
+.align	4
+
 EnableMMUTables:
 	dsb sy
 

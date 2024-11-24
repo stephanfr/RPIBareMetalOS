@@ -22,10 +22,6 @@ namespace task
 
         void SwitchTasks();
 
-        void ServiceMessages();
-
-        TaskImpl &FindNextTask(void);
-
     private:
         using TaskList = minstd::list<minstd::reference_wrapper<TaskImpl>>;
         using TaskListAllocator = minstd::allocator<TaskList::node_type>;
@@ -39,5 +35,13 @@ namespace task
         //  Messaging queue for inter-context messages can go into the static heap
 
         InterContextMessageQueue inter_context_message_queue_;
+
+        //
+        //  Methods
+        //
+        
+        void ServiceMessages();
+
+        TaskImpl &FindNextTask(void);
     };
 } // namespace task

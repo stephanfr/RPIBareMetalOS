@@ -21,8 +21,6 @@ extern "C"
     uint32_t    GetExceptionLevel();
     void*       GetTaskContext();
 
-    bool        CoreExecute (uint32_t core, void (*func)(void));
-
     void        ParkCore();
 
     void        EnableIRQ(void);

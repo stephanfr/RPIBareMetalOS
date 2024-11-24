@@ -87,7 +87,15 @@ void BCM2711ExceptionManager::HandleInterrupt()
     //      this needs to be enforced even with nested interrupts.
 
     SetGICRegister(BCM2711GenericInterruptControllerRegisters::END_OF_INTERRUPT, irq_ack_reg);
-    EnableIRQ();
+
+    //  If there are no task switch ISRs, we can re-enable interrupts.
+    //      Task switch ISRs will re-enable interrupts when they are done.
+
+    if ((task_switch_isr == nullptr) && (core_task_switch_isr == nullptr))
+    {
+        EnableIRQ();
+        return;
+    }
 
     //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
 

@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//  This function is intended only to be used from the boot assembly stub to permit the
-//      memory manager to determine the board revision so the MMU can be configured properly.
+//  This function is intended only to be used from the boot assembly stub to collect 
+//      boot time information so the MMU can be configured properly.
 //
 //  This function cannot be called after the MMU is enabled nor should it be used if other
 //      cores might be accessing the mailbox simultaneously.  In short - use this only during

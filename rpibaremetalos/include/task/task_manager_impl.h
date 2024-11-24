@@ -28,10 +28,6 @@
 
 #include "os_memory_config.h"
 
-#include <minimalstdio.h>
-
-extern "C" void SetKernelTaskContext(task::TaskImpl *task);
-
 namespace task
 {
     class TaskManagerImpl : public TaskManager
@@ -73,18 +69,6 @@ namespace task
         void Schedule(void);
         void SwitchToNextTask(void);
 
-        void Yield(void);
-//        {
-//            CurrentTask().counter_ = 0;
-//            CurrentTask().preempt_count_ = 0;
-//
-//            SwitchToNextTask();
-//        GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
-//
-//        }
-
-        void ExitProcess();
-
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
         ValueResult<TaskResultCodes, UUID> ForkUserTask(Runnable *runnable, const TaskDefinition& task_definition) override;
 
@@ -94,11 +78,7 @@ namespace task
 
         void AddTask(minstd::unique_ptr<TaskImpl> &task);
 
-        minstd::array<TaskImpl *, MAX_CORES> idle_tasks_;
-
-        minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
-
-    //private:
+    private:
         using TaskMap = minstd::map<UUID, minstd::unique_ptr<TaskImpl>>;
         using TaskMapAllocator = minstd::allocator<TaskMap::node_type>;
         using TaskMapHeapAllocator = minstd::heap_allocator<TaskMap::node_type>;
@@ -110,6 +90,9 @@ namespace task
         const uint32_t number_of_cores_;
 
         minstd::array<TaskImpl *, MAX_CORES> kernel_main_tasks_;
+        minstd::array<TaskImpl *, MAX_CORES> idle_tasks_;
+
+        minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
 
         //  Put the task map in the kernel dynamic heap
 
@@ -127,7 +110,5 @@ namespace task
         TaskManagerImpl();
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition& task_definition);
-
-        TaskImpl &FindNextTask(void);
     };
 } // namespace task

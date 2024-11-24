@@ -15,14 +15,12 @@
 
 #define BCM2837_OSC_FREQ		    19200000
 
-
 //  BCM2711
 
-#define BCM2711_LOCAL_CONTROL		0xff800000
-#define BCM2711_LOCAL_PRESCALER		0xff800008
+#define BCM2711_LOCAL_CONTROL		0xFF800000
+#define BCM2711_LOCAL_PRESCALER		0xFF800008
 
 #define BCM2711_OSC_FREQ		    54000000
-
 
 //
 //  The following function sets up the physical timer on the board.  The setup

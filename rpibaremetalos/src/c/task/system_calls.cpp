@@ -3,16 +3,15 @@
 // license that can be found in the LICENSE file.
 
 #include "task/system_calls.h"
-#include "task/process.h"
 #include "task/task_manager_impl.h"
 
-#include <minimalstdio.h>
+#include "devices/std_streams.h"
 
 namespace syscall
 {
     void Write(const char *buf)
     {
-        printf("%s", buf);
+        *stdout << buf;
     }
 
     int CloneTask( const char* name, MemoryPagePointer stack, task::TaskResultCodes &result_code, UUID &result)
@@ -39,7 +38,7 @@ namespace syscall
 
     void Exit()
     {
-        task::ExitProcess();
+        task::Task::GetTask().Exit();
     }
 }
 

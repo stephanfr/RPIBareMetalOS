@@ -495,18 +495,8 @@ extern "C" void kernel_main()
 
     while (1)
     {
-        //        printf("Task List:   **********************************************\n");
-
-        //       task::TaskManagerImpl::Instance().VisitTaskList([](const task::Task &task) -> task::TaskListVisitorCallbackStatus
-        //                                                        {
-        //            if( task.State() != task::Task::ExecutionState::ZOMBIE )
-        //            {
-        //            printf("Task: %s  Status: %s  Core: %d\n", task.Name().c_str(), ToString(task.State()), task.CurrentCore());
-        //            }
-        //            return task::TaskListVisitorCallbackStatus::NEXT; });
-
         CPUTicksDelay(1000);
 
-        //        task::TaskManagerImpl::Instance().Yield();
+        task::Task::GetTask().Yield();
     }
 }

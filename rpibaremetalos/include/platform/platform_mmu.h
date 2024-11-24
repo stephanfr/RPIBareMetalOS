@@ -114,8 +114,8 @@ public:
 
         //  Get the start of videocore memory and its size
 
-        videocore_memory_start_ = (uint8_t *)((uint64_t)__vc_memory_start);
-        videocore_memory_size_ = (uint32_t)__vc_memory_size;
+        videocore_memory_start_ = (uint8_t *)((uint64_t)__videocore_memory_base);
+        videocore_memory_size_ = (uint32_t)__videocore_memory_size_in_bytes;
     }
 
     AARCH64PlatformMemoryManager() = delete;

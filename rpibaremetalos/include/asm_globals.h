@@ -45,6 +45,6 @@ extern minstd::atomic<uint32_t> __core_state[];
 extern uint64_t __core_jmp_table[];
 
 extern uint32_t __board_version;
-extern uint32_t __vc_memory_start;
-extern uint32_t __vc_memory_size;
+extern uint32_t __videocore_memory_base;
+extern uint32_t __videocore_memory_size_in_bytes;
 extern char __kernel_command_line;

@@ -110,7 +110,8 @@ namespace task
         {
             CORE_MAIN_TASK = 0,
             KERNEL_TASK = 1,
-            USER_TASK = 2,
+            IDLE_TASK = 2,
+            USER_TASK = 3,
         } TaskType;
 
         Task() = default;
@@ -129,8 +130,8 @@ namespace task
 
         virtual uint32_t CurrentCore() const = 0;
 
-        //        virtual void Yield() = 0;
-        //        virtual void Exit() = 0;
+        virtual void Yield() = 0;
+        virtual void Exit() = 0;
     };
 
     inline const char *ToString(Task::TaskType type)
@@ -141,6 +142,8 @@ namespace task
             return "Core Main Task";
         case Task::TaskType::KERNEL_TASK:
             return "Kernel Task";
+        case Task::TaskType::IDLE_TASK:
+            return "Idle Task";
         case Task::TaskType::USER_TASK:
             return "User Task";
         default:
