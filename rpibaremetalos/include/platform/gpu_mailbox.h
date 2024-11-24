@@ -6,7 +6,6 @@
 
 #include "platform/platform_info.h"
 
-#include <minimalstdio.h>
 #include <string.h>
 
 #define MAX_TAGS_PER_MESSAGE 24
@@ -430,20 +429,6 @@ public:
     {
         message_buffer_.header_.buffer_size_ = sizeof(Header);
         message_buffer_.header_.request_response_code_ = static_cast<uint32_t>(MailboxMessageTypes::REQUEST);
-    }
-
-    void Print() const
-    {
-        printf("Message: ");
-
-        printf("%u ", AsUint32Buffer()[0]);
-
-        for (uint32_t i = 1; i < AsUint32Buffer()[0] / 4; i++)
-        {
-            printf(", %u ", AsUint32Buffer()[i]);
-        }
-
-        printf("\n");
     }
 
 protected:

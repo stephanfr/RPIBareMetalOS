@@ -7,8 +7,6 @@
 #include "devices/physical_timer.h"
 #include "devices/log.h"
 
-#include <minimalstdio.h>
-
 extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
 
 namespace task
@@ -21,8 +19,6 @@ namespace task
 
         while( inter_context_message_queue_.PopMessage(message) )
         {
-//            printf("Core: %d    Processing Message: %d\n", GetCoreID(), message->Type());
-
             switch( message->Type() )
             {
                 case InterContextMessage::MessageType::ADD_TASK:
@@ -102,7 +98,6 @@ namespace task
 
         if (next_task == task_list_.end())
         {
-            printf("Core: %d No runnable tasks found\n", GetCoreID());
             return TaskImpl::GetTask();
         }
 
@@ -127,7 +122,6 @@ namespace task
 
         if (TaskImpl::GetTask().counter_ > 0 || TaskImpl::GetTask().preempt_count_ > 0)
         {
-            printf("Core: %d   Task: %s  Counter: %d    Preempt Count: %d\n", GetCoreID(), TaskImpl::GetTask().Name().c_str(), TaskImpl::GetTask().counter_, TaskImpl::GetTask().preempt_count_);
             return;
         }
 

@@ -8,6 +8,7 @@
 
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
+#include "platform/mmu_manager.h"
 
 #include "devices/system_timer.h"
 #include "devices/character_io.h"
@@ -311,13 +312,11 @@ public:
 
 extern "C" void kernel_main()
 {
-    //  Initialize the platform
-
-//    InitializePlatform();
-
     printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
     printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
+
+    printf("Memory Model: %s\n", ToString(MMUManager::Instance().MemoryModel()));
 
     SetLogLevel(LogLevel::WARNING);
 

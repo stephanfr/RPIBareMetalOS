@@ -4,8 +4,6 @@
 
 #include "platform/rpi3/rpi3_exception_manager.h"
 
-#include <minimalstdio.h>
-
 #include "asm_utility.h"
 
 bool BCM2837ExceptionManager::Initialize()
@@ -54,10 +52,10 @@ void BCM2837ExceptionManager::HandleInterrupt()
 
     Interrupts interrupt = Interrupts::NO_SUCH_INTERRUPT;
 
-    if ((interrupt_source & static_cast<BCM2837ARMLocalInterruptSources>((uint32_t)BCM2837ARMLocalInterruptSources::MAILBOX_0 << IPI_MAILBOX_ID) ) != BCM2837ARMLocalInterruptSources::NONE)
+    if ((interrupt_source & static_cast<BCM2837ARMLocalInterruptSources>((uint32_t)BCM2837ARMLocalInterruptSources::MAILBOX_0 << IPI_MAILBOX_ID)) != BCM2837ARMLocalInterruptSources::NONE)
     {
         interrupt = ExceptionManager::AsInterrupt(static_cast<InterprocessorInterrupts>(GetCoreMailbox(core_id, IPI_MAILBOX_ID)));
-        ResetCoreMailbox(core_id, IPI_MAILBOX_ID, 0xFFFFFFFF);   //  Reset the mailbox value otherwise the interrupt will be triggered again
+        ResetCoreMailbox(core_id, IPI_MAILBOX_ID, 0xFFFFFFFF); //  Reset the mailbox value otherwise the interrupt will be triggered again
     }
     else if ((interrupt_source & BCM2837ARMLocalInterruptSources::GPU_INTERRUPT) != BCM2837ARMLocalInterruptSources::NONE)
     {
@@ -89,7 +87,7 @@ void BCM2837ExceptionManager::HandleInterrupt()
             {
                 task_switch_isr = current_isr;
             }
-            else if(current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
+            else if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
             {
                 core_task_switch_isr = current_isr;
             }
@@ -111,7 +109,7 @@ void BCM2837ExceptionManager::HandleInterrupt()
         LogDebug1("Executing Task Switch ISR\n");
         task_switch_isr->HandleInterrupt();
     }
-    else if(core_task_switch_isr != nullptr)
+    else if (core_task_switch_isr != nullptr)
     {
         LogDebug1("Executing Core Task Switch ISR\n");
         core_task_switch_isr->HandleInterrupt();

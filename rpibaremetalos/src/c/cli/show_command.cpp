@@ -16,8 +16,6 @@
 #include "heaps.h"
 
 #include <format>
-#include <minimalstdio.h>
-
 
 extern CharacterIODevice *stdout;
 

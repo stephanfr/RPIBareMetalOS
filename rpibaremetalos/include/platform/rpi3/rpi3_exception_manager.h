@@ -9,8 +9,6 @@
 
 #include "devices/log.h"
 
-#include <minimalstdio.h>
-
 //  Enumerate the interrupt sources for the ARM Core.
 //      These are described in the BCM2836 Peripherals manual QA7, section 4.10
 //      Define an and operator to allow bitwise operations on the enum values.

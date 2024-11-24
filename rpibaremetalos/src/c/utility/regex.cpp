@@ -36,7 +36,6 @@
 
 #include "utility/regex.h"
 
-#include <minimalstdio.h>
 #include <ctype.h>
 
 /* Definitions: */
@@ -254,6 +253,7 @@ re_t re_compile(const char* pattern)
   return (re_t) re_compiled;
 }
 
+/*
 void re_print(regex_t* pattern)
 {
   const char* types[] = { "UNUSED", "DOT", "BEGIN", "END", "QUESTIONMARK", "STAR", "PLUS", "CHAR", "CHAR_CLASS", "INV_CHAR_CLASS", "DIGIT", "NOT_DIGIT", "ALPHA", "NOT_ALPHA", "WHITESPACE", "NOT_WHITESPACE", "BRANCH" };
@@ -290,7 +290,7 @@ void re_print(regex_t* pattern)
     printf("\n");
   }
 }
-
+*/
 
 
 /* Private functions: */

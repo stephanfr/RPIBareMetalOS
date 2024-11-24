@@ -5,7 +5,6 @@
 #pragma once
 
 #include <fixed_string>
-#include <minimalstdio.h>
 
 #include "result.h"
 

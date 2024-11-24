@@ -4,13 +4,9 @@
 
 #include "isr/core_task_switch_isr.h"
 
-#include "asm_utility.h"
-
 #include "task/task_manager_impl.h"
 
 #include <devices/log.h>
-
-#include <minimalstdio.h>
 
 void CoreTaskSwitchISR::HandleInterrupt()
 {

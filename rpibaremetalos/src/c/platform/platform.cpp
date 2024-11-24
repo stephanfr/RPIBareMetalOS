@@ -7,17 +7,19 @@
 
 #include <fixed_string>
 #include <memory>
+#include <minimalstdio.h>
 
-#include "platform/exception_manager.h"
 #include "platform/platform_info.h"
-
-#include "platform/rpi3/rpi3_platform_info.h"
-#include "platform/rpi4/rpi4_platform_info.h"
+#include "platform/exception_manager.h"
+#include "platform/memory_manager.h"
+#include "platform/platform_sw_rngs.h"
+#include "platform/kernel_command_line.h"
 
 #include "platform/rpi3/rpi3_exception_manager.h"
 #include "platform/rpi4/rpi4_exception_manager.h"
 
-#include "os_entity.h"
+#include "platform/rpi3/rpi3_platform_info.h"
+#include "platform/rpi4/rpi4_platform_info.h"
 
 #include "devices/rpi3/rpi3_hw_rng.h"
 #include "devices/rpi4/rpi4_hw_rng.h"
@@ -26,20 +28,10 @@
 #include "devices/uart0.h"
 #include "devices/uart1.h"
 
-#include "platform/kernel_command_line.h"
-#include "platform/memory_manager.h"
 #include "platform/mmu_manager.h"
-#include "platform/platform_sw_rngs.h"
 
 #include "services/xoroshiro128plusplus.h"
 
-#include "asm_globals.h"
-
-
-//  Forward declare the assembly language function which returns the board type
-
-extern "C" uint32_t IdentifyBoardType();
-extern "C" void ParkCore();
 
 //  Global flag to indicate if the platform has been initialized
 

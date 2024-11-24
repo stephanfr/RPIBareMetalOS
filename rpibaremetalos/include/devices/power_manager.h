@@ -6,10 +6,6 @@
 
 #include "platform/platform_info.h"
 
-#include "devices/system_timer.h"
-
-#include "minimalstdio.h"
-
 class PowerManager
 {
 public:

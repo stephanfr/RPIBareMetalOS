@@ -52,3 +52,13 @@ private:
 
     virtual void EnableMMU() = 0;
 };
+
+
+inline const char *ToString(MMUManager::MemoryModelTypes model)
+{
+    switch(  model )
+    {
+        case MMUManager::MemoryModelTypes::KERNEL_ONLY_1_TO_1:
+            return MMUManager::KERNEL_ONLY_1_TO_1_STRING;
+    }
+}

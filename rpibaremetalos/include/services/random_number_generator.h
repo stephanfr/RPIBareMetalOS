@@ -6,8 +6,6 @@
 
 #include <stdint.h>
 
-#include <minimalstdio.h>
-
 typedef enum class RandomNumberGeneratorTypes
 {
     HARDWARE,

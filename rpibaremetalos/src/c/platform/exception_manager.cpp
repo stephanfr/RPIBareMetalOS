@@ -55,7 +55,7 @@ void ExceptionManager::HandleException(unsigned int type, unsigned long esr, uns
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
 {
-    printf("AddISR: %s to cores: 0x%08X\n", ToString(isr->InterruptType()), on_cores.Cores());
+    LogEntryAndExit( "Adding ISR: %s on core: %d", isr->Name(), on_cores.Cores());
 
     ISRMap::iterator map_itr = isrs_.find(isr->InterruptType());
 

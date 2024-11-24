@@ -94,7 +94,7 @@ namespace task
 
             uint32_t core_id = GetCoreID();
 
-            auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
+            auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
 
             task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
 
@@ -171,7 +171,7 @@ namespace task
 
             auto idle_task_runnable = static_new<internal::IdleTask>();
 
-            auto fork_idle_task_result = instance_->get().ForkKernelTask(idle_task_runnable, TaskDefinition{"Idle Task", 0, DEFAULT_TASK_STACK_SIZE_IN_BYTES, (0x01 << core_id)});
+            auto fork_idle_task_result = instance_->get().ForkKernelTask(idle_task_runnable, TaskDefinition{"Idle Task", 0, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)});
 
             if (fork_idle_task_result.Failed())
             {

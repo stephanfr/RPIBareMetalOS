@@ -4,9 +4,11 @@
 
 #include "devices/power_manager.h"
 
-#include "devices/gpio.h"
 #include "platform/gpu_mailbox_messages.h"
+
+#include "devices/gpio.h"
 #include "devices/physical_timer.h"
+#include "devices/log.h"
 
 void PowerManager::Halt()
 {
@@ -55,7 +57,7 @@ void PowerManager::Halt()
     for (unsigned int i = 0; i < 1E08; i++)
     {
         PhysicalTimer::WaitMsec(1000);
-        printf("Halting\n");
+        LogInfo("Halting\n");
     }
 }
 
@@ -74,6 +76,6 @@ void PowerManager::Reboot()
     for (unsigned int i = 0; i < 1E08; i++)
     {
         PhysicalTimer::WaitMsec(1000);
-        printf("Waiting to reboot\n");
+        LogInfo("Waiting to reboot\n");
     }
 }
