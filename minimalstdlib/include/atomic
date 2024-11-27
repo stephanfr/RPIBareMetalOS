@@ -128,6 +128,11 @@ namespace MINIMAL_STD_NAMESPACE
             return __atomic_and_fetch(&value_, value, static_cast<int>(order));
         }
 
+        T sub_fetch(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_sub_fetch(&value_, value, static_cast<int>(order));
+        }
+
     private:
         T value_;
     };
