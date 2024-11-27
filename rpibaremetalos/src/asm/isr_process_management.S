@@ -71,6 +71,8 @@ SOFTWARE.
 #define S_FRAME_SIZE			288 		//  Space needed on stack to save all the registers - must match size of 'FullCPUState'
 
 .macro	KernelEntry, el
+	clrex									//  Clear exclusive access monitor for exclusive load/store instructions
+
     sub	sp, sp, #S_FRAME_SIZE
     stp	x0, x1, [sp, #16 * 0]
     stp	x2, x3, [sp, #16 * 1]

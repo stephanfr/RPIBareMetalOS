@@ -15,6 +15,8 @@
 
 .globl SwitchCPUState
 SwitchCPUState:
+	clrex								// Clear exclusive access monitor for exclusive load/store
+
 	mov	x9, sp
 	stp	x19, x20, [x0], #16
 	stp	x21, x22, [x0], #16
