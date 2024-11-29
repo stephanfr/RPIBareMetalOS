@@ -39,6 +39,12 @@ constexpr uint32_t FREQUENCY_250MHZ = 250000000;
 constexpr uint32_t FREQUENCY_4MHZ = 4000000;
 
 //
+//  Structre sizes shared with assembly code
+//
+
+constexpr uint32_t FULL_CPU_STATE_FRAME_SIZE = 288;		        //  Space needed on stack to save all the registers during ISR - must match size of 'FullCPUState' and be updated below
+
+//
 //  Init Sequence limits
 //
 
@@ -60,6 +66,7 @@ constexpr uint32_t DEFAULT_SERIAL_CONSOLE_BAUD_RATE = 115200;
 constexpr size_t MAX_OS_ENTITY_NAME_LENGTH = 64;
 
 constexpr size_t MAX_TASK_NAME_LENGTH = 64;
+constexpr size_t MAX_ACTIVE_TASKS_PER_CORE = 1024;
 
 //
 //  Filesystem limits
@@ -78,5 +85,6 @@ constexpr size_t MAX_FAT32_SHORT_FILENAME_SEARCH_TABLE_SIZE = 100;
 #else
 
 #define MAX_KERNEL_COMMAND_LINE_LENGTH 2048
+#define FULL_CPU_STATE_FRAME_SIZE 288 		        //  Space needed on stack to save all the registers during ISR - must match size of 'FullCPUState'
 
 #endif

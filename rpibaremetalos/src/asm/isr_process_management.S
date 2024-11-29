@@ -29,8 +29,10 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include "os_config.h"
 #include "sysregs.h"
 #include "task/system_calls.h"
+
 
 #define SYNC_INVALID_EL1t		0 
 #define IRQ_INVALID_EL1t		1 
@@ -68,12 +70,10 @@ SOFTWARE.
 #define EL0						0
 #define EL1						1
 
-#define S_FRAME_SIZE			288 		//  Space needed on stack to save all the registers - must match size of 'FullCPUState'
-
 .macro	KernelEntry, el
 	clrex									//  Clear exclusive access monitor for exclusive load/store instructions
 
-    sub	sp, sp, #S_FRAME_SIZE
+    sub	sp, sp, #FULL_CPU_STATE_FRAME_SIZE
     stp	x0, x1, [sp, #16 * 0]
     stp	x2, x3, [sp, #16 * 1]
     stp	x4, x5, [sp, #16 * 2]
@@ -93,7 +93,7 @@ SOFTWARE.
 	.if	\el == 0
 	mrs	x21, sp_el0
 	.else
-	add	x21, sp, #S_FRAME_SIZE
+	add	x21, sp, #FULL_CPU_STATE_FRAME_SIZE
 	.endif 
 
 	mrs	x22, elr_el1    					//  For preemptive multi-tasking, save the ELR_EL1 and SPSR_EL1 registers as we can context switch in an IRQ Handler
@@ -138,7 +138,7 @@ SOFTWARE.
     ldp	x24, x25, [sp, #16 * 12]
     ldp	x26, x27, [sp, #16 * 13]
     ldp	x28, x29, [sp, #16 * 14]
-    add	sp, sp, #S_FRAME_SIZE		
+    add	sp, sp, #FULL_CPU_STATE_FRAME_SIZE		
     eret
 .endm
 

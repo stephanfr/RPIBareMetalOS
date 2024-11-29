@@ -59,7 +59,7 @@ namespace task
             unsigned long tpidr_el1;   //  Pointer to thread context for kernel threads
         } PACKED FullCPUState;
 
-        static_assert(sizeof(FullCPUState) == 36 * sizeof(unsigned long), "FullCPUState size is not correct");
+        static_assert(sizeof(FullCPUState) == FULL_CPU_STATE_FRAME_SIZE, "FullCPUState size is not correct");
 
         static TaskImpl &GetTask();
 

@@ -9,6 +9,8 @@
 
 #include "devices/log.h"
 
+#include <minimalstdio.h>
+
 //  Enumerate the interrupt sources for the ARM Core.
 //      These are described in the BCM2836 Peripherals manual QA7, section 4.10
 //      Define an and operator to allow bitwise operations on the enum values.
@@ -204,6 +206,100 @@ private:
             return true;
 
         case Interrupts::CORE_MAILBOX_0:
+        case Interrupts::CORE_MAILBOX_1:
+        case Interrupts::CORE_MAILBOX_2:
+        case Interrupts::CORE_MAILBOX_3:
+        {
+            uint32_t mailbox_bit_to_set = 0x00000001 << ((uint32_t)interrupt_to_enable - (uint32_t)Interrupts::CORE_MAILBOX_0);
+
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = mailbox_bit_to_set;
+                }
+            }
+            return true;
+        }
+
+
+/*
+        case Interrupts::CORE_MAILBOX_1:
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0x00000001 << 1;
+                }
+            }
+            return true;
+
+        case Interrupts::CORE_MAILBOX_2:
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0x00000001 << 2;
+                }
+            }
+            return true;
+
+        case Interrupts::CORE_MAILBOX_3:
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0x00000001 << 3;
+                }
+            }
+            return true;
+*/
+
+        case Interrupts::SYSTEM_TIMER_1:
+            SetRegister(BCM2837ARMCInterruptRequestRegisters::ENABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_1);
+            return true;
+
+        case Interrupts::SYSTEM_TIMER_3:
+            SetRegister(BCM2837ARMCInterruptRequestRegisters::ENABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_3);
+            return true;
+        }
+
+        return false;
+    }
+
+    bool DisableInterrupt(Interrupts interrupt_to_disable, CoreList on_cores) override
+    {
+        switch (interrupt_to_disable)
+        {
+        case Interrupts::NO_SUCH_INTERRUPT:
+        case Interrupts::SYSTEM_TIMER_0:
+        case Interrupts::SYSTEM_TIMER_2:
+            return false;
+
+        case Interrupts::CORE_HALT: 
+        case Interrupts::SWITCH_TASK:
+            return true;
+
+        case Interrupts::CORE_MAILBOX_0:
+        case Interrupts::CORE_MAILBOX_1:
+        case Interrupts::CORE_MAILBOX_2:
+        case Interrupts::CORE_MAILBOX_3:
+        {
+//            uint32_t mailbox_bit_to_clear = ~(0x00000001 << ((uint32_t)interrupt_to_disable - (uint32_t)Interrupts::CORE_MAILBOX_0));
+
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0;
+                }
+            }
+            return true;
+        }
+
+
+/*
+        case Interrupts::CORE_MAILBOX_0:
             for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
             {
                 if (on_cores.Cores() & (1 << current_core))
@@ -242,13 +338,14 @@ private:
                 }
             }
             return true;
+*/
 
         case Interrupts::SYSTEM_TIMER_1:
-            SetRegister(BCM2837ARMCInterruptRequestRegisters::ENABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_1);
+            SetRegister(BCM2837ARMCInterruptRequestRegisters::DISABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_1);
             return true;
 
         case Interrupts::SYSTEM_TIMER_3:
-            SetRegister(BCM2837ARMCInterruptRequestRegisters::ENABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_3);
+            SetRegister(BCM2837ARMCInterruptRequestRegisters::DISABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_3);
             return true;
         }
 

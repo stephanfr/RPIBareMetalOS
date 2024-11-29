@@ -19,12 +19,14 @@
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 
+#include <minimalstdio.h>
+
 //  A couple of assembly language functions we will need only in this translation unit
 
 extern "C" void ReturnFromForkASMStub(void);
 extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
 extern "C" void SetKernelTaskContext(task::TaskImpl *task);
-extern "C" bool CoreExecute (uint32_t core, void (*func)(void));
+extern "C" bool CoreExecute(uint32_t core, void (*func)(void));
 
 UUID GetCurrentTaskId(void)
 {
@@ -149,7 +151,7 @@ namespace task
 
         for (uint32_t core_id = 0; core_id < instance_->get().number_of_cores_; core_id++)
         {
-            // LEAK LEAK LEAK LEAK
+            // TODO LEAK LEAK LEAK LEAK
 
             auto idle_task_runnable = static_new<internal::IdleTask>();
 
@@ -224,6 +226,10 @@ namespace task
 
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
     {
+        //  We need to single-thread this method
+
+        LockGuard lock(const_cast<SpinLock &>(task_map_spinlock_));
+
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
             if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)
@@ -334,7 +340,7 @@ namespace task
     {
         //  We need to single-thread this method
 
-        LockGuard lock(task_map_mutex_);
+        LockGuard lock(task_map_spinlock_);
 
         //  Add the task to the task map
 
@@ -368,18 +374,12 @@ namespace task
      */
     void TaskManagerImpl::PreemptiveSchedule()
     {
-        Schedule();
-    }
-
-    void TaskManagerImpl::Schedule(void)
-    {
         //  Signal the other cores to switch tasks, then switch ourselves
 
+        GetExceptionManager().SendInterprocessorInterrupt(0, InterprocessorInterrupts::CORE_TASK_SWITCH);
         GetExceptionManager().SendInterprocessorInterrupt(1, InterprocessorInterrupts::CORE_TASK_SWITCH);
         GetExceptionManager().SendInterprocessorInterrupt(2, InterprocessorInterrupts::CORE_TASK_SWITCH);
         GetExceptionManager().SendInterprocessorInterrupt(3, InterprocessorInterrupts::CORE_TASK_SWITCH);
-
-        SwitchToNextTask();
     }
 
     void TaskManagerImpl::SwitchToNextTask()

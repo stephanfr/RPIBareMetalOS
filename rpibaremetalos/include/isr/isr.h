@@ -6,7 +6,7 @@
 
 #include <stdint.h>
 
-typedef enum class Interrupts : int32_t
+typedef enum class Interrupts : uint32_t
 {
     NO_SUCH_INTERRUPT = 0,
 

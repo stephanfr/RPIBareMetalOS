@@ -76,18 +76,13 @@ void BCM2837ExceptionManager::HandleInterrupt()
 
     //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
 
-    InterruptServiceRoutine *task_switch_isr = nullptr;
     InterruptServiceRoutine *core_task_switch_isr = nullptr;
 
     if (isrs != nullptr)
     {
         for (InterruptServiceRoutine *current_isr : *isrs)
         {
-            if (current_isr->ISRType() == InterruptServiceRoutineType::TASK_SCHEDULER)
-            {
-                task_switch_isr = current_isr;
-            }
-            else if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
+            if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
             {
                 core_task_switch_isr = current_isr;
             }
@@ -102,14 +97,11 @@ void BCM2837ExceptionManager::HandleInterrupt()
         LogError("No ISRs found for Interrupt: %s\n", ToString(interrupt));
     }
 
+    EnableIRQ();
+
     //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
 
-    if (task_switch_isr != nullptr)
-    {
-        LogDebug1("Executing Task Switch ISR\n");
-        task_switch_isr->HandleInterrupt();
-    }
-    else if (core_task_switch_isr != nullptr)
+    if (core_task_switch_isr != nullptr)
     {
         LogDebug1("Executing Core Task Switch ISR\n");
         core_task_switch_isr->HandleInterrupt();

@@ -108,6 +108,8 @@ namespace task
 
     void TaskExecutionContext::SwitchTasks()
     {
+        DisableIRQ();
+
         //  First, groom the task list.
 
         if( inter_context_message_queue_.HasMessages() )
@@ -122,23 +124,25 @@ namespace task
 
         if (TaskImpl::GetTask().counter_ > 0 || TaskImpl::GetTask().preempt_count_ > 0)
         {
+            EnableIRQ();
             return;
         }
 
         TaskImpl::GetTask().counter_ = 0;
 
-        EnableIRQ();
+//        EnableIRQ();
 
         TaskImpl *const prev = &TaskImpl::GetTask();
         TaskImpl *next = nullptr;
 
         {
-            NonPreemptableSection non_preemptable_section;
+//            NonPreemptableSection non_preemptable_section;
 
             next = &FindNextTask();
 
             if (prev == next)
             {
+                EnableIRQ();
                 return;
             }
 
@@ -154,9 +158,11 @@ namespace task
 //            printf("Core: %d    Switching from %s to %s\n", GetCoreID(), prev->Name().c_str(), next->Name().c_str());
         }
 
+        EnableIRQ();
+
         SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
 
-        DisableIRQ();
+//        DisableIRQ();
 
         if (TaskImpl::GetTask().State() == Task::ExecutionState::ZOMBIE)
         {

@@ -6,14 +6,14 @@
 
 #include "heaps.h"
 
+#include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
-#include "platform/mmu_manager.h"
 
-#include "devices/system_timer.h"
 #include "devices/character_io.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
+#include "devices/system_timer.h"
 
 #include "isr/core_task_switch_isr.h"
 #include "isr/halt_core_isr.h"
@@ -35,8 +35,6 @@
 #include "asm_utility.h"
 
 #include "task/task_manager_impl.h"
-
-
 
 void delay(uint32_t count)
 {
@@ -130,9 +128,14 @@ private:
 class ImmediateExitProcess : public Runnable
 {
 public:
-    ImmediateExitProcess(uint32_t id)
-        : id_(id)
+    ImmediateExitProcess()
+        : id_(0)
     {
+    }
+
+    void SetId(uint32_t id)
+    {
+        id_ = id;
     }
 
     void Run()
@@ -141,7 +144,7 @@ public:
     }
 
 private:
-    const uint32_t id_;
+    uint32_t id_;
 };
 
 class KernelCounter : public Runnable
@@ -200,7 +203,7 @@ public:
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
-        delay(100 + (random_generator.Next32BitValue() % 20) * 1000);
+        delay(100 + (random_generator.Next32BitValue() % 20) * 500);
 
         if (task_id != task::Task::GetTask().ID())
         {
@@ -233,7 +236,7 @@ public:
                 return;
             }
 
-            delay(50 + (random_generator.Next32BitValue() % 20) * 1000);
+            delay(50 + (random_generator.Next32BitValue() % 20) * 500);
 
             if (task_id != task::Task::GetTask().ID())
             {
@@ -412,6 +415,15 @@ extern "C" void kernel_main()
         return;
     }
 
+    Counter counter3("!@#$%^&*()");
+
+    auto new_counter3 = task::GetTaskManager().ForkKernelTask(&counter3, "Counter3");
+    if (new_counter3.Failed())
+    {
+        printf("error while starting counter 3");
+        return;
+    }
+
     printf("Starting short lived kernel process\n");
 
     ShortLivedKernelProcess short_lived_kernel_process;
@@ -461,6 +473,19 @@ extern "C" void kernel_main()
         return;
     }
 
+    ImmediateExitProcess immediate_exit_process[100];
+
+    for (int i = 0; i < 100; i++)
+    {
+        immediate_exit_process[i].SetId(i);
+
+        auto new_immediate_exit_process = task::GetTaskManager().ForkKernelTask(&immediate_exit_process[i], "Immediate Exit Process");
+        if (new_immediate_exit_process.Failed())
+        {
+            printf("error while starting immediate exit process");
+            return;
+        }
+    }
     /*
         printf("Starting user processes\n");
 

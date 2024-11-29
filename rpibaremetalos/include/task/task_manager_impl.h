@@ -99,7 +99,7 @@ namespace task
         TaskMapHeapAllocator task_map_heap_allocator_{__os_dynamic_heap};
         TaskMap task_map_{task_map_heap_allocator_};
 
-        Mutex task_map_mutex_;
+        SpinLock task_map_spinlock_;
 
         //
         //  Private methods

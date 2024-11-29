@@ -17,6 +17,7 @@
 SwitchCPUState:
 	clrex								// Clear exclusive access monitor for exclusive load/store
 
+	msr daifset, #2						// Disable IRQs
 	mov	x9, sp
 	stp	x19, x20, [x0], #16
 	stp	x21, x22, [x0], #16
@@ -40,4 +41,5 @@ SwitchCPUState:
 	msr tpidrro_el0, x2
 	msr tpidr_el1, x3
 	mov	sp, x9
+	msr daifclr, #2							// Enable IRQs
 	ret

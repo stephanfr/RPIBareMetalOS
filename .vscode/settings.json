@@ -61,7 +61,8 @@
         "atomic": "cpp",
         "spsc_queue": "cpp",
         "ticket_dispener": "cpp",
-        "token_dispenser": "cpp"
+        "token_dispenser": "cpp",
+        "linked_list": "cpp"
     },
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.errorSquiggles": "disabled",

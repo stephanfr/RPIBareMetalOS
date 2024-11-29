@@ -27,6 +27,9 @@ class ExceptionManager
 public:
     virtual bool Initialize() = 0;
 
+    virtual bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) = 0;
+    virtual bool DisableInterrupt(Interrupts interrupt_to_disable, CoreList on_cores) = 0;
+
     virtual bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) = 0;
 
     virtual bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr, CoreList on_cores) = 0;
@@ -56,8 +59,6 @@ protected:
     {
         asm volatile("msr	daifset, #2"); //  Disables interrupts on the processor
     }
-
-    virtual bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) = 0;
 
     bool AddISR(InterruptServiceRoutine *isr, CoreList on_cores);
 

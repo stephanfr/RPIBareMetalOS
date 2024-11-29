@@ -45,6 +45,31 @@ bool BCM2711ExceptionManager::EnableInterrupt(Interrupts interrupt_to_enable, Co
     return true;
 }
 
+bool BCM2711ExceptionManager::DisableInterrupt(Interrupts interrupt_to_disable, CoreList on_cores)
+{
+    LogEntryAndExit("Entering DisableInterrupt: %s on cores: 0x%08X", ToString(interrupt_to_disable), on_cores.Cores());
+
+    BCM2711Interrupts bcm_2711_interrupt = GetBCM2711InterruptType(interrupt_to_disable);
+
+    if (bcm_2711_interrupt != BCM2711Interrupts::NO_SUCH_INTERRUPT)
+    {
+        for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+        {
+            if (on_cores.Cores() & (1 << current_core))
+            {
+                Disable2711Interrupt(current_core, bcm_2711_interrupt);
+
+                if (bcm_2711_interrupt == BCM2711Interrupts::CORE_MAILBOX_3)
+                {
+                    DisableCoreMailbox(current_core, 3);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
 void BCM2711ExceptionManager::HandleInterrupt()
 {
     LogEntryAndExit("Entering HandleInterrupt");
@@ -57,18 +82,13 @@ void BCM2711ExceptionManager::HandleInterrupt()
 
     //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
 
-    ALIGN InterruptServiceRoutine *task_switch_isr = nullptr;
     ALIGN InterruptServiceRoutine *core_task_switch_isr = nullptr;
 
     if (isrs != nullptr)
     {
         for (ALIGN InterruptServiceRoutine *current_isr : *isrs)
         {
-            if (current_isr->ISRType() == InterruptServiceRoutineType::TASK_SCHEDULER)
-            {
-                task_switch_isr = current_isr;
-            }
-            else if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
+            if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
             {
                 core_task_switch_isr = current_isr;
             }
@@ -88,23 +108,11 @@ void BCM2711ExceptionManager::HandleInterrupt()
 
     SetGICRegister(BCM2711GenericInterruptControllerRegisters::END_OF_INTERRUPT, irq_ack_reg);
 
-    //  If there are no task switch ISRs, we can re-enable interrupts.
-    //      Task switch ISRs will re-enable interrupts when they are done.
-
-    if ((task_switch_isr == nullptr) && (core_task_switch_isr == nullptr))
-    {
-        EnableIRQ();
-        return;
-    }
+    EnableIRQ();
 
     //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
 
-    if (task_switch_isr != nullptr)
-    {
-        LogDebug1("Executing Task Switch ISR\n");
-        task_switch_isr->HandleInterrupt();
-    }
-    else if (core_task_switch_isr != nullptr)
+    if (core_task_switch_isr != nullptr)
     {
         LogDebug1("Executing Core Task Switch ISR\n");
         core_task_switch_isr->HandleInterrupt();

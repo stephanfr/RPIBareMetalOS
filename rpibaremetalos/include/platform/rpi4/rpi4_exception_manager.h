@@ -32,6 +32,7 @@ typedef enum class BCM2711ARMCoreLocalPeripheralRegisterOffsets : uint32_t
 typedef enum class BCM2711GenericInterruptControllerRegisters : uint32_t
 {
     ENABLE_IRQ_BASE = 0x00001100,
+    DISABLE_IRQ_BASE = 0x00001180,
     INTERRUPT_CPU_TARGET_BASE = 0x00001800,
     INTERRUPT_ACKNOWLEDGE = 0x0000200C,
     END_OF_INTERRUPT = 0x00002010
@@ -91,6 +92,7 @@ private:
     const uint8_t *BCM2711_GIC400_BASE = reinterpret_cast<const uint8_t *>(0xFF840000);
 
     bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) override;
+    bool DisableInterrupt(Interrupts interrupt_to_disable, CoreList on_cores) override;
 
     uint32_t GetGICRegister(BCM2711GenericInterruptControllerRegisters reg)
     {
@@ -113,6 +115,26 @@ private:
         unsigned int bit_mask = 1 << (interrupt_num % 32);
 
         unsigned int enableRegister = static_cast<uint32_t>(BCM2711GenericInterruptControllerRegisters::ENABLE_IRQ_BASE) + (4 * reg_num);
+
+        uint32_t current_value = *((volatile uint32_t *)(BCM2711_GIC400_BASE + enableRegister));
+
+        if ((current_value & bit_mask) == 0)
+        {
+            *((volatile uint32_t *)(BCM2711_GIC400_BASE + enableRegister)) = bit_mask;
+            Assign2711InterruptCoreTarget(core_id, interrupt);
+        }
+    }
+
+    void Disable2711Interrupt(uint32_t core_id, BCM2711Interrupts interrupt)
+    {
+        //  There are 256 interrupts which are enabled/disabled by bits in one of 8 32 bit registers
+
+        uint32_t interrupt_num = static_cast<uint32_t>(interrupt) + (4 * core_id);
+
+        unsigned int reg_num = interrupt_num / 32;
+        unsigned int bit_mask = 1 << (interrupt_num % 32);
+
+        unsigned int enableRegister = static_cast<uint32_t>(BCM2711GenericInterruptControllerRegisters::DISABLE_IRQ_BASE) + (4 * reg_num);
 
         uint32_t current_value = *((volatile uint32_t *)(BCM2711_GIC400_BASE + enableRegister));
 
@@ -231,6 +253,15 @@ private:
     void EnableCoreMailbox(uint32_t core_id, uint32_t mailbox_id)
     {
         *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2711ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * core_id)) = 0x00000001 << mailbox_id;
+
+        //  Compute the actual interrupt number from the base mailbox, core_id and mailbox_id
+
+        //        EnableInterrupt((Interrupts)(uint32_t(Interrupts::CORE_MAILBOX_0) + mailbox_id), CoreList(core_id));
+    }
+
+    void DisableCoreMailbox(uint32_t core_id, uint32_t mailbox_id)
+    {
+        *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2711ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * core_id)) &= ~(0x00000001 << mailbox_id);
 
         //  Compute the actual interrupt number from the base mailbox, core_id and mailbox_id
 
