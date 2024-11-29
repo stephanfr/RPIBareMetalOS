@@ -61,6 +61,7 @@ CPP_SRC_DIRS := $(addprefix $(SRC_ROOT)/,$(CPP_DIRS))
 
 ELF := $(BUILD_ROOT)/kernel8.elf
 IMG := $(IMAGE_DIR)/kernel8.img
+SYM := $(IMAGE_DIR)/kernel8.sym
 
 ASM_SRC := $(foreach sdir,$(ASM_SRC_DIRS),$(wildcard $(sdir)/*.S))
 C_SRC   := $(foreach sdir,$(C_SRC_DIRS),$(wildcard $(sdir)/*.c))
@@ -82,30 +83,31 @@ all_clean: clean all
 
 $(IMG): $(ELF)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
+	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
 	/bin/cp armstub/image/armstub_minimal.bin image/.
 	/bin/cp resources/*.txt image/.
 	/bin/cp resources/sd.img image/.
 
 $(ELF): $(OBJ) $(LINKER_SCRIPT)
-	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -T $(LINKER_SCRIPT) -o $(ELF)
+	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -g -T $(LINKER_SCRIPT) -o $(ELF)
 
 $(LINKER_SCRIPT): 
 	$(CPREPROCESSOR) -Iinclude  $(LINKER_SCRIPT_TEMPLATE) -o $(LINKER_SCRIPT)
 
 define make-asm-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.S
-	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -g -c $$< -o $$@
 endef
 
 define make-c-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.c
-	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -g $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 define make-cpp-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.cpp
-	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -g $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 

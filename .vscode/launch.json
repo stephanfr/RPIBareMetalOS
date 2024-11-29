@@ -9,7 +9,7 @@
             "name": "(gdb) Remote Attach",
             "type": "gdb",
             "request": "attach",
-            "executable": "${workspaceFolder}/dev/RPIBareMetalOS/rpibaremetalos/image/kernel8.img",
+            "executable": "${workspaceFolder}/rpibaremetalos/build/kernel8.elf",
             "target": "localhost:1234",
             "remote": true,
             "cwd": "${workspaceRoot}", 
