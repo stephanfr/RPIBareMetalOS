@@ -79,7 +79,7 @@ __core_jump_table : .double 0
 //  Below is a fully formed GPU mailbox request for the board revision, VC memory info and the kernel command line
 
 .align 16       //  Align to 16 bytes - as the mailbox only uses the top 28 bits
-__board_version_vc_start_cmd_line_message_mailbox_buffer :  .word 60 + MAX_KERNEL_COMMAND_LINE_LENGTH       //  Buffer size in bytes
+__board_version_vc_start_cmd_line_message_mailbox_buffer :  .word 60 + S_MAX_KERNEL_COMMAND_LINE_LENGTH     //  Buffer size in bytes
                                                             .word 0                                         //  Response code
                                                             .word 0x00010002                                //  Board revision request code
                                                             .word 4                                         //  Response buffer size in bytes
@@ -91,9 +91,9 @@ __board_version:                                            .word 0             
 __videocore_memory_base:                                    .word 0                                         //  Videocore memory start address
 __videocore_memory_size_in_bytes:                           .word 0                                         //  Videocore memory size
                                                             .word 0x00050001                                //  Kernel Command Line
-                                                            .word MAX_KERNEL_COMMAND_LINE_LENGTH            //  Response buffer size in bytes
+                                                            .word S_MAX_KERNEL_COMMAND_LINE_LENGTH          //  Response buffer size in bytes
                                                             .word 0                                         //  Request code
-__kernel_command_line:                                      .space MAX_KERNEL_COMMAND_LINE_LENGTH, 0        //  Kernel command line buffer
+__kernel_command_line:                                      .space S_MAX_KERNEL_COMMAND_LINE_LENGTH, 0      //  Kernel command line buffer
                                                             .word 0                                         //  End Tag - must be zero
                                                             .word 0
 
