@@ -12,12 +12,12 @@
 //		as a result of a call to 'schedule', the other registers are assumed by the compiler to
 //		be volatile.
 //
+//	Insure that IRQs are disabled when calling this method, it will re-enable them before returning.
 
 .globl SwitchCPUState
 SwitchCPUState:
 	clrex								// Clear exclusive access monitor for exclusive load/store
 
-	msr daifset, #2						// Disable IRQs
 	mov	x9, sp
 	stp	x19, x20, [x0], #16
 	stp	x21, x22, [x0], #16

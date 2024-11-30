@@ -109,6 +109,7 @@ SOFTWARE.
 .endm
 
 .macro	KernelExit, el
+	msr	daifset, #2							//  Disable IRQs, taking an IRQ while in the middle of a context switch is not going to end well		
 	ldp	x22, x23, [sp, #16 * 17]
 	msr	tpidrro_el0, x22
 	msr	tpidr_el1, x23
@@ -138,7 +139,8 @@ SOFTWARE.
     ldp	x24, x25, [sp, #16 * 12]
     ldp	x26, x27, [sp, #16 * 13]
     ldp	x28, x29, [sp, #16 * 14]
-    add	sp, sp, #S_FULL_CPU_STATE_FRAME_SIZE		
+    add	sp, sp, #S_FULL_CPU_STATE_FRAME_SIZE
+	msr	daifclr, #2						//  Re-enable IRQs
     eret
 .endm
 
