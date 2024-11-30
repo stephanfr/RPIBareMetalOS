@@ -9,11 +9,11 @@
 #include <lru_cache>
 
 #include "os_config.h"
-#include "platform/mutex.h"
 #include "platform/platform_sw_rngs.h"
 #include "services/murmur_hash.h"
 
 #include "heaps.h"
+#include "synchronization.h"
 
 #include "filesystem/fat32_directory.h"
 
