@@ -22,6 +22,8 @@
 #include "task/task_impl.h"
 #include "task/task_execution_context.h"
 
+#include "services/random_number_generator.h"
+
 #include "asm_utility.h"
 
 #include "synchronization.h"
@@ -93,6 +95,8 @@ namespace task
         minstd::array<TaskImpl *, MAX_CORES> idle_tasks_;
 
         minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
+
+        RandomNumberGeneratorSingleThreaded random_generator_{NewRandomNumberGenerator()};
 
         //  Put the task map in the kernel dynamic heap
 

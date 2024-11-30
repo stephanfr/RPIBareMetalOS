@@ -24,7 +24,6 @@
 //  A couple of assembly language functions we will need only in this translation unit
 
 extern "C" void ReturnFromForkASMStub(void);
-extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
 extern "C" void SetKernelTaskContext(task::TaskImpl *task);
 extern "C" bool CoreExecute(uint32_t core, void (*func)(void));
 
@@ -228,7 +227,7 @@ namespace task
     {
         //  We need to single-thread this method
 
-        LockGuard lock(const_cast<SpinLock &>(task_map_spinlock_));
+        LockGuard single_thread(const_cast<SpinLock &>(task_map_spinlock_));
 
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
@@ -338,23 +337,25 @@ namespace task
 
     void TaskManagerImpl::AddTask(minstd::unique_ptr<TaskImpl> &task)
     {
-        //  We need to single-thread this method
-
-        LockGuard lock(task_map_spinlock_);
-
-        //  Add the task to the task map
-
         TaskImpl &task_ref = *task.get();
 
-        task_map_.insert(task->ID(), minstd::move(task));
+        {
+            //  We need to single-thread actions on the task map
+
+            LockGuard lock(task_map_spinlock_);
+
+            //  Add the task to the task map
+
+            task_map_.insert(task->ID(), minstd::move(task));
+        }
 
         //  Determine which core to schedule the task on
 
-        uint32_t schedule_on_core = GetGeneralRNG().Next32BitValue() % number_of_cores_;
+        uint32_t schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
 
         while (!task_ref.CoreMask().ContainsCore(schedule_on_core))
         {
-            schedule_on_core = GetGeneralRNG().Next32BitValue() % number_of_cores_;
+            schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
         }
 
         task_ref.schedule_on_core_ = schedule_on_core;
@@ -362,7 +363,7 @@ namespace task
 
         //  Add the task to the per-core task queue, loop and delay if the queue is full
 
-        minstd::unique_ptr<InterContextMessage> add_task_message = make_dynamic_unique<AddTaskMessage, InterContextMessage>(task_ref);
+        InterContextMessage add_task_message( InterContextMessage::MessageType::ADD_TASK, task_ref);
 
         task_execution_contexts_[schedule_on_core].QueueMessage(add_task_message);
     }

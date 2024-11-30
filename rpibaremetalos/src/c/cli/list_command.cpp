@@ -4,6 +4,8 @@
 
 #include "cli/list_command.h"
 
+#include <string.h>
+
 #include "os_entity.h"
 
 #include "filesystem/filesystems.h"
@@ -132,13 +134,51 @@ namespace cli::commands
         minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
         char uuid_buffer[UUID::UUID_STRING_BUFFER_SIZE];
 
+        //  Check for extra arguments
+
+        bool print_uuids = false;
+        bool include_zombies = true;
+
+        const char *next_token = parser.NextToken();
+
+        while (next_token != nullptr)
+        {
+            if (strncmp(next_token, "-uuid", 16) == 0)
+            {
+                print_uuids = true;
+            }
+            else if (strncmp(next_token, "-nz", 16) == 0)
+            {
+                include_zombies = false;
+            }
+            else
+            {
+                context.output_stream_ << "Unknown argument: " << next_token << "\n";
+            }
+
+            next_token = parser.NextToken();
+        }
+
         //  List all the tasks with the visitor callback
 
         context.output_stream_ << "Tasks:\n";
 
-        auto callback = [&buffer, &uuid_buffer, &context](const task::Task &task) -> task::TaskListVisitorCallbackStatus
+        auto callback = [&](const task::Task &task) -> task::TaskListVisitorCallbackStatus
         {
-            context.output_stream_ << minstd::format(buffer, "{} {} {:<24} {}\n", task.ID().ToString(uuid_buffer), task.CurrentCore(), task.Name(), ToString(task.State()));
+            if (!include_zombies && (task.State() == task::Task::ExecutionState::ZOMBIE))
+            {
+                return task::TaskListVisitorCallbackStatus::NEXT;
+            }
+
+            if (print_uuids)
+            {
+                context.output_stream_ << minstd::format(buffer, "{} {:<24} {} {}\n", task.ID().ToString(uuid_buffer), task.Name(), task.CurrentCore(), ToString(task.State()));
+            }
+            else
+            {
+                context.output_stream_ << minstd::format(buffer, "{:<24} {} {}\n", task.Name(), task.CurrentCore(), ToString(task.State()));
+            }
+
             return task::TaskListVisitorCallbackStatus::NEXT;
         };
 

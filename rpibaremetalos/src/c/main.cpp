@@ -227,7 +227,7 @@ public:
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
-        for (int i = 0; i < 256; i++)
+        for (int i = 0; i < 512; i++)
         {
             auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_processes[i], "Short Lived Kernel Process");
             if (new_short_lived_kernel_process.Failed())
@@ -236,7 +236,7 @@ public:
                 return;
             }
 
-            delay(50 + (random_generator.Next32BitValue() % 20) * 500);
+            delay(50 + (random_generator.Next32BitValue() % 20) * 250);
 
             if (task_id != task::Task::GetTask().ID())
             {
@@ -501,18 +501,18 @@ extern "C" void kernel_main()
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0].load(), __core_state[1].load(), __core_state[2].load(), __core_state[3].load());
 
-    //    printf("Starting exception generating process\n");
+//        printf("Starting exception generating process\n");
 
-    //    ExceptionGeneratingProcess ex_process;
+//        ExceptionGeneratingProcess ex_process;
 
-    //    auto exception_generating_process_wrapper = task::GetTaskManager().ForkUserTask("Exception Generating Task", &ex_process);
-    //    if (exception_generating_process_wrapper.Failed())
-    //    {
-    //        printf("error while starting exception generating process");
-    //        return;
-    //    }
+//        auto exception_generating_process_wrapper = task::GetTaskManager().ForkKernelTask(&ex_process, "Exception Generating Task" );
+//        if (exception_generating_process_wrapper.Failed())
+//        {
+//            printf("error while starting exception generating process");
+//            return;
+//        }
 
-    //    printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+//        printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
     //  Keep the scheduler running
 

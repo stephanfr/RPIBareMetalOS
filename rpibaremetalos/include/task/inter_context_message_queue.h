@@ -8,49 +8,87 @@
 
 #include <lockfree/spsc_queue>
 
-#include "heaps.h"
 #include "asm_utility.h"
 
 namespace task
 {
+    //
+    //  The inter context message class should be concrete as the lockless queue requires a copyable type
+    //      and it contains all of the storage for the element so there is no need for dynamic allocation of messages.
+    //      Allocating any part of the message on the heap can lead to deadlocks if the allocator takes a lock
+    //      as the message is processed and if dynamic would be released inside the task switching code which
+    //      is inside the disabled IRQ context.
+    //
+    //  Bottom line - no locks should *ever* be taken in the task switching code.
+    //
+
     class InterContextMessage
     {
     public:
-
-        enum class MessageType
+        enum class MessageType : uint32_t
         {
+            EMPTY,
             ADD_TASK,
             SURRENDER_TASK,
         };
 
-        InterContextMessage() = default;
-
-        virtual ~InterContextMessage() = default;
-
-        virtual MessageType Type() const = 0;
-    };
-
-    class AddTaskMessage : public InterContextMessage
-    {   
-    public:
-        AddTaskMessage(TaskImpl &task)
-            : task_(task)
+        InterContextMessage()
+            : type_(MessageType::EMPTY),
+              task_(nullptr)
         {
         }
 
-        virtual MessageType Type() const override
+        InterContextMessage(MessageType type,
+                            TaskImpl &task)
+            : type_(type),
+              task_(&task) {
+              };
+
+        InterContextMessage(const InterContextMessage &message_to_copy)
+            : type_(message_to_copy.type_),
+              task_(message_to_copy.task_)
         {
-            return MessageType::ADD_TASK;
         }
 
-        TaskImpl &Task() const
+        InterContextMessage(InterContextMessage &&message_to_move)
+            : type_(message_to_move.type_),
+              task_(message_to_move.task_)
         {
-            return task_;
         }
 
-        private :
+        ~InterContextMessage() = default;
 
-        TaskImpl &task_;
+        InterContextMessage &operator=(const InterContextMessage &message_to_copy)
+        {
+            type_ = message_to_copy.type_;
+            task_ = message_to_copy.task_;
+
+            return *this;
+        }
+
+        InterContextMessage &operator=(InterContextMessage &&message_to_move)
+        {
+            type_ = message_to_move.type_;
+            task_ = message_to_move.task_;
+
+            return *this;
+        }
+
+        MessageType Type() const
+        {
+            return type_;
+        }
+
+        TaskImpl &Task()
+        {
+            return *task_;
+        }
+
+    private:
+
+        MessageType type_;
+
+        TaskImpl *task_;
     };
 
     class InterContextMessageQueue
@@ -65,7 +103,7 @@ namespace task
             return !queue_.empty();
         }
 
-        void QueueMessage(minstd::unique_ptr<InterContextMessage> &message)
+        void QueueMessage(InterContextMessage &message)
         {
             while (!queue_.push_back(message))
             {
@@ -75,13 +113,13 @@ namespace task
             }
         }
 
-        bool PopMessage(minstd::unique_ptr<InterContextMessage> &message)
+        bool PopMessage(InterContextMessage &message)
         {
             return queue_.pop_front(message);
         }
 
     private:
-        using TaskQueue = minstd::spsc_queue<minstd::unique_ptr<InterContextMessage>>;
+        using TaskQueue = minstd::spsc_queue<InterContextMessage>;
         using TaskQueueAllocator = minstd::allocator<TaskQueue::value_type>;
         using TaskQueueHeapAllocator = minstd::heap_allocator<TaskQueue::value_type>;
 

@@ -8,6 +8,64 @@
 
 namespace task
 {
+    class PerCoreTaskList
+    {
+        public :
+
+        PerCoreTaskList() = default;
+        PerCoreTaskList(const PerCoreTaskList &) = delete;
+        PerCoreTaskList(PerCoreTaskList &&) = delete;
+        
+        ~PerCoreTaskList() = default;
+
+        PerCoreTaskList &operator=(const PerCoreTaskList &) = delete;
+        PerCoreTaskList &operator=(PerCoreTaskList &&) = delete;
+
+        uint32_t NumTasks() const
+        {
+            return num_tasks_;
+        }
+
+        TaskImpl &operator[](uint32_t index)
+        {
+            return *task_list_[index];
+        }
+
+        bool AddTask(TaskImpl &task)
+        {
+            //  If the task list is full, return false
+            
+            if( num_tasks_ >= MAX_ACTIVE_TASKS_PER_CORE - 1 )
+            {
+                return false;
+            }
+            
+            task_list_[num_tasks_++] = &task;
+            return true;
+        }
+
+        void RemoveTaskByIndex(uint32_t index)
+        {
+            if( index >= num_tasks_ )
+            {
+                return;
+            }
+
+            if( index == num_tasks_ - 1 )
+            {
+                num_tasks_--;
+                return;
+            }
+
+            task_list_[index] = task_list_[--num_tasks_];
+        }
+
+        private :
+
+        uint32_t num_tasks_ = 0;
+        minstd::array<TaskImpl*, MAX_ACTIVE_TASKS_PER_CORE> task_list_;
+    };
+
     class TaskExecutionContext
     {
     public:
@@ -15,7 +73,7 @@ namespace task
 
         ~TaskExecutionContext() = default;
 
-        void QueueMessage(minstd::unique_ptr<InterContextMessage> &message)
+        void QueueMessage(InterContextMessage &message)
         {
             inter_context_message_queue_.QueueMessage(message);
         }
@@ -23,14 +81,8 @@ namespace task
         void SwitchTasks();
 
     private:
-        using TaskList = minstd::list<minstd::reference_wrapper<TaskImpl>>;
-        using TaskListAllocator = minstd::allocator<TaskList::node_type>;
-        using TaskListHeapAllocator = minstd::heap_allocator<TaskList::node_type>;
 
-        //  Per core task lists will go into the dynamic kernel queue as they are dynamically sized
-
-        TaskListHeapAllocator task_list_heap_allocator_{__os_dynamic_heap};
-        TaskList task_list_{task_list_heap_allocator_};
+        PerCoreTaskList task_list_;
 
         //  Messaging queue for inter-context messages can go into the static heap
 
