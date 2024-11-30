@@ -10,16 +10,23 @@ RandomNumberGeneratorBase &GetHWRandomNumberGenerator();
 
 Xoroshiro128PlusPlusRNG &GetXoroshiro128PlusPlusRootRandomNumberGenerator();
 
-RandomNumberGenerator GetRandomNumberGenerator(RandomNumberGeneratorTypes type)
+RandomNumberGenerator<RandomNumberGeneratorBase&, false> GetRandomNumberGenerator(RandomNumberGeneratorTypes type)
 {
     switch (type)
     {
     case RandomNumberGeneratorTypes::HARDWARE:
-        return RandomNumberGenerator(GetHWRandomNumberGenerator());
+        return RandomNumberGenerator<RandomNumberGeneratorBase&, false>(GetHWRandomNumberGenerator());
         break;
 
     case RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS:
-        return RandomNumberGenerator( GetXoroshiro128PlusPlusRootRandomNumberGenerator() );
+        return RandomNumberGenerator<RandomNumberGeneratorBase&, false>(GetXoroshiro128PlusPlusRootRandomNumberGenerator());
         break;
     }
 }
+
+
+minstd::unique_ptr<RandomNumberGeneratorBase> NewRandomNumberGenerator(minstd::single_block_memory_heap &heap)
+{
+    return minstd::unique_ptr<RandomNumberGeneratorBase>((RandomNumberGeneratorBase *)new (heap.allocate_block<Xoroshiro128PlusPlusRNG>(1)) Xoroshiro128PlusPlusRNG(GetXoroshiro128PlusPlusRootRandomNumberGenerator().Fork()), heap);
+}
+
