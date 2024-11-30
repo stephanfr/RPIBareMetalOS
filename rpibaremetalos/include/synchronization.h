@@ -14,9 +14,6 @@ UUID GetCurrentTaskId(void);
 
 extern "C"
 {
-    void LockMutex(void *mutex);
-    void UnlockMutex(void *mutex);
-
     void LockSpinLock(void *spinlock);
     void UnlockSpinLock(void *spinlock);
 }
@@ -74,7 +71,7 @@ class SpinLock : public LockableObject
 
     void Lock()
     {
-        if( track_owning_task_ && ( owner_ == GetCurrentTaskId()))
+        if((lock_ != UNLOCKED) && track_owning_task_ && ( owner_ == GetCurrentTaskId()))
         {
             char buffer[128];
             LogError("SpinLock already owned by current task: %s\n", owner_.ToString(buffer));
@@ -104,7 +101,7 @@ class SpinLock : public LockableObject
 
 private:
 
-    bool track_owning_task_;
+    const bool track_owning_task_;
 
     UUID owner_ = UUID::NIL;
     ALIGN uint32_t lock_ = State::UNLOCKED;

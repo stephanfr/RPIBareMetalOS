@@ -14,7 +14,6 @@
 
 .globl LockSpinLock
 LockSpinLock:
-    msr	    daifset, #2				//  Disable IRQs, we cannot risk being interrupted while trying to acquire the spinlock as register values could be corrupted
     mov	    w2, LOCKED
 	sevl                            //  SEVL insures we fall through the WFE when we hit it next
 spinlock_wait_for_release:
@@ -22,9 +21,8 @@ spinlock_wait_for_release:
 spinlock_try_to_lock:
 	ldaxr	w1, [x0]
 	cbnz	w1, spinlock_wait_for_release
-	stxr	w1, w2, [x0]
+	stlxr	w1, w2, [x0]
 	cbnz	w1, spinlock_try_to_lock
-    msr     daifclr, #2             // Enable IRQs
 	ret
 
 .globl UnlockSpinLock
