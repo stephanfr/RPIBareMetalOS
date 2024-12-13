@@ -5,6 +5,7 @@
 #include "cpu_part_nums.h"
 #include "processor_cores.h"
 #include "os_memory_config.h"
+#include "enable_disable_irqs.S"
 
 
 #define BIT(x) (1 << (x))
@@ -75,6 +76,15 @@ x21_coreStateTableAddress .req x21
 x22_coreJumpTableAddress .req x22
 x23_arrivedInEL3 .req x23
 x24_numberOfCoresAvailable .req x24
+
+
+//.macro EnableIRQs
+//	msr	daifclr, #2
+//.endm
+
+//.macro DisableIRQs
+//	msr	daifset, #2
+//.endm
 
 .macro InitializeLocalRegisterVariables
     mrs     x19_coreNumber, MPIDR_EL1
@@ -363,7 +373,7 @@ el1_spin:
 
     //  Enable interrupts on the core
 
-    bl      EnableIRQ
+    EnableIRQs
 
     //  Mark the core as having jumped to application code
 
