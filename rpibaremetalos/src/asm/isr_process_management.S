@@ -32,6 +32,7 @@ SOFTWARE.
 #include "os_config.h"
 #include "sysregs.h"
 #include "task/system_calls.h"
+#include "enable_disable_irqs.S"
 
 
 #define SYNC_INVALID_EL1t		0 
@@ -90,7 +91,7 @@ SOFTWARE.
     stp	x26, x27, [sp, #16 * 13]
     stp	x28, x29, [sp, #16 * 14]
 
-	.if	\el == 0
+	.if	\el == EL0
 	mrs	x21, sp_el0
 	.else
 	add	x21, sp, #S_FULL_CPU_STATE_FRAME_SIZE
@@ -105,11 +106,10 @@ SOFTWARE.
 	mrs x22, tpidrro_el0
 	mrs x23, tpidr_el1
 	stp	x22, x23, [sp, #16 * 17]			//  The EL0 and EL1 thread pointers
-
 .endm
 
 .macro	KernelExit, el
-	msr	daifset, #2							//  Disable IRQs, taking an IRQ while in the middle of a context switch is not going to end well		
+	DisableIRQs								//  Disable IRQs - we do not want to be interrupted during the context switch
 	ldp	x22, x23, [sp, #16 * 17]
 	msr	tpidrro_el0, x22
 	msr	tpidr_el1, x23
@@ -117,7 +117,7 @@ SOFTWARE.
 	ldp	x22, x23, [sp, #16 * 16]
 	ldp	x30, x21, [sp, #16 * 15] 
 
-	.if	\el == 0
+	.if	\el == EL0
 	msr	sp_el0, x21
 	.endif 
 
@@ -140,8 +140,7 @@ SOFTWARE.
     ldp	x26, x27, [sp, #16 * 13]
     ldp	x28, x29, [sp, #16 * 14]
     add	sp, sp, #S_FULL_CPU_STATE_FRAME_SIZE
-	msr	daifclr, #2						//  Re-enable IRQs
-    eret
+    eret												//  eret restores the PSTATE which will re-enable IRQs
 .endm
 
 
@@ -158,7 +157,6 @@ SOFTWARE.
     //  Just park the core, no recovery possible
 
     b ParkCore
-
 .endm
 
 //
@@ -264,10 +262,16 @@ fiq_invalid_el0_32:
 error_invalid_el0_32:
 	HandleInvalidEntry EL0, ERROR_INVALID_EL0_32
 
+
+//
+//	Interrupt handlers for EL1 and EL0.  These are the entry points for IRQs and FIQs.
+//
+
 EL1_IRQ:
 	KernelEntry EL1
 	bl	HandleIRQ
 	KernelExit EL1
+
 
 EL0_IRQ:
 	KernelEntry EL0 
@@ -300,15 +304,14 @@ EL1_SyscallDispatcher:
 	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
 	uxtw	syscall_number, w8									//	syscall number in w8
 	mov		num_system_calls, #NUMBER_OF_SYSTEM_CALLS
-	bl		EnableIRQ
 	cmp     syscall_number, num_system_calls        			//	check upper syscall limit
 	b.hs	EL1_SyscallIndexOutOfRange
 
 	ldr		x16, [syscall_table_ptr, syscall_number, lsl #3]	//	address in the syscall table
 	blr		x16													//	call system_call routine
-	bl		DisableIRQ				
-	str		x0, [sp, 0]											// returned x0 - zero is offset of x0 in the stack frame
+	str		x0, [sp, 0]											//  Returned x0 - zero is offset of x0 in the stack frame
 	KernelExit EL1
+
 
 EL1_SyscallIndexOutOfRange:
 	HandleInvalidEntry EL1, SYSCALL_ERROR
@@ -328,15 +331,14 @@ EL0_SyscallDispatcher:
 	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
 	uxtw	syscall_number, w8									//	syscall number in w8
 	mov		num_system_calls, #NUMBER_OF_SYSTEM_CALLS
-	bl		EnableIRQ
 	cmp     syscall_number, num_system_calls        			//	check upper syscall limit
 	b.hs	EL0_SyscallIndexOutOfRange
 
 	ldr		x16, [syscall_table_ptr, syscall_number, lsl #3]	//	address in the syscall table
 	blr		x16													//	call system_call routine
-	bl		DisableIRQ				
-	str		x0, [sp, 0]											// returned x0 - zero is offset of x0 in the stack frame
+	str		x0, [sp, 0]											// 	Returned x0 - zero is offset of x0 in the stack frame
 	KernelExit EL0
+
 
 EL0_SyscallIndexOutOfRange:
 	HandleInvalidEntry EL0, SYSCALL_ERROR
@@ -347,10 +349,10 @@ EL0_SyscallIndexOutOfRange:
 
 .globl ReturnFromForkASMStub
 ReturnFromForkASMStub:
-	cbz	x19, ReturnToUserSpace								//	If x19 is zero, return to EL0 which is user space
+	cbz	x19, ReturnToUserSpace									//	If x19 is zero, return to EL0 which is user space
 	mov	x0, x20
 	blr	x19
 ReturnToUserSpace:
-	bl DisableIRQ				
+	DisableIRQs													//	Disable IRQs				
 	KernelExit EL0 
 

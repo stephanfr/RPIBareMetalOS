@@ -14,6 +14,8 @@
 //
 //	Insure that IRQs are disabled when calling this method, it will re-enable them before returning.
 
+#include "enable_disable_irqs.S"
+
 .globl SwitchCPUState
 SwitchCPUState:
 	clrex								// Clear exclusive access monitor for exclusive load/store
@@ -41,5 +43,5 @@ SwitchCPUState:
 	msr tpidrro_el0, x2
 	msr tpidr_el1, x3
 	mov	sp, x9
-	msr daifclr, #2							// Enable IRQs
+	EnableIRQs							// Enable IRQs
 	ret
