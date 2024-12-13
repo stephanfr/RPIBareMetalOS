@@ -22,6 +22,12 @@ sc_Exit:
 	svc #0
 	ret
 
+.globl sc_Yield
+sc_Yield:
+	mov w8, #SYS_YIELD_NUMBER	
+	svc #0
+	ret
+
 .globl sc_CloneTask
 sc_CloneTask:
 	//	Save arguments for the child in scratch registers.  We use them in thread_start below.

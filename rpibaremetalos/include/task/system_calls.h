@@ -7,9 +7,10 @@
 #define SYS_WRITE_NUMBER    0 
 #define SYS_MALLOC_NUMBER   1 	
 #define SYS_CLONE_NUMBER    2 	
-#define SYS_EXIT_NUMBER     3 	
+#define SYS_EXIT_NUMBER     3
+#define SYS_YIELD_NUMBER    4
 
-#define NUMBER_OF_SYSTEM_CALLS 4
+#define NUMBER_OF_SYSTEM_CALLS 5
 
 #define SYS_CLONE_FAILURE   -1
 #define SYS_CLONE_SUCCESS   1
@@ -23,6 +24,7 @@
 extern "C" int sc_CloneTask(const char* name, unsigned long fn, unsigned long arg, unsigned long stack, task::TaskResultCodes &result_code, UUID &result);
 extern "C" unsigned long sc_Malloc(unsigned long block_size);
 extern "C" void sc_Exit();
+extern "C" void sc_Yield();
 
 extern "C" void sc_Write(const char * buf);
 

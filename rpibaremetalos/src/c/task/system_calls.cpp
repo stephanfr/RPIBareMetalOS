@@ -40,6 +40,13 @@ namespace syscall
     {
         task::Task::GetTask().Exit();
     }
+
+    void Yield()
+    {
+        DisableIRQs();
+        task::TaskManagerImpl::Instance().SwitchToNextTask();
+        EnableIRQs();
+    }
 }
 
-extern "C" void *const __system_call_table[] = {(void *)syscall::Write, (void *)syscall::Malloc, (void *)syscall::CloneTask, (void *)syscall::Exit};
+extern "C" void *const __system_call_table[] = {(void *)syscall::Write, (void *)syscall::Malloc, (void *)syscall::CloneTask, (void *)syscall::Exit, (void *)syscall::Yield};
