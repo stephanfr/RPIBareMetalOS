@@ -2,13 +2,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-.globl EnableIRQ
-EnableIRQ:
-	msr    daifclr, #2 
-	ret
+#pragma once
 
-.globl DisableIRQ
-DisableIRQ:
+.macro EnableIRQs
+	msr	daifclr, #2
+.endm
+
+.macro DisableIRQs
 	msr	daifset, #2
-	ret
-	
+.endm
