@@ -221,11 +221,11 @@ public:
 
     void Run()
     {
-        minstd::array<ShortLivedKernelProcess, 256> short_lived_kernel_processes;
+        minstd::array<ShortLivedKernelProcess, 512> short_lived_kernel_processes;
 
         const UUID task_id = task::Task::GetTask().ID();
 
-        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+        RandomNumberGeneratorThreadUnsafe random_generator(NewRandomNumberGenerator());
 
         for (int i = 0; i < 512; i++)
         {
@@ -323,7 +323,7 @@ extern "C" void kernel_main()
 
     SetLogLevel(LogLevel::WARNING);
 
-    EnableIRQ();
+    EnableIRQs();
 
     //  Setup the ISRs
 
@@ -421,6 +421,15 @@ extern "C" void kernel_main()
     if (new_counter3.Failed())
     {
         printf("error while starting counter 3");
+        return;
+    }
+
+    Counter counter4("ABCDEFGHIJ");
+
+    auto new_counter4 = task::GetTaskManager().ForkKernelTask(&counter4, "Counter4");
+    if (new_counter4.Failed())
+    {
+        printf("error while starting counter4");
         return;
     }
 

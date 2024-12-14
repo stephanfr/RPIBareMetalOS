@@ -99,7 +99,7 @@ namespace task
 
             //  Wait for an interrupt - this will be the first task switch message
 
-            EnableIRQ();
+            EnableIRQs();
 
             *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::WaitingInSecondaryMain;
 
@@ -263,14 +263,19 @@ namespace task
 
         minstd::unique_ptr<TaskImpl> new_task = dynamic_new<TaskImpl>(task_definition, Task::TaskType::KERNEL_TASK);
 
+        if (new_task.get() == nullptr)
+        {
+            return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
+        }
+
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
         new_task->cpu_state_.x19 = reinterpret_cast<unsigned long>(wrapper);
         new_task->cpu_state_.x20 = reinterpret_cast<unsigned long>(runnable);
 
-        new_task->priority_ = CurrentTask().priority_;
+        new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        new_task->switched_out_last_ = 0;
+//        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
 
         new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
@@ -305,6 +310,11 @@ namespace task
 
         minstd::unique_ptr<TaskImpl> new_task = dynamic_new<TaskImpl>(task_definition, CurrentTask().type_);
 
+        if (new_task.get() == nullptr)
+        {
+            return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
+        }
+
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
         TaskImpl::FullCPUState &cur_regs = CurrentTask().GetTaskInitialFullCPUState();
@@ -313,9 +323,9 @@ namespace task
         childregs.sp = stack + task_definition.stack_size_in_bytes_;
         new_task->stack_ = stack;
 
-        new_task->priority_ = CurrentTask().priority_;
+        new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        new_task->switched_out_last_ = 0;
+//        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1;
 
         new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
@@ -353,19 +363,24 @@ namespace task
 
         uint32_t schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
 
-        while (!task_ref.CoreMask().ContainsCore(schedule_on_core))
+        while (!task_ref.CoreRestrictionMask().ContainsCore(schedule_on_core))
         {
             schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
         }
 
         task_ref.schedule_on_core_ = schedule_on_core;
+        task_ref.scheduled_timestamp_ = PhysicalTimer::CurrentTicks();
         task_ref.state_ = Task::ExecutionState::RUNNABLE_WAITING;
 
         //  Add the task to the per-core task queue, loop and delay if the queue is full
 
-        InterContextMessage add_task_message( InterContextMessage::MessageType::ADD_TASK, task_ref);
+        InterContextMessage add_task_message(InterContextMessage::MessageType::ADD_TASK, task_ref);
 
         task_execution_contexts_[schedule_on_core].QueueMessage(add_task_message);
+    }
+
+    void TaskManagerImpl::BuryZombies(void)
+    {
     }
 
     /**
@@ -375,7 +390,7 @@ namespace task
      */
     void TaskManagerImpl::PreemptiveSchedule()
     {
-        //  Signal the other cores to switch tasks, then switch ourselves
+        //  Signal all the cores to switch tasks
 
         GetExceptionManager().SendInterprocessorInterrupt(0, InterprocessorInterrupts::CORE_TASK_SWITCH);
         GetExceptionManager().SendInterprocessorInterrupt(1, InterprocessorInterrupts::CORE_TASK_SWITCH);
@@ -385,9 +400,7 @@ namespace task
 
     void TaskManagerImpl::SwitchToNextTask()
     {
-        uint32_t core_id = GetCoreID();
-
-        task_execution_contexts_[core_id].SwitchTasks();
+        task_execution_contexts_[GetCoreID()].SwitchTasks();
     }
 
     void TaskManagerImpl::ReturnFromFork()

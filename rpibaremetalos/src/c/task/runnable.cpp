@@ -5,10 +5,11 @@
 #include "task/runnable.h"
 
 #include "task/tasks.h"
+#include "task/system_calls.h"
 
 void Runnable::Yield()
 {
-    task::Task::GetTask().Yield();
+    sc_Yield();
 }
 
 void Runnable::Exit()

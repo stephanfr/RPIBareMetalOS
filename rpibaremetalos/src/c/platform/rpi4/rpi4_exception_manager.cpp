@@ -108,8 +108,6 @@ void BCM2711ExceptionManager::HandleInterrupt()
 
     SetGICRegister(BCM2711GenericInterruptControllerRegisters::END_OF_INTERRUPT, irq_ack_reg);
 
-    EnableIRQ();
-
     //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
 
     if (core_task_switch_isr != nullptr)
@@ -117,4 +115,6 @@ void BCM2711ExceptionManager::HandleInterrupt()
         LogDebug1("Executing Core Task Switch ISR\n");
         core_task_switch_isr->HandleInterrupt();
     }
+
+    EnableIRQs();
 }

@@ -22,31 +22,31 @@ namespace task
 {
     //  Class to model a core restriction mask
 
-    class CoreRestrictionMask
+    class CoreMask
     {
     public:
         static constexpr uint64_t ALL_CORES = 0xFFFFFFFFFFFFFFFF;
 
-        CoreRestrictionMask(uint64_t mask)
+        CoreMask(uint64_t mask)
             : mask_(mask)
         {
         }
 
-        CoreRestrictionMask(const CoreRestrictionMask &mask_to_copy)
+        CoreMask(const CoreMask &mask_to_copy)
             : mask_(mask_to_copy.mask_)
         {
         }
 
-        ~CoreRestrictionMask() = default;
+        ~CoreMask() = default;
 
-        CoreRestrictionMask &operator=(uint64_t mask)
+        CoreMask &operator=(uint64_t mask)
         {
             mask_ = mask;
 
             return *this;
         }
 
-        CoreRestrictionMask &operator=(const CoreRestrictionMask &mask_to_copy)
+        CoreMask &operator=(const CoreMask &mask_to_copy)
         {
             mask_ = mask_to_copy.mask_;
 
@@ -67,7 +67,7 @@ namespace task
         TaskDefinition(const minstd::string &name,
                        uint32_t priority = 1,
                        uint64_t stack_size_in_bytes = DEFAULT_TASK_STACK_SIZE_IN_BYTES,
-                       CoreRestrictionMask core_mask = CoreRestrictionMask::ALL_CORES)
+                       CoreMask core_mask = CoreMask::ALL_CORES)
             : name_(name),
               priority_(priority),
               stack_size_in_bytes_(stack_size_in_bytes),
@@ -78,7 +78,7 @@ namespace task
         TaskDefinition(const char *name,
                        uint32_t priority = 1,
                        uint64_t stack_size_in_bytes = DEFAULT_TASK_STACK_SIZE_IN_BYTES,
-                       CoreRestrictionMask core_mask = CoreRestrictionMask::ALL_CORES)
+                       CoreMask core_mask = CoreMask::ALL_CORES)
             : name_(name),
               priority_(priority),
               stack_size_in_bytes_(stack_size_in_bytes),
@@ -89,7 +89,7 @@ namespace task
         const minstd::fixed_string<64> name_;
         const uint32_t priority_;
         const uint64_t stack_size_in_bytes_;
-        const CoreRestrictionMask core_mask_;
+        const CoreMask core_mask_;
     };
 
     class Task
@@ -129,6 +129,8 @@ namespace task
         virtual ExecutionState State() const = 0;
 
         virtual uint32_t CurrentCore() const = 0;
+        virtual uint64_t Runtime() const = 0;
+        virtual uint64_t TimeslicesGranted() const = 0;
 
         virtual void Yield() = 0;
         virtual void Exit() = 0;

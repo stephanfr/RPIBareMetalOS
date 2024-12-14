@@ -42,7 +42,44 @@ namespace task
         long max_counter = -1;
         TaskImpl *next_task = nullptr;
 
-        while (true)
+        for (int32_t i = 0; i < task_list_.NumTasks(); i++)
+        {
+            TaskImpl *task = &task_list_[i];
+
+            //  If the current task is a Zombie, remove it from the list.
+            //      We do this in a while loop as the replacement *could* also be a Zombie.
+
+            while (task->State() == Task::ExecutionState::ZOMBIE)
+            {
+                //  Remove takes the last task in the list and places it into the slot to be removed
+
+                task_list_.RemoveTaskByIndex(i);
+
+                if (i >= task_list_.NumTasks())
+                {
+                    break;
+                }
+
+                task = &task_list_[i];
+            }
+
+            if (i < task_list_.NumTasks())
+            {
+                if (((task->State() == Task::ExecutionState::RUNNING) ||
+                     (task->State() == Task::ExecutionState::RUNNABLE_WAITING)))
+                {
+                    if (task->counter_ > max_counter)
+                    {
+                        max_counter = task->counter_;
+                        next_task = task;
+                    }
+                }
+            }
+        }
+
+        //  If we do not have a task counter with a value > 0, update the counters
+
+        if (max_counter <= 0)
         {
             max_counter = -1;
             next_task = nullptr;
@@ -51,49 +88,17 @@ namespace task
             {
                 TaskImpl *task = &task_list_[i];
 
-                //  If the current task is a Zombie, remove it from the list.
-                //      We do this in a while loop as the replacement *could* also be a Zombie.
+                task->counter_ = minstd::max((task->counter_ >> 1) + task->priority_, (long)0);
 
-                while (task->State() == Task::ExecutionState::ZOMBIE)
+                if (((task->State() == Task::ExecutionState::RUNNING) ||
+                     (task->State() == Task::ExecutionState::RUNNABLE_WAITING)))
                 {
-                    //  Remove takes the last task in the list and places it into the slot to be removed
-
-                    task_list_.RemoveTaskByIndex(i);
-
-                    if (i >= task_list_.NumTasks())
+                    if (task->counter_ > max_counter)
                     {
-                        break;
-                    }
-
-                    task = &task_list_[i];
-                }
-
-                if (i < task_list_.NumTasks())
-                {
-                    if (((task->State() == Task::ExecutionState::RUNNING) ||
-                         (task->State() == Task::ExecutionState::RUNNABLE_WAITING)))
-                    {
-                        if (task->counter_ > max_counter)
-                        {
-                            max_counter = task->counter_;
-                            next_task = task;
-                        }
+                        max_counter = task->counter_;
+                        next_task = task;
                     }
                 }
-            }
-
-            //  If we do not have a task counter with a value > 0, update the counters
-
-            if (max_counter > 0)
-            {
-                break;
-            }
-
-            for (int32_t i = 0; i < task_list_.NumTasks(); i++)
-            {
-                TaskImpl &task = task_list_[i];
-
-                task.counter_ = minstd::max((task.counter_ >> 1) + task.priority_, (long)0);
             }
         }
 
@@ -113,13 +118,24 @@ namespace task
         //      Do not allow interrupts to occur in this code as we are manipulating the task list
         //      and it is not thread re-entrant.  Do not block or take locks anywhere in this code.
         //
-        //  The KernelExit method will re-enable interrupts just before the eret instruction.
+        //  The KernelExit method will re-enable interrupts at the eret instruction.
         //
         //  Even if we had a lock-free task list, there is still some risk of taking an interrupt while
-        //      switching contexts.  Best to just disable interrupts for the duration of the switch.
+        //      switching contexts.  Best to just have interrupts disabled for the duration of the switch.
         //      Therefore - make sure the switch is fast.
 
-        DisableIRQ();
+        uint64_t switch_start = PhysicalTimer::CurrentTicks();
+
+        TaskImpl *const prev = &TaskImpl::GetTask();
+
+        //  Update the task task runtime and the switched out timestamp
+
+        if (prev->switched_in_last_ != 0)
+        {
+            prev->runtime_ = prev->runtime_ + (switch_start - prev->switched_in_last_);
+        }
+
+        prev->switched_out_last_ = switch_start;
 
         //  First, groom the task list.
 
@@ -131,22 +147,27 @@ namespace task
         //  Decrement the task counter and if it is still > 0 or is not premeptaable
         //      then return without switching tasks.
 
-        TaskImpl::GetTask().counter_ = minstd::max(TaskImpl::GetTask().counter_ - 1, (long)0);
+        prev->counter_ = minstd::max(prev->counter_ - 1, (long)0);
 
-        if (TaskImpl::GetTask().counter_ > 0 || TaskImpl::GetTask().preempt_count_ > 0)
+        if ((prev->counter_ > 0) || (prev->preempt_count_ > 0))
         {
-            EnableIRQ();
+            prev->timeslices_granted_++; //  Bump the timeslice count
+            prev->switched_in_last_ = PhysicalTimer::CurrentTicks();
             return;
         }
 
-        TaskImpl *const prev = &TaskImpl::GetTask();
+        //  Find the next task to run, we could get the same task back though.
+
         TaskImpl *next = &FindNextTask();
+
+        next->timeslices_granted_++;
 
         if (prev == next)
         {
-            EnableIRQ();
             return;
         }
+
+        //  Switch the tasks
 
         next->state_ = Task::ExecutionState::RUNNING;
 
@@ -155,13 +176,9 @@ namespace task
             prev->state_ = Task::ExecutionState::RUNNABLE_WAITING;
         }
 
-        prev->switched_out_last_ = PhysicalTimer::CurrentTicks();
+//        prev->switched_out_last_ = PhysicalTimer::CurrentTicks();
+        next->switched_in_last_ = PhysicalTimer::CurrentTicks();
 
         SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
-
-        if (TaskImpl::GetTask().State() == Task::ExecutionState::ZOMBIE)
-        {
-            LogError("Core: %d    Switched to Zombie Task on return\n", GetCoreID());
-        }
     }
 } // namespace task

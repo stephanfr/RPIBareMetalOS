@@ -172,11 +172,11 @@ namespace cli::commands
 
             if (print_uuids)
             {
-                context.output_stream_ << minstd::format(buffer, "{} {:<24} {} {}\n", task.ID().ToString(uuid_buffer), task.Name(), task.CurrentCore(), ToString(task.State()));
+                context.output_stream_ << minstd::format(buffer, "{} {:<32} {} {} {} {}\n", task.ID().ToString(uuid_buffer), task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime(), ToString(task.State()));
             }
             else
             {
-                context.output_stream_ << minstd::format(buffer, "{:<24} {} {}\n", task.Name(), task.CurrentCore(), ToString(task.State()));
+                context.output_stream_ << minstd::format(buffer, "{:<32} {} {} {} {}\n", task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime(), ToString(task.State()));
             }
 
             return task::TaskListVisitorCallbackStatus::NEXT;

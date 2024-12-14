@@ -8,6 +8,8 @@
 
 bool BCM2837ExceptionManager::Initialize()
 {
+    //  TODO - check initialization sequence
+
     LogEntryAndExit("Entering Initialize\n");
 
     *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET) = 0x00000001 << IPI_MAILBOX_ID;
@@ -97,13 +99,13 @@ void BCM2837ExceptionManager::HandleInterrupt()
         LogError("No ISRs found for Interrupt: %s\n", ToString(interrupt));
     }
 
-    EnableIRQ();
-
-    //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
+    //  Execute the task scheduler now if we have one.
 
     if (core_task_switch_isr != nullptr)
     {
         LogDebug1("Executing Core Task Switch ISR\n");
         core_task_switch_isr->HandleInterrupt();
     }
+
+    EnableIRQs();
 }

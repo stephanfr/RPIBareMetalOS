@@ -80,6 +80,8 @@ namespace task
 
         void AddTask(minstd::unique_ptr<TaskImpl> &task);
 
+        void BuryZombies(void);
+
     private:
         using TaskMap = minstd::map<UUID, minstd::unique_ptr<TaskImpl>>;
         using TaskMapAllocator = minstd::allocator<TaskMap::node_type>;
@@ -104,6 +106,8 @@ namespace task
         TaskMap task_map_{task_map_heap_allocator_};
 
         SpinLock task_map_spinlock_;
+
+        uint32_t zombie_lifetime_in_seconds_ = 600;             //  10 minutes
 
         //
         //  Private methods

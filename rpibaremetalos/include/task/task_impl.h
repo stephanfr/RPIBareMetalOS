@@ -10,12 +10,15 @@
 #include <fixed_string>
 #include <map>
 
+#include "devices/physical_timer.h"
+
 #include "platform/exception_manager.h"
 #include "platform/memory_manager.h"
 
 #include "task/runnable.h"
 #include "task/task_errors.h"
 #include "task/tasks.h"
+#include "task/system_calls.h"
 
 #include "asm_utility.h"
 
@@ -89,37 +92,49 @@ namespace task
 
         ~TaskImpl() = default;
 
-        const UUID &ID() const
+        const UUID &ID() const override
         {
             return uuid_;
         }
 
-        const minstd::string &Name() const
+        const minstd::string &Name() const override
         {
             return name_;
         }
 
-        uint32_t CurrentCore() const
+        uint32_t CurrentCore() const override
         {
             return schedule_on_core_;
         }
 
-        const CoreRestrictionMask &CoreMask() const
+        const CoreMask &CoreRestrictionMask() const
         {
             return core_restriction_mask_;
         }
 
-        void Yield()
+        uint64_t Runtime() const override
         {
+            return runtime_;
+        }
+
+        uint64_t TimeslicesGranted() const override
+        {
+            return timeslices_granted_;
+        }
+
+        void Yield() override
+        {
+            //  TODO - maybe put the assignments to counter and preempt_count in sc_Yield();
             counter_ = 0;
             preempt_count_ = 0;
 
-            GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
+            sc_Yield();
         }
 
-        void Exit()
+        void Exit() override
         {
             state_ = Task::ExecutionState::ZOMBIE;
+            zombie_timestamp_ = PhysicalTimer::CurrentTicks();
 
             if (stack_ != 0)
             {
@@ -144,12 +159,12 @@ namespace task
             preempt_count_--;
         }
 
-        ExecutionState State() const
+        ExecutionState State() const override
         {
             return state_;
         }
 
-        TaskType Type() const
+        TaskType Type() const override
         {
             return type_;
         }
@@ -169,11 +184,17 @@ namespace task
         const minstd::fixed_string<MAX_TASK_NAME_LENGTH> name_;
         TaskType type_;
         uint64_t stack_size_in_bytes_;
-        CoreRestrictionMask core_restriction_mask_;
+        CoreMask core_restriction_mask_;
 
         minstd::atomic<uint32_t> schedule_on_core_;
+        minstd::atomic<uint64_t> scheduled_timestamp_ = 0;
 
-        minstd::atomic<uint64_t> switched_out_last_;
+        minstd::atomic<uint64_t> zombie_timestamp_ = 0;
+
+        minstd::atomic<uint64_t> switched_out_last_ = 0;
+        minstd::atomic<uint64_t> switched_in_last_ = 0;
+        minstd::atomic<uint64_t> runtime_ = 0;
+        minstd::atomic<uint64_t> timeslices_granted_ = 0;
 
         ExecutionState state_;
         long counter_;
