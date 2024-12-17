@@ -18,6 +18,13 @@ public:
         RANDOM = 4 //  RFC 4122
     } Versions;
 
+
+    UUID()
+        : low_64_bits_(0),
+          high_64_bits_(0)
+    {
+    }
+    
     UUID(const UUID &uuid_to_copy)
         : low_64_bits_(uuid_to_copy.low_64_bits_),
           high_64_bits_(uuid_to_copy.high_64_bits_)
