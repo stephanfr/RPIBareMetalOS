@@ -14,7 +14,7 @@
 //
 //	Insure that IRQs are disabled when calling this method, it will re-enable them before returning.
 
-#include "enable_disable_irqs.S"
+#include "enable_disable_irqs.h"
 
 .globl SwitchCPUState
 SwitchCPUState:

@@ -5,7 +5,7 @@
 #include "cpu_part_nums.h"
 #include "processor_cores.h"
 #include "os_memory_config.h"
-#include "enable_disable_irqs.S"
+#include "enable_disable_irqs.h"
 
 
 #define BIT(x) (1 << (x))

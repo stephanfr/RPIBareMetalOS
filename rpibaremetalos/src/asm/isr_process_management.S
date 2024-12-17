@@ -32,7 +32,7 @@ SOFTWARE.
 #include "os_config.h"
 #include "sysregs.h"
 #include "task/system_calls.h"
-#include "enable_disable_irqs.S"
+#include "enable_disable_irqs.h"
 
 
 #define SYNC_INVALID_EL1t		0 
