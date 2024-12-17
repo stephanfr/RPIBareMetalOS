@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "asm_utility.h"
 #include "devices/log.h"
 #include "heaps.h"
 
@@ -17,7 +18,7 @@ public:
     {
     }
 
-    uint64_t GetMicroseconds() const override
+    nanoseconds Now() const override
     {
         uint32_t h;
         uint32_t l;
@@ -36,30 +37,32 @@ public:
             l = GetRegister(SystemTimerRegisters::SYSTEM_TIMER_LOW);
         }
 
+        INSTRUCTION_CACHE_BARRIER;
+
         //  Return the 64 bit value
 
-        return ((uint64_t)h << 32) | l;
+        return nanoseconds((((uint64_t)h << 32) | l) * 1000);
     }
 
-    void WaitInMicroseconds(uint32_t microseconds_to_wait) const override
+    void Wait(nanoseconds delay) const override
     {
-        uint64_t start_time = GetMicroseconds();
+        auto start_time = Now();
 
         //  Insure the time is non-zero, because qemu does not emulate system timer.
         //      Left unchecked, a qemu VM would just loop forever here....
 
-        if (start_time)
+        if (start_time > nanoseconds::zero())
         {
-            while (GetMicroseconds() - start_time < microseconds_to_wait)
+            while (Now() - start_time < delay)
             {
             };
         }
     }
 
     void StartRecurringInterrupt(SystemTimerCompares compare_register,
-                                 uint32_t period_in_microseconds) override
+                                 microseconds period) override
     {
-        if (period_in_microseconds == 0)
+        if (period == microseconds::zero())
         {
             return;
         }
@@ -67,11 +70,11 @@ public:
         RecurringTimerConfig &config = GetRecurringTimerConfig(compare_register);
 
         config.running_ = true;
-        config.period_in_microseconds_ = period_in_microseconds;
+        config.period_ = period;
 
-        config.next_interrupt_ = GetMicroseconds() + period_in_microseconds;
+        config.next_interrupt_ = duration_cast<microseconds>(Now()) + period;
 
-        SetCompareRegister(compare_register, (uint32_t)(config.next_interrupt_ & 0x00000000FFFFFFFF));
+        SetCompareRegister(compare_register, (uint32_t)(config.next_interrupt_.count() & 0x00000000FFFFFFFF));
     }
 
     void CancelRecurringInterrupt(SystemTimerCompares compare_register) override
@@ -79,11 +82,11 @@ public:
         RecurringTimerConfig &config = GetRecurringTimerConfig(compare_register);
 
         config.running_ = false;
-        config.period_in_microseconds_ = 0;
+        config.period_ = microseconds::zero();
     }
 
     void RescheduleRecurringInterrupt(SystemTimerCompares compare_register,
-                                      uint32_t new_period_in_microseconds = 0) override
+                                      microseconds new_period = microseconds::zero()) override
     {
         //  If the timer is still active, reschedule now
 
@@ -91,25 +94,25 @@ public:
 
         if (config.running_)
         {
-            config.period_in_microseconds_ = new_period_in_microseconds > 0 ? new_period_in_microseconds : config.period_in_microseconds_;
+            config.period_ = new_period > microseconds::zero() ? new_period : config.period_;
 
             //  If the new period is greater than zero, then set the next interrupt time
 
-            if (config.period_in_microseconds_ > 0)
+            if (config.period_ > microseconds::zero())
             {
-                config.next_interrupt_ += config.period_in_microseconds_;
+                config.next_interrupt_ += config.period_;
 
                 //  If we missed or are close to missing an interrupt, issue a warning and reschedule for the next period
 
-                if( config.next_interrupt_ < ( GetMicroseconds() + (config.period_in_microseconds_ / 10)))
+                if (config.next_interrupt_ < (Now() + duration_cast<nanoseconds>(config.period_ / 10)))
                 {
                     LogWarning("******Missed interrupt******\n");
-                    config.next_interrupt_ = GetMicroseconds() + config.period_in_microseconds_;
+                    config.next_interrupt_ = duration_cast<microseconds>(Now() + config.period_);
                 }
 
                 //  The compare register only compares the bottom 32 bits of the 64 bit timer value
 
-                SetCompareRegister(compare_register, (uint32_t)(config.next_interrupt_ & 0x00000000FFFFFFFF));
+                SetCompareRegister(compare_register, (uint32_t)(config.next_interrupt_.count() & 0x00000000FFFFFFFF));
             }
         }
 
@@ -143,14 +146,14 @@ private:
         RecurringTimerConfig()
             : running_(false),
               next_interrupt_(0),
-              period_in_microseconds_(0)
+              period_(0)
         {
         }
 
         bool running_;
 
-        uint64_t next_interrupt_;
-        uint32_t period_in_microseconds_;
+        microseconds next_interrupt_;
+        microseconds period_;
     };
 
     RecurringTimerConfig recurring_timer_configs_[NUM_SYSTEM_TIMER_COMPARE_REGISTERS];

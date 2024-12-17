@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <stdint.h>
+#include "os_stdinclude.h"
 
 #include <array>
 #include <fixed_string>
