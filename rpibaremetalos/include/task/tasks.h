@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "os_stdinclude.h"
 #include "os_config.h"
 #include "os_memory_config.h"
 
@@ -129,11 +130,12 @@ namespace task
         virtual ExecutionState State() const = 0;
 
         virtual uint32_t CurrentCore() const = 0;
-        virtual uint64_t Runtime() const = 0;
+        virtual microseconds Runtime() const = 0;
         virtual uint64_t TimeslicesGranted() const = 0;
 
         virtual void Yield() = 0;
         virtual void Exit() = 0;
+        virtual void Join() = 0;
     };
 
     inline const char *ToString(Task::TaskType type)
@@ -184,6 +186,7 @@ namespace task
     {
     public:
         virtual void VisitTaskList(TaskListVisitorCallback callback) const = 0;
+        virtual minstd::optional<minstd::reference_wrapper<Task>> FindTask(const UUID &task_id) = 0;
 
         virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
         virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;

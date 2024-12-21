@@ -36,17 +36,6 @@
 
 #include "task/task_manager_impl.h"
 
-void delay(uint32_t count)
-{
-    for (uint32_t i = 0; i < count; i++)
-    {
-        for (uint32_t j = 0; j < 100000; j++)
-        {
-            asm volatile("nop");
-        }
-    }
-}
-
 class Counter : public Runnable
 {
 public:
@@ -111,7 +100,7 @@ public:
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
-        delay(500 + (random_generator.Next32BitValue() % 20) * 1000);
+        PhysicalTimer::Wait(microseconds(500 + (random_generator.Next32BitValue() % 20)) * 1000);
 
         if (task_id != task::Task::GetTask().ID())
         {
@@ -173,7 +162,7 @@ public:
             {
                 buf[0] = array[i];
                 printf("%c", buf[0]);
-                delay(990 + random_generator.Next32BitValue() % 20);
+                PhysicalTimer::Wait(milliseconds(990 + random_generator.Next32BitValue() % 20));
             }
 
             if (task_id != task::Task::GetTask().ID())
@@ -203,7 +192,7 @@ public:
 
         RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
-        delay(100 + (random_generator.Next32BitValue() % 20) * 500);
+        PhysicalTimer::Wait(microseconds(100 + (random_generator.Next32BitValue() % 20)) * 10);
 
         if (task_id != task::Task::GetTask().ID())
         {
@@ -222,8 +211,11 @@ public:
     void Run()
     {
         minstd::array<ShortLivedKernelProcess, 512> short_lived_kernel_processes;
+        minstd::array<UUID, 512> short_lived_kernel_process_ids;
 
         const UUID task_id = task::Task::GetTask().ID();
+
+        char uuid_buffer[128];
 
         RandomNumberGeneratorThreadUnsafe random_generator(NewRandomNumberGenerator());
 
@@ -236,7 +228,9 @@ public:
                 return;
             }
 
-            delay(50 + (random_generator.Next32BitValue() % 20) * 250);
+            short_lived_kernel_process_ids[i] = new_short_lived_kernel_process.Value();
+
+            PhysicalTimer::Wait(microseconds(50 + (random_generator.Next32BitValue() % 20)) * 1000);
 
             if (task_id != task::Task::GetTask().ID())
             {
@@ -244,7 +238,22 @@ public:
             }
         }
 
-        printf("Leaving ShortLivedKernelProcess\n");
+        for (int i = 0; i < 512; i++)
+        {
+            short_lived_kernel_process_ids[i].ToString(uuid_buffer);
+
+            auto tsk = task::GetTaskManager().FindTask(short_lived_kernel_process_ids[i]);
+
+            if (!tsk.has_value())
+            {
+                printf("Task not found: %s\n", uuid_buffer);
+                continue;
+            }
+
+            tsk.value().get().Join();
+        }
+
+        printf("Leaving ShortLivedKernelTaskForkingTask\n");
     }
 };
 
@@ -292,7 +301,7 @@ public:
                     auto new_immediate_exit_task = user::task::ForkTask(format_buffer, immediate_exit_processes[i]);
                 }
         */
-        delay(1000);
+        PhysicalTimer::Wait(milliseconds(1));
 
         printf("Leaving User Task\n");
     }
@@ -349,7 +358,7 @@ extern "C" void kernel_main()
 
     printf("Starting recurring interrupt\n");
 
-    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 50000);
+    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, milliseconds{2000});
 
     printf("Interrupts enabled\n");
 
@@ -457,7 +466,7 @@ extern "C" void kernel_main()
 
     ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process2;
 
-    auto new_short_lived_kernel_process_forking_process2 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process2, "Short Lived Kernel Process Forking Process");
+    auto new_short_lived_kernel_process_forking_process2 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process2, "SLKProcess Forking Process");
     if (new_short_lived_kernel_process_forking_process2.Failed())
     {
         printf("error while starting short lived kernel process forking process");
@@ -466,7 +475,7 @@ extern "C" void kernel_main()
 
     ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process3;
 
-    auto new_short_lived_kernel_process_forking_process3 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process3, "Short Lived Kernel Process Forking Process");
+    auto new_short_lived_kernel_process_forking_process3 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process3, "SLKProcess Forking Process");
     if (new_short_lived_kernel_process_forking_process3.Failed())
     {
         printf("error while starting short lived kernel process forking process");
@@ -475,7 +484,7 @@ extern "C" void kernel_main()
 
     ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process4;
 
-    auto new_short_lived_kernel_process_forking_process4 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process4, "Short Lived Kernel Process Forking Process");
+    auto new_short_lived_kernel_process_forking_process4 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process4, "SLKProcess Forking Process");
     if (new_short_lived_kernel_process_forking_process4.Failed())
     {
         printf("error while starting short lived kernel process forking process");
@@ -510,18 +519,18 @@ extern "C" void kernel_main()
 
     printf("Cores active: %d, %d, %d, %d\n", __core_state[0].load(), __core_state[1].load(), __core_state[2].load(), __core_state[3].load());
 
-//        printf("Starting exception generating process\n");
+    //        printf("Starting exception generating process\n");
 
-//        ExceptionGeneratingProcess ex_process;
+    //        ExceptionGeneratingProcess ex_process;
 
-//        auto exception_generating_process_wrapper = task::GetTaskManager().ForkKernelTask(&ex_process, "Exception Generating Task" );
-//        if (exception_generating_process_wrapper.Failed())
-//        {
-//            printf("error while starting exception generating process");
-//            return;
-//        }
+    //        auto exception_generating_process_wrapper = task::GetTaskManager().ForkKernelTask(&ex_process, "Exception Generating Task" );
+    //        if (exception_generating_process_wrapper.Failed())
+    //        {
+    //            printf("error while starting exception generating process");
+    //            return;
+    //        }
 
-//        printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+    //        printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
 
     //  Keep the scheduler running
 

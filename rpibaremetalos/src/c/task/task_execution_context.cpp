@@ -7,6 +7,8 @@
 #include "devices/log.h"
 #include "devices/physical_timer.h"
 
+#include <minimalstdio.h>
+
 extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
 
 namespace task
@@ -42,7 +44,7 @@ namespace task
         long max_counter = -1;
         TaskImpl *next_task = nullptr;
 
-        for (int32_t i = 0; i < task_list_.NumTasks(); i++)
+        for (uint32_t i = 0; i < task_list_.NumTasks(); i++)
         {
             TaskImpl *task = &task_list_[i];
 
@@ -84,7 +86,7 @@ namespace task
             max_counter = -1;
             next_task = nullptr;
 
-            for (int32_t i = 0; i < task_list_.NumTasks(); i++)
+            for (uint32_t i = 0; i < task_list_.NumTasks(); i++)
             {
                 TaskImpl *task = &task_list_[i];
 
@@ -124,18 +126,18 @@ namespace task
         //      switching contexts.  Best to just have interrupts disabled for the duration of the switch.
         //      Therefore - make sure the switch is fast.
 
-        uint64_t switch_start = PhysicalTimer::CurrentTicks();
+        time_point<nanoseconds> switch_start = PhysicalTimer::Now();
 
         TaskImpl *const prev = &TaskImpl::GetTask();
 
-        //  Update the task task runtime and the switched out timestamp
-
-        if (prev->switched_in_last_ != 0)
-        {
-            prev->runtime_ = prev->runtime_ + (switch_start - prev->switched_in_last_);
-        }
-
         prev->switched_out_last_ = switch_start;
+
+        //  Update the task task runtime
+
+        if (prev->switched_in_last_.time_since_epoch().count() != 0)
+        {
+            prev->runtime_ += duration_cast<microseconds>(switch_start - prev->switched_in_last_);
+        }
 
         //  First, groom the task list.
 
@@ -152,7 +154,7 @@ namespace task
         if ((prev->counter_ > 0) || (prev->preempt_count_ > 0))
         {
             prev->timeslices_granted_++; //  Bump the timeslice count
-            prev->switched_in_last_ = PhysicalTimer::CurrentTicks();
+            prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
 
@@ -176,8 +178,7 @@ namespace task
             prev->state_ = Task::ExecutionState::RUNNABLE_WAITING;
         }
 
-//        prev->switched_out_last_ = PhysicalTimer::CurrentTicks();
-        next->switched_in_last_ = PhysicalTimer::CurrentTicks();
+        next->switched_in_last_ = PhysicalTimer::Now();
 
         SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
     }

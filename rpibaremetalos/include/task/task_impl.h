@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include "os_stdinclude.h"
 #include "os_config.h"
 
 #include <atomic>
@@ -112,7 +113,7 @@ namespace task
             return core_restriction_mask_;
         }
 
-        uint64_t Runtime() const override
+        microseconds Runtime() const override
         {
             return runtime_;
         }
@@ -134,7 +135,7 @@ namespace task
         void Exit() override
         {
             state_ = Task::ExecutionState::ZOMBIE;
-            zombie_timestamp_ = PhysicalTimer::CurrentTicks();
+            zombie_timestamp_ = PhysicalTimer::Now();
 
             if (stack_ != 0)
             {
@@ -147,6 +148,15 @@ namespace task
             GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
             LogError("Returned from SwitchToNextTask - should never be here: %s\n", name_.c_str());
+        }
+
+        void Join() override
+        {
+            while (state_ != Task::ExecutionState::ZOMBIE)
+            {
+                Yield();
+                PhysicalTimer::Wait(microseconds(100));
+            }
         }
 
         void PreemptDisable()
@@ -187,14 +197,15 @@ namespace task
         CoreMask core_restriction_mask_;
 
         minstd::atomic<uint32_t> schedule_on_core_;
-        minstd::atomic<uint64_t> scheduled_timestamp_ = 0;
 
-        minstd::atomic<uint64_t> zombie_timestamp_ = 0;
-
-        minstd::atomic<uint64_t> switched_out_last_ = 0;
-        minstd::atomic<uint64_t> switched_in_last_ = 0;
-        minstd::atomic<uint64_t> runtime_ = 0;
         minstd::atomic<uint64_t> timeslices_granted_ = 0;
+
+        time_point<nanoseconds> scheduled_timestamp_;
+        time_point<nanoseconds> switched_in_last_;
+        time_point<nanoseconds> switched_out_last_;
+        time_point<nanoseconds> zombie_timestamp_;
+
+        microseconds runtime_ = microseconds::zero();
 
         ExecutionState state_;
         long counter_;

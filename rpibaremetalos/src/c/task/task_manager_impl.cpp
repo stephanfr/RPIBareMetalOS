@@ -56,7 +56,7 @@ namespace task
                 {
                     WAIT_FOR_EVENT;
                     Yield();
-                    CPUTicksDelay(1000);
+                    PhysicalTimer::Wait(milliseconds(100));
                 }
             }
         };
@@ -275,7 +275,7 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-//        new_task->switched_out_last_ = 0;
+        //        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
 
         new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
@@ -283,16 +283,18 @@ namespace task
         new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task.get();
         new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task.get();
 
-        //  Set the thask context - this is a kernel task right now
+        //  Set the task context - this is a kernel task right now
 
         childregs.tpidr_el1 = (unsigned long)new_task.get();
         childregs.tpidrro_el0 = (unsigned long)new_task.get();
 
         //  Add the task to our task map
 
+        UUID new_task_id = new_task->ID();
+
         AddTask(new_task);
 
-        return Result::Success(new_task->uuid_);
+        return Result::Success(new_task_id);
     }
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::CloneTask(const TaskDefinition &task_definition, MemoryPagePointer stack)
@@ -325,7 +327,7 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-//        new_task->switched_out_last_ = 0;
+        //        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1;
 
         new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
@@ -340,9 +342,11 @@ namespace task
 
         //  Add the task to the task map
 
+        UUID new_task_id = new_task->ID();
+
         AddTask(new_task);
 
-        return Result::Success(new_task->uuid_);
+        return Result::Success(new_task_id);
     }
 
     void TaskManagerImpl::AddTask(minstd::unique_ptr<TaskImpl> &task)
@@ -369,7 +373,7 @@ namespace task
         }
 
         task_ref.schedule_on_core_ = schedule_on_core;
-        task_ref.scheduled_timestamp_ = PhysicalTimer::CurrentTicks();
+        task_ref.scheduled_timestamp_ = PhysicalTimer::Now();
         task_ref.state_ = Task::ExecutionState::RUNNABLE_WAITING;
 
         //  Add the task to the per-core task queue, loop and delay if the queue is full
@@ -379,8 +383,18 @@ namespace task
         task_execution_contexts_[schedule_on_core].QueueMessage(add_task_message);
     }
 
-    void TaskManagerImpl::BuryZombies(void)
+    minstd::optional<minstd::reference_wrapper<Task>> TaskManagerImpl::FindTask(const UUID &task_id)
     {
+        LockGuard single_thread(task_map_spinlock_);
+
+        auto task_itr = task_map_.find(task_id);
+
+        if (task_itr != task_map_.end())
+        {
+            return minstd::optional<minstd::reference_wrapper<Task>>(minstd::move(*(task_itr->second().get())));
+        }
+
+        return minstd::optional<minstd::reference_wrapper<Task>>();
     }
 
     /**

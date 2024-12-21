@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "os_stdinclude.h"
+
 #include <array>
 #include <functional> //  For minstd::reference_wrapper
 #include <lockfree/spsc_queue>
@@ -65,6 +67,7 @@ namespace task
         }
 
         void VisitTaskList(TaskListVisitorCallback callback) const override;
+        minstd::optional<minstd::reference_wrapper<Task>> FindTask(const UUID &task_id) override;
 
         void PreemptiveSchedule(void);
 
@@ -79,8 +82,6 @@ namespace task
         void SetCoreMainTaskContext(minstd::unique_ptr<TaskImpl> &task);
 
         void AddTask(minstd::unique_ptr<TaskImpl> &task);
-
-        void BuryZombies(void);
 
     private:
         using TaskMap = minstd::map<UUID, minstd::unique_ptr<TaskImpl>>;
@@ -107,8 +108,8 @@ namespace task
 
         SpinLock task_map_spinlock_;
 
-        uint32_t zombie_lifetime_in_seconds_ = 600;             //  10 minutes
-
+        seconds zombie_lifetime_{600};
+        
         //
         //  Private methods
         //

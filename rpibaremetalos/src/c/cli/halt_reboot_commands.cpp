@@ -16,7 +16,7 @@ namespace cli::commands
                                       CLISessionContext &context) const
     {
         context << "\nHalting\n";
-        PhysicalTimer::WaitMsec(50);
+        PhysicalTimer::Wait(milliseconds(50));
 
         PowerManager().Halt();
     }
@@ -25,7 +25,7 @@ namespace cli::commands
                                         CLISessionContext &context) const
     {
         context << "\nRebooting\n";
-        PhysicalTimer::WaitMsec(50);
+        PhysicalTimer::Wait(milliseconds(50));
 
         PowerManager().Reboot();
     }
