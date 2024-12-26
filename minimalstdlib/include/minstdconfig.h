@@ -22,8 +22,13 @@ extern "C" void __assert(const char *msg, const char *file, int line);
         __assert(#message, __FILE__, __LINE__); \
     }
 
+#define MINIMAL_STD_NODEBUG
+
+using nullptr_t = decltype(nullptr);
+
 constexpr size_t DEFAULT_FIXED_STRING_MAX_SIZE = 64;
 
 constexpr size_t DEFAULT_DYNAMIC_STRING_SIZE = 64;
 constexpr size_t DEFAULT_DYNAMIC_STRING_MAX_SIZE = 16384;
 constexpr double DYNAMIC_STRING_OVERALLOCATION_PERCENTAGE = 1.25;
+
