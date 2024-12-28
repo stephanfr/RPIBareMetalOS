@@ -13,7 +13,6 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
 
 #include <__type_traits/apply_cv.h>
 #include <__type_traits/conditional.h>

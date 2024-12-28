@@ -64,7 +64,9 @@
         "token_dispenser": "cpp",
         "linked_list": "cpp",
         "ratio": "cpp",
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "limits": "cpp",
+        "tuple": "cpp"
     },
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.errorSquiggles": "disabled",

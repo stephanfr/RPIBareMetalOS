@@ -13,7 +13,6 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
 
 namespace MINIMAL_STD_NAMESPACE
 {

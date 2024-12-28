@@ -68,12 +68,12 @@ bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
     {
         auto insert_result = isrs_.insert(ISRMap::value_type(isr->InterruptType(), static_new<ISRPointerList>(list_allocator_)));
 
-        if (!insert_result.second())
+        if (!minstd::get<1>(insert_result))
         {
             return false;
         }
 
-        map_itr = insert_result.first();
+        map_itr = minstd::get<0>(insert_result);
 
         if (!EnableInterrupt(isr->InterruptType(), on_cores))
         {
@@ -87,7 +87,7 @@ bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
 
     //  TODO - add a priority to ISRs
 
-    map_itr->second()->push_front(isr);
+    minstd::get<1>(*map_itr)->push_front(isr);
 
     return true;
 }

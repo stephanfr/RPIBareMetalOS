@@ -13,7 +13,6 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
 
 #include <__type_traits/conditional.h>
 #include <__type_traits/decay.h>

@@ -13,19 +13,12 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
 
 namespace MINIMAL_STD_NAMESPACE
 {
 #if __has_builtin(__remove_cvref)
     template <class _Tp>
-    struct __remove_cvref_gcc
-    {
-        using type = __remove_cvref(_Tp);
-    };
-
-    template <class _Tp>
-    using __remove_cvref_t MINIMAL_STD_NODEBUG = typename __remove_cvref_gcc<_Tp>::type;
+    using __remove_cvref_t _MINIMAL_STD_NODEBUG = typename __remove_cvref<_Tp>::type;
 #else
     template <class _Tp>
     using __remove_cvref_t MINIMAL_STD_NODEBUG = remove_cv_t<__minstdlib_remove_reference_t<_Tp>>;
@@ -34,14 +27,12 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp, class _Up>
     using __is_same_uncvref = _IsSame<__remove_cvref_t<_Tp>, __remove_cvref_t<_Up>>;
 
-#if _LIBCPP_STD_VER >= 20
     template <class _Tp>
     struct remove_cvref
     {
-        using type MINIMAL_STD_NODEBUG = __remove_cvref(_Tp);
+        using type _MINIMAL_STD_NODEBUG = __remove_cvref_t<_Tp>;
     };
 
     template <class _Tp>
     using remove_cvref_t = __remove_cvref_t<_Tp>;
-#endif
 } // namespace MINIMAL_STD_NAMESPACE

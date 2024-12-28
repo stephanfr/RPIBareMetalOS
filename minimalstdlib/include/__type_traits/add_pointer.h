@@ -13,7 +13,6 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
 
 #include <__type_traits/is_referenceable.h>
 #include <__type_traits/is_same.h>

@@ -150,13 +150,13 @@ namespace
         CHECK(tree.empty());
         CHECK_EQUAL(tree.size(), 0);
 
-        CHECK(tree.insert(AVLTree::value_type(5, TestElement(15))).second());
+        CHECK(get<1>(tree.insert(AVLTree::value_type(5, TestElement(15)))));
 
         CHECK(!tree.empty());
         CHECK_EQUAL(tree.size(), 1);
 
-        CHECK_EQUAL(tree.begin()->first(), 5);
-        CHECK_EQUAL(tree.begin()->second().value(), 15);
+        CHECK_EQUAL(get<0>(*tree.begin()), 5);
+        CHECK_EQUAL(get<1>(*tree.begin()).value(), 15);
 
         CHECK(++tree.begin() == tree.end());
         CHECK(--tree.end() == tree.begin());
@@ -189,14 +189,14 @@ namespace
         CHECK(tree.empty());
         CHECK_EQUAL(tree.size(), 0);
 
-        CHECK(tree.insert(AVLTree::value_type(5, TestElement(15))).second());
+        CHECK(get<1>(tree.insert(AVLTree::value_type(5, TestElement(15)))));
 
         CHECK(!tree.empty());
         CHECK_EQUAL(tree.size(), 1);
 
-        CHECK_EQUAL(tree.insert(10, TestElement(110)).first()->first(), 10);
-        CHECK(tree.insert(3, TestElement(13)).second());
-        CHECK_EQUAL(tree.insert(AVLTree::value_type(24, TestElement(124))).first()->second().value(), 124);
+        CHECK_EQUAL(get<0>(*get<0>(tree.insert(10, TestElement(110)))), 10);
+        CHECK(get<1>(tree.insert(3, TestElement(13))));
+        CHECK_EQUAL(get<1>(*get<0>(tree.insert(AVLTree::value_type(24, TestElement(124))))).value(), 124);
 
         tree.insert(51, TestElement(151));
         tree.insert(AVLTree::value_type(17, TestElement(117)));
@@ -213,7 +213,7 @@ namespace
         tree.insert(AVLTree::value_type(68, TestElement(168)));
         tree.insert(AVLTree::value_type(73, TestElement(173)));
         tree.insert(AVLTree::value_type(81, TestElement(181)));
-        CHECK(tree.insert(AVLTree::value_type(6, TestElement(16))).second());
+        CHECK(get<1>(tree.insert(AVLTree::value_type(6, TestElement(16)))));
 
         CHECK_EQUAL(tree.size(), 20);
 
@@ -221,9 +221,9 @@ namespace
 
         auto bad_insert_result = tree.insert(AVLTree::value_type(57, TestElement(257)));
 
-        CHECK(!bad_insert_result.second());
-        CHECK_EQUAL(bad_insert_result.first()->first(), 57);
-        CHECK_EQUAL(bad_insert_result.first()->second().value(), 157);
+        CHECK(!get<1>(bad_insert_result));
+        CHECK_EQUAL(get<0>(*get<0>(bad_insert_result)), 57);
+        CHECK_EQUAL(get<1>(*get<0>(bad_insert_result)).value(), 157);
 
         //  Test ordering and iteration both foward and reverse
 
@@ -232,8 +232,8 @@ namespace
 
         for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -245,14 +245,14 @@ namespace
 
         for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
         //  Test delete twice
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(tree.size(), 20);
@@ -267,9 +267,9 @@ namespace
 
         for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -280,13 +280,13 @@ namespace
 
         for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(tree.size(), 19);
@@ -296,16 +296,16 @@ namespace
 
         AVLTree::iterator itr_to_erase = tree.find(key_to_delete);
 
-        CHECK_EQUAL(tree.erase(itr_to_erase)->first(), 64);
+        CHECK_EQUAL(get<0>(*tree.erase(itr_to_erase)), 64);
 
         count = 0;
         last_key = 0;
 
         for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -317,13 +317,13 @@ namespace
 
         for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(count, 18);
@@ -332,16 +332,16 @@ namespace
 
         itr_to_erase = tree.find(key_to_delete);
 
-        CHECK_EQUAL(tree.erase(itr_to_erase)->first(), 13);
+        CHECK_EQUAL(get<0>(*tree.erase(itr_to_erase)), 13);
 
         count = 0;
         last_key = 0;
 
         for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -353,13 +353,13 @@ namespace
 
         for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(count, 17);
@@ -376,11 +376,11 @@ namespace
         //  Test Find
 
         CHECK(tree.find(43) != tree.end());
-        CHECK_EQUAL(tree.find(43)->second().value(), 143);
+        CHECK_EQUAL(get<1>(*tree.find(43)).value(), 143);
         CHECK(tree.find(44) == tree.end());
 
         CHECK(tree.find(6) != tree.end());
-        CHECK_EQUAL(tree.find(6)->second().value(), 16);
+        CHECK_EQUAL(get<1>(*tree.find(6)).value(), 16);
         CHECK(tree.find(4) == tree.end());
 
         CHECK_EQUAL(tree.size(), 17);
@@ -395,14 +395,14 @@ namespace
         CHECK(tree.empty());
         CHECK_EQUAL(tree.size(), 0);
 
-        CHECK(tree.insert(AVLTreeMoveOnly::value_type(5, MoveOnlyTestElement(15))).second());
+        CHECK(get<1>(tree.insert(AVLTreeMoveOnly::value_type(5, MoveOnlyTestElement(15)))));
 
         CHECK(!tree.empty());
         CHECK_EQUAL(tree.size(), 1);
 
-        CHECK_EQUAL(tree.insert(10, MoveOnlyTestElement(110)).first()->first(), 10);
-        CHECK(tree.insert(3, MoveOnlyTestElement(13)).second());
-        CHECK_EQUAL(tree.insert(AVLTreeMoveOnly::value_type(24, MoveOnlyTestElement(124))).first()->second().value(), 124);
+        CHECK_EQUAL(get<0>(*get<0>(tree.insert(10, MoveOnlyTestElement(110)))), 10);
+        CHECK(get<1>(tree.insert(3, MoveOnlyTestElement(13))));
+        CHECK_EQUAL(get<1>(*get<0>(tree.insert(AVLTreeMoveOnly::value_type(24, MoveOnlyTestElement(124))))).value(), 124);
 
         tree.insert(51, MoveOnlyTestElement(151));
         tree.insert(AVLTreeMoveOnly::value_type(17, MoveOnlyTestElement(117)));
@@ -420,7 +420,7 @@ namespace
         tree.insert(AVLTreeMoveOnly::value_type(73, MoveOnlyTestElement(173)));
         tree.insert(AVLTreeMoveOnly::value_type(81, MoveOnlyTestElement(181)));
 
-        CHECK(tree.insert(AVLTreeMoveOnly::value_type(6, MoveOnlyTestElement(16))).second());
+        CHECK(get<1>(tree.insert(AVLTreeMoveOnly::value_type(6, MoveOnlyTestElement(16)))));
 
         CHECK_EQUAL(tree.size(), 20);
 
@@ -428,9 +428,9 @@ namespace
 
         auto bad_insert_result = tree.insert(AVLTreeMoveOnly::value_type(57, MoveOnlyTestElement(257)));
 
-        CHECK(!bad_insert_result.second());
-        CHECK_EQUAL(bad_insert_result.first()->first(), 57);
-        CHECK_EQUAL(bad_insert_result.first()->second().value(), 157);
+        CHECK(!get<1>(bad_insert_result));
+        CHECK_EQUAL(get<0>(*get<0>(bad_insert_result)), 57);
+        CHECK_EQUAL(get<1>(*get<0>(bad_insert_result)).value(), 157);
 
         //  Test ordering and iteration both foward and reverse
 
@@ -439,8 +439,8 @@ namespace
 
         for (AVLTreeMoveOnly::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -452,8 +452,8 @@ namespace
 
         for (AVLTreeMoveOnly::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
     }
@@ -467,14 +467,14 @@ namespace
         CHECK(tree.empty());
         CHECK_EQUAL(tree.size(), 0);
 
-        CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(5, 15)).second());
+        CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(5, 15))));
 
         CHECK(!tree.empty());
         CHECK_EQUAL(tree.size(), 1);
 
-        CHECK_EQUAL(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(10, 110)).first()->first(), 10);
-        CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(3, 13)).second());
-        CHECK_EQUAL(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(24, 124)).first()->second()->value(), 124);
+        CHECK_EQUAL(get<0>(*get<0>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(10, 110)))), 10);
+        CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(3, 13))));
+        CHECK_EQUAL(get<1>(*get<0>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(24, 124))))->value(), 124);
 
         tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(51, 151));
         tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(17, 117));
@@ -491,7 +491,7 @@ namespace
         tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(68, 168));
         tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(73, 173));
         tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(81, 181));
-        CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(6, 16)).second());
+        CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(6, 16))));
 
         CHECK_EQUAL(tree.size(), 20);
 
@@ -499,9 +499,9 @@ namespace
 
         auto bad_insert_result = tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(57, 257));
 
-        CHECK(!bad_insert_result.second());
-        CHECK_EQUAL(bad_insert_result.first()->first(), 57);
-        CHECK_EQUAL(bad_insert_result.first()->second()->value(), 157);
+        CHECK(!get<1>(bad_insert_result));
+        CHECK_EQUAL(get<0>(*get<0>(bad_insert_result)), 57);
+        CHECK_EQUAL(get<1>(*get<0>(bad_insert_result))->value(), 157);
 
         //  Test ordering and iteration both foward and reverse
 
@@ -510,8 +510,8 @@ namespace
 
         for (auto itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -523,14 +523,14 @@ namespace
 
         for (auto itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
         //  Test delete twice
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(tree.size(), 20);
@@ -545,9 +545,9 @@ namespace
 
         for (auto itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -558,13 +558,13 @@ namespace
 
         for (auto itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(tree.size(), 19);
@@ -574,16 +574,16 @@ namespace
 
         auto itr_to_erase = tree.find(key_to_delete);
 
-        CHECK_EQUAL(tree.erase(itr_to_erase)->first(), 64);
+        CHECK_EQUAL(get<0>(*tree.erase(itr_to_erase)), 64);
 
         count = 0;
         last_key = 0;
 
         for (auto itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -595,13 +595,13 @@ namespace
 
         for (auto itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(count, 18);
@@ -610,16 +610,16 @@ namespace
 
         itr_to_erase = tree.find(key_to_delete);
 
-        CHECK_EQUAL(tree.erase(itr_to_erase)->first(), 13);
+        CHECK_EQUAL(get<0>(*tree.erase(itr_to_erase)), 13);
 
         count = 0;
         last_key = 0;
 
         for (auto itr = tree.begin(); itr != tree.end(); itr++)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() > last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) > last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
@@ -631,13 +631,13 @@ namespace
 
         for (auto itr = --tree.end(); itr != tree.begin(); itr--)
         {
-            CHECK(itr->first() != key_to_delete);
-            CHECK(itr->first() < last_key);
-            last_key = itr->first();
+            CHECK(get<0>(*itr) != key_to_delete);
+            CHECK(get<0>(*itr) < last_key);
+            last_key = get<0>(*itr);
             count++;
         }
 
-        CHECK(tree.begin()->first() < last_key);
+        CHECK(get<0>(*tree.begin()) < last_key);
         count++;
 
         CHECK_EQUAL(count, 17);
@@ -654,11 +654,11 @@ namespace
         //  Test Find
 
         CHECK(tree.find(43) != tree.end());
-        CHECK_EQUAL(tree.find(43)->second()->value(), 143);
+        CHECK_EQUAL(get<1>(*tree.find(43))->value(), 143);
         CHECK(tree.find(44) == tree.end());
 
         CHECK(tree.find(6) != tree.end());
-        CHECK_EQUAL(tree.find(6)->second()->value(), 16);
+        CHECK_EQUAL(get<1>(*tree.find(6))->value(), 16);
         CHECK(tree.find(4) == tree.end());
 
         CHECK_EQUAL(tree.size(), 17);
@@ -723,12 +723,12 @@ namespace
             CHECK(tree.empty());
             CHECK_EQUAL(tree.size(), 0);
 
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(1, 11)).second());
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(2, 12)).second());
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(3, 13)).second());
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(4, 14)).second());
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(5, 15)).second());
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(6, 16)).second());
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(1, 11))));
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(2, 12))));
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(3, 13))));
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(4, 14))));
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(5, 15))));
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(6, 16))));
 
             tree.erase(5);
             tree.erase(3);
@@ -747,9 +747,9 @@ namespace
             CHECK(tree.empty());
             CHECK_EQUAL(tree.size(), 0);
 
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(1, 11)).second());
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(2, 12)).second());
-            CHECK(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(3, 13)).second());
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(1, 11))));
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(2, 12))));
+            CHECK(get<1>(tree.insert(CREATE_TEST_ELEMENT_UNIQUE_PTR(3, 13))));
 
             tree.clear();
 
@@ -802,28 +802,27 @@ namespace
             auto key_7 = minstd::dynamic_string<128>("seven", string_allocator);
             auto key_1 = minstd::dynamic_string<128>("one", string_allocator);
 
-            CHECK(tree.insert(minstd::reference_wrapper<minstd::dynamic_string<128>>(minstd::move(key_5)), 5).second());
+            CHECK(get<1>(tree.insert(minstd::reference_wrapper(key_5), 5)));
 
             CHECK(!tree.empty());
             CHECK_EQUAL(tree.size(), 1);
 
             auto two_string = minstd::fixed_string<128>("two");
 
-            CHECK(tree.insert(minstd::reference_wrapper(minstd::move(key_2)), 2).first()->first() == static_cast<const minstd::string &>(two_string));
-            CHECK(tree.insert(minstd::reference_wrapper(minstd::move(key_7)), 7).second());
-            CHECK(tree.insert(minstd::reference_wrapper(minstd::move(key_1)), 1).second());
-
+            CHECK(get<0>(*get<0>(tree.insert(minstd::reference_wrapper(key_2), 2))) == static_cast<const minstd::string &>(two_string));
+            CHECK(get<1>(tree.insert(minstd::reference_wrapper(key_7), 7)));
+            CHECK(get<1>(tree.insert(minstd::reference_wrapper(key_1), 1)));
             auto itr = tree.begin();
 
             //  Ordering is by the string key
 
-            CHECK_EQUAL(itr->second(), 5);
+            CHECK_EQUAL(get<1>(*itr), 5);
             itr++;
-            CHECK_EQUAL(itr->second(), 1);
+            CHECK_EQUAL(get<1>(*itr), 1);
             itr++;
-            CHECK_EQUAL(itr->second(), 7);
+            CHECK_EQUAL(get<1>(*itr), 7);
             itr++;
-            CHECK_EQUAL(itr->second(), 2);
+            CHECK_EQUAL(get<1>(*itr), 2);
             itr++;
             CHECK(itr == tree.end());
         }

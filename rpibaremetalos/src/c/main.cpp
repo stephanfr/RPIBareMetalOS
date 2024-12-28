@@ -358,7 +358,7 @@ extern "C" void kernel_main()
 
     printf("Starting recurring interrupt\n");
 
-    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, milliseconds{2000});
+    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, milliseconds{50});
 
     printf("Interrupts enabled\n");
 

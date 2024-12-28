@@ -53,20 +53,20 @@ namespace
         minstd::pair<uint32_t, double> pair1;
 
         minstd::pair<uint32_t, double> pair2(22, 23.456);
-        CHECK_EQUAL(pair2.first(), 22);
-        CHECK_EQUAL(pair2.second(), 23.456);
+        CHECK_EQUAL(get<0>(pair2), 22);
+        CHECK_EQUAL(get<1>(pair2), 23.456);
 
         pair1 = pair2;
-        CHECK_EQUAL(pair1.first(), 22);
-        CHECK_EQUAL(pair1.second(), 23.456);
+        CHECK_EQUAL(get<0>(pair1), 22);
+        CHECK_EQUAL(get<1>(pair1), 23.456);
 
         minstd::pair<uint32_t, double> pair3(pair1);
-        CHECK_EQUAL(pair3.first(), 22);
-        CHECK_EQUAL(pair3.second(), 23.456);
+        CHECK_EQUAL(get<0>(pair3), 22);
+        CHECK_EQUAL(get<1>(pair3), 23.456);
 
         const minstd::pair<uint32_t, double> pair4(pair3);
-        CHECK_EQUAL(pair4.first(), 22);
-        CHECK_EQUAL(pair4.second(), 23.456);
+        CHECK_EQUAL(get<0>(pair4), 22);
+        CHECK_EQUAL(get<1>(pair4), 23.456);
     }
 
     TEST(PairTests, ObjectTests)
@@ -74,19 +74,19 @@ namespace
         minstd::pair<minstd::fixed_string<>, TestElement> pair1;
 
         minstd::pair<minstd::fixed_string<>, TestElement> pair2("string is first", TestElement(51));
-        STRCMP_EQUAL(pair2.first(), "string is first");
-        CHECK_EQUAL(pair2.second().value(), 51);
+        STRCMP_EQUAL(get<0>(pair2), "string is first");
+        CHECK_EQUAL(get<1>(pair2).value(), 51);
 
         pair1 = pair2;
-        STRCMP_EQUAL(pair1.first(), "string is first");
-        CHECK_EQUAL(pair1.second().value(), 51);
+        STRCMP_EQUAL(get<0>(pair1), "string is first");
+        CHECK_EQUAL(get<1>(pair1).value(), 51);
 
         minstd::pair<minstd::fixed_string<>, TestElement> pair3(pair1);
-        STRCMP_EQUAL(pair3.first(), "string is first");
-        CHECK_EQUAL(pair3.second().value(), 51);
+        STRCMP_EQUAL(get<0>(pair3), "string is first");
+        CHECK_EQUAL(get<1>(pair3).value(), 51);
 
         const minstd::pair<minstd::fixed_string<>, TestElement> pair4(pair3);
-        STRCMP_EQUAL(pair4.first(), "string is first");
-        CHECK_EQUAL(pair4.second().value(), 51);
+        STRCMP_EQUAL(get<0>(pair4), "string is first");
+        CHECK_EQUAL(get<1>(pair4).value(), 51);
     }
 }

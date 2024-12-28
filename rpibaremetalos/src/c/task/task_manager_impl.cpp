@@ -124,7 +124,7 @@ namespace task
         {
             auto temp = minstd::unique_ptr<TaskManagerImpl>(new (__os_static_heap.allocate_block<TaskManagerImpl>(1)) TaskManagerImpl(), __os_static_heap);
 
-            instance_ = minstd::reference_wrapper<TaskManagerImpl>(minstd::move(*temp));
+            instance_ = minstd::reference_wrapper<TaskManagerImpl>(*temp);
 
             if (Failed(GetOSEntityRegistry().AddEntity(temp)))
             {
@@ -162,9 +162,7 @@ namespace task
                 ParkCore();
             }
 
-            instance_->get().task_map_.find(fork_idle_task_result.Value())->second().get();
-
-            instance_->get().idle_tasks_[core_id] = instance_->get().task_map_.find(fork_idle_task_result.Value())->second().get();
+            instance_->get().idle_tasks_[core_id] = minstd::get<1>(*instance_->get().task_map_.find(fork_idle_task_result.Value())).get();
         }
 
         //  Start the secondary cores
@@ -231,7 +229,7 @@ namespace task
 
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
-            if (callback(*(dynamic_cast<const Task *>(task_itr->second().get()))) == TaskListVisitorCallbackStatus::FINISHED)
+            if (callback(*(dynamic_cast<const Task *>(minstd::get<1>(*task_itr).get()))) == TaskListVisitorCallbackStatus::FINISHED)
             {
                 break;
             }
@@ -391,7 +389,7 @@ namespace task
 
         if (task_itr != task_map_.end())
         {
-            return minstd::optional<minstd::reference_wrapper<Task>>(minstd::move(*(task_itr->second().get())));
+            return minstd::optional<minstd::reference_wrapper<Task>>(*(minstd::get<1>(*task_itr).get()));
         }
 
         return minstd::optional<minstd::reference_wrapper<Task>>();

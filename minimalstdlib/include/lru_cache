@@ -202,9 +202,9 @@ namespace MINIMAL_STD_NAMESPACE
 
             if (entry_iter != cache_entry_map_.end())
             {
-                T &entry = entry_iter->second()->value_;
+                T &entry = get<1>(*entry_iter)->value_;
 
-                cache_entries_.move_front(entry_iter->second());
+                cache_entries_.move_front(get<1>(*entry_iter));
 
                 cache_entry_map_.erase(entry_iter);
 
@@ -212,7 +212,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 cache_hits_++;
 
-                return optional<reference_wrapper<T>>(minstd::move(entry));
+                return optional<reference_wrapper<T>>(entry);
             }
 
             cache_misses_++;
@@ -228,7 +228,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             if (entry_iter != cache_entry_map_.end())
             {
-                cache_entries_.erase(entry_iter->second());
+                cache_entries_.erase(get<1>(*entry_iter));
 
                 cache_entry_map_.erase(entry_iter);
 

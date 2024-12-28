@@ -13,11 +13,11 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
+
+#include <__type_traits/integral_constant.h>
 
 namespace MINIMAL_STD_NAMESPACE
 {
-
 #if __has_builtin(__is_lvalue_reference) && __has_builtin(__is_rvalue_reference) && __has_builtin(__is_reference)
 
     template <class _Tp>

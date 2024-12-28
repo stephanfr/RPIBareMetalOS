@@ -25,12 +25,12 @@ namespace filesystems
 
             auto insert_by_filename_result = file_by_absolute_path_map_.insert(minstd::cref(*(file->AbsolutePath())), minstd::move(file));
 
-            if (insert_by_filename_result.second() == false)
+            if (minstd::get<1>(insert_by_filename_result) == false)
             {
                 return Result::Failure(FilesystemResultCodes::FILE_ALREADY_OPENED_EXCLUSIVELY);
             }
 
-            File &file_ref = *(insert_by_filename_result.first()->second());
+            File &file_ref = *(minstd::get<1>(*minstd::get<0>(insert_by_filename_result)));
 
             file_by_uuid_map_.insert(file_ref.ID(), minstd::ref(file_ref));
 
@@ -70,7 +70,7 @@ namespace filesystems
                 return ReferenceResult<FilesystemResultCodes, File>::Failure(FilesystemResultCodes::FILE_IS_CLOSED);
             }
 
-            return Result::Success(itr->second().get());
+            return Result::Success(minstd::get<1>(*itr).get());
         }
 
     private:

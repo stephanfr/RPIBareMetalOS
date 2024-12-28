@@ -71,7 +71,7 @@ protected:
             return nullptr;
         }
 
-        return map_itr->second();
+        return minstd::get<1>(*map_itr);
     }
 
     Interrupts AsInterrupt(InterprocessorInterrupts ipi)

@@ -13,7 +13,6 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
 
 #include <__type_traits/remove_const.h>
 #include <__type_traits/remove_volatile.h>

@@ -6,13 +6,18 @@
 
 #include "minstdconfig.h"
 
-#include "type_traits"
+#include "__utility/forward.h"
+#include "__utility/integer_sequence.h"
+#include "__utility/move.h"
+#include "__utility/priority_tag.h"
+
+#include "tuple"
 
 namespace MINIMAL_STD_NAMESPACE
 {
 
     //  These are simply the canonical forward<>() template functions for the standard library.
-
+/*
     template <class T>
     inline T &&forward(typename remove_reference<T>::type &t) noexcept
     {
@@ -34,7 +39,8 @@ namespace MINIMAL_STD_NAMESPACE
     {
         return static_cast<typename remove_reference<T>::type &&>(t);
     }
-
+*/
+/*
     template <typename T1, typename T2>
     class pair
     {
@@ -141,5 +147,5 @@ namespace MINIMAL_STD_NAMESPACE
     {
         return pair<T1, T2>(first, second);
     }
-
+*/
 }

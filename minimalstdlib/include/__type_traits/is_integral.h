@@ -13,7 +13,8 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include <stddef.h>
+
+#include <__type_traits/remove_cv.h>
 
 namespace MINIMAL_STD_NAMESPACE
 {

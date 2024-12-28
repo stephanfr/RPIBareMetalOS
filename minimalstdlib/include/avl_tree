@@ -91,12 +91,12 @@ namespace MINIMAL_STD_NAMESPACE
 
             const Key &key() const
             {
-                return value_.first();
+                return get<0>(value_);
             }
 
             const T &value() const
             {
-                return value_.second();
+                return get<1>(value_);
             }
 
             void set_left(avl_node *left)
@@ -886,21 +886,21 @@ namespace MINIMAL_STD_NAMESPACE
         //  First, insure the element does not already exist.  If it does,
         //      return the iterator to the element and 'false'.
 
-        iterator existing_element = find(value.first());
+        iterator existing_element = find(get<0>(value));
 
         if (existing_element != end())
         {
             return minstd::pair<iterator, bool>(existing_element, false);
         }
 
-        root_ = insert_recursive(root_, value.first(), value.second());
+        root_ = insert_recursive(root_, get<0>(value), get<1>(value));
 
         root_->left_reverse_ = nullptr;
         root_->right_reverse_ = nullptr;
 
         //  Insert succeeded, return an iterator to the new element
 
-        return minstd::pair<iterator, bool>(find(value.first()), true);
+        return minstd::pair<iterator, bool>(find(get<0>(value)), true);
     }
 
     template <typename Key, typename T>
@@ -909,21 +909,21 @@ namespace MINIMAL_STD_NAMESPACE
         //  First, insure the element does not already exist.  If it does,
         //      return the iterator to the element and 'false'.
 
-        iterator existing_element = find(value.first());
+        iterator existing_element = find(get<0>(value));
 
         if (existing_element != end())
         {
             return minstd::pair<iterator, bool>(existing_element, false);
         }
 
-        root_ = insert_recursive(root_, value.first(), minstd::move(value.second()));
+        root_ = insert_recursive(root_, get<0>(value), minstd::move(get<1>(value)));
 
         root_->left_reverse_ = nullptr;
         root_->right_reverse_ = nullptr;
 
         //  Insert succeeded, return an iterator to the new element
 
-        return minstd::pair<iterator, bool>(find(value.first()), true);
+        return minstd::pair<iterator, bool>(find(get<0>(value)), true);
     }
 
     template <typename Key, typename T>
@@ -940,7 +940,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         ++next_element;
 
-        erase(element_to_erase->first());
+        erase(get<0>(*element_to_erase));
 
         return next_element;
     }
