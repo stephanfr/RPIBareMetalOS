@@ -6,11 +6,11 @@
 
 #include "minstdconfig.h"
 
-#include <string.h>
 #include <stdint.h>
+#include <string.h>
 
-#include "allocator"
 #include "algorithm"
+#include "allocator"
 #include "basic_string"
 
 namespace MINIMAL_STD_NAMESPACE
@@ -22,27 +22,27 @@ namespace MINIMAL_STD_NAMESPACE
         static constexpr size_t npos = SIZE_MAX;
 
         explicit basic_fixed_string()
-            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE)
+            : basic_string<T>(fixed_buffer_, MAX_SIZE + 1, MAX_SIZE)
         {
         }
 
         basic_fixed_string(const T *value)
-            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, value)
+            : basic_string<T>(fixed_buffer_, MAX_SIZE + 1, MAX_SIZE, value)
         {
         }
 
-        explicit basic_fixed_string(const T *value, size_t length)
-            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, value, length)
+        explicit constexpr basic_fixed_string(const T *value, size_t length)
+            : basic_string<T>(fixed_buffer_, MAX_SIZE + 1, MAX_SIZE, value, length)
         {
         }
 
         explicit basic_fixed_string(const basic_string<T> &string_to_copy)
-            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, string_to_copy)
+            : basic_string<T>(fixed_buffer_, MAX_SIZE + 1, MAX_SIZE, string_to_copy)
         {
         }
 
         explicit basic_fixed_string(const basic_fixed_string &string_to_copy)
-            : basic_string<T>(fixed_buffer_, MAX_SIZE+ 1, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_)
+            : basic_string<T>(fixed_buffer_, MAX_SIZE + 1, MAX_SIZE, string_to_copy.buffer_, string_to_copy.length_)
         {
         }
 
@@ -78,12 +78,11 @@ namespace MINIMAL_STD_NAMESPACE
         };
 
         void grow_buffer_for_string(const T *str) override
-        {}
+        {
+        }
 
-        void grow_buffer(size_t chars_needed) override
-        {};
+        void grow_buffer(size_t chars_needed) override {};
     };
-
 
     template <typename T>
     template <size_t OTHER_MAX_SIZE>
@@ -98,4 +97,27 @@ namespace MINIMAL_STD_NAMESPACE
 
     template <size_t MAX_SIZE = DEFAULT_FIXED_STRING_MAX_SIZE>
     using fixed_string = basic_fixed_string<char, MAX_SIZE>;
+
+    inline namespace literals
+    {
+        inline namespace string_literals
+        {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wliteral-suffix"
+            inline constexpr basic_fixed_string<char, 256>
+            operator""s(const char *str, size_t len)
+            {
+                return basic_fixed_string<char, 256>(str, len);
+            }
+#pragma GCC diagnostic pop
+            /*
+                        inline constexpr basic_fixed_string<wchar_t, 256>
+                        operator""s(const wchar_t *str, size_t len)
+                        {
+                            return basic_fixed_string<wchar_t, 256>(str, len);
+                        }
+            */
+        } // namespace string_literals
+    } // namespace literals
+
 }

@@ -14,27 +14,15 @@
 
 #include "minstdconfig.h"
 
+#include <__type_traits/integral_constant.h>
+
 namespace MINIMAL_STD_NAMESPACE
 {
-    template <class _Hp, class _Tp>
-    struct __type_list
+    template <class _Tp>
+    struct is_aggregate : public integral_constant<bool, __is_aggregate(_Tp)>
     {
-        typedef _Hp _Head;
-        typedef _Tp _Tail;
     };
 
-    template <class _TypeList, size_t _Size, bool = _Size <= sizeof(typename _TypeList::_Head)>
-    struct __find_first;
-
-    template <class _Hp, class _Tp, size_t _Size>
-    struct __find_first<__type_list<_Hp, _Tp>, _Size, true>
-    {
-        typedef _MINIMAL_STD_NODEBUG _Hp type;
-    };
-
-    template <class _Hp, class _Tp, size_t _Size>
-    struct __find_first<__type_list<_Hp, _Tp>, _Size, false>
-    {
-        typedef _MINIMAL_STD_NODEBUG typename __find_first<_Tp, _Size>::type type;
-    };
+    template <class _Tp>
+    inline constexpr bool is_aggregate_v = __is_aggregate(_Tp);
 } // namespace MINIMAL_STD_NAMESPACE

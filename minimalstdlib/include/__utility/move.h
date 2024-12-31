@@ -28,7 +28,7 @@ namespace MINIMAL_STD_NAMESPACE
     [[nodiscard]] inline _MINIMAL_STD_HIDDEN constexpr __minstdlib_remove_reference_t<_Tp> &&
     move(_Tp &&__t) noexcept
     {
-        using _Up MINIMAL_STD_NODEBUG = __minstdlib_remove_reference_t<_Tp>;
+        using _Up _MINIMAL_STD_NODEBUG = __minstdlib_remove_reference_t<_Tp>;
         return static_cast<_Up &&>(__t);
     }
 

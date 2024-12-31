@@ -14,25 +14,15 @@
 
 #include "minstdconfig.h"
 
-#include <__type_traits/remove_const.h>
-#include <__type_traits/remove_volatile.h>
+#include <__type_traits/integral_constant.h>
 
 namespace MINIMAL_STD_NAMESPACE
 {
-#if __has_builtin(__remove_cv)
     template <class _Tp>
-    struct remove_cv
+    struct is_trivial : public integral_constant<bool, __is_trivial(_Tp)>
     {
-        using type _MINIMAL_STD_NODEBUG = __remove_cv(_Tp);
     };
-#else
-    template <class _Tp>
-    struct remove_cv
-    {
-        typedef __remove_volatile_t<__remove_const_t<_Tp>> type;
-    };
-#endif
 
     template <class _Tp>
-    using remove_cv_t = typename remove_cv<_Tp>::type;
-} // namespace MINIMAL_STD_NAMESPACE
+    inline constexpr bool is_trivial_v = __is_trivial(_Tp);
+}

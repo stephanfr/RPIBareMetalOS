@@ -81,7 +81,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct make_signed
     {
-        using type MINIMAL_STD_NODEBUG = __make_signed_t<_Tp>;
+        using type _MINIMAL_STD_NODEBUG = __make_signed_t<_Tp>;
     };
 
     template <class _Tp>

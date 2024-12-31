@@ -357,4 +357,46 @@ namespace
             basicTestElementTest(stack_allocator);
         }
     }
+
+    TEST(VectorTests, Assignment)
+    {
+        minstd::single_block_memory_heap test_heap(buffer, 4096);
+        Uint32tVectorStaticHeapAllocator heap_allocator(test_heap);
+
+        Uint32tVector   vec1(heap_allocator);
+        Uint32tVector   vec2(heap_allocator);
+
+        for(uint32_t i = 0; i < 6; i++)
+        {
+            vec1.push_back(i);
+        }
+
+        for(uint32_t i = 6; i < 12; i++)
+        {
+            vec2.push_back(i);
+        }
+
+        CHECK(vec1 != vec2);
+
+        vec2 = vec1;
+
+        CHECK(vec1 == vec2);
+    }
+
+    TEST(VectorTests, BraceInitialization)
+    {
+        minstd::single_block_memory_heap test_heap(buffer, 4096);
+        Uint32tVectorStaticHeapAllocator heap_allocator(test_heap);
+
+        Uint32tVector   vec1({0, 1, 2, 3, 4, 5}, heap_allocator);
+
+        CHECK(vec1.size() == 6);
+
+        CHECK(vec1[0] == 0);
+        CHECK(vec1[1] == 1);
+        CHECK(vec1[2] == 2);
+        CHECK(vec1[3] == 3);
+        CHECK(vec1[4] == 4);
+        CHECK(vec1[5] == 5);
+    }
 }

@@ -20,7 +20,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct remove_extent
     {
-        using type MINIMAL_STD_NODEBUG = __remove_extent(_Tp);
+        using type _MINIMAL_STD_NODEBUG = __remove_extent(_Tp);
     };
 
     template <class _Tp>

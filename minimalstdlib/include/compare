@@ -27,8 +27,3 @@
 #include <__compare/three_way_comparable.h>
 #include <__compare/weak_order.h>
 
-//#include <version>
-
-//#include <cmath>
-//#include <cstddef>
-//#include <type_traits>

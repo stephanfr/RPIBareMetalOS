@@ -26,58 +26,58 @@ namespace MINIMAL_STD_NAMESPACE
     struct __apply_cv_impl
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = _Up;
+        using __apply _MINIMAL_STD_NODEBUG = _Up;
     };
 
     template <class _Tp>
     struct __apply_cv_impl<_Tp, true, false>
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = const _Up;
+        using __apply _MINIMAL_STD_NODEBUG = const _Up;
     };
 
     template <class _Tp>
     struct __apply_cv_impl<_Tp, false, true>
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = volatile _Up;
+        using __apply _MINIMAL_STD_NODEBUG = volatile _Up;
     };
 
     template <class _Tp>
     struct __apply_cv_impl<_Tp, true, true>
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = const volatile _Up;
+        using __apply _MINIMAL_STD_NODEBUG = const volatile _Up;
     };
 
     template <class _Tp>
     struct __apply_cv_impl<_Tp &, false, false>
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = _Up &;
+        using __apply _MINIMAL_STD_NODEBUG = _Up &;
     };
 
     template <class _Tp>
     struct __apply_cv_impl<_Tp &, true, false>
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = const _Up &;
+        using __apply _MINIMAL_STD_NODEBUG = const _Up &;
     };
 
     template <class _Tp>
     struct __apply_cv_impl<_Tp &, false, true>
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = volatile _Up &;
+        using __apply _MINIMAL_STD_NODEBUG = volatile _Up &;
     };
 
     template <class _Tp>
     struct __apply_cv_impl<_Tp &, true, true>
     {
         template <class _Up>
-        using __apply MINIMAL_STD_NODEBUG = const volatile _Up &;
+        using __apply _MINIMAL_STD_NODEBUG = const volatile _Up &;
     };
 
     template <class _Tp, class _Up>
-    using __apply_cv_t MINIMAL_STD_NODEBUG = typename __apply_cv_impl<_Tp>::template __apply<_Up>;
+    using __apply_cv_t _MINIMAL_STD_NODEBUG = typename __apply_cv_impl<_Tp>::template __apply<_Up>;
 }

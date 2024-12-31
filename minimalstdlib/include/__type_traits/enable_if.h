@@ -27,7 +27,7 @@ namespace MINIMAL_STD_NAMESPACE
     };
 
     template <bool _Bp, class _Tp = void>
-    using __enable_if_t MINIMAL_STD_NODEBUG = typename enable_if<_Bp, _Tp>::type;
+    using __enable_if_t _MINIMAL_STD_NODEBUG = typename enable_if<_Bp, _Tp>::type;
 
     template <bool _Bp, class _Tp = void>
     using enable_if_t = typename enable_if<_Bp, _Tp>::type;

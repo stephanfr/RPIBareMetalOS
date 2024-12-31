@@ -24,35 +24,35 @@ namespace MINIMAL_STD_NAMESPACE
     struct _IfImpl<true>
     {
         template <class _IfRes, class _ElseRes>
-        using _Select MINIMAL_STD_NODEBUG = _IfRes;
+        using _Select _MINIMAL_STD_NODEBUG = _IfRes;
     };
 
     template <>
     struct _IfImpl<false>
     {
         template <class _IfRes, class _ElseRes>
-        using _Select MINIMAL_STD_NODEBUG = _ElseRes;
+        using _Select _MINIMAL_STD_NODEBUG = _ElseRes;
     };
 
     template <bool _Cond, class _IfRes, class _ElseRes>
-    using _If MINIMAL_STD_NODEBUG = typename _IfImpl<_Cond>::template _Select<_IfRes, _ElseRes>;
+    using _If _MINIMAL_STD_NODEBUG = typename _IfImpl<_Cond>::template _Select<_IfRes, _ElseRes>;
 
     template <bool _Bp, class _If, class _Then>
     struct conditional
     {
-        using type MINIMAL_STD_NODEBUG = _If;
+        using type _MINIMAL_STD_NODEBUG = _If;
     };
     template <class _If, class _Then>
     struct conditional<false, _If, _Then>
     {
-        using type MINIMAL_STD_NODEBUG = _Then;
+        using type _MINIMAL_STD_NODEBUG = _Then;
     };
 
     template <bool _Bp, class _IfRes, class _ElseRes>
-    using conditional_t MINIMAL_STD_NODEBUG = typename conditional<_Bp, _IfRes, _ElseRes>::type;
+    using conditional_t _MINIMAL_STD_NODEBUG = typename conditional<_Bp, _IfRes, _ElseRes>::type;
 
     // Helper so we can use "conditional_t" in all language versions.
     template <bool _Bp, class _If, class _Then>
-    using __conditional_t MINIMAL_STD_NODEBUG = typename conditional<_Bp, _If, _Then>::type;
+    using __conditional_t _MINIMAL_STD_NODEBUG = typename conditional<_Bp, _If, _Then>::type;
 
 } // namespace MINIMAL_STD_NAMESPACE

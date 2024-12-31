@@ -80,7 +80,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct make_unsigned
     {
-        using type MINIMAL_STD_NODEBUG = __make_unsigned_t<_Tp>;
+        using type _MINIMAL_STD_NODEBUG = __make_unsigned_t<_Tp>;
     };
 
     template <class _Tp>

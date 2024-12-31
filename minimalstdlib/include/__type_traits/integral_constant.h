@@ -34,7 +34,7 @@ namespace MINIMAL_STD_NAMESPACE
     inline constexpr _Tp integral_constant_v = integral_constant<_Tp, VALUE>::value;
 
     template <bool _Val>
-    using _BoolConstant MINIMAL_STD_NODEBUG = integral_constant<bool, _Val>;
+    using _BoolConstant _MINIMAL_STD_NODEBUG = integral_constant<bool, _Val>;
 
     template <bool __b>
     using bool_constant = integral_constant<bool, __b>;

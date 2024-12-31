@@ -21,7 +21,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct remove_volatile
     {
-        using type MINIMAL_STD_NODEBUG = __remove_volatile(_Tp);
+        using type _MINIMAL_STD_NODEBUG = __remove_volatile(_Tp);
     };
 
     template <class _Tp>

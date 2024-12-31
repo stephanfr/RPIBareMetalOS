@@ -20,18 +20,18 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct remove_pointer
     {
-        using type MINIMAL_STD_NODEBUG = __remove_pointer(_Tp);
+        using type _MINIMAL_STD_NODEBUG = __remove_pointer(_Tp);
     };
 
     template <class _Tp>
     using __remove_pointer_t = typename remove_pointer<_Tp>::type;
 #else
     // clang-format off
-template <class _Tp> struct remove_pointer                      {using type MINIMAL_STD_NODEBUG = _Tp;};
-template <class _Tp> struct remove_pointer<_Tp*>                {using type MINIMAL_STD_NODEBUG = _Tp;};
-template <class _Tp> struct remove_pointer<_Tp* const>          {using type MINIMAL_STD_NODEBUG = _Tp;};
-template <class _Tp> struct remove_pointer<_Tp* volatile>       {using type MINIMAL_STD_NODEBUG = _Tp;};
-template <class _Tp> struct remove_pointer<_Tp* const volatile> {using type MINIMAL_STD_NODEBUG = _Tp;};
+template <class _Tp> struct remove_pointer                      {using type _MINIMAL_STD_NODEBUG = _Tp;};
+template <class _Tp> struct remove_pointer<_Tp*>                {using type _MINIMAL_STD_NODEBUG = _Tp;};
+template <class _Tp> struct remove_pointer<_Tp* const>          {using type _MINIMAL_STD_NODEBUG = _Tp;};
+template <class _Tp> struct remove_pointer<_Tp* volatile>       {using type _MINIMAL_STD_NODEBUG = _Tp;};
+template <class _Tp> struct remove_pointer<_Tp* const volatile> {using type _MINIMAL_STD_NODEBUG = _Tp;};
     // clang-format on
 
     template <class _Tp>

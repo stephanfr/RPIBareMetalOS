@@ -1,0 +1,54 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+
+//
+//  Initializer list *must* be in the std namespace, as it is a language feature.
+//
+
+namespace std
+{
+    template <class T>
+    class initializer_list
+    {
+        const T *begin_;
+        size_t size_;
+
+        constexpr initializer_list(const T *begin, size_t size) noexcept
+            : begin_(begin),
+              size_(size) {}
+
+    public:
+        typedef T value_type;
+        typedef const T &reference;
+        typedef const T &const_reference;
+        typedef size_t size_type;
+
+        typedef const T *iterator;
+        typedef const T *const_iterator;
+
+        constexpr initializer_list() noexcept : begin_(nullptr), size_(0) {}
+
+        constexpr size_t size() const noexcept { return size_; }
+
+        constexpr const T *begin() const noexcept { return begin_; }
+
+        constexpr const T *end() const noexcept { return begin_ + size_; }
+    };
+
+    template <class T>
+    inline constexpr const T *begin(initializer_list<T> init_list) noexcept
+    {
+        return init_list.begin();
+    }
+
+    template <class T>
+    inline constexpr const T *end(initializer_list<T> init_list) noexcept
+    {
+        return init_list.end();
+    }
+} // namespace MINIMAL_STD_NAMESPACE
+

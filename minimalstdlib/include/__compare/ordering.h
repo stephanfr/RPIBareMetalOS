@@ -320,12 +320,17 @@ namespace MINIMAL_STD_NAMESPACE
         is_same_v<_Tp, partial_ordering> || is_same_v<_Tp, weak_ordering> || is_same_v<_Tp, strong_ordering>;
 } // namespace MINIMAL_STD_NAMESPACE
 
-//  The following is needed to make the ordering types available in the std namespace.
-//      Comparison operators require them.
 
+//  Include classess needed by the compiler in the 'std' namespace
+
+#ifdef _MINIMAL_STD_PROVIDE_COMPILER_STD_NAMESPACE_DEPENDENCIES
 namespace std
 {
+//  Ordering types must be available in the std namespace as some comparison
+//      operators depend upon them
+
     using strong_ordering = MINIMAL_STD_NAMESPACE::strong_ordering;
     using weak_ordering = MINIMAL_STD_NAMESPACE::weak_ordering;
     using partial_ordering = MINIMAL_STD_NAMESPACE::partial_ordering;
 }
+#endif

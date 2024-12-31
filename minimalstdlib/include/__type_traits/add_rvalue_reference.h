@@ -25,12 +25,12 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp, bool = __minstdlib_is_referenceable<_Tp>::value>
     struct __add_rvalue_reference_impl
     {
-        using type MINIMAL_STD_NODEBUG = _Tp;
+        using type _MINIMAL_STD_NODEBUG = _Tp;
     };
     template <class _Tp>
     struct __add_rvalue_reference_impl<_Tp, true>
     {
-        using type MINIMAL_STD_NODEBUG = _Tp &&;
+        using type _MINIMAL_STD_NODEBUG = _Tp &&;
     };
 
     template <class _Tp>

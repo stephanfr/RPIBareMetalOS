@@ -22,7 +22,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct remove_const
     {
-        using type MINIMAL_STD_NODEBUG = __remove_const(_Tp);
+        using type _MINIMAL_STD_NODEBUG = __remove_const(_Tp);
     };
 
     template <class _Tp>

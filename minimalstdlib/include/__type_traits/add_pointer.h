@@ -32,12 +32,12 @@ namespace MINIMAL_STD_NAMESPACE
               bool = __minstdlib_is_referenceable<_Tp>::value || is_void<_Tp>::value>
     struct __add_pointer_impl
     {
-        typedef MINIMAL_STD_NODEBUG __minstdlib_remove_reference_t<_Tp> *type;
+        typedef _MINIMAL_STD_NODEBUG __minstdlib_remove_reference_t<_Tp> *type;
     };
     template <class _Tp>
     struct __add_pointer_impl<_Tp, false>
     {
-        typedef MINIMAL_STD_NODEBUG _Tp type;
+        typedef _MINIMAL_STD_NODEBUG _Tp type;
     };
 
     template <class _Tp>
@@ -48,7 +48,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct add_pointer
     {
-        using type MINIMAL_STD_NODEBUG = __add_pointer_t<_Tp>;
+        using type _MINIMAL_STD_NODEBUG = __add_pointer_t<_Tp>;
     };
 
     template <class _Tp>

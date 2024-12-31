@@ -20,7 +20,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct remove_reference
     {
-        using type MINIMAL_STD_NODEBUG = __remove_reference_t(_Tp);
+        using type _MINIMAL_STD_NODEBUG = __remove_reference_t(_Tp);
     };
 
     template <class _Tp>
@@ -29,7 +29,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct remove_reference
     {
-        using type MINIMAL_STD_NODEBUG = __remove_reference(_Tp);
+        using type _MINIMAL_STD_NODEBUG = __remove_reference(_Tp);
     };
 
     template <class _Tp>
@@ -38,17 +38,17 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp>
     struct remove_reference
     {
-        typedef MINIMAL_STD_NODEBUG _Tp type;
+        typedef _MINIMAL_STD_NODEBUG _Tp type;
     };
     template <class _Tp>
     struct remove_reference<_Tp &>
     {
-        typedef MINIMAL_STD_NODEBUG _Tp type;
+        typedef _MINIMAL_STD_NODEBUG _Tp type;
     };
     template <class _Tp>
     struct remove_reference<_Tp &&>
     {
-        typedef MINIMAL_STD_NODEBUG _Tp type;
+        typedef _MINIMAL_STD_NODEBUG _Tp type;
     };
 
     template <class _Tp>

@@ -48,7 +48,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class _Tp, class _Up>
     struct __common_type2_imp<_Tp, _Up, __void_t<decltype(true ? declval<_Tp>() : declval<_Up>())>>
     {
-        typedef MINIMAL_STD_NODEBUG __decay_t<decltype(true ? declval<_Tp>() : declval<_Up>())> type;
+        typedef _MINIMAL_STD_NODEBUG __decay_t<decltype(true ? declval<_Tp>() : declval<_Up>())> type;
     };
 
     template <class, class = void>

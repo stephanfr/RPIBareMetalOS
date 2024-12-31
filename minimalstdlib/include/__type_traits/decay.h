@@ -27,26 +27,26 @@ namespace MINIMAL_STD_NAMESPACE
 {
 #if __has_builtin(__decay)
     template <class _Tp>
-    using __decay_t MINIMAL_STD_NODEBUG = __decay(_Tp);
+    using __decay_t _MINIMAL_STD_NODEBUG = __decay(_Tp);
 
     template <class _Tp>
     struct decay
     {
-        using type MINIMAL_STD_NODEBUG = __decay_t<_Tp>;
+        using type _MINIMAL_STD_NODEBUG = __decay_t<_Tp>;
     };
 
 #else
     template <class _Up, bool>
     struct __decay
     {
-        typedef MINIMAL_STD_NODEBUG remove_cv_t<_Up> type;
+        typedef _MINIMAL_STD_NODEBUG remove_cv_t<_Up> type;
     };
 
     template <class _Up>
     struct __decay<_Up, true>
     {
     public:
-        typedef MINIMAL_STD_NODEBUG typename conditional<
+        typedef _MINIMAL_STD_NODEBUG typename conditional<
             is_array<_Up>::value,
             __add_pointer_t<__remove_extent_t<_Up>>,
             typename conditional<
@@ -59,10 +59,10 @@ namespace MINIMAL_STD_NAMESPACE
     struct decay
     {
     private:
-        typedef MINIMAL_STD_NODEBUG __minstdlib_remove_reference_t<_Tp> _Up;
+        typedef _MINIMAL_STD_NODEBUG __minstdlib_remove_reference_t<_Tp> _Up;
 
     public:
-        typedef MINIMAL_STD_NODEBUG typename __decay<_Up, __minstdlib_is_referenceable<_Up>::value>::type type;
+        typedef _MINIMAL_STD_NODEBUG typename __decay<_Up, __minstdlib_is_referenceable<_Up>::value>::type type;
     };
 
     template <class _Tp>

@@ -21,7 +21,7 @@ namespace MINIMAL_STD_NAMESPACE
     using __remove_cvref_t _MINIMAL_STD_NODEBUG = typename __remove_cvref<_Tp>::type;
 #else
     template <class _Tp>
-    using __remove_cvref_t MINIMAL_STD_NODEBUG = remove_cv_t<__minstdlib_remove_reference_t<_Tp>>;
+    using __remove_cvref_t _MINIMAL_STD_NODEBUG = remove_cv_t<__minstdlib_remove_reference_t<_Tp>>;
 #endif // __has_builtin(__remove_cvref)
 
     template <class _Tp, class _Up>
