@@ -36,9 +36,9 @@
 #include "minstdconfig.h"
 
 #include "compare"
-#include "functional"
 #include "type_traits"
-#include "utility"
+#include "__utility/integer_sequence.h"
+#include "__utility/swap.h"
 
 //  This pragma marks the file as a system header, which suppresses warnings.
 //      There are conditions during which comparison of tuples with different numeric types will generate
@@ -51,12 +51,12 @@
 #define _TUPLE_FWD_M(TupleType, BaseType, tup, value) static_cast<TupleType &&>(tup).BaseType::value
 #define _TUPLE_GET_M(BaseType, tup, value) tup.BaseType::value
 
-//
-//  type_list
-//
-
 namespace MINIMAL_STD_NAMESPACE
 {
+    //
+    //  type_list
+    //
+
     /// Represents a list of types
     template <class... T>
     struct type_list
@@ -79,7 +79,7 @@ namespace MINIMAL_STD_NAMESPACE
         template <
             class T,
             class U,
-            class = decltype(minstd::declval<T>() == minstd::declval<U>())>
+            class = decltype(declval<T>() == declval<U>())>
         constexpr bool _test_eq(int)
         {
             return true;
@@ -94,7 +94,7 @@ namespace MINIMAL_STD_NAMESPACE
         template <
             class T,
             class U,
-            class = decltype(minstd::declval<T>() < minstd::declval<U>())>
+            class = decltype(declval<T>() < declval<U>())>
         constexpr bool _test_less(int)
         {
             return true;
@@ -162,7 +162,7 @@ namespace MINIMAL_STD_NAMESPACE
         template <
             class A,
             class B,
-            class = decltype(minstd::declval<A>().compare(minstd::declval<B>()))>
+            class = decltype(declval<A>().compare(declval<B>()))>
         constexpr bool _test_m_compare(int)
         {
             return true;
@@ -179,7 +179,7 @@ namespace MINIMAL_STD_NAMESPACE
     {
         /// Implement assignment but preserve default assignment
         template <class A, class B>
-        using other_than = minstd::enable_if_t<!minstd::is_same_v<minstd::decay_t<A>, minstd::decay_t<B>>>;
+        using other_than = enable_if_t<!is_same_v<decay_t<A>, decay_t<B>>>;
     } // namespace tuple_internal::sfinae
 
     namespace tuple_internal::detail
@@ -222,13 +222,13 @@ namespace MINIMAL_STD_NAMESPACE
     };
 
     template <class U>
-    struct unwrap_reference<minstd::reference_wrapper<U>>
+    struct unwrap_reference<reference_wrapper<U>>
     {
         using type = U &;
     };
 
     template <class T>
-    struct unwrap_ref_decay : unwrap_reference<minstd::decay_t<T>>
+    struct unwrap_ref_decay : unwrap_reference<decay_t<T>>
     {
     };
 
@@ -251,32 +251,32 @@ namespace MINIMAL_STD_NAMESPACE
     using type_t = typename T::type;
 
     template <size_t I>
-    using tag = minstd::integral_constant<size_t, I>;
+    using tag = integral_constant<size_t, I>;
 
     template <size_t I>
     constexpr tag<I> tag_v{};
 
     template <size_t N>
-    using tag_range = minstd::make_index_sequence<N>;
+    using tag_range = make_index_sequence<N>;
 
     template <class Tup>
-    using base_list_t = typename minstd::decay_t<Tup>::base_list;
+    using base_list_t = typename decay_t<Tup>::base_list;
     template <class Tup>
-    using element_list_t = typename minstd::decay_t<Tup>::element_list;
+    using element_list_t = typename decay_t<Tup>::element_list;
 
     template <class T>
-    constexpr bool stateless_v = minstd::is_empty_v<minstd::decay_t<T>>;
+    constexpr bool stateless_v = is_empty_v<decay_t<T>>;
 
     template <class T, class U>
-    concept other_than = !minstd::is_same_v<minstd::decay_t<T>, minstd::decay_t<U>>;
+    concept other_than = !is_same_v<decay_t<T>, decay_t<U>>;
 
     template <class Tuple>
     concept base_list_tuple = requires() {
-        typename minstd::decay_t<Tuple>::base_list;
+        typename decay_t<Tuple>::base_list;
     };
 
     template <class T>
-    concept stateless = minstd::is_empty_v<minstd::decay_t<T>>;
+    concept stateless = is_empty_v<decay_t<T>>;
 
     template <class T>
     concept indexable = stateless<T> || requires(T t) { t[tag<0>()]; };
@@ -500,14 +500,14 @@ namespace MINIMAL_STD_NAMESPACE
 
         inline constexpr auto operator<=>(tuple_elem const &other) const
             noexcept(noexcept(value <=> other.value))
-            requires(minstd::is_reference_v<T> && ordered<T>)
+            requires(is_reference_v<T> && ordered<T>)
         {
             return value <=> other.value;
         }
 
         inline constexpr bool operator==(tuple_elem const &other) const
             noexcept(noexcept(value == other.value))
-            requires(minstd::is_reference_v<T> && equality_comparable<T>)
+            requires(is_reference_v<T> && equality_comparable<T>)
         {
             return value == other.value;
         }
@@ -523,7 +523,7 @@ namespace MINIMAL_STD_NAMESPACE
         struct _get_tuple_base;
 
         template <size_t... I, class... T>
-        struct _get_tuple_base<minstd::index_sequence<I...>, T...>
+        struct _get_tuple_base<index_sequence<I...>, T...>
         {
             using type = type_map<tuple_elem<I, T>...>;
         };
@@ -594,7 +594,7 @@ namespace MINIMAL_STD_NAMESPACE
     struct tuple : tuple_base_t<T...>
     {
         constexpr static size_t N = sizeof...(T);
-        constexpr static bool nothrow_swappable = (minstd::is_nothrow_swappable_v<T> && ...);
+        constexpr static bool nothrow_swappable = (is_nothrow_swappable_v<T> && ...);
         using super = tuple_base_t<T...>;
         using super::operator[];
         using base_list = typename super::base_list;
@@ -604,7 +604,7 @@ namespace MINIMAL_STD_NAMESPACE
         template <other_than<tuple> U> // Preserves default assignments
         inline constexpr auto &operator=(U &&tup)
         {
-            using tuple2 = minstd::decay_t<U>;
+            using tuple2 = decay_t<U>;
             if constexpr (base_list_tuple_v<tuple2>)
             {
                 _assign_tup(
@@ -888,8 +888,7 @@ namespace MINIMAL_STD_NAMESPACE
             tuple &other,
             type_list<B...>) noexcept(nothrow_swappable)
         {
-            using minstd::swap;
-            (swap(B::value, _TUPLE_GET_M(B, other, value)), ...);
+            (MINIMAL_STD_NAMESPACE::swap(B::value, _TUPLE_GET_M(B, other, value)), ...);
         }
 
         template <class U, class... B1, class... B2>
@@ -904,7 +903,7 @@ namespace MINIMAL_STD_NAMESPACE
         template <class U, size_t... I>
         inline constexpr void _assign_index_tup(
             U &&u,
-            minstd::index_sequence<I...>)
+            index_sequence<I...>)
         {
             (void(tuple_elem<I, T>::value = get<I>(static_cast<U &&>(u))), ...);
         }
@@ -1007,77 +1006,77 @@ namespace MINIMAL_STD_NAMESPACE
     //
     //  pair
     //
-
-    template <class First, class Second>
-    struct pair
-    {
-        constexpr static size_t N = 2;
-        constexpr static bool
-            nothrow_swappable = minstd::is_nothrow_swappable_v<First> && minstd::is_nothrow_swappable_v<Second>;
-        [[no_unique_address]] First first;
-        [[no_unique_address]] Second second;
-
-        inline constexpr decltype(auto) operator[](tag<0>) &
+    /*
+        template <class First, class Second>
+        struct pair
         {
-            return (first);
-        }
+            constexpr static size_t N = 2;
+            constexpr static bool
+                nothrow_swappable = is_nothrow_swappable_v<First> && is_nothrow_swappable_v<Second>;
+            [[no_unique_address]] First first;
+            [[no_unique_address]] Second second;
 
-        inline constexpr decltype(auto) operator[](tag<0>) const &
-        {
-            return (first);
-        }
+            inline constexpr decltype(auto) operator[](tag<0>) &
+            {
+                return (first);
+            }
 
-        inline constexpr decltype(auto) operator[](tag<0>) &&
-        {
-            return (static_cast<pair &&>(*this).first);
-        }
+            inline constexpr decltype(auto) operator[](tag<0>) const &
+            {
+                return (first);
+            }
 
-        inline constexpr decltype(auto) operator[](tag<1>) &
-        {
-            return (second);
-        }
+            inline constexpr decltype(auto) operator[](tag<0>) &&
+            {
+                return (static_cast<pair &&>(*this).first);
+            }
 
-        inline constexpr decltype(auto) operator[](tag<1>) const &
-        {
-            return (second);
-        }
+            inline constexpr decltype(auto) operator[](tag<1>) &
+            {
+                return (second);
+            }
 
-        inline constexpr decltype(auto) operator[](tag<1>) &&
-        {
-            return (static_cast<pair &&>(*this).second);
-        }
+            inline constexpr decltype(auto) operator[](tag<1>) const &
+            {
+                return (second);
+            }
 
-        inline void swap(pair &other) noexcept(nothrow_swappable)
-        {
-            using minstd::swap;
-            swap(first, other.first);
-            swap(second, other.second);
-        }
+            inline constexpr decltype(auto) operator[](tag<1>) &&
+            {
+                return (static_cast<pair &&>(*this).second);
+            }
 
-        template <other_than<pair> Type> // Preserves default assignments
-        inline constexpr auto &operator=(Type &&tup)
-        {
-            auto &&[a, b] = static_cast<Type &&>(tup);
-            first = static_cast<decltype(a) &&>(a);
-            second = static_cast<decltype(b) &&>(b);
-            return *this;
-        }
+            inline void swap(pair &other) noexcept(nothrow_swappable)
+            {
+                using swap;
+                swap(first, other.first);
+                swap(second, other.second);
+            }
 
-        template <assignable_to<First> F2, assignable_to<Second> S2>
-        inline constexpr auto &assign(F2 &&f, S2 &&s)
-        {
-            first = static_cast<F2 &&>(f);
-            second = static_cast<S2 &&>(s);
-            return *this;
-        }
+            template <other_than<pair> Type> // Preserves default assignments
+            inline constexpr auto &operator=(Type &&tup)
+            {
+                auto &&[a, b] = static_cast<Type &&>(tup);
+                first = static_cast<decltype(a) &&>(a);
+                second = static_cast<decltype(b) &&>(b);
+                return *this;
+            }
 
-        auto operator<=>(pair const &) const = default;
-        bool operator==(pair const &) const = default;
-    };
+            template <assignable_to<First> F2, assignable_to<Second> S2>
+            inline constexpr auto &assign(F2 &&f, S2 &&s)
+            {
+                first = static_cast<F2 &&>(f);
+                second = static_cast<S2 &&>(s);
+                return *this;
+            }
 
-    template <class A, class B>
-    pair(A, B) -> pair<unwrap_ref_decay_t<A>, unwrap_ref_decay_t<B>>;
+            auto operator<=>(pair const &) const = default;
+            bool operator==(pair const &) const = default;
+        };
 
+        template <class A, class B>
+        pair(A, B) -> pair<unwrap_ref_decay_t<A>, unwrap_ref_decay_t<B>>;
+    */
     //
     //  Conversion
     //
@@ -1087,7 +1086,7 @@ namespace MINIMAL_STD_NAMESPACE
     template <class Tuple>
     struct convert
     {
-        using base_list = typename minstd::decay_t<Tuple>::base_list;
+        using base_list = typename decay_t<Tuple>::base_list;
         Tuple tuple;
         template <class U>
         constexpr operator U() &&
@@ -1133,41 +1132,11 @@ namespace MINIMAL_STD_NAMESPACE
         return tuple_internal::detail::_apply(
             static_cast<Tup &&>(tup),
             static_cast<F &&>(func),
-            typename minstd::decay_t<Tup>::base_list{});
-    }
-
-    template <class F, class A, class B>
-    inline constexpr decltype(auto) apply(
-        F &&func,
-        pair<A, B> &pair)
-    {
-        return static_cast<F &&>(func)(pair.first, pair.second);
-    }
-
-    template <class F, class A, class B>
-    inline constexpr decltype(auto) apply(
-        F &&func,
-        pair<A, B> const &pair)
-    {
-        return static_cast<F &&>(func)(pair.first, pair.second);
-    }
-
-    template <class F, class A, class B>
-    inline constexpr decltype(auto) apply(
-        F &&func,
-        pair<A, B> &&pair)
-    {
-        return static_cast<F &&>(func)(static_cast<MINIMAL_STD_NAMESPACE::pair<A, B> &&>(pair).first, static_cast<MINIMAL_STD_NAMESPACE::pair<A, B> &&>(pair).second);
+            typename decay_t<Tup>::base_list{});
     }
 
     template <class... T>
     inline void swap(tuple<T...> &a, tuple<T...> &b) noexcept(tuple<T...>::nothrow_swappable)
-    {
-        a.swap(b);
-    }
-
-    template <class A, class B>
-    inline void swap(pair<A, B> &a, pair<A, B> &b) noexcept(pair<A, B>::nothrow_swappable)
     {
         a.swap(b);
     }
@@ -1248,7 +1217,7 @@ namespace MINIMAL_STD_NAMESPACE
     //  Appendix 3: tag literals
     //
 
-    namespace tuple_internal::literals::detail
+    namespace tuple_internal::literals
     {
         template <char... D>
         constexpr size_t _size_t_from_digits()
@@ -1261,15 +1230,18 @@ namespace MINIMAL_STD_NAMESPACE
         }
     } // namespace tuple_internal::literals::detail
 
-    namespace tuple_literals
+    inline namespace literals
     {
-        template <char... D>
-        constexpr auto operator""_tag() noexcept
-            -> tag<tuple_internal::literals::detail::_size_t_from_digits<D...>()>
+        inline namespace tuple_literals
         {
-            return {};
-        }
-    } // namespace tuple_internal::literals
+            template <char... D>
+            constexpr auto operator""_tag() noexcept
+                -> tag<tuple_internal::literals::_size_t_from_digits<D...>()>
+            {
+                return {};
+            }
+        } // namespace tuple
+    } // namespace literals
 } // namespace MINIMAL_STD_NAMESPACE
 
 //
@@ -1295,19 +1267,6 @@ namespace MINIMAL_STD_NAMESPACE
     {
         using type = decltype(tuple<T...>::decl_elem(tag<I>()));
     };
-
-    template <class A, class B>
-    struct tuple_size<pair<A, B>>
-        : integral_constant<size_t, 2>
-    {
-    };
-
-    template <size_t I, class A, class B>
-    struct tuple_element<I, pair<A, B>>
-    {
-        static_assert(I < 2, "pair only has 2 elements");
-        using type = minstd::conditional_t<I == 0, A, B>;
-    };
 } // namespace MINIMAL_STD_NAMESPACE
 
 //  Include classess needed by the compiler in the 'std' namespace
@@ -1318,7 +1277,6 @@ namespace std
     //  Tuple needs to be in the std::namespace as well as the compiler depends on
     //      a definition for structured
 
-    using MINIMAL_STD_NAMESPACE::pair;
     using MINIMAL_STD_NAMESPACE::tuple;
     using MINIMAL_STD_NAMESPACE::tuple_element;
     using MINIMAL_STD_NAMESPACE::tuple_size;

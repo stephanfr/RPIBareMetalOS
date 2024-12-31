@@ -8,7 +8,7 @@
 #include <string.h>
 
 #include <fixed_string>
-#include <tuple>            //  for pair<>
+#include <utility>
 
 namespace MINIMAL_STD_NAMESPACE
 {

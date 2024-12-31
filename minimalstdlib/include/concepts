@@ -6,7 +6,8 @@
 
 #include <__concepts/arithmetic.h>
 #include <__concepts/assignable.h>
-#include <__concepts/bool_testable.h>
+#include <__concepts/boolean_testable.h>
+#include <__concepts/destructible.h>
 #include <__concepts/class_or_enum.h>
 #include <__concepts/common_reference_with.h>
 #include <__concepts/common_with.h>

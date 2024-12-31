@@ -43,6 +43,7 @@
 #include <single_block_memory_heap>
 #include <stack_allocator>
 #include <vector>
+#include <functional>
 
 #include <tuple>
 
@@ -615,6 +616,7 @@ namespace
         CHECK(t3 >= t1);
     }
     /*
+    //  string_views not in minstdlib
         TEST(TupleTests, LexiconographicOrdering2)
         {
                 using namespace minstd::fixed_string<64>_view_literals;
