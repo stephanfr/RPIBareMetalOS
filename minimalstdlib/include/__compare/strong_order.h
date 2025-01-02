@@ -17,7 +17,6 @@
 #include <__bit/bit_cast.h>
 #include <__compare/compare_three_way.h>
 #include <__compare/ordering.h>
-//#include <__math/exponential_functions.h>
 #include <__math/traits.h>
 #include <__type_traits/conditional.h>
 #include <__type_traits/decay.h>
@@ -25,7 +24,7 @@
 #include <__type_traits/is_same.h>
 #include <__utility/forward.h>
 #include <__utility/priority_tag.h>
-//#include <cstdint>
+
 #include <limits>
 
 _MINIMAL_STD_PUSH_MACROS
