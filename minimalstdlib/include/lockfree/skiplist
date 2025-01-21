@@ -1,0 +1,519 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <allocator>
+#include <array>
+#include <atomic>
+#include <basic_string>
+#include <limits>
+#include <random>
+#include <strong_typedef>
+
+#define DEFAULT_MAX_LEVELS 16
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    namespace skiplist_internal
+    {
+        struct TransactionId : strong_type<uint64_t, TransactionId>
+        {
+        };
+
+        constexpr TransactionId NOT_TOMBSTONED = TransactionId(0);
+        constexpr TransactionId HEAD = TransactionId(1);
+        constexpr TransactionId TAIL = TransactionId(2);
+        constexpr TransactionId FIRST_USER_TRANSACTION = TransactionId(3);
+
+        template <class T>
+        struct TransactionedReference
+        {
+            TransactionedReference() = delete;
+
+            TransactionedReference(T *value, TransactionId insertion_transaction, TransactionId deletion_transaction)
+                : value_(value),
+                  inserted_at_transaction_(insertion_transaction),
+                  deleted_at_transaction_(deletion_transaction)
+            {
+            }
+
+            T *value_ = nullptr;
+            TransactionId inserted_at_transaction_ = NOT_TOMBSTONED;
+            TransactionId deleted_at_transaction_ = NOT_TOMBSTONED;
+
+            TransactionedReference(TransactionedReference &other) : value_(other.value_), deleted_at_transaction_(other.deleted_at_transaction_) {}
+        };
+
+        // Atomic wrapper for TransactionedReference type
+
+        template <typename T>
+        struct AtomicTransactionedReference
+        {
+            atomic<TransactionedReference<T> *> ref;
+
+            AtomicTransactionedReference()
+            {
+                ref.store(new TransactionedReference<T>(nullptr, NOT_TOMBSTONED, NOT_TOMBSTONED));
+            }
+
+            AtomicTransactionedReference(T *ptr, uint64_t insertion_transaction)
+            {
+                ref.store(new TransactionedReference<T>(ptr, insertion_transaction, NOT_TOMBSTONED));
+            }
+
+            ~AtomicTransactionedReference()
+            {
+                TransactionedReference<T> *temp = ref.load();
+                delete temp;
+            }
+
+            T *get_reference() { return ref.load()->value_; }
+
+            //  Gets the node and the transaction id of the soft delete as a side-effect
+
+            T *get(TransactionId &deleted_at_transaction)
+            {
+                TransactionedReference<T> *temp = ref.load();
+                deleted_at_transaction = temp->deleted_at_transaction_;
+                return temp->value_;
+            }
+
+            void set(T *value, TransactionId inserted_at_transaction)
+            {
+                TransactionedReference<T> *curr = ref.load();
+
+                if ((value != curr->value_) || (inserted_at_transaction != curr->inserted_at_transaction_))
+                {
+                    ref.store(new TransactionedReference<T>(value, inserted_at_transaction, NOT_TOMBSTONED));
+                }
+            }
+
+            TransactionId get_inserted_at_transaction()
+            {
+                return ref.load()->inserted_at_transaction_;
+            }
+
+            TransactionId get_deleted_at_transaction()
+            {
+                return ref.load()->deleted_at_transaction_;
+            }
+
+            void soft_delete(TransactionId transaction)
+            {
+                TransactionedReference<T> *curr = ref.load();
+
+                if (transaction != curr->deleted_at_transaction_)
+                {
+                    ref.store(new TransactionedReference<T>(curr->value_, curr->inserted_at_transaction_, transaction));
+                }
+            }
+
+            //  Atomically sets the value of both the reference and tombstone transaction id to the given
+            //  update values if the current reference is equal to the expected reference
+            //  and the the node is not tombstoned.
+
+            bool compare_exchange_strong(T *expected_value, T *new_value, TransactionId deletion_transaction)
+            {
+                TransactionedReference<T> *curr = ref.load();
+
+                return ((expected_value == curr->value_) && (curr->deleted_at_transaction_ == NOT_TOMBSTONED) &&
+                        (((new_value == curr->value_) && (deletion_transaction == curr->deleted_at_transaction_)) ||
+                         ref.compare_exchange_strong(curr, new TransactionedReference<T>(new_value, curr->inserted_at_transaction_, deletion_transaction), memory_order_seq_cst)));
+            }
+        };
+
+        template <typename KeyType, typename ValueType, int32_t MAX_LEVELS = DEFAULT_MAX_LEVELS> //  MAX_LEVELS must be signed as we need to iterated down to and include index 0
+        class SkipList
+        {
+        private:
+            constexpr bool tombstoned(TransactionId deleted_at_transaction) const
+            {
+                return deleted_at_transaction != NOT_TOMBSTONED;
+            }
+
+            struct SkipNode
+            {
+                // Constructor for standard nodes
+                SkipNode(const KeyType k, const ValueType &v, const int next_node_size) : key(k), value(v), top_level(next_node_size)
+                {
+                    intialize_next_nodes(next_node_size, nullptr);
+                }
+
+                // Constructor for sentinel nodes head and NIL
+                SkipNode(const KeyType k, const int next_node_size, SkipNode *next_node_target) : key(k), top_level(next_node_size)
+                {
+                    intialize_next_nodes(next_node_size, next_node_target);
+                }
+
+                ~SkipNode()
+                {
+                    for (auto i = 0UL; i != next_node.size(); ++i)
+                    {
+                        next_node[i].~AtomicTransactionedReference<SkipNode>();
+                    }
+                }
+
+                void intialize_next_nodes(const int next_node_size, SkipNode *next_node_target)
+                {
+                    for (auto i = 0; i != next_node_size; ++i)
+                    {
+                        next_node[i].set(next_node_target, NOT_TOMBSTONED);
+                    }
+                }
+
+                KeyType key;
+                ValueType value;
+
+                int top_level;
+
+                // Vector of atomic, transactioned, soft-deletable next nodes
+
+                array<AtomicTransactionedReference<SkipNode>, MAX_LEVELS + 1> next_node;
+            };
+
+        public:
+
+        using key_type = KeyType;
+        using value_type = ValueType;
+        
+        using allocator_type = allocator<value_type>;
+
+            SkipList()
+                : rng_(Xoroshiro128PlusPlusRNG::Seed(1, 2)),
+                  probability(0.5),
+                  transaction_counter_(static_cast<uint64_t>(FIRST_USER_TRANSACTION))
+            {
+                NIL = new SkipNode(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
+                head = new SkipNode(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL);
+            }
+
+            ~SkipList()
+            {
+                delete head;
+                delete NIL;
+            };
+
+            ValueType *find(const KeyType search_key) const
+            {
+                TransactionId deletion_transaction = NOT_TOMBSTONED;
+                SkipNode *pred = head, *curr = nullptr, *succ = nullptr;
+
+                // traverse from top of head
+                for (int level = MAX_LEVELS; level >= 0; --level)
+                {
+                    curr = pred->next_node[level].get_reference();
+
+                    while (true)
+                    {
+                        succ = curr->next_node[level].get(deletion_transaction);
+
+                        //  Skip over tombstones
+
+                        while (tombstoned(deletion_transaction))
+                        {
+                            curr = curr->next_node[level].get_reference();
+                            succ = curr->next_node[level].get(deletion_transaction);
+                        }
+
+                        //  Move down the skip list
+
+                        if (curr->key < search_key)
+                        {
+                            pred = curr;
+                            curr = succ;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                return (curr->key == search_key ? &curr->value : nullptr);
+            }
+
+            uint32_t gc()
+            {
+                uint32_t nodes_removed = 0;
+
+                TransactionId deletion_transaction = NOT_TOMBSTONED;
+
+                SkipNode *pred, *curr, *succ;
+
+            RETRY:
+
+                for (auto level = MAX_LEVELS; level >= 0; --level)
+                {
+                    pred = head;
+                    curr = pred->next_node[level].get_reference();
+
+                    while (curr != NIL)
+                    {
+                        //  Delete tombstoned nodes
+
+                        succ = curr->next_node[level].get(deletion_transaction);
+
+                        while (tombstoned(deletion_transaction))
+                        {
+                            if (!pred->next_node[level].compare_exchange_strong(curr, succ, NOT_TOMBSTONED))
+                            {
+                                goto RETRY; // CAS failed, try again
+                            }
+
+                            if (level == 0)
+                            {
+                                nodes_removed++;
+                            }
+
+                            curr = pred->next_node[level].get_reference();
+                            succ = curr->next_node[level].get(deletion_transaction);
+                        }
+
+                        pred = curr;
+                        curr = succ;
+                    }
+                }
+
+                return nodes_removed;
+            }
+
+            bool insert(const KeyType key, const ValueType &value)
+            {
+                const TransactionId transaction_id = NextTransactionId();
+
+                int top_level = random_level();
+
+                SkipNode *preds[MAX_LEVELS + 1];
+                SkipNode *succs[MAX_LEVELS + 1];
+
+                while (true)
+                {
+                    FindResult found = find_with_nodelists(key, preds, succs);
+
+                    if ((found == FindResult::FOUND) || (found == FindResult::SOFT_DELETED))
+                    {
+                        return false;
+                    }
+                    else
+                    {
+                        auto new_node = new SkipNode(key, value, top_level);
+
+                        for (auto level = 0; level < top_level; ++level)
+                        {
+                            auto succ = succs[level];
+                            new_node->next_node[level].set(succ, transaction_id);
+                        }
+
+                        auto pred = preds[0];
+                        auto succ = succs[0];
+                        new_node->next_node[0].set(succ, transaction_id);
+
+                        if (!pred->next_node[0].compare_exchange_strong(succ, new_node, NOT_TOMBSTONED))
+                        {
+                            continue; // CAS failed, try again
+                        }
+
+                        for (auto level = 0; level < top_level; ++level)
+                        {
+                            while (true)
+                            {
+                                pred = preds[level];
+                                succ = succs[level];
+
+                                if (pred->next_node[level].compare_exchange_strong(succ, new_node, NOT_TOMBSTONED))
+                                {
+                                    break;
+                                }
+
+                                find_with_nodelists(key, preds, succs); // CAS failed for upper level, search node to update preds and succs
+                            }
+                        }
+
+                        return true;
+                    }
+                }
+            }
+
+            bool remove(const KeyType key)
+            {
+                const TransactionId transaction_id = NextTransactionId();
+
+                SkipNode *preds[MAX_LEVELS + 1];
+                SkipNode *succs[MAX_LEVELS + 1];
+                SkipNode *succ;
+
+                while (true)
+                {
+                    FindResult found = find_with_nodelists(key, preds, succs);
+
+                    if (found != FindResult::FOUND)
+                    {
+                        return false; // nothing to delete
+                    }
+                    else
+                    {
+                        auto node_to_remove = succs[0];
+
+                        //  Mark as deleted on higher levels
+
+                        TransactionId deletion_transaction = NOT_TOMBSTONED;
+
+                        for (auto level = node_to_remove->top_level - 1; level >= 1; --level)
+                        {
+                            succ = node_to_remove->next_node[level].get(deletion_transaction);
+
+                            while (!tombstoned(deletion_transaction))
+                            {
+                                node_to_remove->next_node[level].soft_delete(transaction_id);
+                                succ = node_to_remove->next_node[level].get(deletion_transaction);
+                            }
+                        }
+
+                        //  Bottom level
+
+                        deletion_transaction = NOT_TOMBSTONED;
+                        succ = node_to_remove->next_node[0].get(deletion_transaction);
+
+                        while (true)
+                        {
+                            bool success = node_to_remove->next_node[0].compare_exchange_strong(succ, succ, transaction_id);
+                            succ = succs[0]->next_node[0].get(deletion_transaction);
+
+                            if (success)
+                            {
+                                // this thread soft deleted the node
+
+                                return true;
+                            }
+                            else if (tombstoned(deletion_transaction))
+                            {
+                                // another thread already soft deleted the node
+
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+
+            uint32_t size() const
+            {
+                auto current_node = head;
+
+                uint32_t size = 0;
+                TransactionId deletion_transaction = NOT_TOMBSTONED;
+
+                while (current_node->next_node[0].get_reference()->key != std::numeric_limits<KeyType>::max())
+                {
+                    current_node = current_node->next_node[0].get(deletion_transaction); // traverse to the right
+
+                    if (!tombstoned(deletion_transaction))
+                    {
+                        ++size;
+                    }
+                }
+
+                return size;
+            }
+
+        private:
+            SkipNode *head;
+            SkipNode *NIL;
+
+            Xoroshiro128PlusPlusRNG rng_;
+
+            const float probability;
+
+            atomic<uint64_t> transaction_counter_;
+
+            TransactionId NextTransactionId()
+            {
+                return TransactionId{transaction_counter_.fetch_add(1, memory_order_relaxed)};
+            }
+
+            int random_level()
+            {
+                static constexpr double rand_max = (double)(Xoroshiro128PlusPlusRNG::max());
+
+                int new_level = 1;
+
+                while (((double)rng_() / rand_max) < probability)
+                {
+                    ++new_level;
+
+                    if (new_level >= MAX_LEVELS)
+                    {
+                        break;
+                    }
+                }
+
+                return new_level;
+            }
+
+            enum class FindResult
+            {
+                FOUND,
+                NOT_FOUND,
+                SOFT_DELETED
+            };
+
+            FindResult find_with_nodelists(const KeyType search_key, SkipNode **preds, SkipNode **succs) const
+            {
+                TransactionId deletion_transaction = NOT_TOMBSTONED;
+
+                bool soft_deleted = false;
+
+                SkipNode *pred, *curr, *succ;
+
+                pred = head;
+                for (auto level = MAX_LEVELS; level >= 0; --level)
+                {
+                    curr = pred->next_node[level].get_reference();
+                    while (true)
+                    {
+                        //  Skip over soft deleted nodes
+
+                        succ = curr->next_node[level].get(deletion_transaction);
+
+                        while (tombstoned(deletion_transaction))
+                        {
+                            if( curr->key == search_key )
+                            {
+                                soft_deleted = true;
+                                break;
+                            }
+
+                            curr = curr->next_node[level].get_reference();
+                            succ = curr->next_node[level].get(deletion_transaction);
+                        }
+
+                        if (curr->key < search_key)
+                        {
+                            pred = curr;
+                            curr = succ;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+
+                    preds[level] = pred;
+                    succs[level] = curr;
+                }
+
+                if( soft_deleted )
+                {
+                    return FindResult::SOFT_DELETED;
+                }
+
+                return (curr->key == search_key) ? FindResult::FOUND : FindResult::NOT_FOUND;
+            }
+        };
+    }
+
+    using skiplist_internal::SkipList;
+
+} // namespace MINIMAL_STD_NAMESPACE

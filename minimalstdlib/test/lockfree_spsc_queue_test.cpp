@@ -10,8 +10,6 @@
 #include <single_block_memory_heap>
 #include <stack_allocator>
 
-#include <stdio.h>
-
 #include <pthread.h>
 
 #define TEST_BUFFER_SIZE 65536

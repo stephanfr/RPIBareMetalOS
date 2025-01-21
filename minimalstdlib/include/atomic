@@ -98,6 +98,16 @@ namespace MINIMAL_STD_NAMESPACE
             return fetch_sub(1);
         }
 
+        T operator+=(T value) noexcept
+        {
+            return add_fetch(value);
+        }
+
+        T operator-=(T value) noexcept
+        {
+            return sub_fetch(value);
+        }
+
         T exchange(T new_value, memory_order order = memory_order_seq_cst) noexcept
         {
             return __atomic_exchange_n(&value_, new_value, static_cast<int>(order));
