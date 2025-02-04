@@ -4,11 +4,18 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <lockfree/binary_semaphore_array>
 
 #include "__extensions/memory_resource_statistics.h"
 #include <memory_resource>
+
+#include <pthread.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+extern "C" int get_current_core();
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -24,28 +31,43 @@ namespace MINIMAL_STD_NAMESPACE
         //
         //  On destruction, this resource will just dump all the memory it allocated without invoking any destructors
 
-        template <size_t ELEMENT_SIZE_IN_BYTES, size_t ELEMENTS_PER_BLOCK>
-            requires((ELEMENT_SIZE_IN_BYTES >= 4) && ((ELEMENT_SIZE_IN_BYTES % 16) == 0) && (ELEMENT_SIZE_IN_BYTES <= 256) && (ELEMENTS_PER_BLOCK >= 256))
-        class fixed_size_element_resource : public memory_resource, public extensions::memory_resource_statistics
+        template <size_t ELEMENT_SIZE_IN_BYTES, size_t ELEMENTS_PER_BLOCK, size_t NUMBER_OF_ARENAS, bool include_statistics = true>
+            requires((ELEMENT_SIZE_IN_BYTES >= 4) &&
+                     ((ELEMENT_SIZE_IN_BYTES % 16) == 0) &&
+                     (ELEMENT_SIZE_IN_BYTES <= 256) &&
+                     (ELEMENTS_PER_BLOCK >= 256) &&
+                     (NUMBER_OF_ARENAS >= 1) &&
+                     (NUMBER_OF_ARENAS <= 32))
+        class fixed_size_element_resource : public memory_resource, public conditional<include_statistics, extensions::memory_resource_statistics, extensions::null_memory_resource_statistics>::type
         {
         public:
             fixed_size_element_resource(memory_resource *memory_resource)
-                : upstream_resource_(memory_resource),
-                  first_block_(new(upstream_resource_->allocate(sizeof(block))) block())
+                : upstream_resource_(memory_resource)
             {
+                for (size_t i = 0; i < NUMBER_OF_ARENAS; i++)
+                {
+                    arenas_[i].upstream_resource_ = memory_resource;
+                    arenas_[i].parent_ = this;
+                    arenas_[i].first_block_.store(new (upstream_resource_->allocate(sizeof(block))) block(), memory_order_release);
+                    arenas_[i].block_count_ = 1;
+                    arenas_[i].elements_allocated_ = 0;
+                }
             }
 
             ~fixed_size_element_resource()
             {
-                auto current_block = first_block_;
-
-                while (current_block != nullptr)
+                for (size_t arena = 0; arena < NUMBER_OF_ARENAS; arena++)
                 {
-                    auto next_block = current_block->next_block_.load(memory_order_seq_cst);
+                    block *current_block = arenas_[arena].first_block_.load(memory_order_acquire);
 
-                    upstream_resource_->deallocate(current_block, sizeof(block));
+                    while (current_block != nullptr)
+                    {
+                        auto next_block = current_block->next_block_;
 
-                    current_block = next_block;
+                        upstream_resource_->deallocate(current_block, sizeof(block));
+
+                        current_block = next_block;
+                    }
                 }
             }
 
@@ -58,155 +80,166 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 size_t count = 0;
 
-                auto current_block = first_block_;
-
-                while (current_block != nullptr)
+                for (size_t arena = 0; arena < NUMBER_OF_ARENAS; arena++)
                 {
-                    count++;
+                    block *current_block = arenas_[arena].first_block_;
 
-                    current_block = current_block->next_block_.load(memory_order_seq_cst);
+                    while (current_block != nullptr)
+                    {
+                        count++;
+
+                        current_block = current_block->next_block_;
+                    }
                 }
 
                 return count;
             }
 
-
         private:
             struct block
             {
-                atomic<block *> next_block_ = nullptr;
+                block *next_block_ = nullptr;
                 binary_semaphore_array<ELEMENTS_PER_BLOCK> element_semaphores_;
                 alignas(16) uint8_t data_[ELEMENT_SIZE_IN_BYTES * ELEMENTS_PER_BLOCK];
             };
 
-            memory_resource *const upstream_resource_ = nullptr;
-
-            block *const first_block_ = nullptr;
-
-            atomic<block *> search_block_hint_ = first_block_;
-
-            void *do_allocate(size_t num_bytes, size_t alignment)
+            struct arena
             {
-                const size_t block_size = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
+                memory_resource *upstream_resource_;
+                fixed_size_element_resource *parent_;
 
-                bool    reset_search_block_hint = false;
-                bool    upstream_allocation_failed = false;
+                atomic<block *> first_block_;
+                atomic<size_t> block_count_;
+                atomic<size_t> elements_allocated_;
 
-                //  Ignore the alignment as alignment will be 16 bytes based on the template requirements
-
-                auto current_block = search_block_hint_.load(memory_order_seq_cst);
-
-                auto allocation = current_block->element_semaphores_.acquire_next_empty_block(block_size);
-
-                while (!allocation.has_value())
+                void *do_allocate(size_t num_elements, size_t alignment)
                 {
+                    //  Ignore the alignment as alignment will be 16 bytes based on the template requirements
+
+                    block *current_block = first_block_.load(memory_order_acquire);
+
+                    minstd::optional<size_t> allocation;
+
                     while (!allocation.has_value())
                     {
-                        //  Move to the next block and try again.
+                        allocation = current_block->element_semaphores_.acquire_next_empty_block(num_elements);
 
-                        if (current_block->next_block_ == nullptr)
+                        while (!allocation.has_value())
                         {
-                            break;
+                            //  Move to the next block and try again.
+
+                            if (current_block->next_block_ == nullptr)
+                            {
+                                break;
+                            }
+
+                            current_block = current_block->next_block_;
+
+                            allocation = current_block->element_semaphores_.acquire_next_empty_block(num_elements);
                         }
 
-                        current_block = current_block->next_block_;
+                        //  We did not find an empty block in the current block list, so add a new block and try
+                        //      again from the start of the list.  If we cannot add  new block, then we are out of memory
+                        //      so return nullptr.
 
-                        allocation = current_block->element_semaphores_.acquire_next_empty_block(block_size);
+                        if (!allocation.has_value())
+                        {
+                            if (!add_new_block())
+                            {
+                                return nullptr;
+                            }
+
+                            current_block = first_block_.load(memory_order_acquire);
+                        }
                     }
 
-                    //  If we found an empty block - return it now
+                    parent_->allocation_made(num_elements * ELEMENT_SIZE_IN_BYTES);
 
-                    if (allocation.has_value())
-                    {
-                        break;
-                    }
+                    return current_block->data_ + (allocation.value() * ELEMENT_SIZE_IN_BYTES);
+                }
 
-                    //  We have searched to the end of the block list and did not find an empty block.
-                    //
-                    //      If we have previously been here and failed to allocate a new block from the upstream allocator
-                    //      and our re-search from the start of the block list failed, then we are out of memory so
-                    //      return nullptr.
-                    //
-                    //  If we have not previously been here, then try to allocate a new block from the upstream allocator.
-                    //      If that fails, then try searching again for an empty block from the front of the block list.
-
-                    if(upstream_allocation_failed)
-                    {
-                        return nullptr; //  Out of memory in upstream resource
-                    }
-
-                    auto prior_last_block = current_block;
-
+                bool add_new_block()
+                {
                     auto new_block_space = upstream_resource_->allocate(sizeof(block));
 
                     if (new_block_space == nullptr)
                     {
-                        upstream_allocation_failed = true;
-                        current_block = first_block_;
-                        allocation = current_block->element_semaphores_.acquire_next_empty_block(block_size);
-                        continue;
+                        return false;
                     }
 
                     auto new_block = new (new_block_space) block();
 
-                    block *expected = nullptr;
+                    block *expected = first_block_.load(memory_order_acquire);
+                    new_block->next_block_ = expected;
 
-                    while (!current_block->next_block_.compare_exchange_strong(expected, new_block, memory_order_seq_cst))
+                    while (!first_block_.compare_exchange_strong(expected, new_block, memory_order_acq_rel, memory_order_acquire))
                     {
-                        current_block = current_block->next_block_.load(memory_order_seq_cst);
-                        expected = nullptr;
+                        new_block->next_block_ = expected;
                     }
 
-                    current_block = prior_last_block;
+                    block_count_.fetch_add(1, memory_order_acq_rel);
 
-                    //  Reset the search block hint so that we will start allocating again from the start of the block list
-                    //      to try to insure the blocks are filled
-
-                    reset_search_block_hint = true;
+                    return true;
                 }
+            };
 
-                //  Update the search hint and return the allocation
+            memory_resource *const upstream_resource_ = nullptr;
 
-                search_block_hint_.store( reset_search_block_hint ? first_block_ : current_block, memory_order_seq_cst);
+            array<arena, NUMBER_OF_ARENAS> arenas_;
 
-                this->allocation_made(block_size * ELEMENT_SIZE_IN_BYTES);
+            atomic<size_t> transactions_ = 0;
 
-                return current_block->data_ + (allocation.value() * ELEMENT_SIZE_IN_BYTES);
+            void *do_allocate(size_t num_bytes, size_t alignment)
+            {
+                //  Ignore the alignment as alignment will be 16 bytes based on the template requirements
+
+                const size_t num_elements = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
+
+                uint64_t arena_in_use = get_current_core() % NUMBER_OF_ARENAS;
+
+                return arenas_[arena_in_use].do_allocate(num_elements, alignment);
             }
 
             void do_deallocate(void *block, size_t num_bytes, size_t alignment)
             {
-                const size_t block_size = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
+                const size_t num_elements = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
 
                 //  Find the block from which the allocation was made
 
-                auto current_block = first_block_;
-
-                while ((block < current_block->data_) || (block >= (current_block->data_ + (ELEMENTS_PER_BLOCK * ELEMENT_SIZE_IN_BYTES))))
+                for (size_t arena = 0; arena < NUMBER_OF_ARENAS; arena++)
                 {
-                    current_block = current_block->next_block_;
+                    auto current_block = arenas_[arena].first_block_.load(memory_order_acquire);
 
-                    if (current_block == nullptr)
+                    while ((block < current_block->data_) || (block >= (current_block->data_ + (ELEMENTS_PER_BLOCK * ELEMENT_SIZE_IN_BYTES))))
                     {
-                        //  The block was not found - this is an error
-                        return;
+                        current_block = current_block->next_block_;
+
+                        if (current_block == nullptr)
+                        {
+                            //  The block was not found - this is an error
+                            return;
+                        }
                     }
+
+                    //  Calculate the index of the block
+
+                    auto index = (static_cast<uint8_t *>(block) - current_block->data_) / ELEMENT_SIZE_IN_BYTES;
+
+                    //  Release the block
+
+                    current_block->element_semaphores_.release_block(index, num_elements);
+
+                    arenas_[arena].elements_allocated_.fetch_add(num_elements, memory_order_acq_rel);
+
+                    this->deallocation_made(num_elements * ELEMENT_SIZE_IN_BYTES);
+
+                    break;
                 }
-
-                //  Calculate the index of the block
-
-                auto index = (static_cast<uint8_t *>(block) - current_block->data_) / ELEMENT_SIZE_IN_BYTES;
-
-                //  Release the block
-
-                current_block->element_semaphores_.release_block(index, block_size);
-
-                this->deallocation_made(block_size * ELEMENT_SIZE_IN_BYTES);
             }
 
             bool do_is_equal(memory_resource const &other) const noexcept
             {
-                return first_block_ == static_cast<fixed_size_element_resource const &>(other).first_block_;
+                return arenas_[0].first_block_.load(memory_order_acquire) == static_cast<fixed_size_element_resource const &>(other).arenas_[0].first_block_.load(memory_order_acquire);
             }
         };
     }

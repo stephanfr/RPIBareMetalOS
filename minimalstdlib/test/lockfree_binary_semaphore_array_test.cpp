@@ -303,7 +303,14 @@ namespace
 
                 //  All bits should be acquired
 
-                CHECK(semaphores.acquire_next_empty_block(1).has_value() == false);
+                result = semaphores.acquire_next_empty_block(1);
+
+                if (result.has_value())
+                {
+                    printf("Round %d Failed with re-acquire block of size %d at index %d\n", j, i, index);
+                }
+
+                CHECK(result.has_value() == false);
             }
         }
 
@@ -351,9 +358,9 @@ namespace
 
         uint32_t bits_set = 0;
 
-        for(size_t i = 0; i < 16384; i++)
+        for (size_t i = 0; i < 16384; i++)
         {
-            if(semaphores.is_acquired(i))
+            if (semaphores.is_acquired(i))
             {
                 bits_set++;
             }
@@ -387,6 +394,8 @@ namespace
 
         //  Wait for all the threads to join and sum all the bits acquired across all threads
 
+        auto start = clock();
+
         uint32_t total_bits_acquired = 0;
 
         for (size_t i = 0; i < NUM_THREADS; i++)
@@ -395,6 +404,12 @@ namespace
 
             total_bits_acquired += arguments[i].bits_acquired_;
         }
+
+        auto end = clock();
+
+        auto duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+
+        printf("Binary Semaphore Array Multithread Tests Duration: %f\n", duration);
 
         //  Check that all bits were acquired, up to total_bits_acquired
 
@@ -419,7 +434,7 @@ namespace
 
     TEST(BinarySemaphoreArrayTests, Benchmark)
     {
-        minstd::binary_semaphore_array<1024> semaphores;
+        minstd::binary_semaphore_array<2048> semaphores;
 
         auto start = clock();
 
@@ -427,13 +442,13 @@ namespace
         {
             size_t block_size = (i % 16) + 1;
 
-            if ((i % 2) == 0)
+            if ((i % 3) == 0)
             {
-                semaphores.acquire_next_empty_block(block_size);
+                semaphores.release_block(i % 2048, block_size);
             }
             else
             {
-                semaphores.release_block(i % 1024, block_size);
+                semaphores.acquire_next_empty_block(block_size, 0);
             }
         }
 
