@@ -67,10 +67,6 @@ namespace
             deallocate_operation[i] = false;
         }
 
-        pid_t tid = gettid();
-
-        printf("Core:  %d, Thread ID: %d, mod 8: %d\n", sched_getcpu(), tid, tid % 8);
-
         for (size_t i = 100; i < NUM_ELEMENTS_IN_MULTITHREAD_TEST; i++)
         {
             deallocate_operation[i] = ((rng() % 5) == 0);

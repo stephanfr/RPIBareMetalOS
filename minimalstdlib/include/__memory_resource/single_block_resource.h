@@ -6,6 +6,7 @@
 
 #include "minstdconfig.h"
 
+#include "array"
 #include "atomic"
 
 #include "__concepts/derived_from.h"
@@ -81,7 +82,6 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-
             void *do_allocate(size_t bytes, size_t alignment) override
             {
                 //  If the total number of deallocations is greater than 10% of the total number of allocations, then
@@ -89,15 +89,33 @@ namespace MINIMAL_STD_NAMESPACE
 
                 if (total_deallocations_ > (total_allocations_ / 10))
                 {
-                    block_header *current = head_.load(memory_order_acquire);
+                    //  Find the right bin deallocation bin to search for a block
 
-                    while (current->next_ != nullptr) //  The last block is the end_of_list_marker_ so we don't want to use that one
+                    size_t deallocation_bin = NUM_DEALLOCATION_BINS - 1;
+
+                    for (size_t i = 0; i < NUM_DEALLOCATION_BINS; i++)
+                    {
+                        if (bytes + BLOCK_HEADER_SIZE >= deallocation_bin_sizes[i])
+                        {
+                            deallocation_bin = i;
+                            break;
+                        }
+                    }
+
+                    //  Search for a deallocated block that is not in use
+
+                    block_header *current = deallocated_head_bins_[deallocation_bin].load(memory_order_acquire);
+                    block_header *previous = nullptr;
+
+                    while (current->next_deallocated_.load(memory_order_acquire) != nullptr) //  The last block is the end_of_list_marker_ so we don't want to use that one
                     {
                         block_header *next = current->next_;
                         void *return_value = (uint8_t *)current + BLOCK_HEADER_SIZE;
 
-                        if ((!current->in_use_) && (static_cast<size_t>((uint8_t *)next - (uint8_t *)return_value) >= bytes))
+                        if (!current->in_use_)
                         {
+                            //  Try to grab the block.  If that fails, then try again from the top.
+
                             bool expected = false;
 
                             if (!current->in_use_.compare_exchange_strong(expected, true, memory_order_acq_rel, memory_order_acquire))
@@ -106,13 +124,32 @@ namespace MINIMAL_STD_NAMESPACE
                                 continue;
                             }
 
+                            //  Update the block to be in use and the requested size
+
                             current->requested_size_ = bytes;
 
                             this->allocation_made(bytes);
 
                             return return_value;
                         }
+                        else
+                        {
+                            //  If the block is in use, then we need to remove it from the deallocated list.
 
+                            block_header *current_value = current;
+
+                            if (previous == nullptr)
+                            {
+                                
+                                deallocated_head_bins_[deallocation_bin].compare_exchange_strong(current_value, next, memory_order_acq_rel, memory_order_acquire);
+                            }
+                            else
+                            {
+                                previous->next_deallocated_.compare_exchange_strong(current_value, next, memory_order_acq_rel, memory_order_acquire);
+                            }
+                        }
+
+                        previous = current;
                         current = next;
                     }
                 }
@@ -141,7 +178,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         //  Add the block to the list of blocks in use
 
-                        while (!head_.compare_exchange_strong(next_block->next_, next_block, memory_order_acq_rel, memory_order_acquire)) {};
+                        while (!head_.compare_exchange_strong(next_block->next_, next_block, memory_order_acq_rel, memory_order_acquire)){};
 
                         this->allocation_made(bytes);
 
@@ -158,6 +195,21 @@ namespace MINIMAL_STD_NAMESPACE
 
             void do_deallocate(void *block, size_t bytes, size_t alignment) override
             {
+                //  Find the right bin for the deallocation
+
+                size_t deallocation_bin = NUM_DEALLOCATION_BINS - 1;
+
+                for (size_t i = 0; i < NUM_DEALLOCATION_BINS; i++)
+                {
+                    if (bytes + BLOCK_HEADER_SIZE >= deallocation_bin_sizes[i])
+                    {
+                        deallocation_bin = i;
+                        break;
+                    }
+                }
+
+                //  Add the block to the list of deallocated blocks in the correct bin
+
                 block_header *header = (block_header *)((char *)block - BLOCK_HEADER_SIZE);
 
                 //  Insure that the block is in use and that the size matches the requested size.
@@ -167,18 +219,23 @@ namespace MINIMAL_STD_NAMESPACE
                     return;
                 }
 
-                //  Mark the block as not in use
+                //  Mark the block as not in use - if it is already marked as not in use then exit now as someone else has already deallocated it.
 
-                header->in_use_.store(false, memory_order_release);
+                bool expected_value = true;
+
+                if (!header->in_use_.compare_exchange_strong(expected_value, false, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return;
+                }
 
                 //  Add the block to the list of deallocated blocks
 
-                block_header *deallocated_head = deallocated_head_.load(memory_order_acquire);
+                block_header *current_deallocated_head = deallocated_head_bins_[deallocation_bin].load(memory_order_acquire);
 
                 do
                 {
-                    header->next_deallocated_ = deallocated_head;
-                } while (deallocated_head_.compare_exchange_strong(deallocated_head, header, memory_order_acq_rel, memory_order_acquire));
+                    header->next_deallocated_.store(current_deallocated_head, memory_order_release);
+                } while (deallocated_head_bins_[deallocation_bin].compare_exchange_strong(current_deallocated_head, header, memory_order_acq_rel, memory_order_acquire));
 
                 //  Update the statistics
 
@@ -196,13 +253,16 @@ namespace MINIMAL_STD_NAMESPACE
             struct block_header
             {
                 block_header *next_;
-                block_header *next_deallocated_;
+                atomic<block_header *> next_deallocated_;
                 size_t actual_size_;    //  size of the block including the block_header
                 size_t requested_size_; //  size of the block requested by the user
                 atomic<bool> in_use_;
             };
 
             static constexpr size_t BLOCK_HEADER_SIZE = internal::aligned_size(sizeof(block_header), DEFAULT_ALIGNMENT);
+            static constexpr size_t NUM_DEALLOCATION_BINS = 16;
+
+            static constexpr array<const size_t, NUM_DEALLOCATION_BINS> deallocation_bin_sizes = {1024, 2048, 4096, 8192, 16384, 32768, 65536, 2 * 65536, 3 * 65536, 4 * 65536, 5 * 65536, 6 * 65536, 7 * 65536, 8 * 65536, 9 * 65536, 10 * 65536};
 
             void *const block_;
             const size_t size_;
@@ -212,7 +272,8 @@ namespace MINIMAL_STD_NAMESPACE
 
             atomic<block_header *> next_empty_block_;
             atomic<block_header *> head_ = &end_of_list_marker_;
-            atomic<block_header *> deallocated_head_ = &end_of_list_marker_;
+
+            array<atomic<block_header *>, NUM_DEALLOCATION_BINS> deallocated_head_bins_ = {&end_of_list_marker_};
 
             atomic<size_t> cmp_exchange_retries_ = 0;
 
@@ -224,42 +285,42 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return (alignment_mod == 0) ? ptr : (void *)((ptr_as_int + alignment) - alignment_mod);
             }
-/*
-            void* search_for_deallocated_block(size_t bytes, size_t alignment)
-            {
-                block_header *current = deallocated_head_.load(memory_order_acquire);
-
-                while (current->next_deallocated_ != nullptr)
-                {
-                    if (current->actual_size_ >= bytes + BLOCK_HEADER_SIZE)
-                    {
-                        block_header *next = current->next_deallocated_;
-                        void *return_value = (uint8_t *)current + BLOCK_HEADER_SIZE;
-
-                        if ((!current->in_use_) && (static_cast<size_t>((uint8_t *)next - (uint8_t *)return_value) >= bytes))
+            /*
+                        void* search_for_deallocated_block(size_t bytes, size_t alignment)
                         {
-                            bool expected = false;
+                            block_header *current = deallocated_head_.load(memory_order_acquire);
 
-                            if (!current->in_use_.compare_exchange_strong(expected, true, memory_order_acq_rel, memory_order_acquire))
+                            while (current->next_deallocated_ != nullptr)
                             {
-                                current = next;
-                                continue;
+                                if (current->actual_size_ >= bytes + BLOCK_HEADER_SIZE)
+                                {
+                                    block_header *next = current->next_deallocated_;
+                                    void *return_value = (uint8_t *)current + BLOCK_HEADER_SIZE;
+
+                                    if ((!current->in_use_) && (static_cast<size_t>((uint8_t *)next - (uint8_t *)return_value) >= bytes))
+                                    {
+                                        bool expected = false;
+
+                                        if (!current->in_use_.compare_exchange_strong(expected, true, memory_order_acq_rel, memory_order_acquire))
+                                        {
+                                            current = next;
+                                            continue;
+                                        }
+
+                                        current->requested_size_ = bytes;
+
+                                        this->allocation_made(bytes);
+
+                                        return return_value;
+                                    }
+                                }
+
+                                current = current->next_deallocated_;
                             }
 
-                            current->requested_size_ = bytes;
-
-                            this->allocation_made(bytes);
-
-                            return return_value;
+                            return nullptr;
                         }
-                    }
-
-                    current = current->next_deallocated_;
-                }
-
-                return nullptr;
-            }
-            */
+                        */
         };
     }
 }

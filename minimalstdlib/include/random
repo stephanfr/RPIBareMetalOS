@@ -5,3 +5,4 @@
 #pragma once
 
 #include "__random/xoroshiro128PlusPlus.h"
+#include "__random/fast_lockfree_low_quality_rng.h"

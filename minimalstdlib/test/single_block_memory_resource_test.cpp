@@ -27,7 +27,9 @@ namespace
 
     constexpr size_t default_alignment = alignof(max_align_t);
 
-    constexpr size_t buffer_size = 4 * 1048576; // 4MB
+    constexpr size_t NUM_ALLOCATIONS_PER_THREAD = 10000;
+
+    constexpr size_t buffer_size = 64 * 1048576; // 64 MB
     char buffer[buffer_size];
 
     minstd::atomic<bool> start_allocations = false;
@@ -36,9 +38,9 @@ namespace
     {
         minstd::pmr::memory_resource *mem_resource;
         uint64_t rng_seed;
-        minstd::array<void *, 500> pointers_allocated = {nullptr};
-        minstd::array<size_t, 500> sizes_allocated = {0};
-        minstd::array<bool, 500> deleted_element = {false};
+        minstd::array<void *, NUM_ALLOCATIONS_PER_THREAD> pointers_allocated = {nullptr};
+        minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> sizes_allocated = {0};
+        minstd::array<bool, NUM_ALLOCATIONS_PER_THREAD> deleted_element = {false};
     };
 
     void *allocation_thread(void *arguments)
@@ -47,16 +49,16 @@ namespace
 
         minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
 
-        minstd::array<size_t, 500> sizes;
-        minstd::array<bool, 500> deallocate_operation = {false};
-        minstd::array<size_t, 500> deallocation_index = {0};
+        minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> sizes;
+        minstd::array<bool, NUM_ALLOCATIONS_PER_THREAD> deallocate_operation = {false};
+        minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> deallocation_index = {0};
 
-        for (int i = 0; i < 500; i++)
+        for (int i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
         {
-            sizes[i] = rng() % 256;
+            sizes[i] = 256 + (rng() % 4096);
         }
 
-        for (int i = 50; i < 500; i++)
+        for (int i = 50; i < NUM_ALLOCATIONS_PER_THREAD; i++)
         {
             deallocate_operation[i] = ((rng() % 4) == 0);
 
@@ -71,7 +73,7 @@ namespace
             sched_yield();
         }
 
-        for (int i = 0; i < 500; i++)
+        for (int i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
         {
             void *ptr = args->mem_resource->allocate(sizes[i]);
 
@@ -192,7 +194,7 @@ namespace
 
     TEST(SingleBlockMemoryResourceTests, MultiThreadTest)
     {
-        constexpr size_t NUM_THREADS = 40;
+        constexpr size_t NUM_THREADS = 32;
 
         minstd::pmr::single_block_resource resource(buffer, buffer_size);
 
@@ -220,14 +222,14 @@ namespace
             CHECK(pthread_join(threads[i], NULL) == 0);
         }
 
-//        printf("Retries: %zu\n", resource.cmp_exchange_retries());
+        printf("Retries: %zu\n", resource.cmp_exchange_retries());
 
         size_t total_number_of_allocations = 0;
         size_t total_number_of_bytes_allocated = 0;
 
         for (size_t i = 0; i < NUM_THREADS; i++)
         {
-            for (int j = 0; j < 500; j++)
+            for (int j = 0; j < NUM_ALLOCATIONS_PER_THREAD; j++)
             {
                 if (args[i].pointers_allocated[j] == nullptr)
                 {
