@@ -232,7 +232,13 @@ namespace MINIMAL_STD_NAMESPACE
                     continue;
                 }
 
-                if (*(byte_array + offset) == 0xFF)
+                //  Thread sanitizer may report a race here - it is OK.
+                //      This is just a scan and if the bit is set by another thread, we will fail
+                //      to acquire the block below and will try again.
+                //
+                //  This is by design and it is actually a good double-check that the thread sanitizer catches this race condition.
+
+                if (*(byte_array + offset) == 0xFF)     
                 {
                     i += 8;
                     continue;
@@ -260,6 +266,11 @@ namespace MINIMAL_STD_NAMESPACE
                 if (found)
                 {
                     index = (start_search + i) % SIZE_IN_BITS;
+
+                    //  We are not guaranteed to get the block - another thread may have acquired it
+                    //      between the time we found it and the time we try to acquire it.  If we fail
+                    //      to get it, just move ahead and try again.  The race condition above is
+                    //      a symptom of this 'optimistic' approach.
 
                     if (acquire_block(index, block_length_in_bits))
                     {

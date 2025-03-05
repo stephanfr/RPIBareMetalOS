@@ -317,6 +317,8 @@ namespace
 
         //  Malloc-Free for baseline comparison
 
+        start_allocations = false;
+
         for (size_t i = 0; i < NUM_THREADS; i++)
         {
             args[i].mem_resource = &malloc_free_resource;

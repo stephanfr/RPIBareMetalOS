@@ -56,15 +56,21 @@ namespace
 
     TEST(LockfreeTokenDispenserTests, MultithreadedTest)
     {
+        #ifdef __SANITIZE_THREAD__
+        static constexpr size_t NUM_THREADS = 50;
+        #else
+        static constexpr size_t NUM_THREADS = 1000;
+        #endif
+
         minstd::token_dispenser test_dispenser(17);
 
         minstd::array<uint32_t,1020> tokens[1000];
 
-        pthread_t test_threads[1000];
+        pthread_t test_threads[NUM_THREADS];
 
-        args thread_args[1000];
+        args thread_args[NUM_THREADS];
         
-        for( uint32_t i = 0; i < 1000; i++)
+        for( uint32_t i = 0; i < NUM_THREADS; i++)
         {
             thread_args[i].dispenser = &test_dispenser;
             thread_args[i].tokens = &tokens[i];
@@ -72,14 +78,14 @@ namespace
             CHECK( pthread_create(&test_threads[i], nullptr, get_tokens, &thread_args[i]) == 0);
         }
 
-        for( uint32_t i = 0; i < 1000; i++)
+        for( uint32_t i = 0; i < NUM_THREADS; i++)
         {
             pthread_join(test_threads[i], nullptr);
         }
 
         minstd::array<uint32_t,17> aggregated_values;
 
-        for(uint32_t i = 0; i < 1000; i++)
+        for(uint32_t i = 0; i < NUM_THREADS; i++)
         {
             for(uint32_t j = 0; j < 1020; j++)
             {
@@ -97,6 +103,6 @@ namespace
         //  The total should be 1000 * 1020.
         //      There is no guarantee that each token will have the same count, but the total should always be the same.
 
-        CHECK_EQUAL(1000 * 1020, total);
+        CHECK_EQUAL(NUM_THREADS * 1020, total);
     }
 }
