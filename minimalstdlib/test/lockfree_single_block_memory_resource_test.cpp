@@ -28,9 +28,9 @@ namespace
 
     constexpr size_t default_alignment = alignof(max_align_t);
 
-    constexpr size_t NUM_ALLOCATIONS_PER_THREAD = 8000;
+    constexpr size_t NUM_ALLOCATIONS_PER_THREAD = 5000;
 
-    constexpr size_t buffer_size = 1024 * 1048576; // 1 GB
+    constexpr size_t buffer_size = (1024 + 256) * 1048576; // 1 GB 256 MB
     char buffer[buffer_size];
 
     minstd::atomic<bool> start_allocations = false;
@@ -43,6 +43,7 @@ namespace
         minstd::array<void *, NUM_ALLOCATIONS_PER_THREAD> pointers_allocated = {nullptr};
         minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> sizes_allocated = {0};
         minstd::array<bool, NUM_ALLOCATIONS_PER_THREAD> deleted_element = {false};
+        size_t repetitions = 0;
     };
 
     void *allocation_thread(void *arguments)
@@ -66,7 +67,7 @@ namespace
 
             if (deallocate_operation[i])
             {
-                deallocation_index[i] = rng() % i;
+                deallocation_index[i] = rng() % (i + 1);
             }
         }
 
@@ -102,6 +103,87 @@ namespace
         return nullptr;
     }
 
+    void *deallocation_thread(void *arguments)
+    {
+        allocator_thread_arguments *args = static_cast<allocator_thread_arguments *>(arguments);
+
+        while (!start_allocations)
+        {
+            sched_yield();
+        }
+
+        for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
+        {
+            if ((args->pointers_allocated[i] != nullptr) && !args->deleted_element[i])
+            {
+                args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
+            }
+        }
+
+        return nullptr;
+    }
+
+    void *repeated_allocation_deallocation_thread(void *arguments)
+    {
+        allocator_thread_arguments *args = static_cast<allocator_thread_arguments *>(arguments);
+
+        minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
+
+        while (!start_allocations)
+        {
+            sched_yield();
+        }
+
+        for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
+        {
+            size_t block_size = 256 + (rng() % 18000);
+
+            void *ptr = args->mem_resource->allocate(block_size);
+
+            if (ptr == nullptr)
+            {
+                printf("thread got nullptr");
+                return nullptr;
+            }
+
+            args->pointers_allocated[i] = ptr;
+            args->sizes_allocated[i] = block_size;
+        }
+
+        for (size_t j = 0; j < args->repetitions; j++)
+        {
+            for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
+            {
+                args->mem_resource->deallocate( args->pointers_allocated[i], args->sizes_allocated[i] );
+
+                size_t block_size = 256 + (rng() % 18000);
+
+                void *ptr = args->mem_resource->allocate(block_size);
+    
+                if (ptr == nullptr)
+                {
+                    printf("thread got nullptr");
+                    return nullptr;
+                }
+    
+                args->pointers_allocated[i] = ptr;
+                args->sizes_allocated[i] = block_size;
+            }
+
+            sleep(0.1);
+        }
+
+        for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
+        {
+            if (args->pointers_allocated[i] != nullptr)
+            {
+                args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
+            }
+        }
+
+        return nullptr;
+    }
+
     void *iteration_thread(void *arguments)
     {
         allocator_thread_arguments *args = static_cast<allocator_thread_arguments *>(arguments);
@@ -116,6 +198,7 @@ namespace
             size_t in_use = 0;
             size_t available = 0;
             size_t soft_deleted = 0;
+            size_t locked = 0;
 
             for (auto itr = ((minstd::pmr::lockfree_single_block_resource *)(args->mem_resource))->begin(); itr != ((minstd::pmr::lockfree_single_block_resource *)(args->mem_resource))->end(); ++itr)
             {
@@ -133,13 +216,17 @@ namespace
                 {
                     soft_deleted++;
                 }
+                else if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::LOCKED)
+                {
+                    locked++;
+                }
                 else
                 {
                     CHECK(false);
                 }
             }
 
-//            printf("In Use: %zu, Available: %zu, Soft Deleted: %zu\n", in_use, available, soft_deleted);
+            //            printf("In Use: %zu, Available: %zu, Soft Deleted: %zu, Locked: %zu\n", in_use, available, soft_deleted, locked);
 
             sleep(0.2);
         }
@@ -204,7 +291,7 @@ namespace
 
         CHECK(counter == 4);
 
-        resource.deallocate(ptr3, 123);
+        resource.deallocate(ptr4, 45678);
 
         counter = 0;
 
@@ -234,6 +321,9 @@ namespace
     TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
     {
         constexpr size_t NUM_THREADS = 16;
+
+        start_allocations = false;
+        exit_thread = false;
 
         minstd::pmr::lockfree_single_block_resource resource(buffer, buffer_size);
 
@@ -265,7 +355,6 @@ namespace
         sleep(1);
 
         start_allocations = true;
-        exit_thread = false;
 
         auto start = clock();
 
@@ -361,13 +450,50 @@ namespace
 
             number_of_list_elements++;
 
-//            if (number_of_list_elements % 100 == 0)
-//            {
-//                printf("Number of list elements: %zu\n", number_of_list_elements);
-//            }
+            //            if (number_of_list_elements % 100 == 0)
+            //            {
+            //                printf("Number of list elements: %zu\n", number_of_list_elements);
+            //            }
 
             CHECK(found);
         }
+
+        //  Deallocate all the allocations
+
+        start_allocations = false;
+        exit_thread = false;
+
+        for (size_t i = 0; i < NUM_THREADS; i++)
+        {
+            args[i].mem_resource = &resource;
+            args[i].rng_seed = i + 333;
+
+            CHECK(pthread_create(&threads[i], NULL, deallocation_thread, (void *)&args[i]) == 0);
+        }
+
+        for (size_t i = 0; i < 5; i++)
+        {
+            itr_thread_args[i].mem_resource = &resource;
+
+            CHECK(pthread_create(&itr_threads[i], NULL, iteration_thread, (void *)&itr_thread_args[i]) == 0);
+        }
+
+        start_allocations = true;
+
+        for (size_t i = 0; i < NUM_THREADS; i++)
+        {
+            CHECK(pthread_join(threads[i], NULL) == 0);
+        }
+
+        exit_thread = true;
+
+        for (size_t i = 0; i < 5; i++)
+        {
+            CHECK(pthread_join(itr_threads[i], NULL) == 0);
+        }
+
+        CHECK_EQUAL(0, resource.current_allocated());
+        CHECK_EQUAL(0, resource.current_bytes_allocated());
 
         //  Again with malloc/free
 
@@ -401,6 +527,91 @@ namespace
 
         duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
 
+        printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
+    }
+
+    TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadAllocateDeallocateTest)
+    {
+        constexpr size_t NUM_THREADS = 1;
+
+        start_allocations = false;
+
+        minstd::pmr::lockfree_single_block_resource resource(buffer, buffer_size);
+
+        allocator_thread_arguments args[NUM_THREADS];
+        pthread_t threads[NUM_THREADS];
+
+        for (size_t i = 0; i < NUM_THREADS; i++)
+        {
+            args[i].mem_resource = &resource;
+            args[i].rng_seed = i + 444;
+            args[i].repetitions = 20000;
+
+            CHECK(pthread_create(&threads[i], NULL, repeated_allocation_deallocation_thread, (void *)&args[i]) == 0);
+        }
+
+        //  Delay a bit for all threads to initialize themselves, then we want to release them so
+        //      we can maximally stress the resource.  The count of collisions should provide a
+        //      reasonable measure of the contention.
+
+        sleep(1);
+
+        auto start = clock();
+
+        start_allocations = true;
+
+        for (size_t i = 0; i < NUM_THREADS; i++)
+        {
+            CHECK(pthread_join(threads[i], NULL) == 0);
+        }
+
+        auto end = clock();
+        auto duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+        printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
+
+        //  Force two reclaimation passes, with no other threads running this should move all
+        //      metadata records into the free headers list.  The free block bins should be empty.
+
+        resource.reclaim();
+        resource.reclaim();
+        resource.reclaim();
+        resource.reclaim();
+        resource.reclaim();
+        resource.reclaim();
+
+
+        printf("Total number of allocations: %zu  deallocations: %zu\n", resource.total_allocations(), resource.total_deallocations());
+        printf("Current allocations: %zu  bytes allocated: %zu\n", resource.current_allocated(), resource.current_bytes_allocated());
+
+        CHECK_EQUAL(0, resource.current_allocated());
+        CHECK_EQUAL(0, resource.current_bytes_allocated());
+
+        //  Do it again with malloc/free
+
+        start_allocations = false;
+
+        minstd::pmr::malloc_free_wrapper_memory_resource  malloc_free_resource(nullptr);
+
+        for (size_t i = 0; i < NUM_THREADS; i++)
+        {
+            args[i].mem_resource = &malloc_free_resource;
+
+            CHECK(pthread_create(&threads[i], NULL, repeated_allocation_deallocation_thread, (void *)&args[i]) == 0);
+        }
+
+        sleep(1);
+
+        start = clock();
+
+        start_allocations = true;
+
+        for (size_t i = 0; i < NUM_THREADS; i++)
+        {
+            CHECK(pthread_join(threads[i], NULL) == 0);
+        }
+
+        end = clock();
+        duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
         printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
     }
 }
