@@ -532,7 +532,7 @@ namespace
 
     TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadAllocateDeallocateTest)
     {
-        constexpr size_t NUM_THREADS = 1;
+        constexpr size_t NUM_THREADS = 12;
 
         start_allocations = false;
 
@@ -545,7 +545,7 @@ namespace
         {
             args[i].mem_resource = &resource;
             args[i].rng_seed = i + 444;
-            args[i].repetitions = 20000;
+            args[i].repetitions = 2000;
 
             CHECK(pthread_create(&threads[i], NULL, repeated_allocation_deallocation_thread, (void *)&args[i]) == 0);
         }

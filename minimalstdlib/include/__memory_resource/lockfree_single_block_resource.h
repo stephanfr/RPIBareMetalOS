@@ -280,9 +280,9 @@ namespace MINIMAL_STD_NAMESPACE
 
             inline static fast_lockfree_low_quality_rng id_generator_;
 
-            static constexpr size_t NUM_FREE_BLOCK_BINS = 16;
+            static constexpr size_t NUM_FREE_BLOCK_BINS = 32;
 
-            static constexpr array<const size_t, NUM_FREE_BLOCK_BINS> free_block_bin_sizes = {4096, 8192, 16384, 32768, 65536, 2 * 65536, 3 * 65536, 4 * 65536, 5 * 65536, 6 * 65536, 7 * 65536, 8 * 65536, 10 * 65536, 12 * 65536, 14 * 65536, UINT64_MAX};
+            static constexpr array<const size_t, NUM_FREE_BLOCK_BINS> free_block_bin_sizes = {128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 2 * 65536, 3 * 65536, 4 * 65536, 5 * 65536, 6 * 65536, 7 * 65536, 8 * 65536, 10 * 65536, 11 * 65536, 12 * 65536, 13 * 65536, 14 * 65536, 15 * 65536, 1048576, 1048576 + 131072, 1048576 + (2 * 131072), 1048576 + (3 * 131072), 1048576 + (4 * 131072), 1048576 + (5 * 131072), 1048576 + (6 * 131072), 1048576 + (7 * 131072), UINT64_MAX};
 
             const void *const block_;
             const size_t block_size_;
@@ -650,7 +650,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     count++;
 
-                    if (((*itr)->total_size_ >= total_size) && (((double)total_size / (double)(*itr)->total_size_) > 0.95) &&
+                    if (((*itr)->total_size_ >= total_size) && (((double)total_size / (double)(*itr)->total_size_) > 0.9) &&
                         ((*itr)->state_.load(memory_order_acquire) == AVAILABLE))
                     {
                         //  Mark the metadata as soft deleted.  If this succeeds, then we have full ownership of the metadata and block.
