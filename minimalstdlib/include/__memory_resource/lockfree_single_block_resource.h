@@ -87,7 +87,7 @@ namespace MINIMAL_STD_NAMESPACE
                 atomic<uint64_t> soft_deleted_at_txn_id_;
 
                 atomic<block_metadata *> next_free_block_;
-                atomic<block_metadata *> next_soft_deleted_header_;
+                block_metadata *next_soft_deleted_header_;
                 atomic<block_metadata *> next_free_header_;
 
                 /**
@@ -222,7 +222,6 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     bin.head_.store(const_cast<block_metadata *>(&end_of_metadata_list_sentinel_), memory_order_release);
                     bin.number_of_active_iterators_.store(0, memory_order_release);
-                    bin.list_length_.store(0, memory_order_release);
                     bin.soft_deletes_in_list_.store(0, memory_order_release);
                     bin.hard_delete_before_txn_cutoff_.store(0, memory_order_release);
                     bin.last_reclaimation_txn_.store(0, memory_order_release);
@@ -270,7 +269,6 @@ namespace MINIMAL_STD_NAMESPACE
             struct alignas(64) free_block_bin
             {
                 atomic<block_metadata *> head_;
-                atomic<int64_t> list_length_;
                 atomic<int64_t> soft_deletes_in_list_;
                 atomic<int64_t> number_of_active_iterators_;
                 atomic<uint64_t> hard_delete_before_txn_cutoff_;
@@ -296,7 +294,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             atomic<block_metadata *> metadata_head_;
 
-            atomic<block_metadata *> soft_deleted_metadata_head_;
+            block_metadata *soft_deleted_metadata_head_;
             atomic<block_metadata *> free_metadata_head_;
 
             atomic<int64_t> number_of_soft_deleted_metadata_records_;
@@ -374,8 +372,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 size_t metadata_index = get_next_metadata_record_index();
 
-                //                free_block->size_including_header_ = internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
-                free_block->metadata_index_.store( metadata_index, memory_order_release);
+                free_block->metadata_index_.store(metadata_index, memory_order_release);
 
                 block_metadata *metadata = metadata_start_ - metadata_index;
 
@@ -470,7 +467,7 @@ namespace MINIMAL_STD_NAMESPACE
                         metadata.soft_deleted_at_txn_id_.store(SIZE_MAX, memory_order_release);
                         metadata.state_.store(SOFT_DELETED, memory_order_release);
                         metadata.memory_block_.store(nullptr, memory_order_release);
-                        free_block_bins_[free_block_bin].list_length_.fetch_add(1, memory_order_relaxed);
+
                         free_block_bins_[free_block_bin].soft_deletes_in_list_.fetch_add(1, memory_order_relaxed);
 
                         deallocation_made(metadata.requested_size_);
@@ -518,10 +515,8 @@ namespace MINIMAL_STD_NAMESPACE
                     metadata.next_free_block_.store(current_free_block_metadata, memory_order_release);
                 } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, &metadata, memory_order_acq_rel, memory_order_acquire));
 
-                free_block_bins_[free_block_bin].list_length_.fetch_add(1, memory_order_relaxed);
-
                 //  Track the deallocation
-                
+
                 deallocation_made(metadata.requested_size_);
 
                 //  Mark the block as available
@@ -633,11 +628,6 @@ namespace MINIMAL_STD_NAMESPACE
                 uint64_t total_size = internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
                 auto free_block_bin = free_block_bin_index(total_size);
 
-                //                if (free_block_bins_[free_block_bin].list_length_.load(memory_order_acquire) < 5)
-                //                {
-                //                    return nullptr;
-                //                }
-
                 if ((transactions_.load(memory_order_acquire) - free_block_bins_[free_block_bin].last_reclaimation_txn_.load(memory_order_acquire) > 1000) &&
                     (free_block_bins_[free_block_bin].soft_deletes_in_list_.load(memory_order_acquire) > 1))
                 {
@@ -664,7 +654,6 @@ namespace MINIMAL_STD_NAMESPACE
                             continue;
                         }
 
-                        //                        free_block_bins_[free_block_bin].list_length_.fetch_add(1, memory_order_relaxed);
                         free_block_bins_[free_block_bin].soft_deletes_in_list_.fetch_add(1, memory_order_relaxed);
 
                         //  Clear the metadata and return the block
@@ -692,9 +681,8 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 block_metadata *previous = nullptr;
-//                uint64_t current_txn_id = transactions_.load(memory_order_acquire);
 
-                free_block_bins_[free_block_bin].last_reclaimation_txn_.store(transactions_.fetch_add(1,memory_order_acq_rel), memory_order_release);
+                free_block_bins_[free_block_bin].last_reclaimation_txn_.store(transactions_.fetch_add(1, memory_order_acq_rel), memory_order_release);
 
                 for (auto itr = free_block_itr_begin(free_block_bin); itr != free_block_itr_end(free_block_bin); ++itr)
                 {
@@ -730,14 +718,14 @@ namespace MINIMAL_STD_NAMESPACE
 
                         //  Set the soft deleted at transaction id and update the next/previous pointers
 
-                        (*itr)->soft_deleted_at_txn_id_.store(transactions_.fetch_add(1,memory_order_acq_rel), memory_order_release);
+                        (*itr)->soft_deleted_at_txn_id_.store(transactions_.fetch_add(1, memory_order_acq_rel), memory_order_release);
 
                         //  If (*itr)->previous_ is null or we are at the start of the metadata records, remove the
                         //      record from the front of the metadata.  We do this in a loop to try to insure
 
                         while (true)
                         {
-                            if ( metadata_head_.load(memory_order_acquire) != (*itr) )
+                            if (metadata_head_.load(memory_order_acquire) != (*itr))
                             {
                                 (*itr)->previous_.load(memory_order_acquire)->next_.store((*itr)->next_.load(memory_order_acquire), memory_order_release);
                                 (*itr)->next_.load(memory_order_acquire)->previous_.store((*itr)->previous_.load(memory_order_acquire), memory_order_release);
@@ -756,14 +744,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                         //  And add it to the soft deleted list and increment the count of elements in the list
 
-                        block_metadata *current = soft_deleted_metadata_head_.load(memory_order_acquire);
+                        (*itr)->next_soft_deleted_header_ = soft_deleted_metadata_head_;
+                        soft_deleted_metadata_head_ = *itr;
 
-                        do
-                        {
-                            (*itr)->next_soft_deleted_header_.store(current, memory_order_release);
-                        } while (!soft_deleted_metadata_head_.compare_exchange_strong(current, *itr, memory_order_acq_rel, memory_order_acquire));
-
-                        free_block_bins_[free_block_bin].list_length_.fetch_sub(1, memory_order_relaxed);
                         free_block_bins_[free_block_bin].soft_deletes_in_list_.fetch_sub(1, memory_order_relaxed);
 
                         number_of_soft_deleted_metadata_records_.fetch_add(1, memory_order_relaxed);
@@ -793,7 +776,7 @@ namespace MINIMAL_STD_NAMESPACE
                 //  Walk the soft deleted list and reclaim any metadata records that are older than the hard delete cutoff
 
                 block_metadata *previous = nullptr;
-                block_metadata *current = soft_deleted_metadata_head_.load(memory_order_acquire);
+                block_metadata *current = soft_deleted_metadata_head_;
 
                 while (current != &end_of_metadata_list_sentinel_)
                 {
@@ -810,32 +793,31 @@ namespace MINIMAL_STD_NAMESPACE
                             //
                             //  If we have not updated the head of the list, then we just start again at the head of the list
 
-                            if (soft_deleted_metadata_head_.compare_exchange_strong(current, current->next_soft_deleted_header_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
+                            soft_deleted_metadata_head_ = current->next_soft_deleted_header_;
+
+                            //  Add current to the front of the free list
+
+                            current->state_.store(METADATA_AVAILABLE, memory_order_release);
+                            current->next_free_block_.store(nullptr, memory_order_release);
+                            current->next_.store(nullptr, memory_order_release);
+                            current->previous_.store(nullptr, memory_order_release);
+
+                            block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
+
+                            do
                             {
-                                //  Add current to the front of the free list
+                                current->next_free_header_.store(free_head, memory_order_release);
+                            } while (!free_metadata_head_.compare_exchange_strong(free_head, current, memory_order_acq_rel, memory_order_acquire));
 
-                                current->state_.store(METADATA_AVAILABLE, memory_order_release);
-                                current->next_free_block_.store(nullptr, memory_order_release);
-                                current->next_.store(nullptr, memory_order_release);
-                                current->previous_.store(nullptr, memory_order_release);
+                            current->next_soft_deleted_header_ = nullptr;
 
-                                block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
+                            //  Decrement the count of soft deleted metadata records
 
-                                do
-                                {
-                                    current->next_free_header_.store(free_head, memory_order_release);
-                                } while (!free_metadata_head_.compare_exchange_strong(free_head, current, memory_order_acq_rel, memory_order_acquire));
-
-                                current->next_soft_deleted_header_.store(nullptr, memory_order_release);
-
-                                //  Decrement the count of soft deleted metadata records
-
-                                number_of_soft_deleted_metadata_records_.fetch_sub(1, memory_order_relaxed);
-                            }
+                            number_of_soft_deleted_metadata_records_.fetch_sub(1, memory_order_relaxed);
 
                             //  With either success or failure, we start again at the head of the list
 
-                            current = soft_deleted_metadata_head_.load(memory_order_acquire);
+                            current = soft_deleted_metadata_head_;
                         }
                         else
                         {
@@ -853,7 +835,7 @@ namespace MINIMAL_STD_NAMESPACE
                                 current->next_free_header_.store(free_head, memory_order_release);
                             } while (!free_metadata_head_.compare_exchange_strong(free_head, current, memory_order_acq_rel, memory_order_acquire));
 
-                            previous->next_soft_deleted_header_.store(current->next_soft_deleted_header_.load(memory_order_acquire), memory_order_release);
+                            previous->next_soft_deleted_header_ = current->next_soft_deleted_header_;
 
                             //  Decrement the count of soft deleted metadata records
 
@@ -861,8 +843,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                             //  Advance to the next node
 
-                            auto next = current->next_soft_deleted_header_.load(memory_order_acquire);
-                            current->next_soft_deleted_header_.store(nullptr, memory_order_release);
+                            auto next = current->next_soft_deleted_header_;
+                            current->next_soft_deleted_header_ = nullptr;
                             current = next;
                         }
                     }
@@ -871,7 +853,7 @@ namespace MINIMAL_STD_NAMESPACE
                         //  Move to the next metadata record
 
                         previous = current;
-                        current = current->next_soft_deleted_header_.load(memory_order_acquire);
+                        current = current->next_soft_deleted_header_;
                     }
                 }
 
@@ -880,15 +862,12 @@ namespace MINIMAL_STD_NAMESPACE
 
             void increment_free_block_iterator_count(size_t bin_index)
             {
-//                auto txn_id = transactions_.load(memory_order_acquire);
                 auto num_iterators_on_entry = free_block_bins_[bin_index].number_of_active_iterators_.fetch_add(1, memory_order_acq_rel);
 
                 if (num_iterators_on_entry == 0)
                 {
-                    free_block_bins_[bin_index].hard_delete_before_txn_cutoff_.store(transactions_.fetch_add(1,memory_order_acq_rel), memory_order_release);
+                    free_block_bins_[bin_index].hard_delete_before_txn_cutoff_.store(transactions_.fetch_add(1, memory_order_acq_rel), memory_order_release);
                 }
-
-//                return txn_id;
             }
 
             free_block_iterator free_block_itr_begin(size_t bin_index)
@@ -985,3 +964,4 @@ namespace MINIMAL_STD_NAMESPACE
         };
     };
 } //  namespace MINIMAL_STD_NAMESPACE::pmr
+
