@@ -32,22 +32,22 @@ namespace MINIMAL_STD_NAMESPACE
 
                 size_t total_allocations() const
                 {
-                    return total_allocations_;
+                    return total_allocations_.load(memory_order_acquire);
                 }
 
                 size_t total_deallocations() const
                 {
-                    return total_deallocations_;
+                    return total_deallocations_.load(memory_order_acquire);
                 }
 
                 size_t current_allocated() const
                 {
-                    return current_allocated_;
+                    return current_allocated_.load(memory_order_acquire);
                 }
 
                 size_t peak_allocated() const
                 {
-                    return peak_allocated_;
+                    return peak_allocated_.load(memory_order_acquire);
                 }
 
                 size_t current_bytes_allocated() const
@@ -65,17 +65,17 @@ namespace MINIMAL_STD_NAMESPACE
 
                 void allocation_made(size_t size)
                 {
-                    total_allocations_++;
-                    current_allocated_++;
-                    current_bytes_allocated_ += size;
-                    peak_allocated_ = max(peak_allocated_.load(memory_order_relaxed), current_allocated_.load(memory_order_relaxed));
+                    total_allocations_.fetch_add(1, memory_order_relaxed);
+                    size_t current_allocated = current_allocated_.add_fetch(1, memory_order_acq_rel);
+                    current_bytes_allocated_.fetch_add(size, memory_order_relaxed);
+                    peak_allocated_ = max(peak_allocated_.load(memory_order_acquire), current_allocated);
                 }
 
                 void deallocation_made(size_t size)
                 {
-                    total_deallocations_++;
-                    current_allocated_--;
-                    current_bytes_allocated_ -= size;
+                    total_deallocations_.fetch_add(1, memory_order_relaxed);
+                    current_allocated_.fetch_sub(1, memory_order_relaxed);
+                    current_bytes_allocated_.fetch_sub(size, memory_order_relaxed);
                 }
             };
 

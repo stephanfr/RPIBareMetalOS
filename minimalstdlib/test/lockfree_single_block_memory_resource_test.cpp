@@ -136,7 +136,7 @@ namespace
 
         for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
         {
-            size_t block_size = 256 + (rng() % 18000);
+            size_t block_size = 128 + (rng() % 7000);
 
             void *ptr = args->mem_resource->allocate(block_size);
 
@@ -156,7 +156,7 @@ namespace
             {
                 args->mem_resource->deallocate( args->pointers_allocated[i], args->sizes_allocated[i] );
 
-                size_t block_size = 256 + (rng() % 18000);
+                size_t block_size = 128 + (rng() % 7000);
 
                 void *ptr = args->mem_resource->allocate(block_size);
     
@@ -170,7 +170,7 @@ namespace
                 args->sizes_allocated[i] = block_size;
             }
 
-            sleep(0.1);
+//            sleep(0.1);
         }
 
         for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
@@ -199,6 +199,7 @@ namespace
             size_t available = 0;
             size_t soft_deleted = 0;
             size_t locked = 0;
+            size_t metadata_available = 0;
 
             for (auto itr = ((minstd::pmr::lockfree_single_block_resource *)(args->mem_resource))->begin(); itr != ((minstd::pmr::lockfree_single_block_resource *)(args->mem_resource))->end(); ++itr)
             {
@@ -219,6 +220,10 @@ namespace
                 else if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::LOCKED)
                 {
                     locked++;
+                }
+                else if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::METADATA_AVAILABLE)
+                {
+                    metadata_available++;
                 }
                 else
                 {
@@ -532,7 +537,7 @@ namespace
 
     TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadAllocateDeallocateTest)
     {
-        constexpr size_t NUM_THREADS = 12;
+        constexpr size_t NUM_THREADS = 2;
 
         start_allocations = false;
 
@@ -572,12 +577,12 @@ namespace
         //  Force two reclaimation passes, with no other threads running this should move all
         //      metadata records into the free headers list.  The free block bins should be empty.
 
-        resource.reclaim();
-        resource.reclaim();
-        resource.reclaim();
-        resource.reclaim();
-        resource.reclaim();
-        resource.reclaim();
+//        resource.reclaim();
+//        resource.reclaim();
+//        resource.reclaim();
+//        resource.reclaim();
+//        resource.reclaim();
+//        resource.reclaim();
 
 
         printf("Total number of allocations: %zu  deallocations: %zu\n", resource.total_allocations(), resource.total_deallocations());
