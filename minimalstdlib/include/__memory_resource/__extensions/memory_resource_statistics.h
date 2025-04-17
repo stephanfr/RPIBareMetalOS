@@ -56,10 +56,10 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
             protected:
-                atomic<size_t> total_allocations_ = 0;
-                atomic<size_t> total_deallocations_ = 0;
-                atomic<size_t> current_allocated_ = 0;
-                atomic<size_t> peak_allocated_ = 0;
+                alignas(64) atomic<size_t> total_allocations_ = 0;
+                alignas(64) atomic<size_t> total_deallocations_ = 0;
+                alignas(64) atomic<size_t> current_allocated_ = 0;
+                alignas(64) atomic<size_t> peak_allocated_ = 0;
 
                 atomic<size_t> current_bytes_allocated_ = 0;
 
@@ -94,12 +94,14 @@ namespace MINIMAL_STD_NAMESPACE
 
             protected:
                 void allocation_made(size_t size)
-                {}
+                {
+                }
 
                 void deallocation_made(size_t size)
-                {}
+                {
+                }
             };
 
         } // namespace extensions
-    }     // namespace pmr
+    } // namespace pmr
 } // namespace MINIMAL_STD_NAMESPACE

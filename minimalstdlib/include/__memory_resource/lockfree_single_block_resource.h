@@ -56,7 +56,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             struct alignas(DEFAULT_ALIGNMENT) block_header
             {
-                atomic<size_t> metadata_index_;
+                size_t metadata_index_;
                 size_t size_including_header_; //  size of the block including the block_header
                 block_header *previous_block_;
                 uint64_t hash_; //  hash of the header - we will use this to insure the heap has not been corrupted
@@ -69,28 +69,21 @@ namespace MINIMAL_STD_NAMESPACE
             struct alignas(64) block_metadata
             {
                 atomic<block_header *> memory_block_;
+                atomic<block_metadata *> next_;
 
-                size_t requested_size_;
-
+                atomic<size_t> requested_size_;
+                uint64_t alignment_;
                 size_t total_size_;
 
-                struct
-                {
-                    uint32_t alignment_;
-                    uint32_t randomized_value_;
-                } __attribute__((packed));
+                uint64_t randomized_value_;
 
-                atomic<block_metadata *> next_;
-                //                atomic<block_metadata *> previous_;
                 atomic<uint64_t> state_;
 
-                atomic<uint64_t> soft_deleted_at_txn_id_;
+                uint64_t soft_deleted_at_txn_id_;
 
                 atomic<block_metadata *> next_free_block_;
                 block_metadata *next_soft_deleted_header_;
                 atomic<block_metadata *> next_free_header_;
-
-                uint64_t padding_;
 
                 /**
                  * @brief Computes a 64-bit hash value for the memory block.
@@ -107,7 +100,7 @@ namespace MINIMAL_STD_NAMESPACE
                     uint64_t hash = 0xcbf29ce484222325;
                     uint64_t prime = 0x100000001b3;
 
-                    for (int i = 0; i < 32; ++i)
+                    for (int i = 0; i < 48; ++i)
                     {
                         hash = hash ^ data[i];
                         hash *= prime;
@@ -121,67 +114,6 @@ namespace MINIMAL_STD_NAMESPACE
 
             static_assert(ALLOCATION_METADATA_SIZE == 128, "allocation_metadata is not 128 bytes in size");
 
-            //
-            //  Iterator for the free block list
-            //
-            /*
-                        class free_block_iterator
-                        {
-                        public:
-                            free_block_iterator() = delete;
-
-                            explicit free_block_iterator(const free_block_iterator &other)
-                                : resource_(other.resource_),
-                                  current_(other.current_),
-                                  bin_(other.bin_)
-                            {
-                                const_cast<lockfree_single_block_resource *>(resource_)->increment_free_block_iterator_count(bin_);
-                            }
-
-                            ~free_block_iterator()
-                            {
-                                const_cast<lockfree_single_block_resource *>(resource_)->free_block_bins_[bin_].number_of_active_iterators_.fetch_sub(1, memory_order_acq_rel);
-                            }
-
-                            free_block_iterator &operator=(const free_block_iterator &other) = delete;
-                            free_block_iterator &operator=(free_block_iterator &&other) = delete;
-
-                            free_block_iterator operator++(int) = delete;
-
-                            free_block_iterator &operator++()
-                            {
-                                current_ = current_->next_free_block_.load(memory_order_acquire);
-
-                                return *this;
-                            }
-
-                            bool operator==(const free_block_iterator &other) const
-                            {
-                                return current_ == other.current_;
-                            }
-
-                            block_metadata *operator*() const
-                            {
-                                return const_cast<block_metadata *>(current_);
-                            }
-
-                        private:
-                            friend class lockfree_single_block_resource;
-
-                            explicit free_block_iterator(const lockfree_single_block_resource *resource,
-                                                         const lockfree_single_block_resource::block_metadata *current,
-                                                         int64_t bin = -1)
-                                : resource_(resource),
-                                  current_(current),
-                                  bin_(bin)
-                            {
-                            }
-
-                            const lockfree_single_block_resource *resource_;
-                            const lockfree_single_block_resource::block_metadata *current_;
-                            int64_t bin_;
-                        };
-            */
         public:
             enum allocation_state : uint64_t
             {
@@ -207,14 +139,13 @@ namespace MINIMAL_STD_NAMESPACE
                                                     size_t block_size)
                 : block_(block),
                   block_size_(block_size),
+                  metadata_start_(static_cast<block_metadata *>(internal::align_pointer((char *)block + block_size, 64)) - 1),
                   transactions_(0),
                   next_empty_memory_block_(static_cast<block_header *>(internal::align_pointer(block, DEFAULT_ALIGNMENT))),
-                  metadata_start_(static_cast<block_metadata *>(internal::align_pointer((char *)block + block_size, 64)) - 1),
                   current_metadata_record_count_(0),
                   metadata_head_((block_metadata *)&end_of_metadata_list_sentinel_),
                   soft_deleted_metadata_head_((block_metadata *)&end_of_metadata_list_sentinel_),
                   free_metadata_head_((block_metadata *)&end_of_metadata_list_sentinel_),
-                  number_of_soft_deleted_metadata_records_(0),
                   number_of_active_iterators_(0),
                   hard_delete_before_txn_cutoff_(SIZE_MAX),
                   reclaimation_pass_(false),
@@ -223,11 +154,6 @@ namespace MINIMAL_STD_NAMESPACE
                 for (auto &bin : free_block_bins_)
                 {
                     bin.head_.store(const_cast<block_metadata *>(&end_of_metadata_list_sentinel_), memory_order_release);
-                    bin.number_of_active_iterators_.store(0, memory_order_release);
-                    bin.soft_deletes_in_list_.store(0, memory_order_release);
-                    bin.hard_delete_before_txn_cutoff_.store(0, memory_order_release);
-                    bin.last_reclaimation_txn_.store(0, memory_order_release);
-                    //                    const_cast<lockfree_single_block_resource::free_block_iterator &>(bin.itr_end_).resource_ = this;
                 }
             }
 
@@ -236,7 +162,7 @@ namespace MINIMAL_STD_NAMESPACE
             allocation_info get_allocation_info(void *allocation) const
             {
                 const block_header &header = as_block_header(allocation);
-                const size_t metadata_index = header.metadata_index_.load(memory_order_acquire);
+                const size_t metadata_index = header.metadata_index_;
 
                 if (metadata_index < current_metadata_record_count_.load(memory_order_acquire))
                 {
@@ -247,38 +173,24 @@ namespace MINIMAL_STD_NAMESPACE
                         return {nullptr, INVALID, 0, 0};
                     }
 
-                    return {allocation, static_cast<allocation_state>(metadata.state_.load(memory_order_acquire)), metadata.requested_size_, metadata.alignment_};
+                    return {allocation, static_cast<allocation_state>(metadata.state_.load(memory_order_acquire)), metadata.requested_size_.load(memory_order_acquire), metadata.alignment_};
                 }
 
                 return {nullptr, INVALID, 0, 0};
             }
 
-            /*
-            void reclaim()
-            {
-                next_transaction();
-
-                for (int i = 0; i < NUM_FREE_BLOCK_BINS; i++)
-                {
-                    reclaim_soft_deletes(i);
-                }
-
-                reclaim_soft_deleted_metadata();
-            }
-*/
         private:
-            inline static const block_metadata end_of_metadata_list_sentinel_ = {nullptr, 0, 0, 0, 0, nullptr, 0, 0, nullptr, nullptr, 0};
+            inline static const block_metadata end_of_metadata_list_sentinel_ = {nullptr, nullptr, 0, 0, 0, 0, 0, 0, nullptr, nullptr, 0};
 
             struct alignas(64) free_block_bin
             {
                 atomic<block_metadata *> head_;
-                atomic<int64_t> soft_deletes_in_list_;
-                atomic<int64_t> number_of_active_iterators_;
-                atomic<uint64_t> hard_delete_before_txn_cutoff_;
-                atomic<uint64_t> last_reclaimation_txn_;
-                //                const free_block_iterator itr_end_{nullptr, &end_of_metadata_list_sentinel_, -1};
                 const block_metadata *list_end_ = &end_of_metadata_list_sentinel_;
+
+                size_t padding[6];
             };
+
+            static_assert(sizeof(free_block_bin) == 64, "free_block_bin is not 64 bytes in size");
 
             inline static fast_lockfree_low_quality_rng id_generator_;
 
@@ -305,64 +217,127 @@ namespace MINIMAL_STD_NAMESPACE
 
             const void *const block_;
             const size_t block_size_;
-
-            atomic<uint64_t> transactions_;
-
-            atomic<block_header *> next_empty_memory_block_;
-
             block_metadata *const metadata_start_;
-            atomic<size_t> current_metadata_record_count_;
 
-            atomic<block_metadata *> metadata_head_;
+            alignas(64) atomic<uint64_t> transactions_;
 
-            atomic<block_metadata *> soft_deleted_metadata_head_;
-            atomic<block_metadata *> free_metadata_head_;
+            alignas(64) atomic<block_header *> next_empty_memory_block_;
 
-            atomic<int64_t> number_of_soft_deleted_metadata_records_;
+            alignas(64) atomic<size_t> current_metadata_record_count_;
+            alignas(64) atomic<block_metadata *> metadata_head_;
+            alignas(64) atomic<block_metadata *> soft_deleted_metadata_head_;
+            alignas(64) atomic<block_metadata *> free_metadata_head_;
 
-            atomic<int64_t> number_of_active_iterators_;
-            atomic<uint64_t> hard_delete_before_txn_cutoff_;
+            alignas(64) atomic<int64_t> number_of_active_iterators_;
+            alignas(64) atomic<uint64_t> hard_delete_before_txn_cutoff_;
+
+            alignas(64) atomic<bool> reclaimation_pass_;
 
             array<free_block_bin, NUM_FREE_BLOCK_BINS> free_block_bins_;
-
-            atomic<bool> reclaimation_pass_;
 
             const block_header &as_block_header(void *block) const
             {
                 return *(reinterpret_cast<block_header *>(static_cast<char *>(block) - ALLOCATION_HEADER_SIZE));
             }
 
+            bool is_last_block(const block_metadata &metadata)
+            {
+                return ((uint8_t *)next_empty_memory_block_.load(memory_order_acquire) == ((uint8_t *)metadata.memory_block_.load(memory_order_acquire)) + metadata.total_size_);
+            }
+
             uint64_t free_block_bin_index(size_t bytes) const
             {
-                //  Find the right bin for the deallocation
+                size_t offset = NUM_FREE_BLOCK_BINS / 4;
+                size_t index = NUM_FREE_BLOCK_BINS / 2;
 
-                size_t free_block_bin = NUM_FREE_BLOCK_BINS - 1;
-
-                for (size_t i = 0; i < NUM_FREE_BLOCK_BINS; i++)
+                while (true)
                 {
-                    if (bytes <= free_block_bin_sizes[i])
+                    if (free_block_bin_sizes[index] >= bytes)
                     {
-                        free_block_bin = i;
+                        if (free_block_bin_sizes[index - 1] < bytes)
+                        {
+                            break;
+                        }
+                        else
+                        {
+                            index -= offset;
+                        }
+                    }
+                    else
+                    {
+                        index += offset;
+                    }
+
+                    if (index == 0)
+                    {
                         break;
+                    }
+
+                    if (offset >= 8)
+                    {
+                        offset /= 2;
+                    }
+                    else
+                    {
+                        offset = 1;
                     }
                 }
 
-                return free_block_bin;
+                return index;
             }
 
             void next_transaction()
             {
-                uint64_t current_txn_count = transactions_.fetch_add(1, memory_order_acq_rel);
+                transactions_.fetch_add(1, memory_order_relaxed);
+            }
 
-                //                if (number_of_active_iterators_.load(memory_order_acquire) == 0)
-                //                {
-                //                    hard_delete_before_txn_cutoff_.store(current_txn_count, memory_order_release);
-                //                }
+            void move_metadata_to_free_metadata_list(block_metadata &metadata)
+            {
+                metadata.state_.store(METADATA_AVAILABLE, memory_order_release);
+
+                //  Add head to the front of the free metadata list
+
+                block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
+
+                do
+                {
+                    metadata.next_free_header_.store(free_head, memory_order_release);
+                } while (!free_metadata_head_.compare_exchange_strong(free_head, &metadata, memory_order_acq_rel, memory_order_acquire));
+
+                metadata.next_soft_deleted_header_ = nullptr;
+            }
+
+            void move_metadata_to_soft_deleted_list(block_metadata &metadata)
+            {
+                metadata.state_.store(LOCKED, memory_order_release);
+                metadata.memory_block_.store(nullptr, memory_order_release);
+                metadata.next_free_block_.store(nullptr, memory_order_release);
+
+                //  If there are no iterators, then we can move the metadata directly to the free metadata list
+
+                if (hard_delete_before_txn_cutoff_.load(memory_order_acquire) == SIZE_MAX)
+                {
+                    move_metadata_to_free_metadata_list(metadata);
+                }
+                else
+                {
+                    metadata.soft_deleted_at_txn_id_ = transactions_.load(memory_order_acquire) + 1;
+                    metadata.state_.store(SOFT_DELETED, memory_order_release);
+
+                    //  Put the metadata record into the list of soft deleted blocks
+
+                    block_metadata *soft_deleted_head = soft_deleted_metadata_head_.load(memory_order_acquire);
+
+                    do
+                    {
+                        metadata.next_soft_deleted_header_ = soft_deleted_head;
+                    } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_head, &metadata, memory_order_acq_rel, memory_order_acquire));
+                }
             }
 
             void *do_allocate(size_t bytes, size_t alignment) override
             {
-                //  We cannot throw and exceeption which is what the standard requires if we cannot allocate the memory
+                //  We cannot throw and exception which is what the standard requires if we cannot allocate the memory
                 //      of either the desired size or alignment, so we will just return nullptr.
 
                 if ((bytes == 0) || (DEFAULT_ALIGNMENT % alignment != 0))
@@ -377,11 +352,14 @@ namespace MINIMAL_STD_NAMESPACE
                 //  First, search for a deallocated block that is the correct size and alignment
                 //      If we do not find one, then allocate a net-new block.
 
-                block_header *free_block = search_for_deallocated_block(bytes);
+                uint64_t total_size = internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
+                auto free_block_bin = free_block_bin_index(total_size);
+
+                block_header *free_block = search_for_deallocated_block(free_block_bin);
 
                 if (free_block == nullptr)
                 {
-                    free_block = get_next_empty_memory_block(bytes);
+                    free_block = get_next_empty_memory_block(free_block_bin);
 
                     if (free_block == nullptr)
                     {
@@ -393,19 +371,16 @@ namespace MINIMAL_STD_NAMESPACE
 
                 size_t metadata_index = get_next_metadata_record_index();
 
-                free_block->metadata_index_.store(metadata_index, memory_order_release);
+                free_block->metadata_index_ = metadata_index;
 
                 block_metadata *metadata = metadata_start_ - metadata_index;
 
                 metadata->memory_block_.store(free_block, memory_order_release);
-                metadata->requested_size_ = bytes;
+                metadata->requested_size_.store(bytes, memory_order_release);
                 metadata->total_size_ = free_block->size_including_header_;
                 metadata->alignment_ = alignment;
                 metadata->state_.store(IN_USE, memory_order_release);
                 metadata->randomized_value_ = id_generator_();
-                //                metadata->previous_.store(nullptr, memory_order_release);
-
-                free_block->hash_ = metadata->hash();
 
                 if (metadata->next_.load(memory_order_acquire) == nullptr)
                 {
@@ -419,18 +394,9 @@ namespace MINIMAL_STD_NAMESPACE
                         metadata->next_.store(current, memory_order_release);
                     } while (!metadata_head_.compare_exchange_weak(current, metadata, memory_order_acq_rel, memory_order_acquire));
                 }
-                //  If this is the first allocation, insure the previous pointer is null.
 
-                /*
-                                if (current == block_)
-                                {
-                                    current->previous_.store(nullptr, memory_order_release);
-                                }
-                                else
-                                {
-                                    current->previous_.store(metadata, memory_order_release);
-                                }
-                */
+                free_block->hash_ = metadata->hash();
+
                 allocation_made(bytes);
 
                 return reinterpret_cast<uint8_t *>(free_block) + ALLOCATION_HEADER_SIZE;
@@ -444,113 +410,69 @@ namespace MINIMAL_STD_NAMESPACE
                 //      If the hash of the metadata does not match the hash in the block, then the heap has been corrupted.
 
                 const block_header &header = as_block_header(block);
-                const size_t metadata_index = header.metadata_index_.load(memory_order_acquire);
+                const size_t metadata_index = header.metadata_index_;
 
                 if (metadata_index > current_metadata_record_count_.load(memory_order_acquire))
                 {
                     return;
                 }
 
-                block_metadata &metadata = *(metadata_start_ - metadata_index);
+                block_metadata *block_to_deallocate = metadata_start_ - metadata_index;
 
-                if (metadata.hash() != header.hash_)
+                if (block_to_deallocate->hash() != header.hash_)
                 {
                     return;
                 }
 
-                //  Insure the block has not already been deallocated and lock it
+                //  Insure the block has not already been deallocated and lock it.
+                //      Set the soft deleted at transaction id to SIZE_MAX to insure the reclaimation process does not inadvertantly
+                //      change the state of the block and metadata while we are running this thread.
 
-                metadata.soft_deleted_at_txn_id_.store(SIZE_MAX, memory_order_release);
+                block_to_deallocate->soft_deleted_at_txn_id_ = SIZE_MAX;
 
                 size_t current_state = IN_USE;
 
-                if (!metadata.state_.compare_exchange_strong(current_state, LOCKED, memory_order_acq_rel, memory_order_acquire))
+                if (!block_to_deallocate->state_.compare_exchange_strong(current_state, LOCKED, memory_order_acq_rel, memory_order_acquire))
                 {
                     return;
                 }
 
-                /*
-                                if ((uint8_t *)next_empty_memory_block_.load(memory_order_acquire) == ((uint8_t *)metadata.memory_block_.load(memory_order_acquire)) + metadata.total_size_)
-                                {
-                                    block_header *current = next_empty_memory_block_.load(memory_order_acquire);
+                //  Track the deallocation.  We know bytes is the correct size as the hash matches.
 
-                                    if (next_empty_memory_block_.compare_exchange_strong(current, metadata.memory_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
-                                    {
-                                        current = metadata.memory_block_.load(memory_order_acquire);
+                deallocation_made(bytes);
 
-                                        block_header *previous = metadata.memory_block_.load(memory_order_acquire)->previous_block_;
+                //  If this is the last block, we can reclaim it completely.
 
-                                        auto free_block_bin = free_block_bin_index(metadata.total_size_);
+                if (is_last_block(*block_to_deallocate))
+                {
+                    block_header *current_empty_block_head = next_empty_memory_block_.load(memory_order_acquire);
 
-                                        block_metadata *current_free_block_metadata = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
+                    //  If the next empty block pointer is moved back to the start of the block, then it is permanently
+                    //      deleted and we can put the metadata directly into the soft deleted list.
 
-                                        do
-                                        {
-                                            metadata.next_free_block_.store(current_free_block_metadata, memory_order_release);
-                                        } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, &metadata, memory_order_acq_rel, memory_order_acquire));
+                    if (next_empty_memory_block_.compare_exchange_strong(current_empty_block_head, block_to_deallocate->memory_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
+                    {
+                        move_metadata_to_soft_deleted_list(*block_to_deallocate);
 
-                                        metadata.soft_deleted_at_txn_id_.store(SIZE_MAX, memory_order_release);
-                                        metadata.state_.store(SOFT_DELETED, memory_order_release);
-                                        metadata.memory_block_.store(nullptr, memory_order_release);
-
-                                        free_block_bins_[free_block_bin].soft_deletes_in_list_.fetch_add(1, memory_order_relaxed);
-
-                                        deallocation_made(metadata.requested_size_);
-
-                                        while ((previous != nullptr) && ((metadata_start_ - previous->metadata_index_.load(memory_order_acquire))->state_.load(memory_order_acquire) == AVAILABLE))
-                                        {
-                                            block_metadata &metadata = *(metadata_start_ - previous->metadata_index_.load(memory_order_acquire));
-
-                                            metadata.soft_deleted_at_txn_id_.store(SIZE_MAX, memory_order_release);
-
-                                            current_state = AVAILABLE;
-
-                                            if (!metadata.state_.compare_exchange_strong(current_state, SOFT_DELETED, memory_order_acq_rel, memory_order_acquire))
-                                            {
-                                                return;
-                                            }
-
-                                            if (next_empty_memory_block_.compare_exchange_strong(current, metadata.memory_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
-                                            {
-                                                auto free_block_bin = free_block_bin_index(metadata.total_size_);
-
-                                                current = metadata.memory_block_.load(memory_order_acquire);
-                                                previous = current->previous_block_;
-                                                metadata.memory_block_.store(nullptr, memory_order_release);
-                                                free_block_bins_[free_block_bin].soft_deletes_in_list_.fetch_add(1, memory_order_relaxed);
-                                            }
-                                            else
-                                            {
-                                                metadata.state_.store(AVAILABLE, memory_order_release);
-
-                                                return;
-                                            }
-                                        }
-
-                                        return;
-                                    }
-                                }
-                */
+                        return;
+                    }
+                }
 
                 //  Mark the block as available
 
-                metadata.state_.store(AVAILABLE, memory_order_release);
-                metadata.soft_deleted_at_txn_id_.store(transactions_.fetch_add(1, memory_order_acquire), memory_order_release);
-
-                //  Track the deallocation
-
-                deallocation_made(metadata.requested_size_);
+                block_to_deallocate->state_.store(AVAILABLE, memory_order_release);
+                block_to_deallocate->soft_deleted_at_txn_id_ = transactions_.load(memory_order_acquire) + 1;
 
                 //  Finally, put the block into the correct free block bin
 
-                auto free_block_bin = free_block_bin_index(metadata.total_size_);
+                auto free_block_bin = free_block_bin_index(block_to_deallocate->total_size_);
 
                 block_metadata *current_free_block_metadata = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
 
                 do
                 {
-                    metadata.next_free_block_.store(current_free_block_metadata, memory_order_release);
-                } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, &metadata, memory_order_acq_rel, memory_order_acquire));
+                    block_to_deallocate->next_free_block_.store(current_free_block_metadata, memory_order_release);
+                } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, block_to_deallocate, memory_order_acq_rel, memory_order_acquire));
 
                 //  Finished
             }
@@ -571,9 +493,9 @@ namespace MINIMAL_STD_NAMESPACE
              * @param alignment The alignment requirement for the memory block.
              * @return A pointer to the allocated memory block, or nullptr if there is not enough memory.
              */
-            block_header *get_next_empty_memory_block(size_t bytes)
+            block_header *get_next_empty_memory_block(uint64_t free_block_bin)
             {
-                size_t allocation_size = free_block_bin_sizes[free_block_bin_index(internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT))];
+                size_t allocation_size = free_block_bin_sizes[free_block_bin];
 
                 block_header *next = nullptr;
                 block_header *current = next_empty_memory_block_.load(memory_order_acquire);
@@ -624,31 +546,6 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                //  If we have a bunch of soft deleted metadata records, then reclaim some.
-                //      Performance is not very dependent on the limit to trigger a reclaim cycle.
-                //      A larger number will reduce reclaim passes but will introduce a longer delay for the
-                //      thread that processes the reclaim.
-
-                if (number_of_soft_deleted_metadata_records_.load(memory_order_relaxed) > 64)
-                {
-                    reclaim_soft_deleted_metadata();
-
-                    //  Try again to grab to the top of the free metadata list - it should not be empty now.
-
-                    block_metadata *current = free_metadata_head_.load(memory_order_acquire);
-
-                    while (current != &end_of_metadata_list_sentinel_)
-                    {
-                        block_metadata *next = current->next_free_header_.load(memory_order_acquire);
-
-                        if (free_metadata_head_.compare_exchange_strong(current, next, memory_order_acq_rel, memory_order_acquire))
-                        {
-                            current->next_free_header_.store(nullptr, memory_order_release);
-                            return metadata_start_ - current;
-                        }
-                    }
-                }
-
                 //  If we are here, there were no metadata records available, so we have to allocate a new one.
 
                 auto next_record_index = current_metadata_record_count_.fetch_add(1, memory_order_acq_rel);
@@ -660,11 +557,8 @@ namespace MINIMAL_STD_NAMESPACE
                 return next_record_index;
             }
 
-            block_header *search_for_deallocated_block(size_t bytes)
+            block_header *search_for_deallocated_block(uint64_t free_block_bin)
             {
-                uint64_t total_size = internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
-                auto free_block_bin = free_block_bin_index(total_size);
-
                 //  Pop the top of the free block bin
 
                 block_metadata *head = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
@@ -690,188 +584,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                 auto return_value = head->memory_block_.load(memory_order_acquire);
 
-                head->memory_block_.store(nullptr, memory_order_release);
-
-                //  If there are not iterators, then the hard_delete_before_txn_cutoff_ is SIZE_MAX and we
-                //      can move the metadata directly into the free metadata list.  If not, then we have
-                //      to soft delete the metadata record and put it into the soft deleted list.
-
-                if (hard_delete_before_txn_cutoff_ == SIZE_MAX)
-                {
-                    //  Add head to the front of the free metadata list
-
-                    head->state_.store(METADATA_AVAILABLE, memory_order_release);
-                    head->next_free_block_.store(nullptr, memory_order_release);
-                    //                    head->next_.store(nullptr, memory_order_release);
-                    //                    head->previous_.store(nullptr, memory_order_release);
-
-                    block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
-
-                    do
-                    {
-                        head->next_free_header_.store(free_head, memory_order_release);
-                    } while (!free_metadata_head_.compare_exchange_strong(free_head, head, memory_order_acq_rel, memory_order_acquire));
-
-                    head->next_soft_deleted_header_ = nullptr;
-                }
-                else
-                {
-                    //  Update the state
-
-                    head->soft_deleted_at_txn_id_.store(transactions_.fetch_add(1, memory_order_acq_rel), memory_order_release);
-                    head->state_.store(SOFT_DELETED, memory_order_release);
-
-                    //  Put the metadata record into the list of soft deleted blocks
-
-                    block_metadata *soft_deleted_head = soft_deleted_metadata_head_.load(memory_order_acquire);
-
-                    do
-                    {
-                        head->next_soft_deleted_header_ = soft_deleted_head;
-                    } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_head, head, memory_order_acq_rel, memory_order_acquire));
-
-                    number_of_soft_deleted_metadata_records_.fetch_add(1, memory_order_relaxed);
-                }
+                move_metadata_to_soft_deleted_list(*head);
 
                 //  Return the block
 
                 return return_value;
-
-                /*
-                                if ((transactions_.load(memory_order_acquire) - free_block_bins_[free_block_bin].last_reclaimation_txn_.load(memory_order_acquire) > 1000) &&
-                                    (free_block_bins_[free_block_bin].soft_deletes_in_list_.load(memory_order_acquire) > 1))
-                                {
-                                    reclaim_soft_deletes(free_block_bin);
-                                }
-
-                                uint64_t count = 0;
-
-                                for (auto itr = free_block_itr_begin(free_block_bin); itr != free_block_itr_end(free_block_bin); ++itr)
-                                {
-                                    count++;
-
-                                    if ((*itr)->state_.load(memory_order_acquire) == AVAILABLE)
-                                    {
-                                        //  Mark the metadata as soft deleted.  If this succeeds, then we have full ownership of the metadata and block.
-
-                                        (*itr)->soft_deleted_at_txn_id_.store(SIZE_MAX, memory_order_release);
-
-                                        uint64_t current_state = AVAILABLE;
-
-                                        if (!(*itr)->state_.compare_exchange_strong(current_state, SOFT_DELETED, memory_order_acq_rel, memory_order_acquire))
-                                        {
-                                            continue;
-                                        }
-
-                                        free_block_bins_[free_block_bin].soft_deletes_in_list_.fetch_add(1, memory_order_relaxed);
-
-                                        //  Clear the metadata and return the block
-
-                                        auto return_value = (*itr)->memory_block_.load(memory_order_acquire);
-
-                                        (*itr)->memory_block_.store(nullptr, memory_order_release);
-
-                                        return return_value;
-                                    }
-                                }
-
-                                return nullptr;
-                */
             }
-            /*
-                        void reclaim_soft_deletes(size_t free_block_bin)
-                        {
-                            //  Grab the flag to reclaim the soft deletes.  If we do not get it, just return.
-
-                            bool current_reclaiming_soft_deletes = false;
-
-                            if (!reclaimation_pass_.compare_exchange_strong(current_reclaiming_soft_deletes, true, memory_order_acq_rel, memory_order_acquire))
-                            {
-                                return;
-                            }
-
-                            block_metadata *previous = nullptr;
-
-                            free_block_bins_[free_block_bin].last_reclaimation_txn_.store(transactions_.fetch_add(1, memory_order_acq_rel), memory_order_release);
-
-                            for (auto itr = free_block_itr_begin(free_block_bin); itr != free_block_itr_end(free_block_bin); ++itr)
-                            {
-                                if ((*itr)->state_.load(memory_order_acquire) == SOFT_DELETED)
-                                {
-                                    //  If previous is null, we just pop the front
-
-                                    if (previous == nullptr)
-                                    {
-                                        //  If we cannot update the head of the list, then we just move on to the next metadata record.
-                                        //      We will pick up the head later.
-
-                                        block_metadata *current = *itr;
-
-                                        if (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current, (*itr)->next_free_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
-                                        {
-                                            continue;
-                                        }
-                                    }
-                                    else
-                                    {
-                                        //  Remove the metadata record from the list of deallocated blocks
-
-                                        block_metadata *current = *itr;
-
-                                        if (!previous->next_free_block_.compare_exchange_strong(current, (*itr)->next_free_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
-                                        {
-                                            //  Since we are single threaded here - this should never fail.  If it does, then we just move on to the next metadata record.
-
-                                            continue;
-                                        }
-                                    }
-
-                                    //  Set the soft deleted at transaction id and update the next/previous pointers
-
-                                    (*itr)->soft_deleted_at_txn_id_.store(transactions_.fetch_add(1, memory_order_acq_rel), memory_order_release);
-
-                                    //  If (*itr)->previous_ is null or we are at the start of the metadata records, remove the
-                                    //      record from the front of the metadata.  We do this in a loop to try to insure
-
-                                    while (true)
-                                    {
-                                        if ((metadata_head_.load(memory_order_acquire) != (*itr)) && ((*itr)->previous_ != nullptr))
-                                        {
-                                            (*itr)->previous_.load(memory_order_acquire)->next_.store((*itr)->next_.load(memory_order_acquire), memory_order_release);
-                                            (*itr)->next_.load(memory_order_acquire)->previous_.store((*itr)->previous_.load(memory_order_acquire), memory_order_release);
-                                            break;
-                                        }
-                                        else
-                                        {
-                                            block_metadata *current_metadata_head = metadata_head_.load(memory_order_acquire);
-
-                                            if (metadata_head_.compare_exchange_strong(current_metadata_head, (*itr)->next_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
-                                            {
-                                                break;
-                                            }
-                                        }
-                                    }
-
-                                    //  And add it to the soft deleted list and increment the count of elements in the list
-
-                                    (*itr)->next_soft_deleted_header_ = soft_deleted_metadata_head_;
-                                    soft_deleted_metadata_head_ = *itr;
-
-                                    free_block_bins_[free_block_bin].soft_deletes_in_list_.fetch_sub(1, memory_order_relaxed);
-
-                                    number_of_soft_deleted_metadata_records_.fetch_add(1, memory_order_relaxed);
-                                }
-                                else
-                                {
-                                    previous = *itr;
-                                }
-                            }
-
-                            //  Release the reclaiming soft deletes flag
-
-                            reclaimation_pass_.store(false, memory_order_release);
-                        }
-            */
 
             void reclaim_soft_deleted_metadata()
             {
@@ -887,115 +605,62 @@ namespace MINIMAL_STD_NAMESPACE
                 //  Walk the soft deleted list and reclaim any metadata records that are older than the hard delete cutoff
 
                 block_metadata *previous = nullptr;
-                block_metadata *current = soft_deleted_metadata_head_;
+                block_metadata *current = soft_deleted_metadata_head_.load(memory_order_acquire);
 
                 while (current != &end_of_metadata_list_sentinel_)
                 {
-                    //  If the metadata record was soft-deleted before the cutoff transaction, then we can reclaim it
+                    //  If the metadata record was soft-deleted after the cutoff transaction, then move to the next record
 
-                    if (current->soft_deleted_at_txn_id_.load(memory_order_acquire) < hard_delete_before_txn_cutoff_.load(memory_order_acquire))
-                    {
-                        //  If there is no previous, then we are at the head of the list
-
-                        if (previous == nullptr)
-                        {
-                            //  If we have updated the head of the list, then we have the metadata record
-                            //      so we can add it to the front of the free metadata list and decrement the metadata entries count
-                            //
-                            //  If we have not updated the head of the list, then we just start again at the head of the list
-
-                            soft_deleted_metadata_head_ = current->next_soft_deleted_header_;
-
-                            //  Add current to the front of the free list
-
-                            current->state_.store(METADATA_AVAILABLE, memory_order_release);
-                            current->next_free_block_.store(nullptr, memory_order_release);
-                            //                            current->next_.store(nullptr, memory_order_release);
-                            //                            current->previous_.store(nullptr, memory_order_release);
-
-                            block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
-
-                            do
-                            {
-                                current->next_free_header_.store(free_head, memory_order_release);
-                            } while (!free_metadata_head_.compare_exchange_strong(free_head, current, memory_order_acq_rel, memory_order_acquire));
-
-                            current->next_soft_deleted_header_ = nullptr;
-
-                            //  Decrement the count of soft deleted metadata records
-
-                            number_of_soft_deleted_metadata_records_.fetch_sub(1, memory_order_relaxed);
-
-                            //  With either success or failure, we start again at the head of the list
-
-                            current = soft_deleted_metadata_head_;
-                        }
-                        else
-                        {
-                            //  We are somewhere mid-list, so we can remove the current metadata record from the free list
-
-                            current->state_.store(METADATA_AVAILABLE, memory_order_release);
-                            current->next_free_block_.store(nullptr, memory_order_release);
-                            //                            current->next_.store(nullptr, memory_order_release);
-                            //                            current->previous_.store(nullptr, memory_order_release);
-
-                            block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
-
-                            do
-                            {
-                                current->next_free_header_.store(free_head, memory_order_release);
-                            } while (!free_metadata_head_.compare_exchange_strong(free_head, current, memory_order_acq_rel, memory_order_acquire));
-
-                            previous->next_soft_deleted_header_ = current->next_soft_deleted_header_;
-
-                            //  Decrement the count of soft deleted metadata records
-
-                            number_of_soft_deleted_metadata_records_.fetch_sub(1, memory_order_relaxed);
-
-                            //  Advance to the next node
-
-                            auto next = current->next_soft_deleted_header_;
-                            current->next_soft_deleted_header_ = nullptr;
-                            current = next;
-                        }
-                    }
-                    else
+                    if (current->soft_deleted_at_txn_id_ >= hard_delete_before_txn_cutoff_.load(memory_order_acquire))
                     {
                         //  Move to the next metadata record
 
                         previous = current;
                         current = current->next_soft_deleted_header_;
                     }
+
+                    //  The soft delete occurred before the current cutoff, so the metadata record can be
+                    //      moved to the free metadata list.
+
+                    //  If there is no previous, then we are at the head of the list
+
+                    if (previous == nullptr)
+                    {
+                        //  Pop the head of the soft delete metadata list.  This could fail if a new record has been added
+                        //      to the front of the list in a different thread.
+
+                        if (soft_deleted_metadata_head_.compare_exchange_strong(current, current->next_soft_deleted_header_, memory_order_acq_rel))
+                        {
+                            //  Element popped, so add current to the front of the free list
+
+                            move_metadata_to_free_metadata_list(*current);
+                        }
+
+                        //  Start again at the head of the list on either success or failure above
+
+                        current = soft_deleted_metadata_head_.load(memory_order_acquire);
+                    }
+                    else
+                    {
+                        //  We are somewhere mid-list, so we can remove the current metadata record from the free list
+
+                        previous->next_soft_deleted_header_ = current->next_soft_deleted_header_;
+
+                        move_metadata_to_free_metadata_list(*current);
+
+                        //  Advance to the next node
+
+                        auto next = current->next_soft_deleted_header_;
+                        current->next_soft_deleted_header_ = nullptr;
+                        current = next;
+                    }
                 }
+
+                //  Release the reclaimation flag
 
                 reclaimation_pass_.store(false, memory_order_release);
             }
 
-            void increment_free_block_iterator_count(size_t bin_index)
-            {
-                auto num_iterators_on_entry = free_block_bins_[bin_index].number_of_active_iterators_.fetch_add(1, memory_order_acq_rel);
-
-                if (num_iterators_on_entry == 0)
-                {
-                    free_block_bins_[bin_index].hard_delete_before_txn_cutoff_.store(transactions_.fetch_add(1, memory_order_acq_rel), memory_order_release);
-                }
-            }
-            /*
-                        free_block_iterator free_block_itr_begin(size_t bin_index)
-                        {
-                            //  Bump up the count of active iterators before returning 'begin'.  If we do not do this here,
-                            //      then a race condition opens up in which a free block may be removed before all iterators depending on it are gone.
-
-                            increment_free_block_iterator_count(bin_index);
-
-                            return free_block_iterator(this, free_block_bins_[bin_index].head_.load(memory_order_acquire), bin_index);
-                        }
-
-                        const free_block_iterator &free_block_itr_end(size_t bin_index) const
-                        {
-                            return free_block_bins_[bin_index].itr_end_;
-                        }
-            */
         public:
             class const_iterator
             {
@@ -1008,7 +673,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     if (const_cast<lockfree_single_block_resource &>(resource_).number_of_active_iterators_.add_fetch(1, memory_order_acq_rel) == 1)
                     {
-                        const_cast<lockfree_single_block_resource &>(resource_).hard_delete_before_txn_cutoff_.store(const_cast<lockfree_single_block_resource &>(resource_).transactions_.add_fetch(1, memory_order_acq_rel), memory_order_release);
+                        const_cast<lockfree_single_block_resource &>(resource_).hard_delete_before_txn_cutoff_.store(const_cast<lockfree_single_block_resource &>(resource_).transactions_.load(memory_order_acq_rel) + 1, memory_order_release);
                     }
                 }
 
@@ -1017,6 +682,7 @@ namespace MINIMAL_STD_NAMESPACE
                     if (const_cast<lockfree_single_block_resource &>(resource_).number_of_active_iterators_.sub_fetch(1, memory_order_acq_rel) == 0)
                     {
                         const_cast<lockfree_single_block_resource &>(resource_).hard_delete_before_txn_cutoff_.store(SIZE_MAX, memory_order_release);
+                        const_cast<lockfree_single_block_resource &>(resource_).reclaim_soft_deleted_metadata();
                     }
                 }
 
@@ -1043,7 +709,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (state == IN_USE)
                     {
-                        return {(void *)(((uint8_t *)current_->memory_block_.load(memory_order_acquire)) + ALLOCATION_HEADER_SIZE), IN_USE, current_->requested_size_, alignof(max_align_t)};
+                        return {(void *)(((uint8_t *)current_->memory_block_.load(memory_order_acquire)) + ALLOCATION_HEADER_SIZE), IN_USE, current_->requested_size_.load(memory_order_acquire), alignof(max_align_t)};
                     }
                     else
                     {
