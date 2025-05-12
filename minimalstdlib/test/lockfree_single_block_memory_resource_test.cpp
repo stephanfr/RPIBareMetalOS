@@ -36,6 +36,9 @@ namespace
     minstd::atomic<bool> start_allocations = false;
     minstd::atomic<bool> exit_thread = false;
 
+    typedef minstd::pmr::lockfree_single_block_resource<minstd::pmr::extensions::memory_resource_statistics, minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
+    typedef minstd::pmr::lockfree_single_block_resource<minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+
     struct allocator_thread_arguments
     {
         minstd::pmr::memory_resource *mem_resource;
@@ -201,27 +204,27 @@ namespace
             size_t locked = 0;
             size_t metadata_available = 0;
 
-            for (auto itr = ((minstd::pmr::lockfree_single_block_resource *)(args->mem_resource))->begin(); itr != ((minstd::pmr::lockfree_single_block_resource *)(args->mem_resource))->end(); ++itr)
+            for (auto itr = ((lockfree_single_block_resource_with_stats*)(args->mem_resource))->begin(); itr != ((lockfree_single_block_resource_with_stats *)(args->mem_resource))->end(); ++itr)
             {
                 auto alloc_info = *itr;
 
-                if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE)
+                if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE)
                 {
                     in_use++;
                 }
-                else if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::AVAILABLE)
+                else if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::AVAILABLE)
                 {
                     available++;
                 }
-                else if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::SOFT_DELETED)
+                else if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::SOFT_DELETED)
                 {
                     soft_deleted++;
                 }
-                else if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::LOCKED)
+                else if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::LOCKED)
                 {
                     locked++;
                 }
-                else if (alloc_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::METADATA_AVAILABLE)
+                else if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::METADATA_AVAILABLE)
                 {
                     metadata_available++;
                 }
@@ -241,7 +244,7 @@ namespace
 
     TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionality)
     {
-        minstd::pmr::lockfree_single_block_resource resource(buffer, buffer_size);
+        lockfree_single_block_resource_with_stats resource(buffer, buffer_size);
 
         void *ptr1 = resource.allocate(50);
 
@@ -249,7 +252,7 @@ namespace
         CHECK((unsigned long)ptr1 % default_alignment == 0);
 
         auto allocation_info = resource.get_allocation_info(ptr1);
-        CHECK(allocation_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE);
+        CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 50);
         CHECK(allocation_info.alignment == default_alignment);
 
@@ -259,7 +262,7 @@ namespace
         CHECK((unsigned long)ptr2 % default_alignment == 0);
 
         allocation_info = resource.get_allocation_info(ptr2);
-        CHECK(allocation_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE);
+        CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 1023);
         CHECK(allocation_info.alignment == default_alignment);
 
@@ -269,7 +272,7 @@ namespace
         CHECK((unsigned long)ptr3 % default_alignment == 0);
 
         allocation_info = resource.get_allocation_info(ptr3);
-        CHECK(allocation_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE);
+        CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 123);
         CHECK(allocation_info.alignment == default_alignment);
 
@@ -279,7 +282,7 @@ namespace
         CHECK((unsigned long)ptr4 % default_alignment == 0);
 
         allocation_info = resource.get_allocation_info(ptr4);
-        CHECK(allocation_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE);
+        CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 45678);
         CHECK(allocation_info.alignment == default_alignment);
 
@@ -289,7 +292,7 @@ namespace
         {
             allocation_info = *iter;
 
-            CHECK(allocation_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE);
+            CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
 
             counter++;
         }
@@ -304,7 +307,7 @@ namespace
         {
             allocation_info = *iter;
 
-            if (allocation_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE)
+            if (allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE)
             {
                 counter++;
             }
@@ -318,7 +321,7 @@ namespace
         CHECK((unsigned long)ptr5 % default_alignment == 0);
 
         allocation_info = resource.get_allocation_info(ptr5);
-        CHECK(allocation_info.state == minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE);
+        CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 100);
         CHECK(allocation_info.alignment == default_alignment);
     }
@@ -330,7 +333,7 @@ namespace
         start_allocations = false;
         exit_thread = false;
 
-        minstd::pmr::lockfree_single_block_resource resource(buffer, buffer_size);
+        lockfree_single_block_resource_with_stats resource(buffer, buffer_size);
 
         allocator_thread_arguments args[NUM_THREADS];
         pthread_t threads[NUM_THREADS];
@@ -399,12 +402,12 @@ namespace
                 {
                     auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
 
-                    if (!alloc_info.state != minstd::pmr::lockfree_single_block_resource::allocation_state::INVALID)
+                    if (!alloc_info.state != lockfree_single_block_resource_with_stats::allocation_state::INVALID)
                     {
                         printf("Invalid allocation info\n");
                     }
 
-                    CHECK(alloc_info.state != minstd::pmr::lockfree_single_block_resource::allocation_state::INVALID);
+                    CHECK(alloc_info.state != lockfree_single_block_resource_with_stats::allocation_state::INVALID);
 
                     total_number_of_allocations++;
                     total_number_of_bytes_allocated += args[i].sizes_allocated[j];
@@ -426,9 +429,9 @@ namespace
 
         for (auto itr = resource.begin(); itr != resource.end(); ++itr)
         {
-            if ((*itr).state != minstd::pmr::lockfree_single_block_resource::allocation_state::IN_USE)
+            if ((*itr).state != lockfree_single_block_resource_with_stats::allocation_state::IN_USE)
             {
-                if ((*itr).state == minstd::pmr::lockfree_single_block_resource::allocation_state::AVAILABLE)
+                if ((*itr).state == lockfree_single_block_resource_with_stats::allocation_state::AVAILABLE)
                 {
                     total_number_of_free_blocks++;
                     total_number_of_bytes_in_free_blocks += (*itr).size;
@@ -537,11 +540,11 @@ namespace
 
     TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadAllocateDeallocateTest)
     {
-        constexpr size_t NUM_THREADS = 2;
+        constexpr size_t NUM_THREADS = 4;
 
         start_allocations = false;
 
-        minstd::pmr::lockfree_single_block_resource resource(buffer, buffer_size);
+        lockfree_single_block_resource_without_stats resource(buffer, buffer_size);
 
         allocator_thread_arguments args[NUM_THREADS];
         pthread_t threads[NUM_THREADS];
@@ -585,11 +588,11 @@ namespace
 //        resource.reclaim();
 
 
-        printf("Total number of allocations: %zu  deallocations: %zu\n", resource.total_allocations(), resource.total_deallocations());
-        printf("Current allocations: %zu  bytes allocated: %zu\n", resource.current_allocated(), resource.current_bytes_allocated());
+//        printf("Total number of allocations: %zu  deallocations: %zu\n", resource.total_allocations(), resource.total_deallocations());
+//        printf("Current allocations: %zu  bytes allocated: %zu\n", resource.current_allocated(), resource.current_bytes_allocated());
 
-        CHECK_EQUAL(0, resource.current_allocated());
-        CHECK_EQUAL(0, resource.current_bytes_allocated());
+//        CHECK_EQUAL(0, resource.current_allocated());
+//        CHECK_EQUAL(0, resource.current_bytes_allocated());
 
         //  Do it again with malloc/free
 

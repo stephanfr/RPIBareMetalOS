@@ -13,6 +13,7 @@
 #include "__concepts/derived_from.h"
 #include "__type_traits/conditional.h"
 
+#include "__extensions/hash_check.h"
 #include "__extensions/memory_resource_statistics.h"
 #include "memory_resource.h"
 
@@ -46,7 +47,8 @@ namespace MINIMAL_STD_NAMESPACE
         //
         //  On destruction, this resource will just dump all the memory it allocated without invoking any destructors
 
-        class lockfree_single_block_resource : public memory_resource, public extensions::memory_resource_statistics
+        template <typename... optional_extensions>
+        class lockfree_single_block_resource : public memory_resource, public optional_extensions...
         {
         private:
             //  Internally, all blocks will be aligned on 64-byte boundaries.  This will support alignments
@@ -81,9 +83,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                 uint64_t soft_deleted_at_txn_id_;
 
-                atomic<block_metadata *> next_free_block_;
+                block_metadata *next_free_block_;
                 block_metadata *next_soft_deleted_header_;
-                atomic<block_metadata *> next_free_header_;
+                block_metadata *next_free_header_;
 
                 /**
                  * @brief Computes a 64-bit hash value for the memory block.
@@ -94,6 +96,7 @@ namespace MINIMAL_STD_NAMESPACE
                  *
                  * @return A 64-bit hash value representing the memory block.
                  */
+
                 uint64_t hash()
                 {
                     const uint8_t *data = (uint8_t *)&memory_block_;
@@ -144,8 +147,8 @@ namespace MINIMAL_STD_NAMESPACE
                   next_empty_memory_block_(static_cast<block_header *>(internal::align_pointer(block, DEFAULT_ALIGNMENT))),
                   current_metadata_record_count_(0),
                   metadata_head_((block_metadata *)&end_of_metadata_list_sentinel_),
-                  soft_deleted_metadata_head_((block_metadata *)&end_of_metadata_list_sentinel_),
-                  free_metadata_head_((block_metadata *)&end_of_metadata_list_sentinel_),
+                  soft_deleted_metadata_head_((block_metadata *)nullptr),
+                  free_metadata_head_((block_metadata *)nullptr),
                   number_of_active_iterators_(0),
                   hard_delete_before_txn_cutoff_(SIZE_MAX),
                   reclaimation_pass_(false),
@@ -153,7 +156,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 for (auto &bin : free_block_bins_)
                 {
-                    bin.head_.store(const_cast<block_metadata *>(&end_of_metadata_list_sentinel_), memory_order_release);
+                    bin.head_.store(static_cast<block_metadata *>(nullptr), memory_order_release);
                 }
             }
 
@@ -185,7 +188,6 @@ namespace MINIMAL_STD_NAMESPACE
             struct alignas(64) free_block_bin
             {
                 atomic<block_metadata *> head_;
-                const block_metadata *list_end_ = &end_of_metadata_list_sentinel_;
 
                 size_t padding[6];
             };
@@ -286,9 +288,20 @@ namespace MINIMAL_STD_NAMESPACE
                 return index;
             }
 
+            void back_off(size_t &retries)
+            {
+                if (retries > 0)
+                {
+                    for (volatile size_t i = 0; i < 1000 * retries; i++)
+                        ;
+                }
+
+                retries++;
+            }
+
             void next_transaction()
             {
-                transactions_.fetch_add(1, memory_order_relaxed);
+                transactions_.fetch_add(1, memory_order_acq_rel);
             }
 
             void move_metadata_to_free_metadata_list(block_metadata &metadata)
@@ -297,11 +310,15 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Add head to the front of the free metadata list
 
+                size_t retries = 0;
+
                 block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
 
                 do
                 {
-                    metadata.next_free_header_.store(free_head, memory_order_release);
+                    back_off( retries );
+
+                    metadata.next_free_header_ = free_head;
                 } while (!free_metadata_head_.compare_exchange_strong(free_head, &metadata, memory_order_acq_rel, memory_order_acquire));
 
                 metadata.next_soft_deleted_header_ = nullptr;
@@ -311,7 +328,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 metadata.state_.store(LOCKED, memory_order_release);
                 metadata.memory_block_.store(nullptr, memory_order_release);
-                metadata.next_free_block_.store(nullptr, memory_order_release);
+                metadata.next_free_block_ = nullptr;
 
                 //  If there are no iterators, then we can move the metadata directly to the free metadata list
 
@@ -328,8 +345,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                     block_metadata *soft_deleted_head = soft_deleted_metadata_head_.load(memory_order_acquire);
 
+                    size_t retries = 0;
+
                     do
                     {
+                        back_off( retries );
+
                         metadata.next_soft_deleted_header_ = soft_deleted_head;
                     } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_head, &metadata, memory_order_acq_rel, memory_order_acquire));
                 }
@@ -380,7 +401,11 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata->total_size_ = free_block->size_including_header_;
                 metadata->alignment_ = alignment;
                 metadata->state_.store(IN_USE, memory_order_release);
-                metadata->randomized_value_ = id_generator_();
+
+                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
+                {
+                    metadata->randomized_value_ = id_generator_();
+                }
 
                 if (metadata->next_.load(memory_order_acquire) == nullptr)
                 {
@@ -395,9 +420,15 @@ namespace MINIMAL_STD_NAMESPACE
                     } while (!metadata_head_.compare_exchange_weak(current, metadata, memory_order_acq_rel, memory_order_acquire));
                 }
 
-                free_block->hash_ = metadata->hash();
+                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
+                {
+                    free_block->hash_ = metadata->hash();
+                }
 
-                allocation_made(bytes);
+                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource>)
+                {
+                    extensions::memory_resource_statistics::allocation_made(bytes);
+                }
 
                 return reinterpret_cast<uint8_t *>(free_block) + ALLOCATION_HEADER_SIZE;
             }
@@ -419,9 +450,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                 block_metadata *block_to_deallocate = metadata_start_ - metadata_index;
 
-                if (block_to_deallocate->hash() != header.hash_)
+                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
                 {
-                    return;
+                    if (block_to_deallocate->hash() != header.hash_)
+                    {
+                        return;
+                    }
                 }
 
                 //  Insure the block has not already been deallocated and lock it.
@@ -439,7 +473,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Track the deallocation.  We know bytes is the correct size as the hash matches.
 
-                deallocation_made(bytes);
+                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource>)
+                {
+                    extensions::memory_resource_statistics::deallocation_made(bytes);
+                }
 
                 //  If this is the last block, we can reclaim it completely.
 
@@ -469,10 +506,14 @@ namespace MINIMAL_STD_NAMESPACE
 
                 block_metadata *current_free_block_metadata = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
 
+                size_t retries = 0;
+
                 do
                 {
-                    block_to_deallocate->next_free_block_.store(current_free_block_metadata, memory_order_release);
-                } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, block_to_deallocate, memory_order_acq_rel, memory_order_acquire));
+                    back_off( retries );
+
+                    block_to_deallocate->next_free_block_ = current_free_block_metadata;
+                } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, block_to_deallocate, memory_order_acq_rel, memory_order_acq_rel));
 
                 //  Finished
             }
@@ -500,8 +541,12 @@ namespace MINIMAL_STD_NAMESPACE
                 block_header *next = nullptr;
                 block_header *current = next_empty_memory_block_.load(memory_order_acquire);
 
+                size_t retries = 0;
+
                 do
                 {
+                    back_off( retries );
+
                     next = reinterpret_cast<block_header *>(internal::align_pointer(reinterpret_cast<uint8_t *>(current) + allocation_size, DEFAULT_ALIGNMENT));
 
                     //  If the next block intrudes into the metadata area, then we are out of memory so return null
@@ -535,13 +580,18 @@ namespace MINIMAL_STD_NAMESPACE
 
                 block_metadata *current = free_metadata_head_.load(memory_order_acquire);
 
-                while (current != &end_of_metadata_list_sentinel_)
+                size_t retries = 0;
+
+                while (current != nullptr)
                 {
-                    block_metadata *next = current->next_free_header_.load(memory_order_acquire);
+
+                    back_off( retries );
+
+                    block_metadata *next = current->next_free_header_;
 
                     if (free_metadata_head_.compare_exchange_strong(current, next, memory_order_acq_rel, memory_order_acquire))
                     {
-                        current->next_free_header_.store(nullptr, memory_order_release);
+                        current->next_free_header_ = nullptr;
                         return metadata_start_ - current;
                     }
                 }
@@ -561,23 +611,46 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 //  Pop the top of the free block bin
 
+            try_again:
+
                 block_metadata *head = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
+
+                size_t retries = 0;
 
                 do
                 {
+                    back_off( retries );
+
                     //  If the head is the end of the list, then the list is empty so return nullptr
 
-                    if (head == free_block_bins_[free_block_bin].list_end_)
+                    if (head == nullptr)
                     {
                         return nullptr;
                     }
-                } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(head, head->next_free_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire));
+                } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(head, head->next_free_block_, memory_order_acq_rel, memory_order_acquire));
 
                 //  If the head is the end of the list, then the list is empty so return nullptr
 
-                if (head == free_block_bins_[free_block_bin].list_end_)
+                if (head == nullptr)
                 {
                     return nullptr;
+                }
+
+                //  If the head is the last block and there is another block in the list, then fully release the block.
+
+                if (is_last_block(*head) && (head->next_free_block_ != nullptr))
+                {
+                    block_header *current_empty_block_head = next_empty_memory_block_.load(memory_order_acquire);
+
+                    //  If the next empty block pointer is moved back to the start of the block, then it is permanently
+                    //      deleted and we can put the metadata directly into the soft deleted list.
+
+                    if (next_empty_memory_block_.compare_exchange_strong(current_empty_block_head, head->memory_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
+                    {
+                        move_metadata_to_soft_deleted_list(*head);
+
+                        goto try_again;
+                    }
                 }
 
                 //  We have the head, so get the block pointer
@@ -607,7 +680,7 @@ namespace MINIMAL_STD_NAMESPACE
                 block_metadata *previous = nullptr;
                 block_metadata *current = soft_deleted_metadata_head_.load(memory_order_acquire);
 
-                while (current != &end_of_metadata_list_sentinel_)
+                while (current != nullptr)
                 {
                     //  If the metadata record was soft-deleted after the cutoff transaction, then move to the next record
 

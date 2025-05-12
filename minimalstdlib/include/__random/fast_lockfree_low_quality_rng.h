@@ -21,8 +21,19 @@ namespace MINIMAL_STD_NAMESPACE
             uint64_t initial_state = rng_state_.load(memory_order_relaxed);
             uint64_t next_value;
 
+            size_t retries = 0;
+
             do
             {
+                if(retries != 0)
+                {
+                    volatile size_t i;
+
+                    for( i = 0; i < 500 * retries; i++ );
+                }
+
+                retries++;
+                
                 next_value = initial_state;
                 next_value ^= next_value << 7;
                 next_value ^= next_value >> 9;
