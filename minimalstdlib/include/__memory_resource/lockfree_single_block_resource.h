@@ -194,6 +194,22 @@ namespace MINIMAL_STD_NAMESPACE
 
             static_assert(sizeof(free_block_bin) == 64, "free_block_bin is not 64 bytes in size");
 
+            enum elimination_state : uint64_t
+            {
+                EMPTY = 0,
+                WAITING_POP,
+                WAITING_PUSH,
+                ELIMINATING,
+                ELIMINATED,
+                BUSY
+            };
+
+            struct alignas(64) block_elimination_info
+            {
+                atomic<uint64_t> state_ = EMPTY;
+                block_metadata *metadata_ = nullptr;
+            };
+
             inline static fast_lockfree_low_quality_rng id_generator_;
 
             static constexpr size_t NUM_FREE_BLOCK_BINS = 257;
@@ -236,6 +252,11 @@ namespace MINIMAL_STD_NAMESPACE
             alignas(64) atomic<bool> reclaimation_pass_;
 
             array<free_block_bin, NUM_FREE_BLOCK_BINS> free_block_bins_;
+
+            static constexpr size_t NUM_ELIMINATION_ARRAY_ELEMENTS = 8;
+
+            array<block_elimination_info, NUM_ELIMINATION_ARRAY_ELEMENTS> soft_deleted_metadata_elimination_array_;
+            array<block_elimination_info, NUM_ELIMINATION_ARRAY_ELEMENTS> free_metadata_elimination_array_;
 
             const block_header &as_block_header(void *block) const
             {
@@ -310,18 +331,62 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Add head to the front of the free metadata list
 
-                size_t retries = 0;
+                size_t retries = 1;
 
                 block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
 
-                do
+                fast_single_threaded_low_quality_rng local_rng(metadata.randomized_value_);
+
+                while (true)
                 {
-                    back_off( retries );
+                    //                    back_off(retries);
 
                     metadata.next_free_header_ = free_head;
-                } while (!free_metadata_head_.compare_exchange_strong(free_head, &metadata, memory_order_acq_rel, memory_order_acquire));
 
-                metadata.next_soft_deleted_header_ = nullptr;
+                    if (free_metadata_head_.compare_exchange_strong(free_head, &metadata, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        metadata.next_soft_deleted_header_ = nullptr;
+                        break;
+                    }
+
+                    //  Try the elimination route
+
+                    size_t index = local_rng() % NUM_ELIMINATION_ARRAY_ELEMENTS;
+
+                    uint64_t current_state = EMPTY;
+
+                    if (free_metadata_elimination_array_[index].state_.compare_exchange_strong(current_state, BUSY, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        free_metadata_elimination_array_[index].metadata_ = &metadata;
+                        metadata.next_soft_deleted_header_ = nullptr;
+                        metadata.next_free_header_ = nullptr;
+
+                        free_metadata_elimination_array_[index].state_.store(WAITING_POP, memory_order_release);
+
+                    retry_empty:
+
+                        //                            back_off(retries);
+                        for (volatile size_t i = 0; i < 50000; i++)
+                            ;
+
+                        current_state = WAITING_POP;
+
+                        if (free_metadata_elimination_array_[index].state_.compare_exchange_strong(current_state, EMPTY, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            continue;
+                        }
+
+                        current_state = ELIMINATED;
+
+                        if (free_metadata_elimination_array_[index].state_.compare_exchange_strong(current_state, EMPTY, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            //                            printf("Successful Elimination\n");
+                            return;
+                        }
+
+                        goto retry_empty;
+                    }
+                }
             }
 
             void move_metadata_to_soft_deleted_list(block_metadata &metadata)
@@ -329,6 +394,8 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata.state_.store(LOCKED, memory_order_release);
                 metadata.memory_block_.store(nullptr, memory_order_release);
                 metadata.next_free_block_ = nullptr;
+
+                fast_single_threaded_low_quality_rng local_rng(metadata.randomized_value_);
 
                 //  If there are no iterators, then we can move the metadata directly to the free metadata list
 
@@ -343,16 +410,60 @@ namespace MINIMAL_STD_NAMESPACE
 
                     //  Put the metadata record into the list of soft deleted blocks
 
-                    block_metadata *soft_deleted_head = soft_deleted_metadata_head_.load(memory_order_acquire);
-
                     size_t retries = 0;
 
-                    do
+                    while (true)
                     {
-                        back_off( retries );
+                        //                        back_off(retries);
+
+                        block_metadata *soft_deleted_head = soft_deleted_metadata_head_.load(memory_order_acquire);
 
                         metadata.next_soft_deleted_header_ = soft_deleted_head;
-                    } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_head, &metadata, memory_order_acq_rel, memory_order_acquire));
+                        //                    } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_head, &metadata, memory_order_acq_rel, memory_order_acquire));
+
+                        if (soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_head, &metadata, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            break;
+                        }
+
+                        //  Try the elimination route
+
+                        size_t index = local_rng() % NUM_ELIMINATION_ARRAY_ELEMENTS;
+
+                        uint64_t current_state = EMPTY;
+
+                        if (soft_deleted_metadata_elimination_array_[index].state_.compare_exchange_strong(current_state, BUSY, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            soft_deleted_metadata_elimination_array_[index].metadata_ = &metadata;
+                            metadata.next_soft_deleted_header_ = nullptr;
+                            metadata.next_free_header_ = nullptr;
+
+                            soft_deleted_metadata_elimination_array_[index].state_.store(WAITING_POP, memory_order_release);
+
+                        retry_empty:
+
+                            //                            back_off(retries);
+                            for (volatile size_t i = 0; i < 50000; i++)
+                                ;
+
+                            current_state = WAITING_POP;
+
+                            if (soft_deleted_metadata_elimination_array_[index].state_.compare_exchange_strong(current_state, EMPTY, memory_order_acq_rel, memory_order_acquire))
+                            {
+                                continue;
+                            }
+
+                            current_state = ELIMINATED;
+
+                            if (soft_deleted_metadata_elimination_array_[index].state_.compare_exchange_strong(current_state, EMPTY, memory_order_acq_rel, memory_order_acquire))
+                            {
+                                //                            printf("Successful Elimination\n");
+                                return;
+                            }
+
+                            goto retry_empty;
+                        }
+                    }
                 }
             }
 
@@ -401,11 +512,6 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata->total_size_ = free_block->size_including_header_;
                 metadata->alignment_ = alignment;
                 metadata->state_.store(IN_USE, memory_order_release);
-
-                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
-                {
-                    metadata->randomized_value_ = id_generator_();
-                }
 
                 if (metadata->next_.load(memory_order_acquire) == nullptr)
                 {
@@ -510,7 +616,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 do
                 {
-                    back_off( retries );
+                    back_off(retries);
 
                     block_to_deallocate->next_free_block_ = current_free_block_metadata;
                 } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, block_to_deallocate, memory_order_acq_rel, memory_order_acq_rel));
@@ -536,7 +642,13 @@ namespace MINIMAL_STD_NAMESPACE
              */
             block_header *get_next_empty_memory_block(uint64_t free_block_bin)
             {
+                //  We will over-allocate to the next full bin size so this block can be easily re-used
+
                 size_t allocation_size = free_block_bin_sizes[free_block_bin];
+
+                //  For a new allocation, try to advance the head of the empty memory block pointer by the bin size
+                //      chosen above.  This uses a CAS, so loop until we are successful and use a backoff to
+                //      improve throughput under heavy concurrency.
 
                 block_header *next = nullptr;
                 block_header *current = next_empty_memory_block_.load(memory_order_acquire);
@@ -545,7 +657,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 do
                 {
-                    back_off( retries );
+                    back_off(retries);
 
                     next = reinterpret_cast<block_header *>(internal::align_pointer(reinterpret_cast<uint8_t *>(current) + allocation_size, DEFAULT_ALIGNMENT));
 
@@ -559,6 +671,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                 next->previous_block_ = current;
                 current->size_including_header_ = reinterpret_cast<uintptr_t>(next) - reinterpret_cast<uintptr_t>(current);
+
+                //  Return the block
 
                 return current;
             }
@@ -584,14 +698,33 @@ namespace MINIMAL_STD_NAMESPACE
 
                 while (current != nullptr)
                 {
+                    fast_single_threaded_low_quality_rng local_rng(current->randomized_value_);
 
-                    back_off( retries );
+                    back_off(retries);
 
                     block_metadata *next = current->next_free_header_;
 
                     if (free_metadata_head_.compare_exchange_strong(current, next, memory_order_acq_rel, memory_order_acquire))
                     {
                         current->next_free_header_ = nullptr;
+                        return metadata_start_ - current;
+                    }
+
+                    //  Try the elimination route
+
+                    size_t index = local_rng() % NUM_ELIMINATION_ARRAY_ELEMENTS;
+
+                    uint64_t current_state = WAITING_POP;
+
+                    if (free_metadata_elimination_array_[index].state_.compare_exchange_strong(current_state, ELIMINATING, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        current = free_metadata_elimination_array_[index].metadata_;
+                        current->next_free_header_ = nullptr;
+
+                        free_metadata_elimination_array_[index].state_.store(ELIMINATED, memory_order_release);
+
+                        //                        printf("Returning eliminated metadata %i\n", index);
+
                         return metadata_start_ - current;
                     }
                 }
@@ -603,6 +736,12 @@ namespace MINIMAL_STD_NAMESPACE
                 block_metadata *metadata = metadata_start_ - next_record_index;
 
                 metadata->next_.store(nullptr, memory_order_release);
+
+                //  For performance, we will set the randomized value once and re-use as the block is released and re-allocated
+
+                metadata->randomized_value_ = id_generator_();
+
+                //  Return the next metadata
 
                 return next_record_index;
             }
@@ -619,7 +758,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 do
                 {
-                    back_off( retries );
+                    back_off(retries);
 
                     //  If the head is the end of the list, then the list is empty so return nullptr
 

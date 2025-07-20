@@ -69,7 +69,8 @@
         "tuple": "cpp",
         "skiplist": "cpp",
         "locking_bitset": "cpp",
-        "binary_semaphore_array": "cpp"
+        "binary_semaphore_array": "cpp",
+        "elimination_array": "cpp"
     },
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.errorSquiggles": "disabled",
@@ -84,5 +85,6 @@
     "C_Cpp.codeAnalysis.clangTidy.checks.disabled": [
         "clang-diagnostic-vla-cxx-extension"
     ],
-    "C_Cpp.default.compilerPath": ""
+    "C_Cpp.default.compilerPath": "",
+    "cpputestTestAdapter.debugLaunchConfigurationName": "(gdb) Launch"
 }

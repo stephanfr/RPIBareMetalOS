@@ -37,8 +37,8 @@ test-coverage : clean_test $(COVERAGE_EXE)
 	genhtml $(COVERAGE_TEST_OBJ_DIR)/test_coverage_filtered.info --output-directory $(COVERAGE_TEST_OBJ_DIR)/coverage_report
 
 $(TEST_EXE) : $(OBJ) $(TEST_OBJ)
-	$(LD) $(OBJ) $(TEST_OBJ) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
-#	-./$(TEST_EXE)
+	$(LD) $(TEST_LDFLAGS) $(OBJ) $(TEST_OBJ) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
+	-./$(TEST_EXE)
 
 $(TEST_OBJ_DIR)/%.o: $(CPP_TEST_SRC_DIR)/%.cpp
 	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(TEST_OPTIMIZATION_FLAGS) $(TEST_CPP_FLAGS) $(CDEFINES) -c $< -o $@

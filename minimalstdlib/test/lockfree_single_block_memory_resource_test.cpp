@@ -540,7 +540,7 @@ namespace
 
     TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadAllocateDeallocateTest)
     {
-        constexpr size_t NUM_THREADS = 4;
+        constexpr size_t NUM_THREADS = 12;
 
         start_allocations = false;
 
