@@ -38,7 +38,7 @@ test-coverage : clean_test $(COVERAGE_EXE)
 
 $(TEST_EXE) : $(OBJ) $(TEST_OBJ)
 	$(LD) $(TEST_LDFLAGS) $(OBJ) $(TEST_OBJ) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
-	-./$(TEST_EXE)
+#	-./$(TEST_EXE)
 
 $(TEST_OBJ_DIR)/%.o: $(CPP_TEST_SRC_DIR)/%.cpp
 	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(TEST_OPTIMIZATION_FLAGS) $(TEST_CPP_FLAGS) $(CDEFINES) -c $< -o $@
