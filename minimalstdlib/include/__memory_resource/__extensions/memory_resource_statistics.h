@@ -68,6 +68,10 @@ namespace MINIMAL_STD_NAMESPACE
                     total_allocations_.fetch_add(1, memory_order_relaxed);
                     size_t current_allocated = current_allocated_.add_fetch(1, memory_order_acq_rel);
                     current_bytes_allocated_.fetch_add(size, memory_order_relaxed);
+
+                    //  Note: This update is not atomic. In a race between concurrent allocations,
+                    //  peak_allocated_ may occasionally not reflect the true peak if a higher value
+                    //  is overwritten by a lower one. This is acceptable for statistics purposes.
                     peak_allocated_ = max(peak_allocated_.load(memory_order_acquire), current_allocated);
                 }
 
