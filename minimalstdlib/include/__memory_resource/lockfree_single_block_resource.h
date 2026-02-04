@@ -81,16 +81,23 @@ namespace MINIMAL_STD_NAMESPACE
                 // 4-byte fields
                 atomic<uint32_t> requested_size_;                  // 0x20, 4B
                 uint32_t total_size_;                              // 0x24, 4B
-                uint32_t next_free_block_index_;                   // 0x28, 4B
-                uint32_t next_soft_deleted_index_;                 // 0x2C, 4B
-                uint32_t next_free_header_index_;                  // 0x30, 4B
+
+                // Union for mutually exclusive list indices - metadata can only be on one list at a time:
+                // - AVAILABLE state: on free block list (next_free_block_index_)
+                // - SOFT_DELETED state: on soft-deleted list (next_soft_deleted_index_)
+                // - METADATA_AVAILABLE state: on free metadata list (next_free_header_index_)
+                union {                                            // 0x28, 4B
+                    uint32_t next_free_block_index_;
+                    uint32_t next_soft_deleted_index_;
+                    uint32_t next_free_header_index_;
+                };
 
                 // 1-byte fields
-                uint8_t alignment_;                                // 0x34, 1B
-                atomic<uint8_t> state_;                            // 0x35, 1B
+                uint8_t alignment_;                                // 0x2C, 1B
+                atomic<uint8_t> state_;                            // 0x2D, 1B
 
-                // Padding
-                uint8_t reserved_[9];                              // 0x36, 10B
+                // Padding to 64 bytes
+                uint8_t reserved_[18];                             // 0x2E, 18B
 
                 /**
                  * @brief Computes a 64-bit hash value for the memory block.
