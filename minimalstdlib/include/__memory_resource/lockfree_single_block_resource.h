@@ -88,11 +88,9 @@ namespace MINIMAL_STD_NAMESPACE
                 // 1-byte fields
                 uint8_t alignment_;                                // 0x34, 1B
                 atomic<uint8_t> state_;                            // 0x35, 1B
-                uint8_t flags_;                                    // 0x36, 1B
-                uint8_t reserved_byte_;                            // 0x37, 1B
 
                 // Padding
-                uint8_t reserved_[8];                              // 0x38, 8B
+                uint8_t reserved_[9];                              // 0x36, 10B
 
                 /**
                  * @brief Computes a 64-bit hash value for the memory block.
@@ -268,6 +266,10 @@ namespace MINIMAL_STD_NAMESPACE
                  33554432, 33554432 + 2097152, 33554432 + (2097152 * 2), 33554432 + (2097152 * 3), 33554432 + (2097152 * 4), 33554432 + (2097152 * 5), 33554432 + (2097152 * 6), 33554432 + (2097152 * 7), 33554432 + (2097152 * 8), 33554432 + (2097152 * 9), 33554432 + (2097152 * 10), 33554432 + (2097152 * 11), 33554432 + (2097152 * 12), 33554432 + (2097152 * 13), 33554432 + (2097152 * 14), 33554432 + (2097152 * 15),
                  UINT64_MAX};
 
+        public:
+            static constexpr size_t MAX_ALLOCATION_SIZE = free_block_bin_sizes[NUM_FREE_BLOCK_BINS - 2];
+
+        private:
             const void *const block_;
             const size_t block_size_;
             block_metadata *const metadata_start_;
@@ -459,6 +461,11 @@ namespace MINIMAL_STD_NAMESPACE
                 //      If we do not find one, then allocate a net-new block.
 
                 uint64_t total_size = internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
+
+                if (total_size > MAX_ALLOCATION_SIZE)
+                {
+                    return nullptr;
+                }
                 auto free_block_bin = free_block_bin_index(total_size);
                 auto shard = cpu_shard_index();
 

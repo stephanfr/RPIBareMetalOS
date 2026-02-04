@@ -86,5 +86,8 @@
         "clang-diagnostic-vla-cxx-extension"
     ],
     "C_Cpp.default.compilerPath": "",
-    "cpputestTestAdapter.debugLaunchConfigurationName": "(gdb) Launch"
+    "cpputestTestAdapter.debugLaunchConfigurationName": "(gdb) Launch",
+    "chat.tools.terminal.autoApprove": {
+        "make": true
+    }
 }

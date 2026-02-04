@@ -326,6 +326,16 @@ namespace
         CHECK(allocation_info.alignment == default_alignment);
     }
 
+    TEST(LockfreeSingleBlockMemoryResourceTests, AllocationLargerThanMaxIsRejected)
+    {
+        lockfree_single_block_resource_with_stats resource(buffer, buffer_size);
+
+        size_t too_large = lockfree_single_block_resource_with_stats::MAX_ALLOCATION_SIZE + 1;
+        void *ptr = resource.allocate(too_large);
+
+        CHECK(ptr == nullptr);
+    }
+
     TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
     {
         constexpr size_t NUM_THREADS = 16;
