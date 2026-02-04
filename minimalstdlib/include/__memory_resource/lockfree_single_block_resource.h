@@ -16,6 +16,7 @@
 #include "__extensions/hash_check.h"
 #include "__extensions/memory_resource_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
+#include "lockfree/tagged_ptr.h"
 #include "memory_resource.h"
 
 #include "stdio.h"
@@ -151,11 +152,11 @@ namespace MINIMAL_STD_NAMESPACE
                 : block_(block),
                   block_size_(block_size),
                   metadata_start_(static_cast<block_metadata *>(internal::align_pointer((char *)block + block_size, 64)) - 1),
-                  next_empty_memory_block_(static_cast<block_header *>(internal::align_pointer(block, DEFAULT_ALIGNMENT))),
+                  next_empty_memory_block_(block_tag::make(static_cast<block_header *>(internal::align_pointer(block, DEFAULT_ALIGNMENT)))),
                   current_metadata_record_count_(0),
-                  metadata_head_((block_metadata *)&end_of_metadata_list_sentinel_),
-                  soft_deleted_metadata_head_((block_metadata *)nullptr),
-                  free_metadata_head_((block_metadata *)nullptr),
+                  metadata_head_(metadata_tag::make((block_metadata *)&end_of_metadata_list_sentinel_)),
+                  soft_deleted_metadata_head_(metadata_tag::make(nullptr)),
+                  free_metadata_head_(metadata_tag::make(nullptr)),
                   number_of_active_iterators_(0),
                   hard_delete_before_counter_cutoff_(SIZE_MAX),
                   reclaimation_pass_(false),
@@ -163,7 +164,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 for (auto &bin : free_block_bins_)
                 {
-                    bin.head_.store(static_cast<block_metadata *>(nullptr), memory_order_release);
+                    bin.head_.store(metadata_tag::make(nullptr), memory_order_release);
                 }
             }
 
@@ -192,9 +193,12 @@ namespace MINIMAL_STD_NAMESPACE
         private:
             inline static const block_metadata end_of_metadata_list_sentinel_ = {nullptr, nullptr, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {}};
 
+            using metadata_tag = lockfree::tagged_ptr<block_metadata, uint16_t>;
+            using block_tag = lockfree::tagged_ptr<block_header, uint16_t>;
+
             struct alignas(64) free_block_bin
             {
-                atomic<block_metadata *> head_;
+                atomic<uint64_t> head_;
 
                 size_t padding[6];
             };
@@ -228,12 +232,12 @@ namespace MINIMAL_STD_NAMESPACE
             const size_t block_size_;
             block_metadata *const metadata_start_;
 
-            alignas(64) atomic<block_header *> next_empty_memory_block_;
+            alignas(64) atomic<uint64_t> next_empty_memory_block_;
 
             alignas(64) atomic<size_t> current_metadata_record_count_;
-            alignas(64) atomic<block_metadata *> metadata_head_;
-            alignas(64) atomic<block_metadata *> soft_deleted_metadata_head_;
-            alignas(64) atomic<block_metadata *> free_metadata_head_;
+            alignas(64) atomic<uint64_t> metadata_head_;
+            alignas(64) atomic<uint64_t> soft_deleted_metadata_head_;
+            alignas(64) atomic<uint64_t> free_metadata_head_;
 
             alignas(64) atomic<int64_t> number_of_active_iterators_;
             alignas(64) atomic<uint64_t> hard_delete_before_counter_cutoff_;
@@ -259,7 +263,8 @@ namespace MINIMAL_STD_NAMESPACE
 
             bool is_last_block(const block_metadata &metadata)
             {
-                return ((uint8_t *)next_empty_memory_block_.load(memory_order_acquire) == ((uint8_t *)metadata.memory_block_.load(memory_order_acquire)) + metadata.total_size_);
+                auto next_empty = block_tag::unpack_ptr(next_empty_memory_block_.load(memory_order_acquire));
+                return ((uint8_t *)next_empty == ((uint8_t *)metadata.memory_block_.load(memory_order_acquire)) + metadata.total_size_);
             }
 
             uint64_t free_block_bin_index(size_t bytes) const
@@ -326,14 +331,19 @@ namespace MINIMAL_STD_NAMESPACE
 
                     size_t retries = 0;
 
-                    block_metadata *free_head = free_metadata_head_.load(memory_order_acquire);
+                    uint64_t free_head_tag = free_metadata_head_.load(memory_order_acquire);
+
+                    uint64_t new_tag = 0;
 
                     do
                     {
                         back_off(retries);
 
+                        block_metadata *free_head = metadata_tag::unpack_ptr(free_head_tag);
                         metadata.next_free_header_index_ = metadata_to_index(free_head);
-                    } while (!free_metadata_head_.compare_exchange_strong(free_head, &metadata, memory_order_acq_rel, memory_order_acquire));
+
+                        new_tag = metadata_tag::pack(&metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(free_head_tag) + 1));
+                    } while (!free_metadata_head_.compare_exchange_strong(free_head_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 metadata.next_soft_deleted_index_ = NULL_INDEX;
@@ -364,16 +374,21 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         platform::interrupt_guard guard;
 
-                        block_metadata *soft_deleted_head = soft_deleted_metadata_head_.load(memory_order_acquire);
+                        uint64_t soft_deleted_tag = soft_deleted_metadata_head_.load(memory_order_acquire);
 
                         size_t retries = 0;
+
+                        uint64_t new_tag = 0;
 
                         do
                         {
                             back_off(retries);
 
+                            block_metadata *soft_deleted_head = metadata_tag::unpack_ptr(soft_deleted_tag);
                             metadata.next_soft_deleted_index_ = metadata_to_index(soft_deleted_head);
-                        } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_head, &metadata, memory_order_acq_rel, memory_order_acquire));
+
+                            new_tag = metadata_tag::pack(&metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(soft_deleted_tag) + 1));
+                        } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                     }
                 }
             }
@@ -430,12 +445,17 @@ namespace MINIMAL_STD_NAMESPACE
                     //  Put the metadata record into the master list of metadata records.
                     //      This list is a singly linked list that contains all metadata records ever created.
 
-                    block_metadata *current = metadata_head_.load(memory_order_acquire);
+                    uint64_t current_tag = metadata_head_.load(memory_order_acquire);
+
+                    uint64_t new_tag = 0;
 
                     do
                     {
+                        block_metadata *current = metadata_tag::unpack_ptr(current_tag);
                         metadata->next_.store(current, memory_order_release);
-                    } while (!metadata_head_.compare_exchange_weak(current, metadata, memory_order_acq_rel, memory_order_acquire));
+
+                        new_tag = metadata_tag::pack(metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
+                    } while (!metadata_head_.compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
@@ -512,11 +532,19 @@ namespace MINIMAL_STD_NAMESPACE
                     //  If the next empty block pointer is moved back to the start of the block, then it is permanently
                     //      deleted and we can put the metadata directly into the soft deleted list.
 
-                    if (next_empty_memory_block_.compare_exchange_strong(expected_empty_block_position, block_to_deallocate->memory_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
-                    {
-                        move_metadata_to_soft_deleted_list(*block_to_deallocate);
+                    uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
 
-                        return;
+                    if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
+                    {
+                        uint64_t new_tag = block_tag::pack(block_to_deallocate->memory_block_.load(memory_order_acquire),
+                                                          static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
+
+                        if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            move_metadata_to_soft_deleted_list(*block_to_deallocate);
+
+                            return;
+                        }
                     }
                 }
 
@@ -533,16 +561,21 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
-                    block_metadata *current_free_block_metadata = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
+                    uint64_t current_free_tag = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
 
                     size_t retries = 0;
+
+                    uint64_t new_tag = 0;
 
                     do
                     {
                         back_off(retries);
 
+                        block_metadata *current_free_block_metadata = metadata_tag::unpack_ptr(current_free_tag);
                         block_to_deallocate->next_free_block_index_ = metadata_to_index(current_free_block_metadata);
-                    } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_block_metadata, block_to_deallocate, memory_order_acq_rel, memory_order_acq_rel));
+
+                        new_tag = metadata_tag::pack(block_to_deallocate, static_cast<uint16_t>(metadata_tag::unpack_counter(current_free_tag) + 1));
+                    } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_tag, new_tag, memory_order_acq_rel, memory_order_acq_rel));
                 }
 
                 //  Finished
@@ -577,14 +610,18 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
-                    current = next_empty_memory_block_.load(memory_order_acquire);
+                    uint64_t current_tag = next_empty_memory_block_.load(memory_order_acquire);
+                    current = block_tag::unpack_ptr(current_tag);
 
                     size_t retries = 0;
+
+                    uint64_t new_tag = 0;
 
                     do
                     {
                         back_off(retries);
 
+                        current = block_tag::unpack_ptr(current_tag);
                         next = reinterpret_cast<block_header *>(internal::align_pointer(reinterpret_cast<uint8_t *>(current) + allocation_size, DEFAULT_ALIGNMENT));
 
                         //  If the next block intrudes into the metadata area, then we are out of memory so return null
@@ -593,7 +630,8 @@ namespace MINIMAL_STD_NAMESPACE
                         {
                             return nullptr;
                         }
-                    } while (!next_empty_memory_block_.compare_exchange_strong(current, next, memory_order_acq_rel, memory_order_acquire));
+                        new_tag = block_tag::pack(next, static_cast<uint16_t>(block_tag::unpack_counter(current_tag) + 1));
+                    } while (!next_empty_memory_block_.compare_exchange_strong(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 next->previous_block_ = current;
@@ -622,17 +660,19 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
-                    block_metadata *current = free_metadata_head_.load(memory_order_acquire);
+                    uint64_t current_tag = free_metadata_head_.load(memory_order_acquire);
 
                     size_t retries = 0;
 
-                    while (current != nullptr)
+                    while (metadata_tag::unpack_ptr(current_tag) != nullptr)
                     {
                         back_off(retries);
 
+                        block_metadata *current = metadata_tag::unpack_ptr(current_tag);
                         block_metadata *next = index_to_metadata(current->next_free_header_index_);
+                        uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
 
-                        if (free_metadata_head_.compare_exchange_strong(current, next, memory_order_acq_rel, memory_order_acquire))
+                        if (free_metadata_head_.compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
                         {
                             current->next_free_header_index_ = NULL_INDEX;
                             return metadata_start_ - current;
@@ -663,19 +703,24 @@ namespace MINIMAL_STD_NAMESPACE
 
                 block_metadata *head;
                 block_metadata *next = nullptr;
+                uint64_t head_tag;
 
                 {
                     platform::interrupt_guard guard;
 
-                    head = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
+                    head_tag = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
 
                     size_t retries = 0;
+
+                    uint64_t next_tag = 0;
 
                     do
                     {
                         back_off(retries);
 
                         //  If the head is the end of the list, then the list is empty so return nullptr
+
+                        head = metadata_tag::unpack_ptr(head_tag);
 
                         if (head == nullptr)
                         {
@@ -687,7 +732,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                         next = index_to_metadata(head->next_free_block_index_);
 
-                    } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(head, next, memory_order_acq_rel, memory_order_acquire));
+                        next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
+
+                    } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 //  CAS succeeded, head is now popped from the bin
@@ -707,11 +754,19 @@ namespace MINIMAL_STD_NAMESPACE
                     //  If the next empty block pointer is moved back to the start of the block, then it is permanently
                     //      deleted and we can put the metadata directly into the soft deleted list.
 
-                    if (next_empty_memory_block_.compare_exchange_strong(expected_empty_block_position, head->memory_block_.load(memory_order_acquire), memory_order_acq_rel, memory_order_acquire))
-                    {
-                        move_metadata_to_soft_deleted_list(*head);
+                    uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
 
-                        goto try_again;
+                    if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
+                    {
+                        uint64_t new_tag = block_tag::pack(head->memory_block_.load(memory_order_acquire),
+                                                          static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
+
+                        if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            move_metadata_to_soft_deleted_list(*head);
+
+                            goto try_again;
+                        }
                     }
                 }
 
@@ -740,7 +795,8 @@ namespace MINIMAL_STD_NAMESPACE
                 //  Walk the soft deleted list and reclaim any metadata records that are older than the hard delete cutoff
 
                 block_metadata *previous = nullptr;
-                block_metadata *current = soft_deleted_metadata_head_.load(memory_order_acquire);
+                uint64_t current_tag = soft_deleted_metadata_head_.load(memory_order_acquire);
+                block_metadata *current = metadata_tag::unpack_ptr(current_tag);
 
                 while (current != nullptr)
                 {
@@ -764,7 +820,10 @@ namespace MINIMAL_STD_NAMESPACE
                         //  Pop the head of the soft delete metadata list.  This could fail if a new record has been added
                         //      to the front of the list in a different thread.
 
-                        if (soft_deleted_metadata_head_.compare_exchange_strong(current, index_to_metadata(current->next_soft_deleted_index_), memory_order_acq_rel))
+                        block_metadata *next = index_to_metadata(current->next_soft_deleted_index_);
+                        uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
+
+                        if (soft_deleted_metadata_head_.compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel))
                         {
                             //  Element popped, so add current to the front of the free list
 
@@ -773,7 +832,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                         //  Start again at the head of the list on either success or failure above
 
-                        current = soft_deleted_metadata_head_.load(memory_order_acquire);
+                        current_tag = soft_deleted_metadata_head_.load(memory_order_acquire);
+                        current = metadata_tag::unpack_ptr(current_tag);
                     }
                     else
                     {
@@ -871,7 +931,7 @@ namespace MINIMAL_STD_NAMESPACE
             const_iterator begin() const
             {
                 const_cast<lockfree_single_block_resource &>(*this).number_of_active_iterators_.fetch_add(1, memory_order_acq_rel);
-                return const_iterator(*this, metadata_head_.load(memory_order_acquire));
+                return const_iterator(*this, metadata_tag::unpack_ptr(metadata_head_.load(memory_order_acquire)));
             }
 
             const const_iterator &end() const
