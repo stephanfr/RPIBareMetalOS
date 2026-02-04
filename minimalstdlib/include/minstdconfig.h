@@ -32,6 +32,10 @@ extern "C" void __assert(const char *msg, const char *file, int line);
 
 #define _MINIMAL_STD_PROVIDE_COMPILER_STD_NAMESPACE_DEPENDENCIES
 
+#ifndef MINSTD_GET_CPU_ID
+#define MINSTD_GET_CPU_ID() ::MINIMAL_STD_NAMESPACE::pmr::platform::get_cpu_id()
+#endif
+
 using nullptr_t = decltype(nullptr);
 
 constexpr size_t DEFAULT_FIXED_STRING_MAX_SIZE = 64;

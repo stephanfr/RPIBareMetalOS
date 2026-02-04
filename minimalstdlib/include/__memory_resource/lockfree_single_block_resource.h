@@ -164,7 +164,10 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 for (auto &bin : free_block_bins_)
                 {
-                    bin.head_.store(metadata_tag::make(nullptr), memory_order_release);
+                    for (auto &shard : bin)
+                    {
+                        shard.head_.store(metadata_tag::make(nullptr), memory_order_release);
+                    }
                 }
             }
 
@@ -207,6 +210,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             inline static fast_lockfree_low_quality_rng id_generator_;
 
+            static constexpr size_t NUM_CPU_SHARDS = 8;
             static constexpr size_t NUM_FREE_BLOCK_BINS = 257;
 
             static constexpr array<const size_t, NUM_FREE_BLOCK_BINS> free_block_bin_sizes =
@@ -244,7 +248,12 @@ namespace MINIMAL_STD_NAMESPACE
 
             alignas(64) atomic<bool> reclaimation_pass_;
 
-            array<free_block_bin, NUM_FREE_BLOCK_BINS> free_block_bins_;
+            array<array<free_block_bin, NUM_CPU_SHARDS>, NUM_FREE_BLOCK_BINS> free_block_bins_;
+
+            size_t cpu_shard_index() const
+            {
+                return static_cast<size_t>(MINSTD_GET_CPU_ID()) % NUM_CPU_SHARDS;
+            }
 
             const block_header &as_block_header(void *block) const
             {
@@ -408,8 +417,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                 uint64_t total_size = internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
                 auto free_block_bin = free_block_bin_index(total_size);
+                auto shard = cpu_shard_index();
 
-                block_header *free_block = search_for_deallocated_block(free_block_bin);
+                block_header *free_block = search_for_deallocated_block(free_block_bin, shard);
 
                 if (free_block == nullptr)
                 {
@@ -557,11 +567,12 @@ namespace MINIMAL_STD_NAMESPACE
                 //  Protect with interrupt guard to prevent ABA issues during the push operation.
 
                 auto free_block_bin = free_block_bin_index(block_to_deallocate->total_size_);
+                auto shard = cpu_shard_index();
 
                 {
                     platform::interrupt_guard guard;
 
-                    uint64_t current_free_tag = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
+                    uint64_t current_free_tag = free_block_bins_[free_block_bin][shard].head_.load(memory_order_acquire);
 
                     size_t retries = 0;
 
@@ -575,7 +586,7 @@ namespace MINIMAL_STD_NAMESPACE
                         block_to_deallocate->next_free_block_index_ = metadata_to_index(current_free_block_metadata);
 
                         new_tag = metadata_tag::pack(block_to_deallocate, static_cast<uint16_t>(metadata_tag::unpack_counter(current_free_tag) + 1));
-                    } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(current_free_tag, new_tag, memory_order_acq_rel, memory_order_acq_rel));
+                    } while (!free_block_bins_[free_block_bin][shard].head_.compare_exchange_strong(current_free_tag, new_tag, memory_order_acq_rel, memory_order_acq_rel));
                 }
 
                 //  Finished
@@ -691,7 +702,7 @@ namespace MINIMAL_STD_NAMESPACE
                 return next_record_index;
             }
 
-            block_header *search_for_deallocated_block(uint64_t free_block_bin)
+            block_header *search_for_deallocated_block(uint64_t free_block_bin, size_t shard)
             {
                 //  Pop the top of the free block bin
                 //
@@ -708,7 +719,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
-                    head_tag = free_block_bins_[free_block_bin].head_.load(memory_order_acquire);
+                    head_tag = free_block_bins_[free_block_bin][shard].head_.load(memory_order_acquire);
 
                     size_t retries = 0;
 
@@ -734,7 +745,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
 
-                    } while (!free_block_bins_[free_block_bin].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
+                    } while (!free_block_bins_[free_block_bin][shard].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 //  CAS succeeded, head is now popped from the bin
