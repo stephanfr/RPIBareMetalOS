@@ -16,13 +16,8 @@
 
 namespace MINIMAL_STD_NAMESPACE
 {
-#if __has_builtin(__remove_cvref)
-    template <class _Tp>
-    using __remove_cvref_t _MINIMAL_STD_NODEBUG = typename __remove_cvref<_Tp>::type;
-#else
     template <class _Tp>
     using __remove_cvref_t _MINIMAL_STD_NODEBUG = remove_cv_t<__minstdlib_remove_reference_t<_Tp>>;
-#endif // __has_builtin(__remove_cvref)
 
     template <class _Tp, class _Up>
     using __is_same_uncvref = _IsSame<__remove_cvref_t<_Tp>, __remove_cvref_t<_Up>>;

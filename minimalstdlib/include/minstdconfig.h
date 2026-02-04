@@ -9,6 +9,32 @@ static_assert(__cplusplus >= 202002L, "Minimal C++ Stdlib requires C++ 20 or lat
 #include <stddef.h>
 #include <stdint.h>
 
+#ifndef MINSTD_GET_CPU_ID
+#if defined(__linux__)
+#include <sched.h>
+static inline uint32_t minstd_default_get_cpu_id()
+{
+    int cpu = sched_getcpu();
+    return (cpu < 0) ? 0u : static_cast<uint32_t>(cpu);
+}
+#define MINSTD_GET_CPU_ID() ::minstd_default_get_cpu_id()
+#else
+#define MINSTD_GET_CPU_ID() 0u
+#endif
+#endif
+
+#ifndef MINSTD_CPU_SHARDS
+#define MINSTD_CPU_SHARDS 4
+#endif
+
+#ifndef MINSTD_LOCAL_FREE_CACHE_DEPTH
+#define MINSTD_LOCAL_FREE_CACHE_DEPTH 4
+#endif
+
+#ifndef MINSTD_LOCAL_FREE_CACHE_MAX_BYTES
+#define MINSTD_LOCAL_FREE_CACHE_MAX_BYTES 4096
+#endif
+
 extern "C" void __assert(const char *msg, const char *file, int line);
 
 #define MINIMAL_STD_NAMESPACE minstd

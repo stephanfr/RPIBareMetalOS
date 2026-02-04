@@ -61,6 +61,8 @@ clean_test:
 	/bin/rm -rf $(COVERAGE_TEST_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(TEST_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(COVERAGE_TEST_OBJ_DIR) > /dev/null 2> /dev/null || true
+	/bin/mkdir -p build/x64 > /dev/null 2> /dev/null || true
+	/bin/mkdir -p lib/x64 > /dev/null 2> /dev/null || true
 
 echo:
 	@echo "Build Directories:      			" $(TEST_BUILD_DIRS)
