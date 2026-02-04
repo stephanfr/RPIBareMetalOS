@@ -148,35 +148,61 @@ namespace MINIMAL_STD_NAMESPACE
             lockfree_single_block_resource() = delete;
 
             explicit lockfree_single_block_resource(void *block,
-                                                    size_t block_size)
+                                                    size_t block_size,
+                                                    size_t cpu_shards = DEFAULT_CPU_SHARDS)
                 : block_(block),
                   block_size_(block_size),
                   metadata_start_(static_cast<block_metadata *>(internal::align_pointer((char *)block + block_size, 64)) - 1),
-                  next_empty_memory_block_(block_tag::make(static_cast<block_header *>(internal::align_pointer(block, DEFAULT_ALIGNMENT)))),
+                  next_empty_memory_block_(0),  // Will be set after allocating per-CPU arrays
                   current_metadata_record_count_(0),
                   metadata_head_(metadata_tag::make((block_metadata *)&end_of_metadata_list_sentinel_)),
-                  soft_deleted_metadata_heads_{},
-                  free_metadata_heads_{},
+                  soft_deleted_metadata_heads_(nullptr),
+                  free_metadata_heads_(nullptr),
+                  free_block_bins_(nullptr),
+                  cpu_shards_(cpu_shards > 0 ? cpu_shards : 1),
                   number_of_active_iterators_(0),
                   hard_delete_before_counter_cutoff_(SIZE_MAX),
                   reclaimation_pass_(false),
                   itr_end_(*this, &end_of_metadata_list_sentinel_)
             {
-                for (auto &head : soft_deleted_metadata_heads_)
+                //  Allocate the per-CPU shard arrays from the start of the managed block.
+                //  Layout: [soft_deleted_heads][free_metadata_heads][64-byte align][free_block_bins][64-byte align][allocations...]
+
+                uint8_t *current_ptr = static_cast<uint8_t *>(internal::align_pointer(block, DEFAULT_ALIGNMENT));
+
+                //  Allocate soft_deleted_metadata_heads_ array
+                soft_deleted_metadata_heads_ = reinterpret_cast<atomic<uint64_t> *>(current_ptr);
+                current_ptr += cpu_shards_ * sizeof(atomic<uint64_t>);
+
+                //  Allocate free_metadata_heads_ array
+                free_metadata_heads_ = reinterpret_cast<atomic<uint64_t> *>(current_ptr);
+                current_ptr += cpu_shards_ * sizeof(atomic<uint64_t>);
+
+                //  Align to 64 bytes for the free_block_bins_ array (each bin is 64-byte aligned)
+                current_ptr = static_cast<uint8_t *>(internal::align_pointer(current_ptr, DEFAULT_ALIGNMENT));
+
+                //  Allocate free_block_bins_ array (NUM_FREE_BLOCK_BINS * cpu_shards_ elements)
+                free_block_bins_ = reinterpret_cast<free_block_bin *>(current_ptr);
+                current_ptr += NUM_FREE_BLOCK_BINS * cpu_shards_ * sizeof(free_block_bin);
+
+                //  Align to 64 bytes for the start of allocations
+                current_ptr = static_cast<uint8_t *>(internal::align_pointer(current_ptr, DEFAULT_ALIGNMENT));
+
+                //  Set next_empty_memory_block_ to point after the per-CPU arrays
+                next_empty_memory_block_.store(block_tag::make(reinterpret_cast<block_header *>(current_ptr)), memory_order_release);
+
+                //  Initialize all per-CPU shard arrays
+                for (size_t i = 0; i < cpu_shards_; ++i)
                 {
-                    head.store(metadata_tag::make(nullptr), memory_order_release);
+                    soft_deleted_metadata_heads_[i].store(metadata_tag::make(nullptr), memory_order_release);
+                    free_metadata_heads_[i].store(metadata_tag::make(nullptr), memory_order_release);
                 }
 
-                for (auto &head : free_metadata_heads_)
+                for (size_t bin = 0; bin < NUM_FREE_BLOCK_BINS; ++bin)
                 {
-                    head.store(metadata_tag::make(nullptr), memory_order_release);
-                }
-
-                for (auto &bin : free_block_bins_)
-                {
-                    for (auto &shard : bin)
+                    for (size_t shard = 0; shard < cpu_shards_; ++shard)
                     {
-                        shard.head_.store(metadata_tag::make(nullptr), memory_order_release);
+                        free_block_bins_[bin * cpu_shards_ + shard].head_.store(metadata_tag::make(nullptr), memory_order_release);
                     }
                 }
             }
@@ -220,7 +246,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             inline static fast_lockfree_low_quality_rng id_generator_;
 
-            static constexpr size_t NUM_CPU_SHARDS = 8;
+            static constexpr size_t DEFAULT_CPU_SHARDS = 8;
             static constexpr size_t NUM_FREE_BLOCK_BINS = 257;
 
             static constexpr array<const size_t, NUM_FREE_BLOCK_BINS> free_block_bin_sizes =
@@ -250,19 +276,22 @@ namespace MINIMAL_STD_NAMESPACE
 
             alignas(64) atomic<size_t> current_metadata_record_count_;
             alignas(64) atomic<uint64_t> metadata_head_;
-            alignas(64) array<atomic<uint64_t>, NUM_CPU_SHARDS> soft_deleted_metadata_heads_;
-            alignas(64) array<atomic<uint64_t>, NUM_CPU_SHARDS> free_metadata_heads_;
+
+            //  Per-CPU shard arrays - dynamically allocated from the managed block
+            //  These pointers point to arrays allocated at the start of the block
+            atomic<uint64_t> *soft_deleted_metadata_heads_;
+            atomic<uint64_t> *free_metadata_heads_;
+            free_block_bin *free_block_bins_;
+            size_t cpu_shards_;
 
             alignas(64) atomic<int64_t> number_of_active_iterators_;
             alignas(64) atomic<uint64_t> hard_delete_before_counter_cutoff_;
 
             alignas(64) atomic<bool> reclaimation_pass_;
 
-            array<array<free_block_bin, NUM_CPU_SHARDS>, NUM_FREE_BLOCK_BINS> free_block_bins_;
-
             size_t cpu_shard_index() const
             {
-                return static_cast<size_t>(MINSTD_GET_CPU_ID()) % NUM_CPU_SHARDS;
+                return static_cast<size_t>(platform::get_cpu_id()) % cpu_shards_;
             }
 
             const block_header &as_block_header(void *block) const
@@ -586,7 +615,8 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
-                    uint64_t current_free_tag = free_block_bins_[free_block_bin][shard].head_.load(memory_order_acquire);
+                    size_t bin_index = free_block_bin * cpu_shards_ + shard;
+                    uint64_t current_free_tag = free_block_bins_[bin_index].head_.load(memory_order_acquire);
 
                     size_t retries = 0;
 
@@ -600,7 +630,7 @@ namespace MINIMAL_STD_NAMESPACE
                         block_to_deallocate->next_free_block_index_ = metadata_to_index(current_free_block_metadata);
 
                         new_tag = metadata_tag::pack(block_to_deallocate, static_cast<uint16_t>(metadata_tag::unpack_counter(current_free_tag) + 1));
-                    } while (!free_block_bins_[free_block_bin][shard].head_.compare_exchange_strong(current_free_tag, new_tag, memory_order_acq_rel, memory_order_acq_rel));
+                    } while (!free_block_bins_[bin_index].head_.compare_exchange_strong(current_free_tag, new_tag, memory_order_acq_rel, memory_order_acq_rel));
                 }
 
                 //  Finished
@@ -735,7 +765,8 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
-                    head_tag = free_block_bins_[free_block_bin][shard].head_.load(memory_order_acquire);
+                    size_t bin_index = free_block_bin * cpu_shards_ + shard;
+                    head_tag = free_block_bins_[bin_index].head_.load(memory_order_acquire);
 
                     size_t retries = 0;
 
@@ -761,7 +792,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
 
-                    } while (!free_block_bins_[free_block_bin][shard].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
+                    } while (!free_block_bins_[bin_index].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 //  CAS succeeded, head is now popped from the bin
@@ -821,7 +852,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Walk the soft deleted lists and reclaim any metadata records that are older than the hard delete cutoff
 
-                for (size_t shard = 0; shard < NUM_CPU_SHARDS; ++shard)
+                for (size_t shard = 0; shard < cpu_shards_; ++shard)
                 {
                     block_metadata *previous = nullptr;
                     uint64_t current_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);

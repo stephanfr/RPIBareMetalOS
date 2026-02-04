@@ -1,14 +1,23 @@
 ---------------------------- MODULE LockfreeAllocatorTagged ----------------------------
 (***************************************************************************)
-(* TLA+ specification of lock-free allocator with TAGGED POINTERS          *)
-(* for multi-core ABA protection.                                          *)
+(* TLA+ specification of lock-free allocator with TAGGED POINTERS,         *)
+(* PER-CPU SHARDED FREE LISTS, BUMP ALLOCATOR, and METADATA RECLAMATION.   *)
 (*                                                                         *)
-(* The key insight: CAS compares BOTH the index AND a version counter.     *)
-(* Even if the index returns to the same value (ABA), the version will     *)
-(* be different, causing CAS to fail and retry with fresh data.            *)
+(* Block states match C++ enum allocation_state exactly:                   *)
+(*   INVALID (0), IN_USE (1), AVAILABLE (2), SOFT_DELETED (3),             *)
+(*   METADATA_AVAILABLE (4), LOCKED (5)                                    *)
 (*                                                                         *)
-(* This model verifies that tagged pointers solve the multi-core ABA       *)
-(* problem that was found in LockfreeAllocatorMultiCPU.tla                 *)
+(* Key features modeled:                                                   *)
+(* - Bump allocator for fresh block/metadata allocation                    *)
+(* - Per-CPU sharded free lists with tagged-pointer CAS for ABA protection *)
+(* - is_last_block optimization for reclaiming the last allocated block    *)
+(* - LOCKED state for atomic deallocation (CAS IN_USE -> LOCKED)           *)
+(* - Soft-delete mechanism for safe metadata reclamation with iterators    *)
+(* - Iterator lifecycle affecting metadata reclamation timing              *)
+(* - Any CPU can deallocate any block (CAS provides mutual exclusion)      *)
+(*                                                                         *)
+(* The ownership tracking (allocatedBy) is for verification only - the     *)
+(* actual C++ code allows any thread with a valid pointer to deallocate.   *)
 (***************************************************************************)
 
 EXTENDS Integers, FiniteSets
@@ -19,54 +28,109 @@ CONSTANTS
     MaxInterruptDepth   \* Maximum interrupt nesting depth
 
 VARIABLES
-    \* Block state and free list structure
-    blockState,         \* "FREE", "IN_USE", "AVAILABLE"
-    freeListHead,       \* Index of head block (0 = empty)
-    freeListVersion,    \* Version counter for ABA protection
-    nextFreeBlock,      \* Next pointers for free list
+    \* ===== BLOCK MEMORY STATE =====
+    \* Tracks the state of each memory block (matches C++ allocation_state)
+    \* Note: SOFT_DELETED and METADATA_AVAILABLE apply to metadata records
+    \* that have been detached from their block (after is_last_block reclaim
+    \* or when reusing block from free list with new metadata)
+    blockState,         \* "INVALID", "IN_USE", "LOCKED", "AVAILABLE"
 
-    \* Per-CPU allocation state
-    cpuAllocState,      \* "IDLE", "ALLOC_READING", "ALLOC_GOT_NEXT"
+    \* ===== METADATA STATE =====
+    \* Tracks metadata records separately from block memory
+    \* Metadata can be: linked to a block (IN_USE/AVAILABLE), or
+    \* in soft-deleted list (SOFT_DELETED), or in free list (METADATA_AVAILABLE)
+    metadataState,      \* "INVALID", "IN_USE", "SOFT_DELETED", "METADATA_AVAILABLE"
+
+    \* ===== BUMP ALLOCATOR =====
+    nextEmptyBlock,     \* Next block index for fresh allocation
+    nextMetadataIndex,  \* Next metadata index for fresh allocation
+
+    \* ===== PER-CPU FREE BLOCK LISTS =====
+    freeListHead,       \* Per-CPU head block index (0 = empty)
+    freeListVersion,    \* Per-CPU version counter for ABA protection
+    nextFreeBlock,      \* Next pointers for free list linkage
+    blockMetadataIndex, \* Which metadata record is associated with each block
+
+    \* ===== PER-CPU SOFT-DELETED METADATA LISTS =====
+    softDeletedHead,    \* Per-CPU head of soft-deleted metadata (0 = empty)
+    softDeletedVersion, \* Per-CPU version counter for ABA protection
+    nextSoftDeleted,    \* Next pointers for soft-deleted list
+
+    \* ===== PER-CPU FREE METADATA LISTS =====
+    freeMetadataHead,   \* Per-CPU head of free metadata (0 = empty)
+    freeMetadataVersion,\* Per-CPU version counter for ABA protection
+    nextFreeMetadata,   \* Next pointers for free metadata list
+
+    \* ===== ITERATOR/RECLAMATION STATE =====
+    \* Models hard_delete_before_counter_cutoff_ and number_of_active_iterators_
+    activeIteratorCount,\* Number of active iterators (global)
+    hardDeleteCutoff,   \* Counter value for safe reclamation (0 = no iterators)
+    monotonicCounter,   \* Global monotonic counter (simplified)
+    softDeletedAt,      \* When each metadata was soft-deleted
+    reclaimInProgress,  \* Is a reclamation pass in progress?
+
+    \* ===== PER-CPU ALLOCATION STATE =====
+    cpuAllocState,      \* "IDLE", "ALLOC_READING", "ALLOC_GOT_NEXT", "ALLOC_BUMP", "ALLOC_GET_META"
     cpuAllocHead,       \* Snapshot of head index for CAS comparison
     cpuAllocVersion,    \* Snapshot of version for CAS comparison
     cpuAllocNext,       \* Snapshot of next pointer
+    cpuAllocBlock,      \* Block being allocated (for free list path)
 
-    \* Per-CPU deallocation state
-    cpuDeallocState,    \* "IDLE", "DEALLOC_LOCKED", "DEALLOC_PUSHING"
+    \* ===== PER-CPU DEALLOCATION STATE =====
+    cpuDeallocState,    \* "IDLE", "DEALLOC_LOCKED", "DEALLOC_PUSHING", "DEALLOC_RECLAIM", "DEALLOC_SOFT_DEL"
     cpuDeallocBlock,    \* Block being deallocated
     cpuDeallocHead,     \* Snapshot of head for push CAS
     cpuDeallocVersion,  \* Snapshot of version for push CAS
 
-    \* Interrupt state
+    \* ===== INTERRUPT STATE =====
     cpuInterruptDepth,
     cpuInterruptsEnabled,
 
-    \* Ownership tracking
+    \* ===== OWNERSHIP TRACKING (for verification only) =====
+    \* NOTE: This is NOT a constraint on deallocation - any CPU can deallocate
+    \* any IN_USE block. The CAS(IN_USE->LOCKED) provides mutual exclusion.
     allocatedBy         \* Which CPU owns each block (0 = unowned)
 
-vars == <<blockState, freeListHead, freeListVersion, nextFreeBlock,
-          cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext,
+vars == <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+          freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+          softDeletedHead, softDeletedVersion, nextSoftDeleted,
+          freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+          activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+          cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
           cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
           cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
 
-\* Version counter provides ABA protection
-\* In practice, 32-bit counter won't wrap during any in-flight operation
-\* For model checking with small state space, bound must exceed max ops during any CAS
 MaxVersion == 64
+MaxCounter == 100  \* Bound for monotonic counter in model checking
 
-\* Simple increment (no wrap-around in bounded model)
 IncVersion(v) == v + 1
 
 TypeOK ==
-    /\ blockState \in [1..NumBlocks -> {"FREE", "IN_USE", "AVAILABLE"}]
-    /\ freeListHead \in 0..NumBlocks
-    /\ freeListVersion \in 0..MaxVersion
+    /\ blockState \in [1..NumBlocks -> {"INVALID", "IN_USE", "LOCKED", "AVAILABLE"}]
+    /\ metadataState \in [1..NumBlocks -> {"INVALID", "IN_USE", "SOFT_DELETED", "METADATA_AVAILABLE"}]
+    /\ nextEmptyBlock \in 1..(NumBlocks + 1)
+    /\ nextMetadataIndex \in 1..(NumBlocks + 1)
+    /\ freeListHead \in [1..NumCPUs -> 0..NumBlocks]
+    /\ freeListVersion \in [1..NumCPUs -> 0..MaxVersion]
     /\ nextFreeBlock \in [1..NumBlocks -> 0..NumBlocks]
-    /\ cpuAllocState \in [1..NumCPUs -> {"IDLE", "ALLOC_READING", "ALLOC_GOT_NEXT"}]
+    /\ blockMetadataIndex \in [1..NumBlocks -> 0..NumBlocks]
+    /\ softDeletedHead \in [1..NumCPUs -> 0..NumBlocks]
+    /\ softDeletedVersion \in [1..NumCPUs -> 0..MaxVersion]
+    /\ nextSoftDeleted \in [1..NumBlocks -> 0..NumBlocks]
+    /\ freeMetadataHead \in [1..NumCPUs -> 0..NumBlocks]
+    /\ freeMetadataVersion \in [1..NumCPUs -> 0..MaxVersion]
+    /\ nextFreeMetadata \in [1..NumBlocks -> 0..NumBlocks]
+    /\ activeIteratorCount \in 0..NumCPUs
+    /\ hardDeleteCutoff \in 0..MaxCounter
+    /\ monotonicCounter \in 0..MaxCounter
+    /\ softDeletedAt \in [1..NumBlocks -> 0..MaxCounter]
+    /\ reclaimInProgress \in BOOLEAN
+    /\ cpuAllocState \in [1..NumCPUs -> {"IDLE", "ALLOC_READING", "ALLOC_GOT_NEXT", "ALLOC_BUMP", "ALLOC_GET_META"}]
     /\ cpuAllocHead \in [1..NumCPUs -> 0..NumBlocks]
     /\ cpuAllocVersion \in [1..NumCPUs -> 0..MaxVersion]
     /\ cpuAllocNext \in [1..NumCPUs -> 0..NumBlocks]
-    /\ cpuDeallocState \in [1..NumCPUs -> {"IDLE", "DEALLOC_LOCKED", "DEALLOC_PUSHING"}]
+    /\ cpuAllocBlock \in [1..NumCPUs -> 0..NumBlocks]
+    /\ cpuDeallocState \in [1..NumCPUs -> {"IDLE", "DEALLOC_LOCKED", "DEALLOC_PUSHING", "DEALLOC_RECLAIM"}]
     /\ cpuDeallocBlock \in [1..NumCPUs -> 0..NumBlocks]
     /\ cpuDeallocHead \in [1..NumCPUs -> 0..NumBlocks]
     /\ cpuDeallocVersion \in [1..NumCPUs -> 0..MaxVersion]
@@ -78,14 +142,30 @@ TypeOK ==
 (* Initialization *)
 
 Init ==
-    /\ blockState = [b \in 1..NumBlocks |-> "FREE"]
-    /\ freeListHead = NumBlocks
-    /\ freeListVersion = 0
-    /\ nextFreeBlock = [b \in 1..NumBlocks |-> IF b > 1 THEN b - 1 ELSE 0]
+    /\ blockState = [b \in 1..NumBlocks |-> "INVALID"]
+    /\ metadataState = [m \in 1..NumBlocks |-> "INVALID"]
+    /\ nextEmptyBlock = 1
+    /\ nextMetadataIndex = 1
+    /\ freeListHead = [c \in 1..NumCPUs |-> 0]
+    /\ freeListVersion = [c \in 1..NumCPUs |-> 0]
+    /\ nextFreeBlock = [b \in 1..NumBlocks |-> 0]
+    /\ blockMetadataIndex = [b \in 1..NumBlocks |-> 0]
+    /\ softDeletedHead = [c \in 1..NumCPUs |-> 0]
+    /\ softDeletedVersion = [c \in 1..NumCPUs |-> 0]
+    /\ nextSoftDeleted = [m \in 1..NumBlocks |-> 0]
+    /\ freeMetadataHead = [c \in 1..NumCPUs |-> 0]
+    /\ freeMetadataVersion = [c \in 1..NumCPUs |-> 0]
+    /\ nextFreeMetadata = [m \in 1..NumBlocks |-> 0]
+    /\ activeIteratorCount = 0
+    /\ hardDeleteCutoff = 0
+    /\ monotonicCounter = 1
+    /\ softDeletedAt = [m \in 1..NumBlocks |-> 0]
+    /\ reclaimInProgress = FALSE
     /\ cpuAllocState = [c \in 1..NumCPUs |-> "IDLE"]
     /\ cpuAllocHead = [c \in 1..NumCPUs |-> 0]
     /\ cpuAllocVersion = [c \in 1..NumCPUs |-> 0]
     /\ cpuAllocNext = [c \in 1..NumCPUs |-> 0]
+    /\ cpuAllocBlock = [c \in 1..NumCPUs |-> 0]
     /\ cpuDeallocState = [c \in 1..NumCPUs |-> "IDLE"]
     /\ cpuDeallocBlock = [c \in 1..NumCPUs |-> 0]
     /\ cpuDeallocHead = [c \in 1..NumCPUs |-> 0]
@@ -95,35 +175,59 @@ Init ==
     /\ allocatedBy = [b \in 1..NumBlocks |-> 0]
 
 -----------------------------------------------------------------------------
-(* Allocation - Pop from free list *)
-(* Protected by interrupt guard on same CPU *)
+(* ALLOCATION - Two paths: free list (preferred) or bump allocator         *)
 
-\* Step 1: Enter interrupt guard, read head AND version (atomic snapshot)
+\* Step 1: Start allocation - enter interrupt guard, read free list head
 StartAllocation(cpu) ==
     /\ cpuAllocState[cpu] = "IDLE"
     /\ cpuDeallocState[cpu] = "IDLE"
     /\ cpuInterruptsEnabled[cpu] = TRUE
     /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "ALLOC_READING"]
     /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = FALSE]
-    \* Read BOTH head and version atomically (this is one 64-bit load)
-    /\ cpuAllocHead' = [cpuAllocHead EXCEPT ![cpu] = freeListHead]
-    /\ cpuAllocVersion' = [cpuAllocVersion EXCEPT ![cpu] = freeListVersion]
-    /\ UNCHANGED <<blockState, freeListHead, freeListVersion, nextFreeBlock, cpuAllocNext,
+    /\ cpuAllocHead' = [cpuAllocHead EXCEPT ![cpu] = freeListHead[cpu]]
+    /\ cpuAllocVersion' = [cpuAllocVersion EXCEPT ![cpu] = freeListVersion[cpu]]
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocNext, cpuAllocBlock,
                    cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
                    cpuInterruptDepth, allocatedBy>>
 
-\* Step 2: Read next pointer of head block
+\* Step 2a: Free list not empty - read next pointer
 ReadAllocNext(cpu) ==
     /\ cpuAllocState[cpu] = "ALLOC_READING"
     /\ cpuAllocHead[cpu] # 0
     /\ cpuInterruptsEnabled[cpu] = FALSE
     /\ cpuAllocNext' = [cpuAllocNext EXCEPT ![cpu] = nextFreeBlock[cpuAllocHead[cpu]]]
     /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "ALLOC_GOT_NEXT"]
-    /\ UNCHANGED <<blockState, freeListHead, freeListVersion, nextFreeBlock, cpuAllocHead, cpuAllocVersion,
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocHead, cpuAllocVersion, cpuAllocBlock,
                    cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
                    cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
 
-\* Step 3: CAS to pop - compares BOTH index AND version
+\* Step 2b: Free list empty - switch to bump allocation
+StartBumpAllocation(cpu) ==
+    /\ cpuAllocState[cpu] = "ALLOC_READING"
+    /\ cpuAllocHead[cpu] = 0
+    /\ cpuInterruptsEnabled[cpu] = FALSE
+    /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "ALLOC_BUMP"]
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                   cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                   cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+
+\* Step 3a: CAS to pop from free list
+\* On success: block goes to IN_USE, old metadata goes to soft-deleted list
 CASAllocPop(cpu) ==
     /\ cpuAllocState[cpu] = "ALLOC_GOT_NEXT"
     /\ cpuInterruptsEnabled[cpu] = FALSE
@@ -131,73 +235,248 @@ CASAllocPop(cpu) ==
            version == cpuAllocVersion[cpu]
            next == cpuAllocNext[cpu]
        IN
-       \* CAS compares BOTH head AND version - this is the key ABA protection!
-       IF freeListHead = head /\ freeListVersion = version
-       THEN \* CAS succeeds - we own the block now
-            /\ freeListHead' = next
-            /\ freeListVersion' = IncVersion(version)  \* INCREMENT VERSION on success
-            /\ blockState' = [blockState EXCEPT ![head] = "IN_USE"]
-            /\ allocatedBy' = [allocatedBy EXCEPT ![head] = cpu]
-            /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "IDLE"]
-            /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
-            /\ UNCHANGED <<nextFreeBlock, cpuAllocHead, cpuAllocVersion, cpuAllocNext,
-                          cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
-                          cpuInterruptDepth>>
-       ELSE \* CAS fails - re-read head AND version, retry
-            /\ cpuAllocHead' = [cpuAllocHead EXCEPT ![cpu] = freeListHead]
-            /\ cpuAllocVersion' = [cpuAllocVersion EXCEPT ![cpu] = freeListVersion]
-            /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "ALLOC_READING"]
-            /\ UNCHANGED <<blockState, freeListHead, freeListVersion, nextFreeBlock, cpuAllocNext,
-                          cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
-                          cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+       IF freeListHead[cpu] = head /\ freeListVersion[cpu] = version
+       THEN \* CAS succeeds - we now own the block
+          /\ freeListHead' = [freeListHead EXCEPT ![cpu] = next]
+          /\ freeListVersion' = [freeListVersion EXCEPT ![cpu] = IncVersion(version)]
+          /\ blockState' = [blockState EXCEPT ![head] = "IN_USE"]
+          /\ allocatedBy' = [allocatedBy EXCEPT ![head] = cpu]  \* Mark ownership immediately
+          /\ cpuAllocBlock' = [cpuAllocBlock EXCEPT ![cpu] = head]
+          /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "ALLOC_GET_META"]
+          \* Old metadata will be moved to soft-deleted in next step
+          /\ UNCHANGED <<metadataState, nextEmptyBlock, nextMetadataIndex,
+                         nextFreeBlock, blockMetadataIndex,
+                         softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                         freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                         activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                         cpuAllocHead, cpuAllocVersion, cpuAllocNext,
+                         cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                         cpuInterruptDepth, cpuInterruptsEnabled>>
+       ELSE \* CAS fails - retry
+          /\ cpuAllocHead' = [cpuAllocHead EXCEPT ![cpu] = freeListHead[cpu]]
+          /\ cpuAllocVersion' = [cpuAllocVersion EXCEPT ![cpu] = freeListVersion[cpu]]
+          /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "ALLOC_READING"]
+          /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                         freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                         softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                         freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                         activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                         cpuAllocNext, cpuAllocBlock,
+                         cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                         cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
 
-\* Empty list case
-AllocationEmpty(cpu) ==
-    /\ cpuAllocState[cpu] = "ALLOC_READING"
-    /\ cpuAllocHead[cpu] = 0
+\* Step 3b: Complete bump allocation
+CompleteBumpAllocation(cpu) ==
+    /\ cpuAllocState[cpu] = "ALLOC_BUMP"
+    /\ cpuInterruptsEnabled[cpu] = FALSE
+    /\ nextEmptyBlock <= NumBlocks
+    /\ nextMetadataIndex <= NumBlocks
+    /\ LET block == nextEmptyBlock
+           meta == nextMetadataIndex
+       IN
+       /\ nextEmptyBlock' = nextEmptyBlock + 1
+       /\ nextMetadataIndex' = nextMetadataIndex + 1
+       /\ blockState' = [blockState EXCEPT ![block] = "IN_USE"]
+       /\ metadataState' = [metadataState EXCEPT ![meta] = "IN_USE"]
+       /\ blockMetadataIndex' = [blockMetadataIndex EXCEPT ![block] = meta]
+       /\ allocatedBy' = [allocatedBy EXCEPT ![block] = cpu]
+       /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "IDLE"]
+       /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
+       /\ UNCHANGED <<freeListHead, freeListVersion, nextFreeBlock,
+                      softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                      freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                      activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                      cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                      cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                      cpuInterruptDepth>>
+
+\* Bump allocation failed - out of memory
+BumpAllocationFailed(cpu) ==
+    /\ cpuAllocState[cpu] = "ALLOC_BUMP"
+    /\ cpuInterruptsEnabled[cpu] = FALSE
+    /\ (nextEmptyBlock > NumBlocks \/ nextMetadataIndex > NumBlocks)
     /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "IDLE"]
     /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
-    /\ UNCHANGED <<blockState, freeListHead, freeListVersion, nextFreeBlock,
-                   cpuAllocHead, cpuAllocVersion, cpuAllocNext,
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
                    cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
                    cpuInterruptDepth, allocatedBy>>
 
------------------------------------------------------------------------------
-(* Deallocation - Push to free list *)
+\* Complete allocation from free list - get metadata (from free list or bump)
+\* Also move old metadata to soft-deleted list
+CompleteAllocFromFreeList(cpu) ==
+    /\ cpuAllocState[cpu] = "ALLOC_GET_META"
+    /\ cpuInterruptsEnabled[cpu] = FALSE
+    /\ LET block == cpuAllocBlock[cpu]
+           oldMeta == blockMetadataIndex[block]
+           \* Try to get metadata from free list, else bump allocate
+           newMeta == IF freeMetadataHead[cpu] # 0
+                      THEN freeMetadataHead[cpu]
+                      ELSE nextMetadataIndex
+       IN
+       /\ newMeta <= NumBlocks
+       \* Update metadata tracking
+       /\ IF freeMetadataHead[cpu] # 0
+          THEN \* Pop from free metadata list
+             /\ freeMetadataHead' = [freeMetadataHead EXCEPT ![cpu] = nextFreeMetadata[freeMetadataHead[cpu]]]
+             /\ freeMetadataVersion' = [freeMetadataVersion EXCEPT ![cpu] = IncVersion(freeMetadataVersion[cpu])]
+             /\ nextMetadataIndex' = nextMetadataIndex
+          ELSE \* Bump allocate metadata
+             /\ nextMetadataIndex' = nextMetadataIndex + 1
+             /\ freeMetadataHead' = freeMetadataHead
+             /\ freeMetadataVersion' = freeMetadataVersion
+       /\ metadataState' = [metadataState EXCEPT
+                            ![newMeta] = "IN_USE",
+                            ![oldMeta] = IF hardDeleteCutoff = 0
+                                         THEN "METADATA_AVAILABLE"
+                                         ELSE "SOFT_DELETED"]
+       /\ blockMetadataIndex' = [blockMetadataIndex EXCEPT ![block] = newMeta]
+       \* Push old metadata to appropriate list
+       /\ IF hardDeleteCutoff = 0
+          THEN \* No iterators - go directly to free metadata list
+             /\ nextFreeMetadata' = [nextFreeMetadata EXCEPT ![oldMeta] = freeMetadataHead[cpu]]
+             /\ softDeletedHead' = softDeletedHead
+             /\ softDeletedVersion' = softDeletedVersion
+             /\ nextSoftDeleted' = nextSoftDeleted
+             /\ softDeletedAt' = softDeletedAt
+          ELSE \* Has iterators - go to soft-deleted list
+             /\ nextSoftDeleted' = [nextSoftDeleted EXCEPT ![oldMeta] = softDeletedHead[cpu]]
+             /\ softDeletedHead' = [softDeletedHead EXCEPT ![cpu] = oldMeta]
+             /\ softDeletedVersion' = [softDeletedVersion EXCEPT ![cpu] = IncVersion(softDeletedVersion[cpu])]
+             /\ softDeletedAt' = [softDeletedAt EXCEPT ![oldMeta] = monotonicCounter]
+             /\ nextFreeMetadata' = nextFreeMetadata
+       /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "IDLE"]
+       /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
+       \* Note: allocatedBy was already set in CASAllocPop
+       /\ UNCHANGED <<blockState, nextEmptyBlock, freeListHead, freeListVersion, nextFreeBlock,
+                      activeIteratorCount, hardDeleteCutoff, monotonicCounter, reclaimInProgress,
+                      cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                      cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                      cpuInterruptDepth, allocatedBy>>
 
-\* Step 1: Lock block for deallocation (no interrupt guard yet)
+-----------------------------------------------------------------------------
+(* DEALLOCATION - Any CPU can deallocate any IN_USE block                  *)
+(* The CAS(IN_USE -> LOCKED) provides mutual exclusion, not ownership.     *)
+
+\* Step 1: Lock block via CAS(IN_USE -> LOCKED)
+\* NOTE: No ownership constraint - any CPU can attempt this on any IN_USE block
 StartDeallocation(cpu, block) ==
     /\ cpuAllocState[cpu] = "IDLE"
     /\ cpuDeallocState[cpu] = "IDLE"
-    /\ cpuInterruptDepth[cpu] = 0  \* Only from non-interrupt context
+    /\ cpuInterruptDepth[cpu] = 0
     /\ cpuInterruptsEnabled[cpu] = TRUE
     /\ blockState[block] = "IN_USE"
-    /\ allocatedBy[block] = cpu
+    \* CAS(IN_USE -> LOCKED) - only one CPU can succeed
+    /\ blockState' = [blockState EXCEPT ![block] = "LOCKED"]
     /\ cpuDeallocState' = [cpuDeallocState EXCEPT ![cpu] = "DEALLOC_LOCKED"]
     /\ cpuDeallocBlock' = [cpuDeallocBlock EXCEPT ![cpu] = block]
-    /\ UNCHANGED <<blockState, freeListHead, freeListVersion, nextFreeBlock,
-                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext,
+    /\ UNCHANGED <<metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
                    cpuDeallocHead, cpuDeallocVersion,
                    cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
 
-\* Step 2: Set AVAILABLE, enter interrupt guard, read head+version, set next
+\* Step 2a: Check if last block - try to reclaim via bump pointer
+CheckLastBlock(cpu) ==
+    /\ cpuDeallocState[cpu] = "DEALLOC_LOCKED"
+    /\ cpuAllocState[cpu] = "IDLE"
+    /\ cpuInterruptsEnabled[cpu] = TRUE
+    /\ LET block == cpuDeallocBlock[cpu] IN
+       /\ block = nextEmptyBlock - 1
+       /\ cpuDeallocState' = [cpuDeallocState EXCEPT ![cpu] = "DEALLOC_RECLAIM"]
+       /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = FALSE]
+       /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                      freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                      softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                      freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                      activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                      cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                      cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                      cpuInterruptDepth, allocatedBy>>
+
+\* Step 2b: Not last block - proceed to push to free list
 StartDeallocPush(cpu) ==
     /\ cpuDeallocState[cpu] = "DEALLOC_LOCKED"
     /\ cpuAllocState[cpu] = "IDLE"
     /\ cpuInterruptsEnabled[cpu] = TRUE
     /\ LET block == cpuDeallocBlock[cpu] IN
+       /\ block # nextEmptyBlock - 1
+       /\ blockState[block] = "LOCKED"
        /\ blockState' = [blockState EXCEPT ![block] = "AVAILABLE"]
        /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = FALSE]
        /\ cpuDeallocState' = [cpuDeallocState EXCEPT ![cpu] = "DEALLOC_PUSHING"]
-       \* Read head AND version atomically
-       /\ cpuDeallocHead' = [cpuDeallocHead EXCEPT ![cpu] = freeListHead]
-       /\ cpuDeallocVersion' = [cpuDeallocVersion EXCEPT ![cpu] = freeListVersion]
-       /\ nextFreeBlock' = [nextFreeBlock EXCEPT ![block] = freeListHead]
-       /\ UNCHANGED <<freeListHead, freeListVersion, cpuAllocState, cpuAllocHead,
-                      cpuAllocVersion, cpuAllocNext, cpuDeallocBlock,
-                      cpuInterruptDepth, allocatedBy>>
+       /\ cpuDeallocHead' = [cpuDeallocHead EXCEPT ![cpu] = freeListHead[cpu]]
+       /\ cpuDeallocVersion' = [cpuDeallocVersion EXCEPT ![cpu] = freeListVersion[cpu]]
+       /\ nextFreeBlock' = [nextFreeBlock EXCEPT ![block] = freeListHead[cpu]]
+       /\ UNCHANGED <<metadataState, nextEmptyBlock, nextMetadataIndex,
+                      freeListHead, freeListVersion, blockMetadataIndex,
+                      softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                      freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                      activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                      cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                      cpuDeallocBlock, cpuInterruptDepth, allocatedBy>>
 
-\* Step 3: CAS to push block to head - compares BOTH index AND version
+\* Step 3a: Complete reclaim of last block AND move metadata atomically
+\* This combines the bump pointer CAS and metadata handling to match C++ where
+\* move_metadata_to_soft_deleted_list is called immediately after bump CAS succeeds
+CompleteReclaimLastBlock(cpu) ==
+    /\ cpuDeallocState[cpu] = "DEALLOC_RECLAIM"
+    /\ cpuInterruptsEnabled[cpu] = FALSE
+    /\ LET block == cpuDeallocBlock[cpu]
+           meta == blockMetadataIndex[block]
+       IN
+       IF block = nextEmptyBlock - 1
+       THEN \* CAS succeeds - reclaim block and handle metadata atomically
+          /\ nextEmptyBlock' = block
+          /\ blockState' = [blockState EXCEPT ![block] = "INVALID"]
+          /\ allocatedBy' = [allocatedBy EXCEPT ![block] = 0]
+          \* Handle metadata: to free list (no iterators) or soft-deleted (has iterators)
+          /\ IF hardDeleteCutoff = 0
+             THEN \* No iterators - go directly to free metadata list
+                /\ metadataState' = [metadataState EXCEPT ![meta] = "METADATA_AVAILABLE"]
+                /\ nextFreeMetadata' = [nextFreeMetadata EXCEPT ![meta] = freeMetadataHead[cpu]]
+                /\ freeMetadataHead' = [freeMetadataHead EXCEPT ![cpu] = meta]
+                /\ freeMetadataVersion' = [freeMetadataVersion EXCEPT ![cpu] = IncVersion(freeMetadataVersion[cpu])]
+                /\ softDeletedHead' = softDeletedHead
+                /\ softDeletedVersion' = softDeletedVersion
+                /\ nextSoftDeleted' = nextSoftDeleted
+                /\ softDeletedAt' = softDeletedAt
+             ELSE \* Has iterators - go to soft-deleted list
+                /\ metadataState' = [metadataState EXCEPT ![meta] = "SOFT_DELETED"]
+                /\ nextSoftDeleted' = [nextSoftDeleted EXCEPT ![meta] = softDeletedHead[cpu]]
+                /\ softDeletedHead' = [softDeletedHead EXCEPT ![cpu] = meta]
+                /\ softDeletedVersion' = [softDeletedVersion EXCEPT ![cpu] = IncVersion(softDeletedVersion[cpu])]
+                /\ softDeletedAt' = [softDeletedAt EXCEPT ![meta] = monotonicCounter]
+                /\ freeMetadataHead' = freeMetadataHead
+                /\ freeMetadataVersion' = freeMetadataVersion
+                /\ nextFreeMetadata' = nextFreeMetadata
+          /\ cpuDeallocState' = [cpuDeallocState EXCEPT ![cpu] = "IDLE"]
+          /\ cpuDeallocBlock' = [cpuDeallocBlock EXCEPT ![cpu] = 0]
+          /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
+          /\ UNCHANGED <<nextMetadataIndex, freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                         activeIteratorCount, hardDeleteCutoff, monotonicCounter, reclaimInProgress,
+                         cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                         cpuDeallocHead, cpuDeallocVersion, cpuInterruptDepth>>
+       ELSE \* CAS failed - fall back to free list
+          /\ cpuDeallocState' = [cpuDeallocState EXCEPT ![cpu] = "DEALLOC_LOCKED"]
+          /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
+          /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                         freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                         softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                         freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                         activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                         cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                         cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                         cpuInterruptDepth, allocatedBy>>
+
+\* Step 3b: CAS to push block to free list
 CompleteDeallocPush(cpu) ==
     /\ cpuDeallocState[cpu] = "DEALLOC_PUSHING"
     /\ cpuInterruptsEnabled[cpu] = FALSE
@@ -205,31 +484,136 @@ CompleteDeallocPush(cpu) ==
            expectedHead == cpuDeallocHead[cpu]
            expectedVersion == cpuDeallocVersion[cpu]
        IN
-       \* CAS compares BOTH head AND version
-       IF freeListHead = expectedHead /\ freeListVersion = expectedVersion
-       THEN \* CAS succeeds - push block to head
-            /\ freeListHead' = block
-            /\ freeListVersion' = IncVersion(expectedVersion)  \* INCREMENT VERSION
-            /\ allocatedBy' = [allocatedBy EXCEPT ![block] = 0]
-            /\ cpuDeallocState' = [cpuDeallocState EXCEPT ![cpu] = "IDLE"]
-            /\ cpuDeallocBlock' = [cpuDeallocBlock EXCEPT ![cpu] = 0]
-            /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
-            /\ UNCHANGED <<blockState, nextFreeBlock, cpuAllocState, cpuAllocHead,
-                          cpuAllocVersion, cpuAllocNext, cpuDeallocHead, cpuDeallocVersion,
-                          cpuInterruptDepth>>
-       ELSE \* CAS fails - re-read head+version and update next pointer
-            /\ cpuDeallocHead' = [cpuDeallocHead EXCEPT ![cpu] = freeListHead]
-            /\ cpuDeallocVersion' = [cpuDeallocVersion EXCEPT ![cpu] = freeListVersion]
-            /\ nextFreeBlock' = [nextFreeBlock EXCEPT ![block] = freeListHead]
-            /\ UNCHANGED <<blockState, freeListHead, freeListVersion,
-                          cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext,
-                          cpuDeallocState, cpuDeallocBlock,
-                          cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+       IF freeListHead[cpu] = expectedHead /\ freeListVersion[cpu] = expectedVersion
+       THEN \* CAS succeeds
+          /\ freeListHead' = [freeListHead EXCEPT ![cpu] = block]
+          /\ freeListVersion' = [freeListVersion EXCEPT ![cpu] = IncVersion(expectedVersion)]
+          /\ allocatedBy' = [allocatedBy EXCEPT ![block] = 0]
+          /\ cpuDeallocState' = [cpuDeallocState EXCEPT ![cpu] = "IDLE"]
+          /\ cpuDeallocBlock' = [cpuDeallocBlock EXCEPT ![cpu] = 0]
+          /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = TRUE]
+          /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                         nextFreeBlock, blockMetadataIndex,
+                         softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                         freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                         activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                         cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                         cpuDeallocHead, cpuDeallocVersion, cpuInterruptDepth>>
+       ELSE \* CAS fails - retry
+          /\ cpuDeallocHead' = [cpuDeallocHead EXCEPT ![cpu] = freeListHead[cpu]]
+          /\ cpuDeallocVersion' = [cpuDeallocVersion EXCEPT ![cpu] = freeListVersion[cpu]]
+          /\ nextFreeBlock' = [nextFreeBlock EXCEPT ![block] = freeListHead[cpu]]
+          /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                         freeListHead, freeListVersion, blockMetadataIndex,
+                         softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                         freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                         activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                         cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                         cpuDeallocState, cpuDeallocBlock,
+                         cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
 
 -----------------------------------------------------------------------------
-(* Interrupt handling *)
+(* ITERATOR LIFECYCLE - affects metadata reclamation timing                *)
 
-\* Interrupt fires on a CPU - handler allocates
+\* Create an iterator - prevents immediate metadata reclamation
+CreateIterator ==
+    /\ activeIteratorCount < NumCPUs
+    /\ activeIteratorCount' = activeIteratorCount + 1
+    /\ IF activeIteratorCount = 0
+       THEN hardDeleteCutoff' = monotonicCounter + 1
+       ELSE hardDeleteCutoff' = hardDeleteCutoff
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                   cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                   cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+
+\* Destroy an iterator - may trigger reclamation
+DestroyIterator ==
+    /\ activeIteratorCount > 0
+    /\ activeIteratorCount' = activeIteratorCount - 1
+    /\ IF activeIteratorCount = 1
+       THEN hardDeleteCutoff' = 0  \* Clear cutoff when last iterator destroyed
+       ELSE hardDeleteCutoff' = hardDeleteCutoff
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                   cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                   cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+
+\* Advance monotonic counter (models time passing)
+AdvanceCounter ==
+    /\ monotonicCounter < MaxCounter
+    /\ monotonicCounter' = monotonicCounter + 1
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, softDeletedAt, reclaimInProgress,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                   cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                   cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+
+-----------------------------------------------------------------------------
+(* METADATA RECLAMATION - move old soft-deleted metadata to free list      *)
+
+\* Start reclamation pass (only one at a time)
+StartReclamation ==
+    /\ ~reclaimInProgress
+    /\ activeIteratorCount = 0  \* Only reclaim when no iterators
+    /\ \E cpu \in 1..NumCPUs : softDeletedHead[cpu] # 0
+    /\ reclaimInProgress' = TRUE
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                   cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                   cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+
+\* Reclaim one metadata record from soft-deleted to free list
+ReclaimMetadata(cpu, meta) ==
+    /\ reclaimInProgress
+    /\ softDeletedHead[cpu] = meta
+    /\ metadataState[meta] = "SOFT_DELETED"
+    /\ metadataState' = [metadataState EXCEPT ![meta] = "METADATA_AVAILABLE"]
+    /\ softDeletedHead' = [softDeletedHead EXCEPT ![cpu] = nextSoftDeleted[meta]]
+    /\ softDeletedVersion' = [softDeletedVersion EXCEPT ![cpu] = IncVersion(softDeletedVersion[cpu])]
+    /\ nextFreeMetadata' = [nextFreeMetadata EXCEPT ![meta] = freeMetadataHead[cpu]]
+    /\ freeMetadataHead' = [freeMetadataHead EXCEPT ![cpu] = meta]
+    /\ freeMetadataVersion' = [freeMetadataVersion EXCEPT ![cpu] = IncVersion(freeMetadataVersion[cpu])]
+    /\ nextSoftDeleted' = [nextSoftDeleted EXCEPT ![meta] = 0]
+    /\ UNCHANGED <<blockState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                   cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                   cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+
+\* End reclamation pass
+EndReclamation ==
+    /\ reclaimInProgress
+    /\ \A cpu \in 1..NumCPUs : softDeletedHead[cpu] = 0
+    /\ reclaimInProgress' = FALSE
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
+                   cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
+                   cpuInterruptDepth, cpuInterruptsEnabled, allocatedBy>>
+
+-----------------------------------------------------------------------------
+(* INTERRUPT HANDLING *)
+
 InterruptAllocate(cpu) ==
     /\ cpuInterruptsEnabled[cpu] = TRUE
     /\ cpuInterruptDepth[cpu] < MaxInterruptDepth
@@ -237,80 +621,142 @@ InterruptAllocate(cpu) ==
     /\ cpuInterruptDepth' = [cpuInterruptDepth EXCEPT ![cpu] = @ + 1]
     /\ cpuAllocState' = [cpuAllocState EXCEPT ![cpu] = "ALLOC_READING"]
     /\ cpuInterruptsEnabled' = [cpuInterruptsEnabled EXCEPT ![cpu] = FALSE]
-    /\ cpuAllocHead' = [cpuAllocHead EXCEPT ![cpu] = freeListHead]
-    /\ cpuAllocVersion' = [cpuAllocVersion EXCEPT ![cpu] = freeListVersion]
-    /\ UNCHANGED <<blockState, freeListHead, freeListVersion, nextFreeBlock, cpuAllocNext,
+    /\ cpuAllocHead' = [cpuAllocHead EXCEPT ![cpu] = freeListHead[cpu]]
+    /\ cpuAllocVersion' = [cpuAllocVersion EXCEPT ![cpu] = freeListVersion[cpu]]
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocNext, cpuAllocBlock,
                    cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
                    allocatedBy>>
 
-\* Return from interrupt
 ReturnFromInterrupt(cpu) ==
     /\ cpuInterruptDepth[cpu] > 0
     /\ cpuAllocState[cpu] = "IDLE"
     /\ cpuInterruptsEnabled[cpu] = TRUE
     /\ cpuInterruptDepth' = [cpuInterruptDepth EXCEPT ![cpu] = @ - 1]
-    /\ UNCHANGED <<blockState, freeListHead, freeListVersion, nextFreeBlock,
-                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext,
+    /\ UNCHANGED <<blockState, metadataState, nextEmptyBlock, nextMetadataIndex,
+                   freeListHead, freeListVersion, nextFreeBlock, blockMetadataIndex,
+                   softDeletedHead, softDeletedVersion, nextSoftDeleted,
+                   freeMetadataHead, freeMetadataVersion, nextFreeMetadata,
+                   activeIteratorCount, hardDeleteCutoff, monotonicCounter, softDeletedAt, reclaimInProgress,
+                   cpuAllocState, cpuAllocHead, cpuAllocVersion, cpuAllocNext, cpuAllocBlock,
                    cpuDeallocState, cpuDeallocBlock, cpuDeallocHead, cpuDeallocVersion,
                    cpuInterruptsEnabled, allocatedBy>>
 
 -----------------------------------------------------------------------------
-(* Next state *)
+(* Next state relation *)
 
 Next ==
     \/ \E cpu \in 1..NumCPUs :
         \/ StartAllocation(cpu)
         \/ ReadAllocNext(cpu)
+        \/ StartBumpAllocation(cpu)
         \/ CASAllocPop(cpu)
-        \/ AllocationEmpty(cpu)
+        \/ CompleteBumpAllocation(cpu)
+        \/ BumpAllocationFailed(cpu)
+        \/ CompleteAllocFromFreeList(cpu)
         \/ \E block \in 1..NumBlocks : StartDeallocation(cpu, block)
+        \/ CheckLastBlock(cpu)
         \/ StartDeallocPush(cpu)
+        \/ CompleteReclaimLastBlock(cpu)
         \/ CompleteDeallocPush(cpu)
         \/ InterruptAllocate(cpu)
         \/ ReturnFromInterrupt(cpu)
+        \/ \E meta \in 1..NumBlocks : ReclaimMetadata(cpu, meta)
+    \/ CreateIterator
+    \/ DestroyIterator
+    \/ AdvanceCounter
+    \/ StartReclamation
+    \/ EndReclamation
 
 Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 (* Safety Properties *)
 
-\* IN_USE blocks must have an owner
+\* IN_USE blocks must have an owner (for verification)
 NoDoubleFree ==
     \A b \in 1..NumBlocks :
         blockState[b] = "IN_USE" => allocatedBy[b] # 0
 
+\* LOCKED blocks are owned by exactly one deallocating CPU
+LockedBlocksOwnedByDealloc ==
+    \A b \in 1..NumBlocks :
+        blockState[b] = "LOCKED" =>
+            \E cpu \in 1..NumCPUs :
+                /\ cpuDeallocState[cpu] \in {"DEALLOC_LOCKED", "DEALLOC_PUSHING", "DEALLOC_RECLAIM"}
+                /\ cpuDeallocBlock[cpu] = b
+
+\* Only one CPU can deallocate a given block at a time
+NoConcurrentDealloc ==
+    \A b \in 1..NumBlocks :
+    \A cpu1, cpu2 \in 1..NumCPUs :
+        (cpuDeallocBlock[cpu1] = b /\ cpuDeallocBlock[cpu2] = b /\
+         cpuDeallocState[cpu1] # "IDLE" /\ cpuDeallocState[cpu2] # "IDLE")
+        => cpu1 = cpu2
+
 \* Block conservation
 BlockConservation ==
+    Cardinality({b \in 1..NumBlocks : blockState[b] = "INVALID"}) +
     Cardinality({b \in 1..NumBlocks : blockState[b] = "IN_USE"}) +
-    Cardinality({b \in 1..NumBlocks : blockState[b] = "FREE"}) +
+    Cardinality({b \in 1..NumBlocks : blockState[b] = "LOCKED"}) +
     Cardinality({b \in 1..NumBlocks : blockState[b] = "AVAILABLE"}) = NumBlocks
+
+\* Metadata conservation
+MetadataConservation ==
+    Cardinality({m \in 1..NumBlocks : metadataState[m] = "INVALID"}) +
+    Cardinality({m \in 1..NumBlocks : metadataState[m] = "IN_USE"}) +
+    Cardinality({m \in 1..NumBlocks : metadataState[m] = "SOFT_DELETED"}) +
+    Cardinality({m \in 1..NumBlocks : metadataState[m] = "METADATA_AVAILABLE"}) = NumBlocks
+
+\* Bump allocator consistency
+BumpAllocatorConsistency ==
+    \A b \in 1..NumBlocks :
+        b >= nextEmptyBlock => blockState[b] = "INVALID"
+
+\* Reclamation can only START when no iterators exist
+\* (but new iterators can be created during reclamation - cutoff mechanism handles safety)
+\* This is captured in StartReclamation precondition, not as a global invariant
+\* The cutoff-based check in C++ prevents reclaiming entries referenced by new iterators
 
 \* CAS loops are protected by interrupt guard
 AllocCASProtected ==
     \A cpu \in 1..NumCPUs :
-        cpuAllocState[cpu] \in {"ALLOC_READING", "ALLOC_GOT_NEXT"} =>
+        cpuAllocState[cpu] \in {"ALLOC_READING", "ALLOC_GOT_NEXT", "ALLOC_BUMP", "ALLOC_GET_META"} =>
             cpuInterruptsEnabled[cpu] = FALSE
 
 DeallocPushProtected ==
     \A cpu \in 1..NumCPUs :
-        cpuDeallocState[cpu] = "DEALLOC_PUSHING" =>
+        cpuDeallocState[cpu] \in {"DEALLOC_PUSHING", "DEALLOC_RECLAIM"} =>
             cpuInterruptsEnabled[cpu] = FALSE
 
-\* Core safety - the properties we actually care about
-\* (Separate from TypeOK which includes version bounds)
 CoreSafety ==
     /\ NoDoubleFree
+    /\ LockedBlocksOwnedByDealloc
+    /\ NoConcurrentDealloc
     /\ BlockConservation
+    /\ MetadataConservation
+    /\ BumpAllocatorConsistency
     /\ AllocCASProtected
     /\ DeallocPushProtected
 
-\* Combined safety including type checking
-Safety ==
-    /\ TypeOK
-    /\ CoreSafety
+Safety == TypeOK /\ CoreSafety
 
-\* State constraint for bounded model checking
-\* Limits exploration depth by version - used with CONSTRAINT in cfg
-VersionBound == freeListVersion <= 20
+VersionBound == \A c \in 1..NumCPUs:
+    /\ freeListVersion[c] <= 20
+    /\ softDeletedVersion[c] <= 20
+    /\ freeMetadataVersion[c] <= 20
+
+\* Tighter bound for faster verification
+TightBound ==
+    /\ \A c \in 1..NumCPUs:
+        /\ freeListVersion[c] <= 10
+        /\ softDeletedVersion[c] <= 10
+        /\ freeMetadataVersion[c] <= 10
+    /\ monotonicCounter <= 10
+    /\ activeIteratorCount <= 2
 
 =============================================================================

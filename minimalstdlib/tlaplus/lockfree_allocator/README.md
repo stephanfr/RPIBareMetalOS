@@ -1,128 +1,199 @@
 # TLA+ Model for Lock-Free Allocator
 
-This directory contains a TLA+ specification for formally verifying the lock-free single block memory allocator with tagged pointers for ABA protection.
+This directory contains a TLA+ specification for formally verifying the lock-free single block memory allocator with tagged pointers for ABA protection and safe metadata reclamation.
 
 ## Specification Files
 
 ### LockfreeAllocatorTagged.tla
 
-Models the current implementation with **tagged pointers** (16-bit version counter + 48-bit pointer) for multi-core ABA protection.
+Models the current C++ implementation with full fidelity including:
 
-**Key features modeled:**
-- Version counter incremented on every CAS success
-- CAS compares BOTH pointer AND version
-- Interrupt guards for same-CPU re-entrancy protection
-- Multi-CPU concurrent access
+**Core Features:**
+- **Block states matching C++ enum exactly** - INVALID, IN_USE, AVAILABLE, LOCKED
+- **Metadata states** - INVALID, IN_USE, SOFT_DELETED, METADATA_AVAILABLE
+- **Bump allocator** - `nextEmptyBlock` and `nextMetadataIndex` for fresh allocation
+- **Tagged pointers** - Version counters for ABA protection on all CAS operations
+- **Per-CPU sharding** - Separate free lists per CPU to reduce contention
+
+**Ownership Semantics:**
+- **Any CPU can deallocate any block** - Matches C++ where any thread with a valid pointer can deallocate
+- **CAS provides mutual exclusion** - `CAS(IN_USE -> LOCKED)` prevents double-free
+- **`allocatedBy` is for verification only** - Not a constraint on deallocation
+
+**Metadata Reclamation:**
+- **Soft-deleted metadata list** - Per-CPU list of metadata awaiting reclamation
+- **Free metadata list** - Per-CPU list of reusable metadata records
+- **Iterator tracking** - `activeIteratorCount` and `hardDeleteCutoff` control safe reclamation
+- **Reclamation pass** - Moves old soft-deleted metadata to free list when safe
 
 **Config files:**
 - `LockfreeAllocatorTagged.cfg` - Default configuration (2 CPUs, 3 blocks)
 - `LockfreeAllocatorTagged_small.cfg` - Minimal config for quick checks
-- `LockfreeAllocatorTagged_core.cfg` - Core safety only (no TypeOK version bounds)
-- `LockfreeAllocatorTagged_bounded.cfg` - Bounded model checking with version constraint
+- `LockfreeAllocatorTagged_core.cfg` - Core safety only (no TypeOK bounds)
+- `LockfreeAllocatorTagged_bounded.cfg` - Bounded model checking
 
 ## What This Model Verifies
 
-1. **No ABA Problem** - Tagged pointers prevent corrupted CAS operations across CPUs
-2. **Re-entrancy Safety** - Interrupt guards prevent same-CPU ABA
-3. **No Double-Free** - A block cannot be freed twice
-4. **Block Conservation** - Total blocks remain constant (no leaks or corruption)
-5. **Allocation Exclusivity** - Each allocated block has exactly one owner
-
-## Installing TLA+ Tools
-
-### Option 1: TLA+ Toolbox (GUI)
-Download from: https://github.com/tlaplus/tlaplus/releases
-
-### Option 2: Command-line TLC
-The `tla2tools.jar` is already included. If missing, the `run_tlc.sh` script will download it automatically.
-
-## Running the Model Checker
-
-### Using the Script (recommended)
-```bash
-cd /home/steve/dev/RPIBareMetalOS/minimalstdlib/tlaplus
-
-# Run with default config
-./run_tlc.sh
-
-# Run with specific config
-./run_tlc.sh LockfreeAllocatorTagged_small.cfg
-./run_tlc.sh LockfreeAllocatorTagged_bounded.cfg
-```
-
-### Manual Execution
-```bash
-cd /home/steve/dev/RPIBareMetalOS/minimalstdlib/tlaplus
-
-# Quick check with small config
-java -jar tla2tools.jar -config LockfreeAllocatorTagged_small.cfg LockfreeAllocatorTagged.tla
-
-# Full verification with default config
-java -Xmx4g -jar tla2tools.jar -config LockfreeAllocatorTagged.cfg LockfreeAllocatorTagged.tla
-
-# Bounded model checking (limits version counter to bound state space)
-java -jar tla2tools.jar -config LockfreeAllocatorTagged_bounded.cfg LockfreeAllocatorTagged.tla
-```
-
-Note: State files are written to `/tmp/tlc-lockfree-allocator/` to avoid cluttering the source directory.
+1. **No ABA Problem** - Tagged pointers prevent corrupted CAS operations
+2. **No Double-Free** - CAS(IN_USE -> LOCKED) ensures only one CPU can deallocate
+3. **No Concurrent Dealloc** - LOCKED state serializes deallocation attempts
+4. **Block Conservation** - INVALID + IN_USE + LOCKED + AVAILABLE = NumBlocks
+5. **Metadata Conservation** - INVALID + IN_USE + SOFT_DELETED + METADATA_AVAILABLE = NumBlocks
+6. **Bump Allocator Consistency** - Blocks at/after bump pointer are INVALID
+7. **Interrupt Protection** - All CAS loops protected by interrupt guards
 
 ## Understanding the Model
 
+### Block States (matches C++ `allocation_state` enum)
+
+| State | C++ Value | Description |
+|-------|-----------|-------------|
+| `INVALID` | 0 | Never allocated (virgin memory) |
+| `IN_USE` | 1 | Currently allocated and owned |
+| `AVAILABLE` | 2 | On free list, ready for reallocation |
+| `LOCKED` | 5 | Being deallocated (transient) |
+
+### Metadata States
+
+| State | C++ Value | Description |
+|-------|-----------|-------------|
+| `INVALID` | 0 | Never allocated |
+| `IN_USE` | 1 | Associated with an allocated block |
+| `SOFT_DELETED` | 3 | Awaiting safe reclamation (iterators may reference) |
+| `METADATA_AVAILABLE` | 4 | On free metadata list, ready for reuse |
+
 ### State Variables
-- `blockState` - State of each block: FREE, IN_USE, AVAILABLE
-- `freeListHead` - Index of first block in free list
-- `freeListVersion` - **Version counter** for ABA protection
-- `nextFreeBlock` - Linked list next pointers
-- `cpuAllocState/cpuDeallocState` - Per-CPU operation state
-- `cpuAllocVersion/cpuDeallocVersion` - Per-CPU snapshot of version for CAS
-- `cpuInterruptsEnabled` - Whether interrupts are enabled (models interrupt guard)
+
+**Memory Management:**
+- `blockState` - State of each memory block
+- `metadataState` - State of each metadata record
+- `nextEmptyBlock` - Bump pointer for block allocation
+- `nextMetadataIndex` - Bump pointer for metadata allocation
+- `blockMetadataIndex` - Maps blocks to their metadata records
+
+**Free Lists (per-CPU):**
+- `freeListHead`, `freeListVersion`, `nextFreeBlock` - Block free list
+- `softDeletedHead`, `softDeletedVersion`, `nextSoftDeleted` - Soft-deleted metadata
+- `freeMetadataHead`, `freeMetadataVersion`, `nextFreeMetadata` - Free metadata
+
+**Iterator/Reclamation:**
+- `activeIteratorCount` - Number of active iterators
+- `hardDeleteCutoff` - Monotonic counter threshold for safe reclamation
+- `monotonicCounter` - Global time counter
+- `softDeletedAt` - When each metadata was soft-deleted
+- `reclaimInProgress` - Serializes reclamation passes
 
 ### Key Invariants
-- `NoDoubleFree` - IN_USE blocks have exactly one owner
-- `BlockConservation` - Total blocks never changes
-- `AllocCASProtected` - Allocation CAS happens with interrupts disabled
-- `DeallocPushProtected` - Deallocation push happens with interrupts disabled
-- `CoreSafety` - Combined safety properties (without version bounds)
-- `Safety` - Full safety including TypeOK
 
-### How Tagged Pointers Prevent ABA
+- `NoDoubleFree` - IN_USE blocks have an owner
+- `LockedBlocksOwnedByDealloc` - LOCKED blocks are being deallocated by exactly one CPU
+- `NoConcurrentDealloc` - Only one CPU can deallocate a block at a time
+- `BlockConservation` - Total blocks constant
+- `MetadataConservation` - Total metadata records constant
+- `BumpAllocatorConsistency` - Unallocated blocks are INVALID
+- `AllocCASProtected` - Allocation CAS protected by interrupt guard
+- `DeallocPushProtected` - Deallocation push protected by interrupt guard
 
-The ABA problem occurs when:
-1. CPU1 reads head=A, next=B
-2. CPU2 allocates A, then B, then frees A (head returns to A)
-3. CPU1's CAS succeeds (head still equals A) but next pointer is now wrong
+### Allocation Flow
 
-With version counter:
-1. CPU1 reads head=A, version=0, next=B
-2. CPU2's operations increment version to 2
-3. CPU1's CAS fails because version 0 != 2, forcing a retry with fresh data
-
-## Scaling Up the Model
-
-For more thorough checking, modify the constants in the .cfg file:
 ```
-NumBlocks = 4
-NumCPUs = 3
-MaxInterruptDepth = 2
+StartAllocation (enter interrupt guard, read free list head)
+    |
+    +-> [free list not empty] ReadAllocNext -> CASAllocPop
+    |       -> CompleteAllocFromFreeList (move old metadata to soft-deleted/free)
+    |
+    +-> [free list empty] StartBumpAllocation -> CompleteBumpAllocation
 ```
 
-**Warning**: State space grows exponentially. Larger configs may take minutes to hours.
+### Deallocation Flow
+
+```
+StartDeallocation (CAS IN_USE -> LOCKED)
+    |
+    +-> [is last block] CheckLastBlock -> CompleteReclaimLastBlock
+    |       -> CompleteSoftDeleteMetadata (metadata to soft-deleted/free list)
+    |
+    +-> [not last block] StartDeallocPush -> CompleteDeallocPush
+            (block to free list, metadata stays with block)
+```
+
+### Metadata Reclamation Flow
+
+```
+CreateIterator
+    -> Sets hardDeleteCutoff to current counter (blocks reclamation)
+
+DestroyIterator
+    -> If last iterator, clears hardDeleteCutoff
+    -> Triggers reclamation if soft-deleted list not empty
+
+StartReclamation (if no iterators and soft-deleted list not empty)
+    -> ReclaimMetadata (for each soft-deleted entry)
+    -> EndReclamation
+```
+
+## Relationship to C++ Implementation
+
+### Key Correspondences
+
+| TLA+ | C++ | Notes |
+|------|-----|-------|
+| `blockState` | `allocation_state` enum | INVALID, IN_USE, AVAILABLE, LOCKED |
+| `metadataState` | `state_` in `block_metadata` | Tracks metadata lifecycle |
+| `nextEmptyBlock` | `next_empty_memory_block_` | Bump allocator for blocks |
+| `nextMetadataIndex` | `current_metadata_record_count_` | Bump allocator for metadata |
+| `freeListHead[cpu]` | `free_block_bins_[bin * shards + shard]` | Per-CPU free lists |
+| `softDeletedHead[cpu]` | `soft_deleted_metadata_heads_[shard]` | Soft-deleted metadata |
+| `freeMetadataHead[cpu]` | `free_metadata_heads_[shard]` | Reusable metadata |
+| `activeIteratorCount` | `number_of_active_iterators_` | Iterator tracking |
+| `hardDeleteCutoff` | `hard_delete_before_counter_cutoff_` | Safe reclamation threshold |
+| `monotonicCounter` | `platform::get_monotonic_counter()` | Time ordering |
+
+### Ownership Semantics
+
+The TLA+ model accurately reflects that **any CPU can deallocate any block**:
+
+```cpp
+// C++ - no ownership check, just CAS for mutual exclusion
+uint8_t current_state = IN_USE;
+if (!block_to_deallocate->state_.compare_exchange_strong(current_state, LOCKED, ...))
+    return;  // Someone else got it first
+```
+
+```tla
+\* TLA+ - no allocatedBy constraint, CAS modeled as precondition
+StartDeallocation(cpu, block) ==
+    ...
+    /\ blockState[block] = "IN_USE"  \* Only check state, not owner
+    /\ blockState' = [blockState EXCEPT ![block] = "LOCKED"]  \* Atomic CAS
+```
+
+The `allocatedBy` variable in TLA+ is **for verification only** - it tracks ownership for safety property checking but does not constrain which CPU can perform deallocation.
+
+### What's Abstracted Away
+
+- **Size bins** - 257 size classes in C++, single list per CPU in TLA+
+- **Hash verification** - `hash_check` extension for corruption detection
+- **Detailed counter arithmetic** - Simplified monotonic counter
+
+## Running the Model Checker
+
+```bash
+cd /home/steve/dev/RPIBareMetalOS/minimalstdlib/tlaplus/lockfree_allocator
+
+# Quick check
+./run_tlc.sh LockfreeAllocatorTagged_small.cfg
+
+# Full verification
+./run_tlc.sh LockfreeAllocatorTagged.cfg
+```
 
 ## Expected Results
 
 Model checking should complete with no errors:
 ```
 Model checking completed. No error has been found.
-  States found: ~10,000-100,000
+  44845406 states generated, 9073320 distinct states found
 ```
 
-## Relationship to C++ Implementation
-
-The TLA+ model verifies the correctness of the algorithm used in:
-`include/__memory_resource/lockfree_single_block_resource.h`
-
-Key correspondences:
-- `tagged_ptr` struct with 16-bit version = `freeListVersion` variable
-- `free_block_bin::compare_exchange_head()` = CAS checking head AND version
-- `interrupt_guard` RAII class = `cpuInterruptsEnabled` toggling
-- Per-CPU sharding (not modeled) = additional contention reduction in implementation
+Note: The full model with metadata reclamation has a large state space. The `TightBound` constraint limits version counters to 10 and monotonic counter to 10 for tractable verification. Without bounds, the state space grows very quickly (100M+ states).

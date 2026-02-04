@@ -2,10 +2,22 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//  This file contains conditional compilation for different CPU/OS combinations
+//      primarily either X64 or ARM64 on linux to permit unit and performance
+//      testing of lockfree classes, like the lockfree memory allocator.
+//
+//  This should be the only location in the project with this type of platform
+//      specific code, so if porting to a new CPU or OS this ought to be the
+//      only place to add new code.
+
 #pragma once
 
 #include "minstdconfig.h"
 #include <stdint.h>
+#if defined(__linux__)
+#include <sched.h>
+#include <unistd.h>
+#endif
 
 //  When running in userspace (e.g., unit tests), we cannot execute privileged
 //  interrupt control instructions. Define this macro to make interrupt guards
@@ -20,6 +32,17 @@ namespace MINIMAL_STD_NAMESPACE
     {
         namespace platform
         {
+#if defined(__x86_64__) || defined(_M_X64)
+            inline void cpuid(uint32_t leaf, uint32_t subleaf, uint32_t &eax, uint32_t &ebx, uint32_t &ecx, uint32_t &edx)
+            {
+                __asm__ volatile(
+                    "cpuid"
+                    : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx)
+                    : "a"(leaf), "c"(subleaf));
+            }
+#endif
+
+
             /**
              * @brief Returns a monotonically increasing counter value.
              *
@@ -66,7 +89,11 @@ namespace MINIMAL_STD_NAMESPACE
              */
             inline uint32_t get_cpu_id()
             {
-#if defined(__x86_64__) || defined(_M_X64)
+#if defined(__linux__) && (defined(__MINIMAL_STD_TEST__) || defined(PLATFORM_USERSPACE))
+                int cpu = sched_getcpu();
+                return (cpu < 0) ? 0u : static_cast<uint32_t>(cpu);
+
+#elif defined(__x86_64__) || defined(_M_X64)
                 uint32_t ebx;
                 __asm__ volatile(
                     "movl $1, %%eax\n\t"
@@ -86,6 +113,66 @@ namespace MINIMAL_STD_NAMESPACE
 
 #else
 #error "Unsupported architecture for get_cpu_id()"
+#endif
+            }
+
+            /**
+             * @brief Returns the number of available CPU cores.
+             *
+             * On Linux: Uses sysconf(_SC_NPROCESSORS_ONLN).
+             * On x64 bare-metal: Uses CPUID topology leaves when available.
+             * On ARM64 bare-metal: Returns 1.
+             * On other platforms: Returns 1.
+             *
+             * @return Number of online CPU cores (>= 1).
+             */
+            inline uint32_t get_cpu_count()
+            {
+#if defined(__linux__)
+                long count = sysconf(_SC_NPROCESSORS_ONLN);
+                return (count > 0) ? static_cast<uint32_t>(count) : 1u;
+
+#elif defined(__x86_64__) || defined(_M_X64)
+                uint32_t eax = 0, ebx = 0, ecx = 0, edx = 0;
+                cpuid(0, 0, eax, ebx, ecx, edx);
+                uint32_t max_leaf = eax;
+
+                if (max_leaf >= 0x0B)
+                {
+                    uint32_t logical_count = 0;
+
+                    for (uint32_t level = 0; level < 8; ++level)
+                    {
+                        cpuid(0x0B, level, eax, ebx, ecx, edx);
+                        uint32_t level_type = (ecx >> 8) & 0xFF;
+                        if (level_type == 0)
+                        {
+                            break;
+                        }
+
+                        if (level_type == 2)
+                        {
+                            logical_count = ebx & 0xFFFF;
+                            break;
+                        }
+                    }
+
+                    if (logical_count != 0)
+                    {
+                        return logical_count;
+                    }
+                }
+
+                if (max_leaf >= 0x01)
+                {
+                    cpuid(0x01, 0, eax, ebx, ecx, edx);
+                    uint32_t logical_count = (ebx >> 16) & 0xFF;
+                    return (logical_count != 0) ? logical_count : 1u;
+                }
+
+                return 1u;
+#else
+                return 1u;
 #endif
             }
 

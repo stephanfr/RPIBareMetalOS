@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TLA_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TLA_JAR="$TLA_DIR/tla2tools.jar"
 TLA_VERSION="1.8.0"
-TMP_DIR="$SCRIPT_DIR/.tlc_tmp"
+TMP_DIR="$(mktemp -d /tmp/tlc-XXXXXX)"
 
 # Specs/configs may be under a lockfree_allocator sub-folder
 if [ -d "$SCRIPT_DIR/lockfree_allocator" ]; then
@@ -30,7 +30,6 @@ if ! command -v java &> /dev/null; then
 fi
 
 # Create temp directory for TLC state files
-rm -rf "$TMP_DIR"
 mkdir -p "$TMP_DIR"
 
 # Default config or use argument
