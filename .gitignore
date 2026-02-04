@@ -5,3 +5,4 @@ gcc-cross
 **/coverage
 **/lib
 **/doc
+minimalstdlib/tlaplus/tla2tools.jar

@@ -15,7 +15,7 @@
 
 #include "__extensions/hash_check.h"
 #include "__extensions/memory_resource_statistics.h"
-#include "__memory_resource/cpu_platform_abstractions.h"
+#include "__platform/cpu_platform_abstractions.h"
 #include "memory_resource.h"
 
 #include "stdio.h"
