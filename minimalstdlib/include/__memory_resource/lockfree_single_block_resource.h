@@ -155,13 +155,23 @@ namespace MINIMAL_STD_NAMESPACE
                   next_empty_memory_block_(block_tag::make(static_cast<block_header *>(internal::align_pointer(block, DEFAULT_ALIGNMENT)))),
                   current_metadata_record_count_(0),
                   metadata_head_(metadata_tag::make((block_metadata *)&end_of_metadata_list_sentinel_)),
-                  soft_deleted_metadata_head_(metadata_tag::make(nullptr)),
-                  free_metadata_head_(metadata_tag::make(nullptr)),
+                  soft_deleted_metadata_heads_{},
+                  free_metadata_heads_{},
                   number_of_active_iterators_(0),
                   hard_delete_before_counter_cutoff_(SIZE_MAX),
                   reclaimation_pass_(false),
                   itr_end_(*this, &end_of_metadata_list_sentinel_)
             {
+                for (auto &head : soft_deleted_metadata_heads_)
+                {
+                    head.store(metadata_tag::make(nullptr), memory_order_release);
+                }
+
+                for (auto &head : free_metadata_heads_)
+                {
+                    head.store(metadata_tag::make(nullptr), memory_order_release);
+                }
+
                 for (auto &bin : free_block_bins_)
                 {
                     for (auto &shard : bin)
@@ -240,8 +250,8 @@ namespace MINIMAL_STD_NAMESPACE
 
             alignas(64) atomic<size_t> current_metadata_record_count_;
             alignas(64) atomic<uint64_t> metadata_head_;
-            alignas(64) atomic<uint64_t> soft_deleted_metadata_head_;
-            alignas(64) atomic<uint64_t> free_metadata_head_;
+            alignas(64) array<atomic<uint64_t>, NUM_CPU_SHARDS> soft_deleted_metadata_heads_;
+            alignas(64) array<atomic<uint64_t>, NUM_CPU_SHARDS> free_metadata_heads_;
 
             alignas(64) atomic<int64_t> number_of_active_iterators_;
             alignas(64) atomic<uint64_t> hard_delete_before_counter_cutoff_;
@@ -338,9 +348,11 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
+                    auto shard = cpu_shard_index();
+
                     size_t retries = 0;
 
-                    uint64_t free_head_tag = free_metadata_head_.load(memory_order_acquire);
+                    uint64_t free_head_tag = free_metadata_heads_[shard].load(memory_order_acquire);
 
                     uint64_t new_tag = 0;
 
@@ -352,7 +364,7 @@ namespace MINIMAL_STD_NAMESPACE
                         metadata.next_free_header_index_ = metadata_to_index(free_head);
 
                         new_tag = metadata_tag::pack(&metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(free_head_tag) + 1));
-                    } while (!free_metadata_head_.compare_exchange_strong(free_head_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
+                    } while (!free_metadata_heads_[shard].compare_exchange_strong(free_head_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 metadata.next_soft_deleted_index_ = NULL_INDEX;
@@ -383,7 +395,9 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         platform::interrupt_guard guard;
 
-                        uint64_t soft_deleted_tag = soft_deleted_metadata_head_.load(memory_order_acquire);
+                        auto shard = cpu_shard_index();
+
+                        uint64_t soft_deleted_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
 
                         size_t retries = 0;
 
@@ -397,7 +411,7 @@ namespace MINIMAL_STD_NAMESPACE
                             metadata.next_soft_deleted_index_ = metadata_to_index(soft_deleted_head);
 
                             new_tag = metadata_tag::pack(&metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(soft_deleted_tag) + 1));
-                        } while (!soft_deleted_metadata_head_.compare_exchange_strong(soft_deleted_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
+                        } while (!soft_deleted_metadata_heads_[shard].compare_exchange_strong(soft_deleted_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                     }
                 }
             }
@@ -671,7 +685,9 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     platform::interrupt_guard guard;
 
-                    uint64_t current_tag = free_metadata_head_.load(memory_order_acquire);
+                    auto shard = cpu_shard_index();
+
+                    uint64_t current_tag = free_metadata_heads_[shard].load(memory_order_acquire);
 
                     size_t retries = 0;
 
@@ -683,7 +699,7 @@ namespace MINIMAL_STD_NAMESPACE
                         block_metadata *next = index_to_metadata(current->next_free_header_index_);
                         uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
 
-                        if (free_metadata_head_.compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
+                        if (free_metadata_heads_[shard].compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
                         {
                             current->next_free_header_index_ = NULL_INDEX;
                             return metadata_start_ - current;
@@ -803,62 +819,65 @@ namespace MINIMAL_STD_NAMESPACE
                     return;
                 }
 
-                //  Walk the soft deleted list and reclaim any metadata records that are older than the hard delete cutoff
+                //  Walk the soft deleted lists and reclaim any metadata records that are older than the hard delete cutoff
 
-                block_metadata *previous = nullptr;
-                uint64_t current_tag = soft_deleted_metadata_head_.load(memory_order_acquire);
-                block_metadata *current = metadata_tag::unpack_ptr(current_tag);
-
-                while (current != nullptr)
+                for (size_t shard = 0; shard < NUM_CPU_SHARDS; ++shard)
                 {
-                    //  If the metadata record was soft-deleted after the cutoff counter, then move to the next record
+                    block_metadata *previous = nullptr;
+                    uint64_t current_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
+                    block_metadata *current = metadata_tag::unpack_ptr(current_tag);
 
-                    if (current->soft_deleted_at_counter_ >= hard_delete_before_counter_cutoff_.load(memory_order_acquire))
+                    while (current != nullptr)
                     {
-                        //  Move to the next metadata record
+                        //  If the metadata record was soft-deleted after the cutoff counter, then move to the next record
 
-                        previous = current;
-                        current = index_to_metadata(current->next_soft_deleted_index_);
-                    }
-
-                    //  The soft delete occurred before the current cutoff, so the metadata record can be
-                    //      moved to the free metadata list.
-
-                    //  If there is no previous, then we are at the head of the list
-
-                    if (previous == nullptr)
-                    {
-                        //  Pop the head of the soft delete metadata list.  This could fail if a new record has been added
-                        //      to the front of the list in a different thread.
-
-                        block_metadata *next = index_to_metadata(current->next_soft_deleted_index_);
-                        uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
-
-                        if (soft_deleted_metadata_head_.compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel))
+                        if (current->soft_deleted_at_counter_ >= hard_delete_before_counter_cutoff_.load(memory_order_acquire))
                         {
-                            //  Element popped, so add current to the front of the free list
+                            //  Move to the next metadata record
 
-                            move_metadata_to_free_metadata_list(*current);
+                            previous = current;
+                            current = index_to_metadata(current->next_soft_deleted_index_);
                         }
 
-                        //  Start again at the head of the list on either success or failure above
+                        //  The soft delete occurred before the current cutoff, so the metadata record can be
+                        //      moved to the free metadata list.
 
-                        current_tag = soft_deleted_metadata_head_.load(memory_order_acquire);
-                        current = metadata_tag::unpack_ptr(current_tag);
-                    }
-                    else
-                    {
-                        //  We are somewhere mid-list, so we can remove the current metadata record from the free list
+                        //  If there is no previous, then we are at the head of the list
 
-                        previous->next_soft_deleted_index_ = current->next_soft_deleted_index_;
+                        if (previous == nullptr)
+                        {
+                            //  Pop the head of the soft delete metadata list.  This could fail if a new record has been added
+                            //      to the front of the list in a different thread.
 
-                        move_metadata_to_free_metadata_list(*current);
+                            block_metadata *next = index_to_metadata(current->next_soft_deleted_index_);
+                            uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
 
-                        //  Advance to the next node
+                            if (soft_deleted_metadata_heads_[shard].compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel))
+                            {
+                                //  Element popped, so add current to the front of the free list
 
-                        auto next = index_to_metadata(current->next_soft_deleted_index_);
-                        current->next_soft_deleted_index_ = NULL_INDEX;
-                        current = next;
+                                move_metadata_to_free_metadata_list(*current);
+                            }
+
+                            //  Start again at the head of the list on either success or failure above
+
+                            current_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
+                            current = metadata_tag::unpack_ptr(current_tag);
+                        }
+                        else
+                        {
+                            //  We are somewhere mid-list, so we can remove the current metadata record from the free list
+
+                            previous->next_soft_deleted_index_ = current->next_soft_deleted_index_;
+
+                            move_metadata_to_free_metadata_list(*current);
+
+                            //  Advance to the next node
+
+                            auto next = index_to_metadata(current->next_soft_deleted_index_);
+                            current->next_soft_deleted_index_ = NULL_INDEX;
+                            current = next;
+                        }
                     }
                 }
 
