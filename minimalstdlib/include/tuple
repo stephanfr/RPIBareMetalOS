@@ -285,16 +285,6 @@ namespace MINIMAL_STD_NAMESPACE
     concept assignable_to = requires(U u, T t) { t = u; };
 
     template <class T>
-    concept ordered = requires(T const &t) {
-        { t <=> t };
-    };
-
-    template <class T, class U>
-    concept ordered_with = requires(T const &t, U const &u) {
-        { t <=> u };
-    };
-
-    template <class T>
     concept partial_comparable = equality_comparable<T> && requires(T const &t) {
         { t < t } -> same_as<bool>;
     };
@@ -333,15 +323,18 @@ namespace MINIMAL_STD_NAMESPACE
             }
             else
             {
-                if constexpr (ordered_with<T, U>)
+                if constexpr (partial_comparable_with<T, U>)
                 {
-                    auto cmp = a <=> b;
-
-                    if (cmp < 0)
+                    if (a < b)
                     {
                         less = true;
+                        return false;
                     }
-                    return cmp == 0;
+                    if (a > b)
+                    {
+                        return false;
+                    }
+                    return a == b;
                 }
                 else
                 {
@@ -460,9 +453,6 @@ namespace MINIMAL_STD_NAMESPACE
         using base_list = type_list<Bases...>;
         using Bases::operator[]...;
         using Bases::decl_elem...;
-
-        inline auto operator<=>(type_map const &) const = default;
-        inline bool operator==(type_map const &) const = default;
     };
 
     //
@@ -493,24 +483,8 @@ namespace MINIMAL_STD_NAMESPACE
             return (static_cast<tuple_elem &&>(*this).value);
         }
 
-        inline auto operator<=>(tuple_elem const &) const = default;
-        inline bool operator==(tuple_elem const &) const = default;
-
-        // Implements comparison for tuples containing reference types
-
-        inline constexpr auto operator<=>(tuple_elem const &other) const
-            noexcept(noexcept(value <=> other.value))
-            requires(is_reference_v<T> && ordered<T>)
-        {
-            return value <=> other.value;
-        }
-
-        inline constexpr bool operator==(tuple_elem const &other) const
-            noexcept(noexcept(value == other.value))
-            requires(is_reference_v<T> && equality_comparable<T>)
-        {
-            return value == other.value;
-        }
+        //  Intentionally no defaulted or custom comparison operators to avoid
+        //  compiler-specific issues with <=> and comparison category types.
     };
 
     //
@@ -626,14 +600,6 @@ namespace MINIMAL_STD_NAMESPACE
             _assign(base_list{}, static_cast<U &&>(values)...);
             return *this;
         }
-
-        inline auto operator<=>(tuple const &) const = default;
-        inline bool operator==(tuple const &) const = default;
-        inline bool operator!=(tuple const &) const = default;
-        inline bool operator<(tuple const &) const = default;
-        inline bool operator>(tuple const &) const = default;
-        inline bool operator<=(tuple const &) const = default;
-        inline bool operator>=(tuple const &) const = default;
 
         template <class... U>
         inline constexpr auto operator==(tuple<U...> const &other) const -> bool
@@ -939,8 +905,35 @@ namespace MINIMAL_STD_NAMESPACE
         constexpr void swap(tuple) noexcept {}
         constexpr auto &assign() noexcept { return *this; }
 
-        inline auto operator<=>(tuple const &) const = default;
-        inline bool operator==(tuple const &) const = default;
+        inline constexpr bool operator==(tuple const &) const noexcept
+        {
+            return true;
+        }
+
+        inline constexpr bool operator!=(tuple const &) const noexcept
+        {
+            return false;
+        }
+
+        inline constexpr bool operator<(tuple const &) const noexcept
+        {
+            return false;
+        }
+
+        inline constexpr bool operator>(tuple const &) const noexcept
+        {
+            return false;
+        }
+
+        inline constexpr bool operator<=(tuple const &) const noexcept
+        {
+            return true;
+        }
+
+        inline constexpr bool operator>=(tuple const &) const noexcept
+        {
+            return true;
+        }
 
         // Applies a function to every element of the tuple. The order is the
         // declaration order, so first the function will be applied to element

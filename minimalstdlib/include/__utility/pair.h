@@ -73,8 +73,51 @@ namespace MINIMAL_STD_NAMESPACE
             return *this;
         }
 
-        auto operator<=>(pair const &) const = default;
-        bool operator==(pair const &) const = default;
+        inline constexpr bool operator==(pair const &other) const
+            requires(equality_comparable<First> && equality_comparable<Second>)
+        {
+            return first == other.first && second == other.second;
+        }
+
+        inline constexpr bool operator!=(pair const &other) const
+            requires(equality_comparable<First> && equality_comparable<Second>)
+        {
+            return !(*this == other);
+        }
+
+        inline constexpr bool operator<(pair const &other) const
+            requires(partial_comparable_with<First, First> && partial_comparable_with<Second, Second>)
+        {
+            if (first < other.first)
+            {
+                return true;
+            }
+            if (other.first < first)
+            {
+                return false;
+            }
+            return second < other.second;
+        }
+
+        inline constexpr bool operator>(pair const &other) const
+            requires(partial_comparable_with<First, First> && partial_comparable_with<Second, Second>)
+        {
+            return other < *this;
+        }
+
+        inline constexpr bool operator<=(pair const &other) const
+            requires(partial_comparable_with<First, First> && partial_comparable_with<Second, Second> &&
+                     equality_comparable<First> && equality_comparable<Second>)
+        {
+            return !(other < *this);
+        }
+
+        inline constexpr bool operator>=(pair const &other) const
+            requires(partial_comparable_with<First, First> && partial_comparable_with<Second, Second> &&
+                     equality_comparable<First> && equality_comparable<Second>)
+        {
+            return !(*this < other);
+        }
     };
 
     template <class A, class B>

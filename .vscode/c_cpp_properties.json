@@ -3,8 +3,8 @@
         {
             "name": "AArch64 Bare Metal",
             "includePath": [
-                "~/dev/gcc-cross/aarch64-none-elf/lib/gcc/aarch64-none-elf/12.3.1/include",
-                "~/dev/gcc-cross/aarch64-none-elf/lib/gcc/aarch64-none-elf/12.3.1/include-fixed",
+                "~/dev/gcc-cross/aarch64-none-elf/lib/gcc/aarch64-none-elf/13.3.1/include",
+                "~/dev/gcc-cross/aarch64-none-elf/lib/gcc/aarch64-none-elf/13.3.1/include-fixed",
                 "~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include",
                 "~/dev/third-party/cpputest/include",
                 "${workspaceFolder}/rpibaremetalos/include",

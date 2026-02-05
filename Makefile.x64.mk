@@ -7,8 +7,8 @@ THIRD_PARTY := ${HOME}/dev/third-party
 
 # Variables for AArch64 builds follow
 
-CC := gcc
-LD := g++
+CC := gcc-13
+LD := g++-13
 AR := ar
 CPREPROCESSOR := cpp
 C_FLAGS := -Wall -fno-exceptions -fno-unwind-tables
@@ -19,10 +19,10 @@ LDFLAGS :=
 #	Base Include paths
 
 INCLUDE_DIRS := -I/usr/include \
-				-I/usr/lib/gcc/x86_64-linux-gnu/11/include \
+				-I/usr/lib/gcc/x86_64-linux-gnu/13/include \
 				-I/usr/include/x86_64-linux-gnu \
-				-I/usr/include/c++/11 \
-				-I/usr/include/x86_64-linux-gnu/c++/11 
+				-I/usr/include/c++/13 \
+				-I/usr/include/x86_64-linux-gnu/c++/13 
 
 #	Variables for test and coverage follow
 

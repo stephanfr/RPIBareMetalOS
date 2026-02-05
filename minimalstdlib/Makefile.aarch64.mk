@@ -14,7 +14,7 @@ CPP_SRC := $(wildcard $(CPP_SRC_DIR)/*.cpp)
 CPP_OBJ := $(CPP_SRC:$(CPP_SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
 C_DEFINES := 
-INCLUDE_DIRS += -I../minimalclib/include -Iinclude
+INCLUDE_DIRS := -I../minimalclib/include -Iinclude $(INCLUDE_DIRS)
 
 
 $(LIB) : $(CPP_OBJ)

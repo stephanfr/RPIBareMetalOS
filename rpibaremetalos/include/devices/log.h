@@ -7,7 +7,9 @@
 #include "os_config.h"
 
 #include <stdint.h>
-#include <string.h>
+// Use the project string.h so strlcpy/strnlen are available and avoid
+// conflicting toolchain prototypes during aarch64 builds.
+#include "string.h"
 
 typedef enum class LogLevel : uint32_t
 {
