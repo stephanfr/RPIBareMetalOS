@@ -73,7 +73,9 @@ namespace MINIMAL_STD_NAMESPACE
             struct alignas(64) block_metadata
             {
                 // 8-byte aligned fields
-                atomic<block_header *> memory_block_;              // 0x00, 8B
+                // Packed pointer + state + version: [ptr:48][state:8][version:8]
+                // This allows atomic CAS to verify both pointer AND state simultaneously
+                atomic<uint64_t> block_state_;                     // 0x00, 8B
                 atomic<block_metadata *> next_;                    // 0x08, 8B
                 uint64_t soft_deleted_at_counter_;                 // 0x10, 8B - monotonic counter value when soft-deleted
                 uint64_t randomized_value_;                        // 0x18, 8B
@@ -94,35 +96,46 @@ namespace MINIMAL_STD_NAMESPACE
 
                 // 1-byte fields
                 uint8_t alignment_;                                // 0x2C, 1B
-                atomic<uint8_t> state_;                            // 0x2D, 1B
 
-                // Padding to 64 bytes
-                uint8_t reserved_[18];                             // 0x2E, 18B
+                // Padding to 64 bytes (state_ removed - now packed in block_state_)
+                uint8_t reserved_[19];                             // 0x2D, 19B
 
                 /**
                  * @brief Computes a 64-bit hash value for the memory block.
                  *
                  * This function uses the FNV-1a hash algorithm to compute a 64-bit hash value
-                 * for the memory block. The algorithm processes the first 32 bytes of the
-                 * memory block (the 8-byte aligned fields).
+                 * for the memory block. The algorithm processes 24 bytes starting from next_,
+                 * skipping block_state_ since it contains state and version fields that change.
                  *
                  * @return A 64-bit hash value representing the memory block.
                  */
 
                 uint64_t hash()
                 {
-                    const uint8_t *data = (uint8_t *)&memory_block_;
-                    uint64_t hash = 0xcbf29ce484222325;
+                    const uint8_t *data = reinterpret_cast<const uint8_t *>(&next_);
+                    uint64_t hash_val = 0xcbf29ce484222325;
                     uint64_t prime = 0x100000001b3;
 
-                    for (int i = 0; i < 32; ++i)
+                    // Hash 24 bytes: next_(8B) + soft_deleted_at_counter_(8B) + randomized_value_(8B)
+                    for (int i = 0; i < 24; ++i)
                     {
-                        hash = hash ^ data[i];
-                        hash *= prime;
+                        hash_val = hash_val ^ data[i];
+                        hash_val *= prime;
                     }
 
-                    return hash;
+                    return hash_val;
                 };
+
+                // Helper methods to access packed fields
+                block_header *get_memory_block() const
+                {
+                    return block_state_ptr::unpack_ptr(block_state_.load(memory_order_acquire));
+                }
+
+                uint8_t get_state() const
+                {
+                    return block_state_ptr::unpack_state(block_state_.load(memory_order_acquire));
+                }
             };
 
             static constexpr size_t ALLOCATION_METADATA_SIZE = sizeof(block_metadata);
@@ -228,17 +241,73 @@ namespace MINIMAL_STD_NAMESPACE
                         return {nullptr, INVALID, 0, 0};
                     }
 
-                    return {allocation, static_cast<allocation_state>(metadata.state_.load(memory_order_acquire)), metadata.requested_size_.load(memory_order_acquire), metadata.alignment_};
+                    return {allocation, static_cast<allocation_state>(metadata.get_state()), metadata.requested_size_.load(memory_order_acquire), metadata.alignment_};
                 }
 
                 return {nullptr, INVALID, 0, 0};
             }
 
         private:
-            inline static const block_metadata end_of_metadata_list_sentinel_ = {nullptr, nullptr, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, {}};
+            inline static const block_metadata end_of_metadata_list_sentinel_ = {0, nullptr, 0, 0, 0, 0, 0, 0, {}};
 
             using metadata_tag = lockfree::tagged_ptr<block_metadata, uint16_t>;
             using block_tag = lockfree::tagged_ptr<block_header, uint16_t>;
+
+            // Packed pointer + state + version for atomic state transitions
+            // Layout: [ptr:48][state:8][version:8] = 64 bits
+            // This allows atomic CAS to verify both pointer AND state simultaneously,
+            // providing stronger guarantees against ABA issues during deallocation.
+            struct block_state_ptr
+            {
+                using pointer = block_header *;
+                using storage_type = uint64_t;
+
+                static constexpr int ptr_bits = 48;
+                static constexpr int state_bits = 8;
+                static constexpr int version_bits = 8;
+
+                static constexpr storage_type ptr_mask = (1ULL << ptr_bits) - 1;
+                static constexpr storage_type state_mask = 0xFFULL;
+                static constexpr storage_type version_mask = 0xFFULL;
+
+                static constexpr storage_type pack(pointer ptr, uint8_t state, uint8_t version = 0)
+                {
+                    return (static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr)) & ptr_mask)
+                         | (static_cast<storage_type>(state) << 48)
+                         | (static_cast<storage_type>(version) << 56);
+                }
+
+                static constexpr pointer unpack_ptr(storage_type value)
+                {
+                    return reinterpret_cast<pointer>(static_cast<uintptr_t>(value & ptr_mask));
+                }
+
+                static constexpr uint8_t unpack_state(storage_type value)
+                {
+                    return static_cast<uint8_t>((value >> 48) & state_mask);
+                }
+
+                static constexpr uint8_t unpack_version(storage_type value)
+                {
+                    return static_cast<uint8_t>((value >> 56) & version_mask);
+                }
+
+                static constexpr storage_type with_state(storage_type value, uint8_t state)
+                {
+                    return (value & ~(state_mask << 48)) | (static_cast<storage_type>(state) << 48);
+                }
+
+                static constexpr storage_type increment_version(storage_type value)
+                {
+                    uint8_t new_version = static_cast<uint8_t>(unpack_version(value) + 1);
+                    return (value & ~(version_mask << 56)) | (static_cast<storage_type>(new_version) << 56);
+                }
+
+                static constexpr storage_type with_state_and_increment_version(storage_type value, uint8_t state)
+                {
+                    return increment_version(with_state(value, state));
+                }
+            };
 
             struct alignas(64) free_block_bin
             {
@@ -321,7 +390,7 @@ namespace MINIMAL_STD_NAMESPACE
             bool is_last_block(const block_metadata &metadata)
             {
                 auto next_empty = block_tag::unpack_ptr(next_empty_memory_block_.load(memory_order_acquire));
-                return ((uint8_t *)next_empty == ((uint8_t *)metadata.memory_block_.load(memory_order_acquire)) + metadata.total_size_);
+                return ((uint8_t *)next_empty == ((uint8_t *)metadata.get_memory_block()) + metadata.total_size_);
             }
 
             uint64_t free_block_bin_index(size_t bytes) const
@@ -378,7 +447,11 @@ namespace MINIMAL_STD_NAMESPACE
 
             void move_metadata_to_free_metadata_list(block_metadata &metadata)
             {
-                metadata.state_.store(METADATA_AVAILABLE, memory_order_release);
+                // Set state to METADATA_AVAILABLE, preserving pointer (nullptr) and incrementing version
+                uint64_t current = metadata.block_state_.load(memory_order_acquire);
+                metadata.block_state_.store(
+                    block_state_ptr::with_state_and_increment_version(current, METADATA_AVAILABLE),
+                    memory_order_release);
 
                 //  Add head to the front of the free metadata list
                 //  Protect with interrupt guard to prevent ABA issues during the push operation.
@@ -410,8 +483,11 @@ namespace MINIMAL_STD_NAMESPACE
 
             void move_metadata_to_soft_deleted_list(block_metadata &metadata)
             {
-                metadata.state_.store(LOCKED, memory_order_release);
-                metadata.memory_block_.store(nullptr, memory_order_release);
+                // Set state to LOCKED and clear the pointer atomically, increment version
+                uint64_t current = metadata.block_state_.load(memory_order_acquire);
+                metadata.block_state_.store(
+                    block_state_ptr::pack(nullptr, LOCKED, block_state_ptr::unpack_version(current) + 1),
+                    memory_order_release);
                 metadata.next_free_block_index_ = NULL_INDEX;
 
                 //  If there are no iterators, then we can move the metadata directly to the free metadata list
@@ -425,7 +501,12 @@ namespace MINIMAL_STD_NAMESPACE
                     //  Use the monotonic counter to record when this block was soft-deleted.
                     //  Adding 1 ensures the value is strictly after the current counter reading.
                     metadata.soft_deleted_at_counter_ = platform::get_monotonic_counter() + 1;
-                    metadata.state_.store(SOFT_DELETED, memory_order_release);
+
+                    // Set state to SOFT_DELETED (pointer already nullptr), increment version
+                    current = metadata.block_state_.load(memory_order_acquire);
+                    metadata.block_state_.store(
+                        block_state_ptr::with_state_and_increment_version(current, SOFT_DELETED),
+                        memory_order_release);
 
                     //  Put the metadata record into the list of soft deleted blocks
                     //  Protect with interrupt guard to prevent ABA issues during the push operation.
@@ -496,11 +577,15 @@ namespace MINIMAL_STD_NAMESPACE
 
                 block_metadata *metadata = metadata_start_ - metadata_index;
 
-                metadata->memory_block_.store(free_block, memory_order_release);
+                // Get current version (if recycled metadata) and increment it
+                uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_acquire));
+                // Set pointer and state atomically in a single store
+                metadata->block_state_.store(
+                    block_state_ptr::pack(free_block, IN_USE, version + 1),
+                    memory_order_release);
                 metadata->requested_size_.store(static_cast<uint32_t>(bytes), memory_order_release);
                 metadata->total_size_ = static_cast<uint32_t>(free_block->size_including_header_);
                 metadata->alignment_ = static_cast<uint8_t>(alignment);
-                metadata->state_.store(IN_USE, memory_order_release);
 
                 if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
                 {
@@ -563,10 +648,23 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Insure the block has not already been deallocated and lock it.
                 //      We must acquire ownership via CAS BEFORE modifying any metadata fields.
+                //      The packed CAS atomically verifies BOTH the pointer AND state, providing
+                //      stronger ABA protection than a state-only CAS.
 
-                uint8_t current_state = IN_USE;
+                uint64_t current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
+                uint8_t current_state = block_state_ptr::unpack_state(current_block_state);
 
-                if (!block_to_deallocate->state_.compare_exchange_strong(current_state, LOCKED, memory_order_acq_rel, memory_order_acquire))
+                if (current_state != IN_USE)
+                {
+                    return;
+                }
+
+                // Build expected and desired values for CAS
+                // Expected: current pointer + IN_USE + current version
+                // Desired: same pointer + LOCKED + incremented version
+                uint64_t desired_block_state = block_state_ptr::with_state_and_increment_version(current_block_state, LOCKED);
+
+                if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, desired_block_state, memory_order_acq_rel, memory_order_acquire))
                 {
                     return;
                 }
@@ -593,8 +691,9 @@ namespace MINIMAL_STD_NAMESPACE
                     //  if an interrupt allocates memory between is_last_block() and this CAS, the CAS will
                     //  fail because next_empty_memory_block_ will have moved past our expected position.
 
+                    block_header *memory_block_ptr = block_to_deallocate->get_memory_block();
                     block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
-                        reinterpret_cast<uint8_t *>(block_to_deallocate->memory_block_.load(memory_order_acquire)) + block_to_deallocate->total_size_);
+                        reinterpret_cast<uint8_t *>(memory_block_ptr) + block_to_deallocate->total_size_);
 
                     //  If the next empty block pointer is moved back to the start of the block, then it is permanently
                     //      deleted and we can put the metadata directly into the soft deleted list.
@@ -603,7 +702,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
                     {
-                        uint64_t new_tag = block_tag::pack(block_to_deallocate->memory_block_.load(memory_order_acquire),
+                        uint64_t new_tag = block_tag::pack(memory_block_ptr,
                                                           static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
 
                         if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
@@ -615,9 +714,12 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                //  Mark the block as available
+                //  Mark the block as available (keep pointer, change state, increment version)
 
-                block_to_deallocate->state_.store(AVAILABLE, memory_order_release);
+                current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
+                block_to_deallocate->block_state_.store(
+                    block_state_ptr::with_state_and_increment_version(current_block_state, AVAILABLE),
+                    memory_order_release);
                 block_to_deallocate->soft_deleted_at_counter_ = platform::get_monotonic_counter() + 1;
 
                 //  Finally, put the block into the correct free block bin
@@ -820,8 +922,9 @@ namespace MINIMAL_STD_NAMESPACE
                     //  if an interrupt allocates memory between is_last_block() and this CAS, the CAS will
                     //  fail because next_empty_memory_block_ will have moved past our expected position.
 
+                    block_header *head_memory_block = head->get_memory_block();
                     block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
-                        reinterpret_cast<uint8_t *>(head->memory_block_.load(memory_order_acquire)) + head->total_size_);
+                        reinterpret_cast<uint8_t *>(head_memory_block) + head->total_size_);
 
                     //  If the next empty block pointer is moved back to the start of the block, then it is permanently
                     //      deleted and we can put the metadata directly into the soft deleted list.
@@ -830,7 +933,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
                     {
-                        uint64_t new_tag = block_tag::pack(head->memory_block_.load(memory_order_acquire),
+                        uint64_t new_tag = block_tag::pack(head_memory_block,
                                                           static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
 
                         if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
@@ -844,7 +947,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  We have the head, so get the block pointer
 
-                auto return_value = head->memory_block_.load(memory_order_acquire);
+                auto return_value = head->get_memory_block();
 
                 move_metadata_to_soft_deleted_list(*head);
 
@@ -977,11 +1080,14 @@ namespace MINIMAL_STD_NAMESPACE
 
                 allocation_info operator*() const
                 {
-                    auto state = static_cast<allocation_state>(current_->state_.load(memory_order_acquire));
+                    // Load block_state_ once to get both state and pointer atomically
+                    uint64_t block_state = current_->block_state_.load(memory_order_acquire);
+                    auto state = static_cast<allocation_state>(block_state_ptr::unpack_state(block_state));
 
                     if (state == IN_USE)
                     {
-                        return {(void *)(((uint8_t *)current_->memory_block_.load(memory_order_acquire)) + ALLOCATION_HEADER_SIZE), IN_USE, current_->requested_size_.load(memory_order_acquire), alignof(max_align_t)};
+                        block_header *memory_block = block_state_ptr::unpack_ptr(block_state);
+                        return {(void *)(((uint8_t *)memory_block) + ALLOCATION_HEADER_SIZE), IN_USE, current_->requested_size_.load(memory_order_acquire), alignof(max_align_t)};
                     }
                     else
                     {
