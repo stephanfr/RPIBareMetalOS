@@ -180,7 +180,6 @@ namespace MINIMAL_STD_NAMESPACE
                   cpu_shards_(cpu_shards > 0 ? cpu_shards : 1),
                   number_of_active_iterators_(0),
                   hard_delete_before_counter_cutoff_(SIZE_MAX),
-                  reclaimation_pass_(false),
                   itr_end_(*this, &end_of_metadata_list_sentinel_)
             {
                 //  Allocate the per-CPU shard arrays from the start of the managed block.
@@ -364,8 +363,6 @@ namespace MINIMAL_STD_NAMESPACE
 
             alignas(64) atomic<int64_t> number_of_active_iterators_;
             alignas(64) atomic<uint64_t> hard_delete_before_counter_cutoff_;
-
-            alignas(64) atomic<bool> reclaimation_pass_;
 
             size_t cpu_shard_index() const
             {
@@ -956,82 +953,67 @@ namespace MINIMAL_STD_NAMESPACE
                 return return_value;
             }
 
-            void reclaim_soft_deleted_metadata()
+            void reclaim_soft_deleted_metadata(size_t shard)
             {
-                //  Grab the reclaiming metadata flag.  If we can't get it, then return as a different thread is already reclaiming.
+                //  Walk the soft deleted list for the given shard and reclaim any metadata records
+                //  that are older than the hard delete cutoff.
 
-                bool current_reclaiming_metadata = false;
+                block_metadata *previous = nullptr;
+                uint64_t current_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
+                block_metadata *current = metadata_tag::unpack_ptr(current_tag);
 
-                if (!reclaimation_pass_.compare_exchange_strong(current_reclaiming_metadata, true, memory_order_acq_rel, memory_order_acquire))
+                while (current != nullptr)
                 {
-                    return;
-                }
+                    //  If the metadata record was soft-deleted after the cutoff counter, then move to the next record
 
-                //  Walk the soft deleted lists and reclaim any metadata records that are older than the hard delete cutoff
-
-                for (size_t shard = 0; shard < cpu_shards_; ++shard)
-                {
-                    block_metadata *previous = nullptr;
-                    uint64_t current_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
-                    block_metadata *current = metadata_tag::unpack_ptr(current_tag);
-
-                    while (current != nullptr)
+                    if (current->soft_deleted_at_counter_ >= hard_delete_before_counter_cutoff_.load(memory_order_acquire))
                     {
-                        //  If the metadata record was soft-deleted after the cutoff counter, then move to the next record
+                        //  Move to the next metadata record
 
-                        if (current->soft_deleted_at_counter_ >= hard_delete_before_counter_cutoff_.load(memory_order_acquire))
+                        previous = current;
+                        current = index_to_metadata(current->next_soft_deleted_index_);
+                    }
+
+                    //  The soft delete occurred before the current cutoff, so the metadata record can be
+                    //      moved to the free metadata list.
+
+                    //  If there is no previous, then we are at the head of the list
+
+                    if (previous == nullptr)
+                    {
+                        //  Pop the head of the soft delete metadata list.  This could fail if a new record has been added
+                        //      to the front of the list in a different thread.
+
+                        block_metadata *next = index_to_metadata(current->next_soft_deleted_index_);
+                        uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
+
+                        if (soft_deleted_metadata_heads_[shard].compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel))
                         {
-                            //  Move to the next metadata record
-
-                            previous = current;
-                            current = index_to_metadata(current->next_soft_deleted_index_);
-                        }
-
-                        //  The soft delete occurred before the current cutoff, so the metadata record can be
-                        //      moved to the free metadata list.
-
-                        //  If there is no previous, then we are at the head of the list
-
-                        if (previous == nullptr)
-                        {
-                            //  Pop the head of the soft delete metadata list.  This could fail if a new record has been added
-                            //      to the front of the list in a different thread.
-
-                            block_metadata *next = index_to_metadata(current->next_soft_deleted_index_);
-                            uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
-
-                            if (soft_deleted_metadata_heads_[shard].compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel))
-                            {
-                                //  Element popped, so add current to the front of the free list
-
-                                move_metadata_to_free_metadata_list(*current);
-                            }
-
-                            //  Start again at the head of the list on either success or failure above
-
-                            current_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
-                            current = metadata_tag::unpack_ptr(current_tag);
-                        }
-                        else
-                        {
-                            //  We are somewhere mid-list, so we can remove the current metadata record from the free list
-
-                            previous->next_soft_deleted_index_ = current->next_soft_deleted_index_;
+                            //  Element popped, so add current to the front of the free list
 
                             move_metadata_to_free_metadata_list(*current);
-
-                            //  Advance to the next node
-
-                            auto next = index_to_metadata(current->next_soft_deleted_index_);
-                            current->next_soft_deleted_index_ = NULL_INDEX;
-                            current = next;
                         }
+
+                        //  Start again at the head of the list on either success or failure above
+
+                        current_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
+                        current = metadata_tag::unpack_ptr(current_tag);
+                    }
+                    else
+                    {
+                        //  We are somewhere mid-list, so we can remove the current metadata record from the free list
+
+                        previous->next_soft_deleted_index_ = current->next_soft_deleted_index_;
+
+                        move_metadata_to_free_metadata_list(*current);
+
+                        //  Advance to the next node
+
+                        auto next = index_to_metadata(current->next_soft_deleted_index_);
+                        current->next_soft_deleted_index_ = NULL_INDEX;
+                        current = next;
                     }
                 }
-
-                //  Release the reclaimation flag
-
-                reclaimation_pass_.store(false, memory_order_release);
             }
 
         public:
@@ -1057,7 +1039,7 @@ namespace MINIMAL_STD_NAMESPACE
                     if (const_cast<lockfree_single_block_resource &>(resource_).number_of_active_iterators_.sub_fetch(1, memory_order_acq_rel) == 0)
                     {
                         const_cast<lockfree_single_block_resource &>(resource_).hard_delete_before_counter_cutoff_.store(SIZE_MAX, memory_order_release);
-                        const_cast<lockfree_single_block_resource &>(resource_).reclaim_soft_deleted_metadata();
+                        const_cast<lockfree_single_block_resource &>(resource_).reclaim_soft_deleted_metadata(resource_.cpu_shard_index());
                     }
                 }
 
