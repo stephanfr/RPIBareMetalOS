@@ -6,7 +6,7 @@
 
 #include <minstdconfig.h>
 
-#include <lockfree/binary_semaphore_array>
+#include <lockfree/binary_semaphore_array2>
 
 #include <array>
 #include <pthread.h>
@@ -65,11 +65,72 @@ namespace
 
     struct _thread_arguments
     {
-        minstd::binary_semaphore_array<16384> *semaphores_ = nullptr;
+        minstd::binary_semaphore_array2<16384> *semaphores_ = nullptr;
         uint64_t rng_seed_;
 
         uint32_t bits_acquired_ = 0;
     };
+
+    enum class perf_op
+    {
+        single_bit,
+        block,
+        next_block
+    };
+
+    struct _perf_thread_arguments
+    {
+        minstd::binary_semaphore_array2<65536> *semaphores_ = nullptr;
+        uint64_t rng_seed_ = 0;
+        size_t iterations_ = 0;
+        perf_op op_ = perf_op::single_bit;
+    };
+
+    void *_perf_worker(void *arguments)
+    {
+        _perf_thread_arguments *args = static_cast<_perf_thread_arguments *>(arguments);
+
+        minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed_, args->rng_seed_ * 10));
+
+        while (!start_updates)
+        {
+        }
+
+        switch (args->op_)
+        {
+            case perf_op::single_bit:
+                for (size_t i = 0; i < args->iterations_; i++)
+                {
+                    const size_t index = rng() % 65536;
+                    args->semaphores_->acquire(index);
+                    args->semaphores_->release(index);
+                }
+                break;
+            case perf_op::block:
+                for (size_t i = 0; i < args->iterations_; i++)
+                {
+                    const uint32_t block_size = (rng() % 16) + 1;
+                    const size_t index = rng() % (65536 - block_size);
+                    args->semaphores_->acquire_block(index, block_size);
+                    args->semaphores_->release_block(index, block_size);
+                }
+                break;
+            case perf_op::next_block:
+                for (size_t i = 0; i < args->iterations_; i++)
+                {
+                    const uint32_t block_size = (rng() % 16) + 1;
+                    auto index = args->semaphores_->acquire_next_empty_block(block_size, 0);
+
+                    if (index.has_value())
+                    {
+                        args->semaphores_->release_block(index.value(), block_size);
+                    }
+                }
+                break;
+        }
+
+        return nullptr;
+    }
 
     void *_worker_thread1(void *arguments)
     {
@@ -131,7 +192,7 @@ namespace
 
     TEST(BinarySemaphoreArrayTests, BasicFunctionality)
     {
-        minstd::binary_semaphore_array<1024> locks;
+        minstd::binary_semaphore_array2<1024> locks;
 
         CHECK(locks.acquire(13));
         CHECK(locks.is_acquired(13));
@@ -203,7 +264,7 @@ namespace
 
     TEST(BinarySemaphoreArrayTests, TestSpans)
     {
-        minstd::binary_semaphore_array<16384> semaphores;
+        minstd::binary_semaphore_array2<16384> semaphores;
         minstd::array<bit_block, 1000> bit_blocks;
 
         //  Generate a collection of non-overlapping bit blocks and then acquire them.
@@ -270,7 +331,7 @@ namespace
 
         minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(123, 456));
 
-        minstd::binary_semaphore_array<SIZE_IN_BITS> semaphores;
+        minstd::binary_semaphore_array2<SIZE_IN_BITS> semaphores;
 
         for (size_t i = 0; i < SIZE_IN_BITS / 16; i++)
         {
@@ -330,7 +391,7 @@ namespace
     {
         constexpr size_t NUM_THREADS = 32;
 
-        minstd::binary_semaphore_array<16384> semaphores;
+        minstd::binary_semaphore_array2<16384> semaphores;
 
         pthread_t threads[NUM_THREADS];
         _thread_arguments arguments[NUM_THREADS];
@@ -374,7 +435,7 @@ namespace
         constexpr size_t SIZE_IN_BITS = 16384;
         constexpr size_t NUM_THREADS = 32;
 
-        minstd::binary_semaphore_array<SIZE_IN_BITS> semaphores;
+        minstd::binary_semaphore_array2<SIZE_IN_BITS> semaphores;
 
         pthread_t threads[NUM_THREADS];
         _thread_arguments arguments[NUM_THREADS];
@@ -434,7 +495,7 @@ namespace
 
     TEST(BinarySemaphoreArrayTests, Benchmark)
     {
-        minstd::binary_semaphore_array<2048> semaphores;
+        minstd::binary_semaphore_array2<2048> semaphores;
 
         auto start = clock();
 
@@ -457,6 +518,54 @@ namespace
         auto duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
 
         printf("Binary Semaphore Array Tests Benchmark Duration: %f\n", duration);
+    }
+
+    TEST(BinarySemaphoreArrayTests, PerformanceTest)
+    {
+        constexpr size_t SIZE_IN_BITS = 65536;
+        constexpr size_t ITERATIONS_PER_THREAD = 200000;
+
+        minstd::binary_semaphore_array2<SIZE_IN_BITS> semaphores;
+
+        pthread_t threads[32];
+        _perf_thread_arguments arguments[32];
+
+        const perf_op ops[] = {perf_op::single_bit, perf_op::block, perf_op::next_block};
+        const char *op_names[] = {"Single-Bit", "Block", "Next-Block"};
+
+        for (size_t op_index = 0; op_index < 3; op_index++)
+        {
+            printf("Binary Semaphore Array %s Ops/sec (Threads 1-32):\n", op_names[op_index]);
+
+            for (size_t num_threads = 1; num_threads <= 32; num_threads++)
+            {
+                start_updates = false;
+
+                for (size_t i = 0; i < num_threads; i++)
+                {
+                    arguments[i].semaphores_ = &semaphores;
+                    arguments[i].rng_seed_ = (op_index + 1) * 1000 + i * 17;
+                    arguments[i].iterations_ = ITERATIONS_PER_THREAD;
+                    arguments[i].op_ = ops[op_index];
+
+                    pthread_create(&threads[i], nullptr, _perf_worker, &arguments[i]);
+                }
+
+                auto start = clock();
+                start_updates = true;
+
+                for (size_t i = 0; i < num_threads; i++)
+                {
+                    pthread_join(threads[i], nullptr);
+                }
+
+                auto end = clock();
+                double duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+                double ops_per_sec = (double)(ITERATIONS_PER_THREAD * num_threads * 2) / duration;
+
+                printf("  %2zu threads: %f\n", num_threads, ops_per_sec);
+            }
+        }
     }
 
 }

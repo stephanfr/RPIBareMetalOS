@@ -1,0 +1,158 @@
+// Copyright 2025 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <optional>
+#if defined(__linux__)
+#include <sched.h>
+#endif
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <size_t SIZE_IN_BITS>
+        requires(SIZE_IN_BITS >= 128)
+    class binary_semaphore_array2
+    {
+    public:
+        binary_semaphore_array2()
+        {
+            for (size_t record_idx = 0; record_idx < NUM_RECORDS; ++record_idx)
+            {
+                auto &record = records_[record_idx];
+
+                record.reserved_ = 0;
+
+                for (size_t block_idx = 0; block_idx < record.headers_.size(); ++block_idx)
+                {
+                    record.headers_[block_idx].store(0x3F, minstd::memory_order_relaxed);
+                    record.bit_block[block_idx] = 0;
+                }
+            }
+        }
+
+        size_t size() const
+        {
+            return SIZE_IN_BITS;
+        }
+
+        size_t total_bits_set() const
+        {
+            return 0;
+        }
+
+        size_t bits_set_in_block_containing_bit( const size_t bit_index)
+        {
+            const size_t record_idx = record_index(bit_index);
+            const size_t block_idx = bit_block_index(bit_index);
+
+            return 63 - (records_[record_idx].headers_[block_idx].load( minstd::memory_order_relaxed ) & 0x3F);
+        }
+
+        bool acquire(const size_t bit_index)
+        {
+            const size_t record_idx = record_index(bit_index);
+            const size_t block_idx = bit_block_index(bit_index);
+
+            //  First, we lock the bit block so we are sure that no other thread can modifying the same block at the same time.
+            //      Once the block is locked though, we do not need atomic operations for bit manipulation as we have sole
+            //      ownership of the bit block.
+
+            l2_record_and_bits &record = records_[record_idx];
+
+            if (!try_to_lock_block(record, block_idx))
+                return false; // Failed to acquire the block, so we cannot acquire the bit
+
+            const size_t bit_idx = bit_block_bit_index(bit_index);
+
+            if (record.bit_block[block_idx] & (1ULL << bit_idx))
+            {
+                unlock_block(record, block_idx); // Release the block lock
+                return false;                    // The bit is already acquired by another thread
+            }
+
+            record.bit_block[block_idx] |= (1ULL << bit_idx);
+            unlock_block(record, block_idx);
+
+            return true; // Successfully acquired the bit
+        }
+
+        bool release(const size_t bit_index)
+        {
+            return false;
+        }
+
+        bool is_acquired(const size_t bit_index) const
+        {
+            return false;
+        }
+
+        bool acquire_block(const size_t bit_index, const size_t block_length_in_bits)
+        {
+            return false;
+        }
+        bool release_block(const size_t bit_index, const uint32_t block_length_in_bits)
+        {
+            return false;
+        }
+
+        minstd::optional<size_t> acquire_next_empty_block(const uint32_t block_length_in_bits, const int32_t search_hint = -1)
+        {
+            return minstd::optional<size_t>();
+        }
+
+    private:
+        static constexpr size_t NUM_64BIT_WORDS = (SIZE_IN_BITS + 64 - 1) / 64;
+        static constexpr size_t NUM_RECORDS = (NUM_64BIT_WORDS + 7 - 1) / 7;
+        static constexpr size_t BITS_PER_RECORD = 7 * 64;
+
+        typedef struct
+        {
+            uint8_t reserved : 1 = 0;
+            uint8_t locked : 1 = 0;
+            uint8_t count : 6 = 0x3F;
+        } block_header;
+        static_assert(sizeof(block_header) == 1, "block_header must be exactly 1 byte in size");
+
+        typedef struct
+        {
+            uint8_t reserved_;
+            minstd::array<minstd::atomic<uint8_t>, 7> headers_;
+            minstd::array<uint64_t, 7> bit_block;
+        } l2_record_and_bits;
+        static_assert(sizeof(l2_record_and_bits) == 64, "l2_record_and_bits must be exactly 64 bytes in size");
+
+        alignas(64) minstd::array<l2_record_and_bits, NUM_RECORDS> records_;
+
+        size_t record_index(const size_t bit_index) const
+        {
+            return bit_index / BITS_PER_RECORD;
+        }
+
+        size_t bit_block_index(const size_t bit_index) const
+        {
+            return (bit_index % BITS_PER_RECORD) / 64;
+        }
+
+        size_t bit_block_bit_index(const size_t bit_index) const
+        {
+            return 63 - (bit_index % 64);
+        }
+
+        bool try_to_lock_block(l2_record_and_bits &record, const size_t bit_block_idx)
+        {
+            uint8_t expected = record.headers_[bit_block_idx] & 0xBF; // Expect the block to be unlocked (bit 6 is the locked bit)
+            return record.headers_[bit_block_idx].compare_exchange_weak(expected, expected | 0x40, minstd::memory_order_acquire, minstd::memory_order_relaxed);
+        }
+
+        void unlock_block(l2_record_and_bits &record, const size_t bit_block_idx)
+        {
+            uint8_t num_zeros = 64 - __builtin_popcountll(record.bit_block[bit_block_idx]);
+            record.headers_[bit_block_idx].store( num_zeros & 0x3F, minstd::memory_order_relaxed ); // Clear the locked bit (bit 6) and set the number of zeros in the block
+        }
+    };
+}

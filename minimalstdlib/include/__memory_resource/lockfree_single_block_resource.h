@@ -16,7 +16,7 @@
 #include "__extensions/hash_check.h"
 #include "__extensions/memory_resource_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
-#include "lockfree/tagged_ptr.h"
+#include "lockfree/tagged_ptr"
 #include "memory_resource.h"
 
 #include "stdio.h"
@@ -435,8 +435,10 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 if (retries > 0)
                 {
-                    for (volatile size_t i = 0; i < 1000 * retries; i++)
-                        ;
+                    for (size_t i = 0; i < 1000 * retries; ++i)
+                    {
+                        __asm__ __volatile__("" ::: "memory");
+                    }
                 }
 
                 retries++;

@@ -25,11 +25,12 @@ namespace MINIMAL_STD_NAMESPACE
 
             do
             {
-                if(retries != 0)
+                if (retries != 0)
                 {
-                    volatile size_t i;
-
-                    for( i = 0; i < 500 * retries; i++ );
+                    for (size_t i = 0; i < 500 * retries; ++i)
+                    {
+                        __asm__ __volatile__("" ::: "memory");
+                    }
                 }
 
                 retries++;

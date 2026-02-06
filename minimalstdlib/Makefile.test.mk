@@ -29,6 +29,8 @@ TEST_LIB := -L$(CPPUTEST_PATH)/lib -lCppUTest -lCppUTestExt
 
 test : clean clean_test lib $(TEST_EXE)
 
+test-incremental : lib $(TEST_EXE)
+
 test-coverage : clean_test $(COVERAGE_EXE)
 	cd $(COVERAGE_TEST_OBJ_DIR)
 	gcov ../cpputest_main.cpp --object-directory .

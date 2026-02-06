@@ -640,7 +640,7 @@ namespace
         printf("--------|------------------|----------------|---------------|------------|----------|----------\n");
 
         static double baseline_lockfree_efficiency = 0.0;
-        static double baseline_malloc_efficiency = 0.0;
+//        static double baseline_malloc_efficiency = 0.0;
         constexpr size_t MAX_THREADS = 16;
         constexpr size_t OPERATIONS_PER_THREAD_SENSITIVITY = 2000;
 
@@ -752,7 +752,7 @@ namespace
             if (num_threads == 1) 
             {
                 baseline_lockfree_efficiency = lockfree_efficiency;
-                baseline_malloc_efficiency = malloc_efficiency;
+//                baseline_malloc_efficiency = malloc_efficiency;
             }
             
             double lockfree_scalability = baseline_lockfree_efficiency > 0 ? 

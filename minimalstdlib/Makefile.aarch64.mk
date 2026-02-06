@@ -24,7 +24,7 @@ $(OBJ_DIR)/%.o: $(CPP_SRC_DIR)/%.cpp
 	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(OPTIMIZATION_FLAGS) -c $< -o $@
 
 
-lib: clean $(LIB)
+lib: $(LIB)
 
 clean:
 	/bin/rm $(LIB_DIR)/*.* $(OBJ_DIR)/*.o > /dev/null 2> /dev/null || true
