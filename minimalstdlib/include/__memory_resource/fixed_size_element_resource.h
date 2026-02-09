@@ -6,7 +6,8 @@
 
 #include <algorithm>
 #include <atomic>
-#include <lockfree/binary_semaphore_array>
+#include <optional>
+#include <lockfree/bitblock_set>
 
 #include "__extensions/memory_resource_statistics.h"
 #include <memory_resource>
@@ -99,8 +100,58 @@ namespace MINIMAL_STD_NAMESPACE
             struct block
             {
                 block *next_block_ = nullptr;
-                binary_semaphore_array<ELEMENTS_PER_BLOCK> element_semaphores_;
+                bitblock_set<ELEMENTS_PER_BLOCK> element_allocations_;
+                alignas(64) atomic<size_t> contiguous_search_hint_{0};
                 alignas(16) uint8_t data_[ELEMENT_SIZE_IN_BYTES * ELEMENTS_PER_BLOCK];
+
+                minstd::optional<size_t> acquire_next_empty_block(size_t num_elements)
+                {
+                    if (num_elements == 0 || num_elements > ELEMENTS_PER_BLOCK || num_elements > 16)
+                    {
+                        return minstd::optional<size_t>();
+                    }
+
+                    //  For single element allocations, use the optimized acquire_first_available
+                    //      which uses SIMD scanning and an internal search hint.
+
+                    if (num_elements == 1)
+                    {
+                        return element_allocations_.acquire_first_available();
+                    }
+
+                    //  For multi-element contiguous allocations, scan from a hint position
+                    //      to distribute threads across different regions of the block.
+
+                    const size_t last_start = ELEMENTS_PER_BLOCK - num_elements;
+                    const size_t hint = contiguous_search_hint_.load(memory_order_relaxed);
+                    const size_t start_pos = (hint <= last_start) ? hint : 0;
+
+                    for (size_t start = start_pos; start <= last_start; ++start)
+                    {
+                        auto result = element_allocations_.acquire(start, num_elements);
+
+                        if (result == bitblock_set_result::success)
+                        {
+                            contiguous_search_hint_.store(start + num_elements, memory_order_relaxed);
+                            return minstd::optional<size_t>(start);
+                        }
+                    }
+
+                    //  Wrap around to search positions before the hint
+
+                    for (size_t start = 0; start < start_pos; ++start)
+                    {
+                        auto result = element_allocations_.acquire(start, num_elements);
+
+                        if (result == bitblock_set_result::success)
+                        {
+                            contiguous_search_hint_.store(start + num_elements, memory_order_relaxed);
+                            return minstd::optional<size_t>(start);
+                        }
+                    }
+
+                    return minstd::optional<size_t>();
+                }
             };
 
             struct arena
@@ -116,13 +167,18 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     //  Ignore the alignment as alignment will be 16 bytes based on the template requirements
 
+                    if (num_elements == 0 || num_elements > 16)
+                    {
+                        return nullptr;
+                    }
+
                     block *current_block = first_block_.load(memory_order_acquire);
 
                     minstd::optional<size_t> allocation;
 
                     while (!allocation.has_value())
                     {
-                        allocation = current_block->element_semaphores_.acquire_next_empty_block(num_elements);
+                        allocation = current_block->acquire_next_empty_block(num_elements);
 
                         while (!allocation.has_value())
                         {
@@ -135,7 +191,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                             current_block = current_block->next_block_;
 
-                            allocation = current_block->element_semaphores_.acquire_next_empty_block(num_elements);
+                            allocation = current_block->acquire_next_empty_block(num_elements);
                         }
 
                         //  We did not find an empty block in the current block list, so add a new block and try
@@ -193,7 +249,12 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 //  Ignore the alignment as alignment will be 16 bytes based on the template requirements
 
-                const size_t num_elements = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
+                size_t num_elements = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
+
+                if (num_elements == 0)
+                {
+                    num_elements = 1;
+                }
 
                 uint64_t arena_in_use = get_current_core() % NUMBER_OF_ARENAS;
 
@@ -202,7 +263,12 @@ namespace MINIMAL_STD_NAMESPACE
 
             void do_deallocate(void *block, size_t num_bytes, size_t alignment)
             {
-                const size_t num_elements = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
+                size_t num_elements = (num_bytes % ELEMENT_SIZE_IN_BYTES == 0) ? (num_bytes / ELEMENT_SIZE_IN_BYTES) : (num_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
+
+                if (num_elements == 0)
+                {
+                    num_elements = 1;
+                }
 
                 //  Find the block from which the allocation was made
 
@@ -210,15 +276,15 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     auto current_block = arenas_[arena].first_block_.load(memory_order_acquire);
 
-                    while ((block < current_block->data_) || (block >= (current_block->data_ + (ELEMENTS_PER_BLOCK * ELEMENT_SIZE_IN_BYTES))))
+                    while (current_block != nullptr &&
+                           ((block < current_block->data_) || (block >= (current_block->data_ + (ELEMENTS_PER_BLOCK * ELEMENT_SIZE_IN_BYTES)))))
                     {
                         current_block = current_block->next_block_;
+                    }
 
-                        if (current_block == nullptr)
-                        {
-                            //  The block was not found - this is an error
-                            return;
-                        }
+                    if (current_block == nullptr)
+                    {
+                        continue;
                     }
 
                     //  Calculate the index of the block
@@ -227,7 +293,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     //  Release the block
 
-                    current_block->element_semaphores_.release_block(index, num_elements);
+                    current_block->element_allocations_.release(index, num_elements);
 
                     arenas_[arena].elements_allocated_.fetch_add(num_elements, memory_order_acq_rel);
 

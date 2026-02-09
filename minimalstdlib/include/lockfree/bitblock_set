@@ -1,0 +1,360 @@
+// Copyright 2025 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <array>
+#include <atomic>
+#include <optional>
+#include <__platform/cpu_platform_abstractions.h>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    enum class bitblock_set_result : uint8_t
+    {
+        success = 0,
+        invalid_num_bits,
+        start_index_out_of_range,
+        range_exceeds_size,
+        failed_bit_already_acquired,
+        failed_bit_already_acquired_first_word,
+        failed_bit_already_acquired_last_word,
+        failed_bit_already_released,
+        failed_bit_already_released_first_word,
+        failed_bit_already_released_last_word
+    };
+
+    template <size_t SIZE_IN_BITS>
+        requires(SIZE_IN_BITS >= 128)
+    class bitblock_set
+    {
+    public:
+        bitblock_set()
+        {
+            for (size_t word_idx = 0; word_idx < PADDED_NUM_WORDS; ++word_idx)
+            {
+                words_[word_idx].store(0, minstd::memory_order_relaxed);
+            }
+
+            if constexpr (TAIL_UNUSED_BITS > 0)
+            {
+                constexpr uint64_t tail_mask = (1ULL << TAIL_UNUSED_BITS) - 1;
+                words_[NUM_WORDS - 1].store(tail_mask, minstd::memory_order_relaxed);
+            }
+
+            if constexpr (PADDED_NUM_WORDS > NUM_WORDS)
+            {
+                words_[NUM_WORDS].store(~0ULL, minstd::memory_order_relaxed);
+            }
+
+            search_hint_.store(0, minstd::memory_order_relaxed);
+        }
+
+        size_t size() const
+        {
+            return SIZE_IN_BITS;
+        }
+
+        size_t total_bits_set() const
+        {
+            size_t total = 0;
+
+            for (size_t word_idx = 0; word_idx < NUM_WORDS; ++word_idx)
+            {
+                total += __builtin_popcountll(words_[word_idx].load(minstd::memory_order_relaxed));
+            }
+
+            if constexpr (TAIL_UNUSED_BITS > 0)
+            {
+                total -= TAIL_UNUSED_BITS;
+            }
+
+            return total;
+        }
+
+        bitblock_set_result acquire(const size_t start_bit, const size_t num_bits = 1)
+        {
+            if (num_bits < 1 || num_bits > 16)
+            {
+                return bitblock_set_result::invalid_num_bits;
+            }
+
+            if (start_bit >= SIZE_IN_BITS)
+            {
+                return bitblock_set_result::start_index_out_of_range;
+            }
+
+            if ((start_bit + num_bits) > SIZE_IN_BITS)
+            {
+                return bitblock_set_result::range_exceeds_size;
+            }
+
+            const size_t start_word = start_bit / BITS_PER_WORD;
+            const size_t start_bit_in_word = start_bit % BITS_PER_WORD;
+            const size_t end_bit = start_bit + num_bits - 1;
+            const size_t end_word = end_bit / BITS_PER_WORD;
+
+            if (start_word == end_word)
+            {
+                return acquire_single_word(start_word, start_bit_in_word, num_bits);
+            }
+            else
+            {
+                return acquire_multi_word(start_bit, num_bits, start_word, end_word);
+            }
+        }
+
+        bitblock_set_result release(const size_t start_bit, const size_t num_bits = 1)
+        {
+            if (num_bits < 1 || num_bits > 16)
+            {
+                return bitblock_set_result::invalid_num_bits;
+            }
+
+            if (start_bit >= SIZE_IN_BITS)
+            {
+                return bitblock_set_result::start_index_out_of_range;
+            }
+
+            if ((start_bit + num_bits) > SIZE_IN_BITS)
+            {
+                return bitblock_set_result::range_exceeds_size;
+            }
+
+            const size_t start_word = start_bit / BITS_PER_WORD;
+            const size_t start_bit_in_word = start_bit % BITS_PER_WORD;
+            const size_t end_bit = start_bit + num_bits - 1;
+            const size_t end_word = end_bit / BITS_PER_WORD;
+
+            if (start_word == end_word)
+            {
+                return release_single_word(start_word, start_bit_in_word, num_bits);
+            }
+            else
+            {
+                return release_multi_word(start_bit, num_bits, start_word, end_word);
+            }
+        }
+
+        bool is_acquired(const size_t bit_index) const
+        {
+            if (bit_index >= SIZE_IN_BITS)
+            {
+                return false;
+            }
+
+            const size_t word_idx = bit_index / BITS_PER_WORD;
+            const uint64_t mask = 1ULL << (63 - (bit_index % BITS_PER_WORD));
+
+            return (words_[word_idx].load(minstd::memory_order_acquire) & mask) != 0;
+        }
+
+        minstd::optional<size_t> acquire_first_available()
+        {
+            const size_t hint = search_hint_.load(minstd::memory_order_relaxed);
+            const size_t start_chunk = (hint / BITS_PER_WORD / WORDS_PER_SCAN_CHUNK) % NUM_SCAN_CHUNKS;
+
+            for (size_t i = 0; i < NUM_SCAN_CHUNKS; ++i)
+            {
+                const size_t chunk = (start_chunk + i) % NUM_SCAN_CHUNKS;
+                const size_t chunk_base_word = chunk * WORDS_PER_SCAN_CHUNK;
+
+                if (scan_chunk_is_full(&words_[chunk_base_word]))
+                {
+                    continue;
+                }
+
+                for (size_t w = 0; w < WORDS_PER_SCAN_CHUNK; ++w)
+                {
+                    const size_t word_idx = chunk_base_word + w;
+
+                    if (word_idx >= NUM_WORDS)
+                    {
+                        break;
+                    }
+
+                    uint64_t word = words_[word_idx].load(minstd::memory_order_relaxed);
+
+                    while (word != ~0ULL)
+                    {
+                        const size_t bit_pos = static_cast<size_t>(__builtin_clzll(~word));
+                        const size_t bit_index = word_idx * BITS_PER_WORD + bit_pos;
+
+                        if (bit_index >= SIZE_IN_BITS)
+                        {
+                            break;
+                        }
+
+                        const uint64_t mask = 1ULL << (63 - bit_pos);
+                        uint64_t old = words_[word_idx].fetch_or(mask, minstd::memory_order_acquire);
+
+                        if ((old & mask) == 0)
+                        {
+                            search_hint_.store(bit_index + 1, minstd::memory_order_relaxed);
+                            return minstd::optional<size_t>(bit_index);
+                        }
+
+                        word = words_[word_idx].load(minstd::memory_order_relaxed);
+                    }
+                }
+            }
+
+            return minstd::optional<size_t>();
+        }
+
+    private:
+        static constexpr size_t BITS_PER_WORD = 64;
+        static constexpr size_t NUM_WORDS = (SIZE_IN_BITS + BITS_PER_WORD - 1) / BITS_PER_WORD;
+        static constexpr size_t WORDS_PER_SCAN_CHUNK = 2;
+        static constexpr size_t NUM_SCAN_CHUNKS = (NUM_WORDS + WORDS_PER_SCAN_CHUNK - 1) / WORDS_PER_SCAN_CHUNK;
+        static constexpr size_t PADDED_NUM_WORDS = NUM_SCAN_CHUNKS * WORDS_PER_SCAN_CHUNK;
+        static constexpr size_t TAIL_UNUSED_BITS = (NUM_WORDS * BITS_PER_WORD) - SIZE_IN_BITS;
+
+        alignas(64) minstd::array<minstd::atomic<uint64_t>, PADDED_NUM_WORDS> words_;
+        alignas(64) minstd::atomic<size_t> search_hint_;
+
+        static uint64_t create_bit_mask(const size_t start_bit_in_word, const size_t num_bits)
+        {
+            const uint64_t all_ones = (num_bits == 64) ? ~0ULL : ((1ULL << num_bits) - 1);
+            return all_ones << (64 - start_bit_in_word - num_bits);
+        }
+
+        bitblock_set_result acquire_single_word(const size_t word_idx, const size_t start_bit_in_word, const size_t num_bits)
+        {
+            const uint64_t mask = create_bit_mask(start_bit_in_word, num_bits);
+
+            if (num_bits == 1)
+            {
+                uint64_t old = words_[word_idx].fetch_or(mask, minstd::memory_order_acquire);
+                return (old & mask) ? bitblock_set_result::failed_bit_already_acquired : bitblock_set_result::success;
+            }
+
+            uint64_t expected = words_[word_idx].load(minstd::memory_order_relaxed);
+
+            while (true)
+            {
+                if (expected & mask)
+                {
+                    return bitblock_set_result::failed_bit_already_acquired;
+                }
+
+                uint64_t desired = expected | mask;
+
+                if (words_[word_idx].compare_exchange_weak(expected, desired,
+                                                            minstd::memory_order_acquire,
+                                                            minstd::memory_order_relaxed))
+                {
+                    return bitblock_set_result::success;
+                }
+            }
+        }
+
+        bitblock_set_result release_single_word(const size_t word_idx, const size_t start_bit_in_word, const size_t num_bits)
+        {
+            const uint64_t mask = create_bit_mask(start_bit_in_word, num_bits);
+
+            if (num_bits == 1)
+            {
+                uint64_t old = words_[word_idx].fetch_and(~mask, minstd::memory_order_release);
+                return ((old & mask) == mask) ? bitblock_set_result::success : bitblock_set_result::failed_bit_already_released;
+            }
+
+            uint64_t expected = words_[word_idx].load(minstd::memory_order_relaxed);
+
+            while (true)
+            {
+                if ((expected & mask) != mask)
+                {
+                    return bitblock_set_result::failed_bit_already_released;
+                }
+
+                uint64_t desired = expected & ~mask;
+
+                if (words_[word_idx].compare_exchange_weak(expected, desired,
+                                                            minstd::memory_order_release,
+                                                            minstd::memory_order_relaxed))
+                {
+                    return bitblock_set_result::success;
+                }
+            }
+        }
+
+        bitblock_set_result acquire_multi_word(const size_t start_bit, const size_t num_bits,
+                                               const size_t start_word, const size_t end_word)
+        {
+            const size_t start_bit_in_word = start_bit % BITS_PER_WORD;
+            const size_t bits_in_first_word = BITS_PER_WORD - start_bit_in_word;
+            const size_t bits_in_last_word = num_bits - bits_in_first_word;
+
+            const uint64_t first_mask = create_bit_mask(start_bit_in_word, bits_in_first_word);
+            uint64_t old_first = words_[start_word].fetch_or(first_mask, minstd::memory_order_acquire);
+
+            if (old_first & first_mask)
+            {
+                // Roll back any newly-set bits before failing
+                // fetch_or unconditionally set all bits in first_mask, but some were already set.
+                // We must clear only the bits we just set: (first_mask & ~old_first)
+                uint64_t newly_set_bits = first_mask & ~old_first;
+                if (newly_set_bits != 0)
+                {
+                    words_[start_word].fetch_and(~newly_set_bits, minstd::memory_order_release);
+                }
+                return bitblock_set_result::failed_bit_already_acquired_first_word;
+            }
+
+            const uint64_t last_mask = create_bit_mask(0, bits_in_last_word);
+            uint64_t old_last = words_[end_word].fetch_or(last_mask, minstd::memory_order_acquire);
+
+            if (old_last & last_mask)
+            {
+                words_[start_word].fetch_and(~first_mask, minstd::memory_order_release);
+                return bitblock_set_result::failed_bit_already_acquired_last_word;
+            }
+
+            return bitblock_set_result::success;
+        }
+
+        bitblock_set_result release_multi_word(const size_t start_bit, const size_t num_bits,
+                                               const size_t start_word, const size_t end_word)
+        {
+            const size_t start_bit_in_word = start_bit % BITS_PER_WORD;
+            const size_t bits_in_first_word = BITS_PER_WORD - start_bit_in_word;
+            const size_t bits_in_last_word = num_bits - bits_in_first_word;
+
+            const uint64_t first_mask = create_bit_mask(start_bit_in_word, bits_in_first_word);
+            const uint64_t last_mask = create_bit_mask(0, bits_in_last_word);
+
+            uint64_t old_first = words_[start_word].load(minstd::memory_order_acquire);
+            uint64_t old_last = words_[end_word].load(minstd::memory_order_acquire);
+
+            const bool first_ok = (old_first & first_mask) == first_mask;
+            const bool last_ok = (old_last & last_mask) == last_mask;
+
+            if (!first_ok && !last_ok)
+            {
+                return bitblock_set_result::failed_bit_already_released;
+            }
+
+            if (!first_ok)
+            {
+                return bitblock_set_result::failed_bit_already_released_first_word;
+            }
+
+            if (!last_ok)
+            {
+                return bitblock_set_result::failed_bit_already_released_last_word;
+            }
+
+            words_[start_word].fetch_and(~first_mask, minstd::memory_order_release);
+            words_[end_word].fetch_and(~last_mask, minstd::memory_order_release);
+
+            return bitblock_set_result::success;
+        }
+
+        static bool scan_chunk_is_full(const minstd::atomic<uint64_t> *chunk_ptr)
+        {
+            return pmr::platform::simd_scan_128bit_is_all_ones(reinterpret_cast<const uint64_t *>(chunk_ptr));
+        }
+    };
+}

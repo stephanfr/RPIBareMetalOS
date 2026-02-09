@@ -56,7 +56,7 @@ namespace MINIMAL_STD_NAMESPACE
                     slot.element_.store(new_element, memory_order_release);
                     slot.state_.store(WAITING_GET, memory_order_release);
 
-                    for (int i = 0; i < TIMING_ITERATIONS; i++)
+                    for (size_t i = 0; i < TIMING_ITERATIONS; ++i)
                     {
                         __asm__ volatile("" ::: "memory");
                     }
@@ -120,7 +120,7 @@ namespace MINIMAL_STD_NAMESPACE
                 uint64_t expected_state = EMPTY;
                 if (slot.state_.compare_exchange_weak(expected_state, WAITING_PUT, memory_order_acq_rel, memory_order_acquire))
                 {
-                    for (int i = 0; i < TIMING_ITERATIONS; i++)
+                    for (size_t i = 0; i < TIMING_ITERATIONS; ++i)
                     {
                         __asm__ volatile("" ::: "memory");
                     }

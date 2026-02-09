@@ -55,7 +55,7 @@ namespace
         uint32_t value_;
     };
 
-    using TestEliminationArray = minstd::elimination_array<TestElement, 16>;
+    using TestEliminationArray = minstd::elimination_array<TestElement, 16, 5000>;
 
     // Thread synchronization for multithreaded tests
     static volatile bool start_threads = false;
@@ -330,12 +330,6 @@ namespace
         // Start threads
         start_threads = true;
         
-        // Let threads run for a bit
-        sleep(1);
-        
-        // Signal threads to stop
-        stop_threads = true;
-        
         // Wait for all threads to complete
         for (size_t i = 0; i < NUM_PRODUCER_THREADS; ++i)
         {
@@ -420,7 +414,6 @@ namespace
     // Performance test measuring scalability with varying thread counts
     TEST(EliminationArrayTests, PerformanceScalabilityTest)
     {
-        static const size_t MAX_THREADS = 32;
         static const size_t OPERATIONS_PER_THREAD = 10000;
         
         printf("\n=== Elimination Array Performance Test (16 slots) ===\n");

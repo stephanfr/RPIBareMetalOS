@@ -374,14 +374,16 @@ namespace
 
         start_allocations = true;
 
-        auto start = clock();
+        timespec start_time{};
+        timespec end_time{};
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         for (size_t i = 0; i < NUM_THREADS; i++)
         {
             CHECK(pthread_join(threads[i], NULL) == 0);
         }
 
-        auto end = clock();
+        clock_gettime(CLOCK_MONOTONIC, &end_time);
 
         exit_thread = true;
 
@@ -390,7 +392,8 @@ namespace
             CHECK(pthread_join(itr_threads[i], NULL) == 0);
         }
 
-        auto duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+        double duration = (end_time.tv_sec - start_time.tv_sec) +
+                  (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
         printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
 
@@ -534,16 +537,17 @@ namespace
 
         start_allocations = true;
 
-        start = clock();
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         for (size_t i = 0; i < NUM_THREADS; i++)
         {
             CHECK(pthread_join(threads[i], NULL) == 0);
         }
 
-        end = clock();
+        clock_gettime(CLOCK_MONOTONIC, &end_time);
 
-        duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+        duration = (end_time.tv_sec - start_time.tv_sec) +
+               (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
         printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
     }
@@ -574,7 +578,9 @@ namespace
 
         sleep(1);
 
-        auto start = clock();
+        timespec start_time{};
+        timespec end_time{};
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         start_allocations = true;
 
@@ -583,8 +589,9 @@ namespace
             CHECK(pthread_join(threads[i], NULL) == 0);
         }
 
-        auto end = clock();
-        auto duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+        clock_gettime(CLOCK_MONOTONIC, &end_time);
+        double duration = (end_time.tv_sec - start_time.tv_sec) +
+                  (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
         printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
 
         //  Force two reclaimation passes, with no other threads running this should move all
@@ -619,7 +626,7 @@ namespace
 
         sleep(1);
 
-        start = clock();
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         start_allocations = true;
 
@@ -628,8 +635,9 @@ namespace
             CHECK(pthread_join(threads[i], NULL) == 0);
         }
 
-        end = clock();
-        duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+        clock_gettime(CLOCK_MONOTONIC, &end_time);
+        duration = (end_time.tv_sec - start_time.tv_sec) +
+               (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
         printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
     }
 

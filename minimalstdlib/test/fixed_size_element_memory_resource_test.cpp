@@ -51,6 +51,14 @@ namespace
         float duration;
     };
 
+    struct perf_thread_arguments
+    {
+        minstd::pmr::memory_resource *mem_resource;
+        uint64_t rng_seed;
+        size_t iterations;
+        size_t ops_completed;
+    };
+
     void *allocation_thread(void *arguments)
     {
         allocator_thread_arguments *args = static_cast<allocator_thread_arguments *>(arguments);
@@ -107,6 +115,36 @@ namespace
         auto end = clock();
 
         args->duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
+
+        return nullptr;
+    }
+
+    void *perf_allocation_thread(void *arguments)
+    {
+        perf_thread_arguments *args = static_cast<perf_thread_arguments *>(arguments);
+
+        minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
+
+        while (!start_allocations)
+        {
+            sched_yield();
+        }
+
+        args->ops_completed = 0;
+
+        for (size_t i = 0; i < args->iterations; ++i)
+        {
+            const size_t size = rng() % 256;
+            void *ptr = args->mem_resource->allocate(size);
+
+            if (ptr == nullptr)
+            {
+                continue;
+            }
+
+            args->mem_resource->deallocate(ptr, size);
+            args->ops_completed++;
+        }
 
         return nullptr;
     }
@@ -348,6 +386,66 @@ namespace
 
         //        CHECK_EQUAL(total_number_of_allocations, resource.current_allocated());
         //        CHECK_EQUAL(total_number_of_bytes_allocated, resource.current_bytes_allocated());
+    }
+
+    TEST(FixedSizeElementMemoryResourceTests, ThreadSensitivityPerformanceTest)
+    {
+        constexpr size_t NUM_BYTES_PER_ELEMENT = 32;
+        constexpr size_t NUM_ELEMENTS_PER_BLOCK = 1024;
+        constexpr size_t MAX_THREADS = 32;
+        constexpr size_t ITERATIONS_PER_THREAD = 200000;
+
+        minstd::pmr::single_block_resource upstream_resource(buffer, buffer_size);
+
+        auto *resource = new minstd::pmr::fixed_size_element_resource<NUM_BYTES_PER_ELEMENT, NUM_ELEMENTS_PER_BLOCK, 8, false>(
+            static_cast<minstd::pmr::memory_resource *>(&upstream_resource));
+
+        auto *args = new perf_thread_arguments[MAX_THREADS];
+        pthread_t threads[MAX_THREADS];
+
+        printf("Fixed size element resource ops/sec (threads 1-%zu):\n", MAX_THREADS);
+
+        for (size_t num_threads = 1; num_threads <= MAX_THREADS; ++num_threads)
+        {
+            start_allocations = false;
+
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                args[i].mem_resource = resource;
+                args[i].rng_seed = clock() + i * 1000;
+                args[i].iterations = ITERATIONS_PER_THREAD;
+                args[i].ops_completed = 0;
+
+                CHECK(pthread_create(&threads[i], NULL, perf_allocation_thread, (void *)&args[i]) == 0);
+            }
+
+            timespec start_time{};
+            timespec end_time{};
+            clock_gettime(CLOCK_MONOTONIC, &start_time);
+            start_allocations = true;
+
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                CHECK(pthread_join(threads[i], NULL) == 0);
+            }
+
+            clock_gettime(CLOCK_MONOTONIC, &end_time);
+            double elapsed = static_cast<double>(end_time.tv_sec - start_time.tv_sec);
+            elapsed += static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+            size_t total_ops = 0;
+
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                total_ops += args[i].ops_completed;
+            }
+
+            const double ops_per_sec = elapsed > 0.0 ? static_cast<double>(total_ops) / elapsed : 0.0;
+
+            printf("  %2zu threads: %f ops/sec\n", num_threads, ops_per_sec);
+        }
+
+        delete resource;
+        delete[] args;
     }
     /*
             //  The benchmarks are interesting but that is about all.  The lockfree behavior of aarch64 is so different

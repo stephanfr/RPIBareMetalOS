@@ -19,6 +19,12 @@
 #include <unistd.h>
 #endif
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <emmintrin.h>
+#elif defined(__aarch64__)
+#include <arm_neon.h>
+#endif
+
 //  When running in userspace (e.g., unit tests), we cannot execute privileged
 //  interrupt control instructions. Define this macro to make interrupt guards
 //  no-ops for testing purposes.
@@ -173,6 +179,53 @@ namespace MINIMAL_STD_NAMESPACE
                 return 1u;
 #else
                 return 1u;
+#endif
+            }
+
+            /**
+             * @brief Hint to the CPU that we are in a spin-wait loop.
+             *
+             * This can reduce power or contention while spinning.
+             */
+            inline void cpu_relax()
+            {
+#if defined(__x86_64__) || defined(__i386__)
+                __builtin_ia32_pause();
+#elif defined(__aarch64__) || defined(__arm__)
+                __asm__ __volatile__("yield" ::: "memory");
+#else
+                __asm__ __volatile__("" ::: "memory");
+#endif
+            }
+
+            /**
+             * @brief Check if a 128-bit aligned chunk contains all ones.
+             *
+             * This function uses SIMD instructions when available to efficiently
+             * check if two consecutive 64-bit words are both ~0ULL. Used for
+             * optimistic scanning in lock-free bitset structures.
+             *
+             * On x64: Uses SSE2 instructions (_mm_load_si128, _mm_cmpeq_epi8)
+             * On ARM64: Uses NEON instructions (vld1q_u64, vceqq_u64)
+             * On other platforms: Falls back to scalar loads
+             *
+             * @param chunk_ptr Pointer to two consecutive uint64_t values (must be 16-byte aligned on x64)
+             * @return true if both words are all ones (~0ULL), false otherwise
+             */
+            inline bool simd_scan_128bit_is_all_ones(const uint64_t *chunk_ptr)
+            {
+#if defined(__x86_64__) || defined(_M_X64)
+                __m128i data = _mm_load_si128(reinterpret_cast<const __m128i *>(chunk_ptr));
+                __m128i all_ff = _mm_set1_epi8(static_cast<char>(0xFF));
+                __m128i cmp = _mm_cmpeq_epi8(data, all_ff);
+                return _mm_movemask_epi8(cmp) == 0xFFFF;
+#elif defined(__aarch64__)
+                uint64x2_t data = vld1q_u64(chunk_ptr);
+                uint64x2_t all_ff = vdupq_n_u64(~0ULL);
+                uint64x2_t cmp = vceqq_u64(data, all_ff);
+                return (vgetq_lane_u64(cmp, 0) & vgetq_lane_u64(cmp, 1)) == ~0ULL;
+#else
+                return (chunk_ptr[0] == ~0ULL) && (chunk_ptr[1] == ~0ULL);
 #endif
             }
 

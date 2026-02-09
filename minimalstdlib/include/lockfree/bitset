@@ -1,0 +1,95 @@
+// Copyright 2025 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <array>
+#include <atomic>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    typedef enum bitset_result : uint8_t
+    {
+        INDEX_OUT_OF_RANGE = 0,
+        SUCCESS = 1,
+        FAILED_BIT_ALREADY_ACQUIRED = 2,
+        FAILED_BIT_ALREADY_RELEASED = 3
+    } result;
+
+    template <size_t SIZE_IN_BITS, size_t CACHE_LINE_SCALING = 1>
+        requires(SIZE_IN_BITS >= 64)
+    class bitset
+    {
+    public:
+        bitset()
+        {
+            for (size_t word_idx = 0; word_idx < NUM_STORAGE_WORDS; ++word_idx)
+            {
+                words_[word_idx].store(0, minstd::memory_order_relaxed);
+            }
+        }
+
+        bitset_result acquire(const size_t bit_index)
+        {
+            if (bit_index >= SIZE_IN_BITS)
+            {
+                return INDEX_OUT_OF_RANGE;
+            }
+
+            const size_t word_idx = word_index(bit_index);
+            const uint64_t mask = 1ULL << word_bit_index(bit_index);
+
+            uint64_t old = words_[word_idx].fetch_or(mask, minstd::memory_order_acquire);
+
+            return (old & mask) ? FAILED_BIT_ALREADY_ACQUIRED : SUCCESS;
+        }
+
+        bitset_result release(const size_t bit_index)
+        {
+            if (bit_index >= SIZE_IN_BITS)
+            {
+                return INDEX_OUT_OF_RANGE;
+            }
+
+            const size_t word_idx = word_index(bit_index);
+            const uint64_t mask = 1ULL << word_bit_index(bit_index);
+
+            uint64_t old = words_[word_idx].fetch_and(~mask, minstd::memory_order_release);
+
+            return ((old & mask) == 0) ? FAILED_BIT_ALREADY_RELEASED : SUCCESS;
+        }
+
+    private:
+        static constexpr size_t WORDS_PER_CACHE_LINE = 8;
+        static constexpr size_t STORAGE_WORDS_PER_BLOCK = WORDS_PER_CACHE_LINE * CACHE_LINE_SCALING;
+        static constexpr size_t USED_WORDS_PER_LINE = WORDS_PER_CACHE_LINE / CACHE_LINE_SCALING;
+        static constexpr size_t NUM_STORAGE_WORDS = ((SIZE_IN_BITS + 64 - 1) / 64 + WORDS_PER_CACHE_LINE - 1) / WORDS_PER_CACHE_LINE * STORAGE_WORDS_PER_BLOCK;
+        static_assert(CACHE_LINE_SCALING >= 1, "CACHE_LINE_SCALING must be at least 1");
+        static_assert((CACHE_LINE_SCALING & (CACHE_LINE_SCALING - 1)) == 0, "CACHE_LINE_SCALING must be a power of 2");
+        static_assert((WORDS_PER_CACHE_LINE % CACHE_LINE_SCALING) == 0, "CACHE_LINE_SCALING must divide 8");
+        static_assert((NUM_STORAGE_WORDS % WORDS_PER_CACHE_LINE) == 0, "NUM_STORAGE_WORDS must be a multiple of WORDS_PER_CACHE_LINE");
+
+        alignas(64) minstd::array<minstd::atomic<uint64_t>, NUM_STORAGE_WORDS> words_;
+
+        size_t word_index(const size_t bit_index) const
+        {
+            const size_t logical_word_idx = bit_index / 64;
+            return physical_word_index_from_logical(logical_word_idx);
+        }
+
+        size_t word_bit_index(const size_t bit_index) const
+        {
+            return 63 - (bit_index % 64);
+        }
+
+        size_t physical_word_index_from_logical(const size_t logical_word_idx) const
+        {
+            const size_t num_lines = NUM_STORAGE_WORDS / WORDS_PER_CACHE_LINE;
+            const size_t line_idx = logical_word_idx % num_lines;
+            const size_t word_in_line = logical_word_idx / num_lines;
+
+            return (line_idx * WORDS_PER_CACHE_LINE) + word_in_line;
+        }
+    };
+}
