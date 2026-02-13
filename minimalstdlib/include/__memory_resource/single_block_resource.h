@@ -21,7 +21,7 @@ namespace MINIMAL_STD_NAMESPACE
     {
         namespace internal
         {
-            constexpr size_t aligned_size(size_t unaligned_requested_size_in_bytes, size_t block_alignment)
+            inline constexpr size_t aligned_size(size_t unaligned_requested_size_in_bytes, size_t block_alignment)
             {
                 return (((unaligned_requested_size_in_bytes / block_alignment) + ((unaligned_requested_size_in_bytes % block_alignment) == 0 ? 0 : 1)) * block_alignment);
             }

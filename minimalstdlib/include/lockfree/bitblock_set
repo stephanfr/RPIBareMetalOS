@@ -150,10 +150,10 @@ namespace MINIMAL_STD_NAMESPACE
             return (words_[word_idx].load(minstd::memory_order_acquire) & mask) != 0;
         }
 
-        minstd::optional<size_t> acquire_first_available()
+        minstd::optional<size_t> acquire_first_available(size_t scan_offset = 0)
         {
             const size_t hint = search_hint_.load(minstd::memory_order_relaxed);
-            const size_t start_chunk = (hint / BITS_PER_WORD / WORDS_PER_SCAN_CHUNK) % NUM_SCAN_CHUNKS;
+            const size_t start_chunk = ((hint / BITS_PER_WORD / WORDS_PER_SCAN_CHUNK) + scan_offset) % NUM_SCAN_CHUNKS;
 
             for (size_t i = 0; i < NUM_SCAN_CHUNKS; ++i)
             {
@@ -196,6 +196,113 @@ namespace MINIMAL_STD_NAMESPACE
                         }
 
                         word = words_[word_idx].load(minstd::memory_order_relaxed);
+                    }
+                }
+            }
+
+            return minstd::optional<size_t>();
+        }
+
+        //  SIMD-accelerated contiguous allocation: finds num_bits contiguous free bits
+        //  using chunk scanning to skip full regions, then a bit-erosion technique to
+        //  locate runs within each word, acquired with a single atomic CAS.
+
+        minstd::optional<size_t> acquire_first_available_contiguous(size_t num_bits, size_t scan_offset = 0)
+        {
+            if (num_bits == 0 || num_bits > 16)
+            {
+                return minstd::optional<size_t>();
+            }
+
+            if (num_bits == 1)
+            {
+                return acquire_first_available(scan_offset);
+            }
+
+            //  For multi-bit contiguous allocations, start from the hint position
+            //  without the scan_offset.  Per-core distribution is handled at the arena
+            //  level; within a block, sequential packing gives better utilization and
+            //  avoids fragmentation that would make contiguous runs harder to find.
+
+            const size_t hint = search_hint_.load(minstd::memory_order_relaxed);
+            const size_t start_chunk = (hint / BITS_PER_WORD / WORDS_PER_SCAN_CHUNK) % NUM_SCAN_CHUNKS;
+
+            for (size_t i = 0; i < NUM_SCAN_CHUNKS; ++i)
+            {
+                const size_t chunk = (start_chunk + i) % NUM_SCAN_CHUNKS;
+                const size_t chunk_base_word = chunk * WORDS_PER_SCAN_CHUNK;
+
+                if (scan_chunk_is_full(&words_[chunk_base_word]))
+                {
+                    continue;
+                }
+
+                for (size_t w = 0; w < WORDS_PER_SCAN_CHUNK; ++w)
+                {
+                    const size_t word_idx = chunk_base_word + w;
+
+                    if (word_idx >= NUM_WORDS)
+                    {
+                        break;
+                    }
+
+                    uint64_t word = words_[word_idx].load(minstd::memory_order_relaxed);
+
+                    while (word != ~0ULL)
+                    {
+                        //  Early-out: fewer free bits than needed for a contiguous run
+
+                        if (static_cast<size_t>(__builtin_popcountll(~word)) < num_bits)
+                        {
+                            break;
+                        }
+
+                        //  Erosion technique: AND the free-bits mask with right-shifted
+                        //  copies of itself.  A set bit at position p in the result means
+                        //  positions p, p-1, ..., p-(num_bits-1) are all free.
+
+                        uint64_t free_bits = ~word;
+                        uint64_t candidates = free_bits;
+
+                        for (size_t k = 1; k < num_bits; k++)
+                        {
+                            candidates &= (free_bits >> k);
+                        }
+
+                        if (candidates == 0)
+                        {
+                            break;
+                        }
+
+                        //  The highest set bit in candidates marks the end of the first
+                        //  contiguous run.  Convert to a starting bit index within the word.
+
+                        const size_t clz = static_cast<size_t>(__builtin_clzll(candidates));
+                        const size_t start_bit_in_word = clz - (num_bits - 1);
+                        const size_t bit_index = word_idx * BITS_PER_WORD + start_bit_in_word;
+
+                        if (bit_index + num_bits > SIZE_IN_BITS)
+                        {
+                            break;
+                        }
+
+                        //  Atomically acquire all bits with a single CAS
+
+                        const uint64_t mask = create_bit_mask(start_bit_in_word, num_bits);
+                        uint64_t expected = word;
+                        uint64_t desired = expected | mask;
+
+                        if (words_[word_idx].compare_exchange_weak(expected, desired,
+                                                                    minstd::memory_order_acquire,
+                                                                    minstd::memory_order_relaxed))
+                        {
+                            search_hint_.store(bit_index + num_bits, minstd::memory_order_relaxed);
+                            return minstd::optional<size_t>(bit_index);
+                        }
+
+                        //  CAS failed due to concurrent modification, retry with updated word
+
+                        word = expected;
                     }
                 }
             }

@@ -61,7 +61,7 @@ namespace MINIMAL_STD_NAMESPACE
                 alignas(64) atomic<size_t> current_allocated_ = 0;
                 alignas(64) atomic<size_t> peak_allocated_ = 0;
 
-                atomic<size_t> current_bytes_allocated_ = 0;
+                alignas(64) atomic<size_t> current_bytes_allocated_ = 0;
 
                 void allocation_made(size_t size)
                 {

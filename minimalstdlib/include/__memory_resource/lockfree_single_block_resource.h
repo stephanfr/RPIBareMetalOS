@@ -27,12 +27,12 @@ namespace MINIMAL_STD_NAMESPACE
     {
         namespace internal
         {
-            constexpr size_t aligned_size(size_t unaligned_size_in_bytes, size_t alignment)
+            inline constexpr size_t lockfree_aligned_size(size_t unaligned_size_in_bytes, size_t alignment)
             {
                 return (((unaligned_size_in_bytes / alignment) + ((unaligned_size_in_bytes % alignment) == 0 ? 0 : 1)) * alignment);
             }
 
-            void *align_pointer(void *ptr, size_t alignment)
+            inline void *align_pointer(void *ptr, size_t alignment)
             {
                 uintptr_t ptr_as_int = reinterpret_cast<uintptr_t>(ptr);
 
@@ -547,7 +547,7 @@ namespace MINIMAL_STD_NAMESPACE
                 //  First, search for a deallocated block that is the correct size and alignment
                 //      If we do not find one, then allocate a net-new block.
 
-                uint64_t total_size = internal::aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
+                uint64_t total_size = internal::lockfree_aligned_size(bytes + ALLOCATION_HEADER_SIZE, DEFAULT_ALIGNMENT);
 
                 if (total_size > MAX_ALLOCATION_SIZE)
                 {
