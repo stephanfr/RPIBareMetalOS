@@ -4,20 +4,17 @@
 
 #pragma once
 
-#include <algorithm>
-#include <atomic>
-#include <limits>
-#include <optional>
-#include <lockfree/bitblock_set>
+#include "minstdconfig.h"
 
+#include "algorithm"
+#include "atomic"
+#include "limits"
+#include "optional"
+#include "lockfree/bitblock_set"
+
+#include "__platform/cpu_platform_abstractions.h"
 #include "__extensions/memory_resource_statistics.h"
 #include "memory_resource.h"
-
-#include <pthread.h>
-#include <sys/types.h>
-#include <unistd.h>
-
-extern "C" int get_current_core();
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -86,21 +83,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             size_t number_of_blocks() const noexcept
             {
-                size_t count = 0;
-
-                for (size_t arena = 0; arena < number_of_arenas_; arena++)
-                {
-                    block *current_block = arenas_[arena].first_block_;
-
-                    while (current_block != nullptr)
-                    {
-                        count++;
-
-                        current_block = current_block->next_block_;
-                    }
-                }
-
-                return count;
+                return total_blocks_.load(memory_order_acquire);
             }
 
         private:
@@ -283,7 +266,6 @@ namespace MINIMAL_STD_NAMESPACE
 
             minstd::array<core_allocation_hint, MAX_NUMBER_OF_ARENAS> core_hints_;
 
-            atomic<size_t> transactions_ = 0;
             atomic<size_t> total_blocks_ = 0;
             const size_t number_of_arenas_;
 
@@ -312,11 +294,7 @@ namespace MINIMAL_STD_NAMESPACE
                     return 0;
                 }
 
-                size_t num_elements = (adjusted_bytes % ELEMENT_SIZE_IN_BYTES == 0)
-                    ? (adjusted_bytes / ELEMENT_SIZE_IN_BYTES)
-                    : (adjusted_bytes / ELEMENT_SIZE_IN_BYTES) + 1;
-
-                return num_elements == 0 ? 1 : num_elements;
+                return (adjusted_bytes + ELEMENT_SIZE_IN_BYTES - 1) / ELEMENT_SIZE_IN_BYTES;
             }
 
             void *finalize_allocation(block *blk, size_t element_index, size_t num_elements)
@@ -339,7 +317,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void update_hints_after_deallocation(block *blk)
             {
-                uint64_t core_id = get_current_core();
+                uint64_t core_id = platform::get_cpu_id();
                 size_t hint_index = core_id % MAX_NUMBER_OF_ARENAS;
                 core_hints_[hint_index].last_block.store(blk, memory_order_relaxed);
                 arenas_[blk->arena_index_].allocation_hint_.store(blk, memory_order_relaxed);
@@ -352,14 +330,7 @@ namespace MINIMAL_STD_NAMESPACE
                     return 1;
                 }
 
-                size_t clamped = requested > MAX_NUMBER_OF_ARENAS ? MAX_NUMBER_OF_ARENAS : requested;
-
-                if (clamped > MAX_NUMBER_OF_BLOCKS)
-                {
-                    return MAX_NUMBER_OF_BLOCKS;
-                }
-
-                return clamped;
+                return min(requested, min(MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS));
             }
 
             bool try_reserve_block()
@@ -382,7 +353,7 @@ namespace MINIMAL_STD_NAMESPACE
                 total_blocks_.fetch_sub(1, memory_order_acq_rel);
             }
 
-            void *do_allocate(size_t num_bytes, size_t alignment)
+            void *do_allocate(size_t num_bytes, size_t alignment) override
             {
                 //  Ignore the alignment as alignment will be 16 bytes based on the template requirements
 
@@ -393,7 +364,7 @@ namespace MINIMAL_STD_NAMESPACE
                     return nullptr;
                 }
 
-                uint64_t core_id = get_current_core();
+                uint64_t core_id = platform::get_cpu_id();
                 uint64_t arena_in_use = core_id % number_of_arenas_;
                 size_t hint_index = core_id % MAX_NUMBER_OF_ARENAS;
                 size_t scan_offset = core_id;
@@ -466,7 +437,7 @@ namespace MINIMAL_STD_NAMESPACE
                 return nullptr;
             }
 
-            void do_deallocate(void *block, size_t num_bytes, size_t alignment)
+            void do_deallocate(void *block, size_t num_bytes, size_t alignment) override
             {
                 size_t num_elements = elements_for_bytes(num_bytes);
 
@@ -492,46 +463,13 @@ namespace MINIMAL_STD_NAMESPACE
                     this->deallocation_made(num_elements * ELEMENT_SIZE_IN_BYTES);
 
                     update_hints_after_deallocation(current_block);
-
-                    return;
-                }
-
-                for (size_t arena = 0; arena < number_of_arenas_; arena++)
-                {
-                    auto current_block = arenas_[arena].first_block_.load(memory_order_acquire);
-
-                    while (current_block != nullptr &&
-                           ((block < current_block->data_) || (block >= (current_block->data_ + (ELEMENTS_PER_BLOCK * ELEMENT_SIZE_IN_BYTES)))))
-                    {
-                        current_block = current_block->next_block_;
-                    }
-
-                    if (current_block == nullptr)
-                    {
-                        continue;
-                    }
-
-                    //  Calculate the index of the block
-
-                    auto index = (static_cast<uint8_t *>(block) - current_block->data_) / ELEMENT_SIZE_IN_BYTES;
-
-                    //  Release the block
-
-                    current_block->element_allocations_.release(index, num_elements);
-                    current_block->free_count_.fetch_add(static_cast<uint32_t>(num_elements), minstd::memory_order_relaxed);
-
-                    this->deallocation_made(num_elements * ELEMENT_SIZE_IN_BYTES);
-
-                    update_hints_after_deallocation(current_block);
-
-                    break;
                 }
             }
 
-            bool do_is_equal(memory_resource const &other) const noexcept
+            bool do_is_equal(const memory_resource &other) const noexcept override
             {
-                return arenas_[0].first_block_.load(memory_order_acquire) == static_cast<fixed_size_element_resource const &>(other).arenas_[0].first_block_.load(memory_order_acquire);
+                return this == &other;
             }
         };
-    }
-}
+    } // namespace pmr
+} // namespace MINIMAL_STD_NAMESPACE

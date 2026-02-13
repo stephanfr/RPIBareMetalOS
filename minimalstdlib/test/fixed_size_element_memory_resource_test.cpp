@@ -23,11 +23,6 @@ extern "C" double log(double);
 extern "C" double cos(double);
 extern "C" double exp(double);
 
-extern "C" int get_current_core()
-{
-    return sched_getcpu();
-}
-
 namespace
 {
 #pragma GCC diagnostic push
