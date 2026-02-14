@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include "minstdconfig.h"
+
 #include <array>
 #include <atomic>
 #include <optional>
@@ -157,7 +159,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                                                      if ((old & mask) == 0)
                                                      {
-                                                         search_hint_.store(bit_index + 1, minstd::memory_order_relaxed);
+                                                         advance_search_hint(bit_index + 1);
                                                          return minstd::optional<size_t>(bit_index);
                                                      }
 
@@ -245,7 +247,7 @@ namespace MINIMAL_STD_NAMESPACE
                                                                                                  minstd::memory_order_acquire,
                                                                                                  minstd::memory_order_relaxed))
                                                      {
-                                                         search_hint_.store(bit_index + num_bits, minstd::memory_order_relaxed);
+                                                         advance_search_hint(bit_index + num_bits);
                                                          return minstd::optional<size_t>(bit_index);
                                                      }
 
@@ -321,12 +323,27 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (result.has_value())
                     {
-                        return result;
+                        return minstd::optional<size_t>(result.value());
                     }
                 }
             }
 
             return minstd::optional<size_t>();
+        }
+
+        void advance_search_hint(const size_t proposed_hint)
+        {
+            size_t current_hint = search_hint_.load(minstd::memory_order_relaxed);
+
+            while (proposed_hint > current_hint)
+            {
+                if (search_hint_.compare_exchange_weak(current_hint, proposed_hint,
+                                                       minstd::memory_order_relaxed,
+                                                       minstd::memory_order_relaxed))
+                {
+                    break;
+                }
+            }
         }
 
         bitblock_set_result acquire_single_word(const size_t word_idx, const size_t start_bit_in_word, const size_t num_bits)

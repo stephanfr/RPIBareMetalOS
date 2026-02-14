@@ -6,13 +6,13 @@
 
 #include "minstdconfig.h"
 
-#include "algorithm"
-#include "atomic"
-#include "limits"
-#include "optional"
-#include "lockfree/bitblock_set"
+#include <algorithm>
+#include <atomic>
+#include <limits>
+#include <optional>
+#include <lockfree/bitblock_set>
 
-#include "__platform/cpu_platform_abstractions.h"
+#include <__platform/cpu_platform_abstractions.h>
 #include "__extensions/memory_resource_statistics.h"
 #include "memory_resource.h"
 
