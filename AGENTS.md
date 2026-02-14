@@ -20,3 +20,44 @@ Use consistent, lowercase `snake_case` for new type names across the repository.
 - `cache_entry_type`
 - `map_entry_allocator_type`
 - `common_type_t`
+
+## Class Member Ordering
+
+### Rules
+- **Private nested types first**: When a class contains private nested structs or classes (implementation details like nodes, blocks, arenas), place them in a `private:` section at the top of the class, before the `public:` section.
+- **Public API second**: The `public:` section with constructors, destructors, and public methods follows the private types.
+- **Private members and methods last**: A second `private:` section contains member variables, helper methods, and virtual method overrides.
+- **Public nested types are an exception**: When a nested type is part of the public API (e.g., iterators, tokens, entries), it belongs in the `public:` section.
+
+### Layout
+```cpp
+class example_resource
+{
+private:
+    // Constants
+    static constexpr size_t SOME_CONSTANT = 64;
+
+    // Private nested structs/classes (implementation details)
+    struct internal_node { ... };
+    struct internal_block { ... };
+
+public:
+    // Constructors, destructor, public methods
+    example_resource(...);
+    ~example_resource();
+    size_t size() const noexcept;
+
+private:
+    // Member variables
+    size_t count_;
+
+    // Helper methods
+    void do_something();
+
+    // Virtual method overrides
+    void *do_allocate(size_t bytes, size_t alignment) override;
+};
+```
+
+### Reference Files
+- `lockfree_single_block_resource.h`, `avl_tree`, `list`, `forward_list`

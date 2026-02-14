@@ -40,55 +40,8 @@ namespace MINIMAL_STD_NAMESPACE
                      (MAX_NUMBER_OF_BLOCKS >= 1))
         class fixed_size_element_resource : public memory_resource, public conditional<include_statistics, extensions::memory_resource_statistics, extensions::null_memory_resource_statistics>::type
         {
-        public:
-            fixed_size_element_resource(memory_resource *memory_resource, size_t number_of_arenas)
-                : upstream_resource_(memory_resource),
-                  number_of_arenas_(clamp_arena_count(number_of_arenas))
-            {
-                for (size_t i = 0; i < number_of_arenas_; i++)
-                {
-                    arenas_[i].upstream_resource_ = memory_resource;
-                    arenas_[i].parent_ = this;
-                    arenas_[i].arena_index_ = i;
-                    auto initial_block = new (upstream_resource_->allocate(sizeof(block))) block();
-                    initial_block->arena_index_ = i;
-                    arenas_[i].first_block_.store(initial_block, memory_order_release);
-                    arenas_[i].block_count_ = 1;
-                }
-
-                total_blocks_.store(number_of_arenas_, memory_order_release);
-            }
-
-            ~fixed_size_element_resource()
-            {
-                for (size_t arena = 0; arena < number_of_arenas_; arena++)
-                {
-                    block *current_block = arenas_[arena].first_block_.load(memory_order_acquire);
-
-                    while (current_block != nullptr)
-                    {
-                        auto next_block = current_block->next_block_;
-
-                        upstream_resource_->deallocate(current_block, sizeof(block));
-
-                        current_block = next_block;
-                    }
-                }
-            }
-
-            size_t element_size() const noexcept
-            {
-                return ELEMENT_SIZE_IN_BYTES;
-            }
-
-            size_t number_of_blocks() const noexcept
-            {
-                return total_blocks_.load(memory_order_acquire);
-            }
-
         private:
             static constexpr size_t HEADER_SIZE = 16;
-            static constexpr uint64_t ALLOC_MAGIC = 0x4d46534541524e41ULL;
 
             struct block
             {
@@ -249,31 +202,78 @@ namespace MINIMAL_STD_NAMESPACE
                         new_block->next_block_ = expected;
                     }
 
-                    block_count_.fetch_add(1, memory_order_acq_rel);
+                    block_count_.fetch_add(1, memory_order_relaxed);
 
                     return true;
                 }
             };
-
-            memory_resource *const upstream_resource_ = nullptr;
-
-            array<arena, MAX_NUMBER_OF_ARENAS> arenas_;
 
             struct alignas(64) core_allocation_hint
             {
                 minstd::atomic<block *> last_block{nullptr};
             };
 
+            struct allocation_header
+            {
+                block *owner = nullptr;
+                uint32_t num_elements = 0;
+            };
+
+        public:
+            fixed_size_element_resource(memory_resource *memory_resource, size_t number_of_arenas)
+                : upstream_resource_(memory_resource),
+                  number_of_arenas_(clamp_arena_count(number_of_arenas))
+            {
+                for (size_t i = 0; i < number_of_arenas_; i++)
+                {
+                    arenas_[i].upstream_resource_ = memory_resource;
+                    arenas_[i].parent_ = this;
+                    arenas_[i].arena_index_ = i;
+                    auto initial_block = new (upstream_resource_->allocate(sizeof(block))) block();
+                    initial_block->arena_index_ = i;
+                    arenas_[i].first_block_.store(initial_block, memory_order_release);
+                    arenas_[i].block_count_ = 1;
+                }
+
+                total_blocks_.store(number_of_arenas_, memory_order_release);
+            }
+
+            ~fixed_size_element_resource()
+            {
+                for (size_t arena = 0; arena < number_of_arenas_; arena++)
+                {
+                    block *current_block = arenas_[arena].first_block_.load(memory_order_acquire);
+
+                    while (current_block != nullptr)
+                    {
+                        auto next_block = current_block->next_block_;
+
+                        upstream_resource_->deallocate(current_block, sizeof(block));
+
+                        current_block = next_block;
+                    }
+                }
+            }
+
+            size_t element_size() const noexcept
+            {
+                return ELEMENT_SIZE_IN_BYTES;
+            }
+
+            size_t number_of_blocks() const noexcept
+            {
+                return total_blocks_.load(memory_order_acquire);
+            }
+
+        private:
+            memory_resource *const upstream_resource_ = nullptr;
+
+            array<arena, MAX_NUMBER_OF_ARENAS> arenas_;
+
             minstd::array<core_allocation_hint, MAX_NUMBER_OF_ARENAS> core_hints_;
 
             atomic<size_t> total_blocks_ = 0;
             const size_t number_of_arenas_;
-
-            struct allocation_header
-            {
-                block *owner = nullptr;
-                uint64_t magic = 0;
-            };
 
             static size_t bytes_with_header(size_t num_bytes) noexcept
             {
@@ -304,7 +304,7 @@ namespace MINIMAL_STD_NAMESPACE
                 uint8_t *allocation_base = blk->data_ + (element_index * ELEMENT_SIZE_IN_BYTES);
                 auto header = reinterpret_cast<allocation_header *>(allocation_base);
                 header->owner = blk;
-                header->magic = ALLOC_MAGIC;
+                header->num_elements = static_cast<uint32_t>(num_elements);
 
                 return allocation_base + HEADER_SIZE;
             }
@@ -335,11 +335,11 @@ namespace MINIMAL_STD_NAMESPACE
 
             bool try_reserve_block()
             {
-                size_t current = total_blocks_.load(memory_order_acquire);
+                size_t current = total_blocks_.load(memory_order_relaxed);
 
                 while (current < MAX_NUMBER_OF_BLOCKS)
                 {
-                    if (total_blocks_.compare_exchange_weak(current, current + 1, memory_order_acq_rel, memory_order_acquire))
+                    if (total_blocks_.compare_exchange_weak(current, current + 1, memory_order_relaxed, memory_order_relaxed))
                     {
                         return true;
                     }
@@ -350,7 +350,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void release_block_reservation()
             {
-                total_blocks_.fetch_sub(1, memory_order_acq_rel);
+                total_blocks_.fetch_sub(1, memory_order_relaxed);
             }
 
             void *do_allocate(size_t num_bytes, size_t alignment) override
@@ -439,31 +439,21 @@ namespace MINIMAL_STD_NAMESPACE
 
             void do_deallocate(void *block, size_t num_bytes, size_t alignment) override
             {
-                size_t num_elements = elements_for_bytes(num_bytes);
-
-                if (num_elements == 0)
-                {
-                    return;
-                }
-
                 //  Find the block from which the allocation was made
 
                 uint8_t *payload = static_cast<uint8_t *>(block);
                 auto header = reinterpret_cast<allocation_header *>(payload - HEADER_SIZE);
+                auto current_block = header->owner;
+                uint32_t num_elements = header->num_elements;
 
-                if (header->magic == ALLOC_MAGIC && header->owner != nullptr)
-                {
-                    auto current_block = header->owner;
+                auto index = (reinterpret_cast<uint8_t *>(header) - current_block->data_) / ELEMENT_SIZE_IN_BYTES;
 
-                    auto index = (reinterpret_cast<uint8_t *>(header) - current_block->data_) / ELEMENT_SIZE_IN_BYTES;
+                current_block->element_allocations_.release(index, num_elements);
+                current_block->free_count_.fetch_add(num_elements, minstd::memory_order_relaxed);
 
-                    current_block->element_allocations_.release(index, num_elements);
-                    current_block->free_count_.fetch_add(static_cast<uint32_t>(num_elements), minstd::memory_order_relaxed);
+                this->deallocation_made(num_elements * ELEMENT_SIZE_IN_BYTES);
 
-                    this->deallocation_made(num_elements * ELEMENT_SIZE_IN_BYTES);
-
-                    update_hints_after_deallocation(current_block);
-                }
+                update_hints_after_deallocation(current_block);
             }
 
             bool do_is_equal(const memory_resource &other) const noexcept override
