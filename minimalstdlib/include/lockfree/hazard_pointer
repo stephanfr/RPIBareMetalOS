@@ -1,0 +1,336 @@
+// Copyright 2026 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <limits>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    namespace lockfree
+    {
+        template <typename T, size_t MAX_HAZARD_POINTERS = 128, size_t MAX_RETIRED_RECORDS = 1024, size_t RETIRE_SCAN_THRESHOLD = 32>
+        class hazard_pointer_domain
+        {
+        private:
+            static constexpr size_t INVALID_SLOT_INDEX = std::numeric_limits<size_t>::max();
+
+            using pointer_type = T *;
+            using deleter_type = void (*)(pointer_type);
+
+            struct hazard_record
+            {
+                minstd::atomic<bool> in_use_{false};
+                minstd::atomic<pointer_type> protected_ptr_{nullptr};
+            };
+
+            struct retired_record
+            {
+                minstd::atomic<bool> in_use_{false};
+                minstd::atomic<bool> active_{false};
+                pointer_type retired_ptr_ = nullptr;
+                deleter_type deleter_ = nullptr;
+            };
+
+        public:
+            class hazard_guard
+            {
+            public:
+                hazard_guard() = default;
+
+                hazard_guard(const hazard_guard &) = delete;
+                hazard_guard &operator=(const hazard_guard &) = delete;
+
+                hazard_guard(hazard_guard &&other) noexcept
+                    : domain_(other.domain_),
+                      slot_index_(other.slot_index_)
+                {
+                    other.domain_ = nullptr;
+                    other.slot_index_ = INVALID_SLOT_INDEX;
+                }
+
+                hazard_guard &operator=(hazard_guard &&other) noexcept
+                {
+                    if (this != &other)
+                    {
+                        release();
+
+                        domain_ = other.domain_;
+                        slot_index_ = other.slot_index_;
+
+                        other.domain_ = nullptr;
+                        other.slot_index_ = INVALID_SLOT_INDEX;
+                    }
+
+                    return *this;
+                }
+
+                ~hazard_guard()
+                {
+                    release();
+                }
+
+                bool is_valid() const
+                {
+                    return (domain_ != nullptr) && (slot_index_ != INVALID_SLOT_INDEX);
+                }
+
+                pointer_type protect(const minstd::atomic<pointer_type> &source)
+                {
+                    if (!is_valid())
+                    {
+                        return nullptr;
+                    }
+
+                    while (true)
+                    {
+                        pointer_type current = source.load(minstd::memory_order_acquire);
+                        domain_->store_hazard(slot_index_, current);
+
+                        if (source.load(minstd::memory_order_acquire) == current)
+                        {
+                            return current;
+                        }
+                    }
+                }
+
+                void clear()
+                {
+                    if (!is_valid())
+                    {
+                        return;
+                    }
+
+                    domain_->store_hazard(slot_index_, nullptr);
+                }
+
+            private:
+                friend class hazard_pointer_domain;
+
+                hazard_guard(hazard_pointer_domain *domain, size_t slot_index)
+                    : domain_(domain),
+                      slot_index_(slot_index)
+                {
+                }
+
+                void release()
+                {
+                    if (!is_valid())
+                    {
+                        return;
+                    }
+
+                    domain_->release_hazard_slot(slot_index_);
+
+                    domain_ = nullptr;
+                    slot_index_ = INVALID_SLOT_INDEX;
+                }
+
+                hazard_pointer_domain *domain_ = nullptr;
+                size_t slot_index_ = INVALID_SLOT_INDEX;
+            };
+
+            hazard_pointer_domain() = default;
+
+            hazard_pointer_domain(const hazard_pointer_domain &) = delete;
+            hazard_pointer_domain &operator=(const hazard_pointer_domain &) = delete;
+
+            ~hazard_pointer_domain()
+            {
+                force_reclaim_all();
+            }
+
+            hazard_guard acquire_guard()
+            {
+                return hazard_guard(this, try_acquire_hazard_slot());
+            }
+
+            bool retire(pointer_type ptr, deleter_type deleter = default_deleter)
+            {
+                if (ptr == nullptr)
+                {
+                    return true;
+                }
+
+                for (size_t attempt = 0; attempt < 2; ++attempt)
+                {
+                    for (size_t i = 0; i < MAX_RETIRED_RECORDS; ++i)
+                    {
+                        bool expected = false;
+
+                        if (!retired_records_[i].in_use_.compare_exchange_strong(expected, true,
+                                                                                 minstd::memory_order_acq_rel,
+                                                                                 minstd::memory_order_acquire))
+                        {
+                            continue;
+                        }
+
+                        retired_records_[i].retired_ptr_ = ptr;
+                        retired_records_[i].deleter_ = deleter;
+                        retired_records_[i].active_.store(true, minstd::memory_order_release);
+
+                        size_t retired_since_scan = retire_since_scan_.fetch_add(1, minstd::memory_order_relaxed) + 1;
+
+                        if (retired_since_scan >= RETIRE_SCAN_THRESHOLD)
+                        {
+                            scan();
+                            retire_since_scan_.store(0, minstd::memory_order_relaxed);
+                        }
+
+                        return true;
+                    }
+
+                    scan();
+                }
+
+                return false;
+            }
+
+            size_t scan()
+            {
+                size_t reclaimed = 0;
+
+                for (size_t i = 0; i < MAX_RETIRED_RECORDS; ++i)
+                {
+                    if (!retired_records_[i].active_.load(minstd::memory_order_acquire))
+                    {
+                        continue;
+                    }
+
+                    pointer_type retired_ptr = retired_records_[i].retired_ptr_;
+
+                    if ((retired_ptr == nullptr) || is_hazard_protected(retired_ptr))
+                    {
+                        continue;
+                    }
+
+                    bool expected = true;
+
+                    if (!retired_records_[i].active_.compare_exchange_strong(expected, false,
+                                                                             minstd::memory_order_acq_rel,
+                                                                             minstd::memory_order_acquire))
+                    {
+                        continue;
+                    }
+
+                    pointer_type ptr_to_delete = retired_records_[i].retired_ptr_;
+                    deleter_type deleter = retired_records_[i].deleter_;
+
+                    retired_records_[i].retired_ptr_ = nullptr;
+                    retired_records_[i].deleter_ = nullptr;
+                    retired_records_[i].in_use_.store(false, minstd::memory_order_release);
+
+                    if ((ptr_to_delete != nullptr) && (deleter != nullptr))
+                    {
+                        deleter(ptr_to_delete);
+                        ++reclaimed;
+                    }
+                }
+
+                return reclaimed;
+            }
+
+            size_t active_hazard_count() const
+            {
+                size_t count = 0;
+
+                for (size_t i = 0; i < MAX_HAZARD_POINTERS; ++i)
+                {
+                    if (hazard_records_[i].protected_ptr_.load(minstd::memory_order_acquire) != nullptr)
+                    {
+                        ++count;
+                    }
+                }
+
+                return count;
+            }
+
+        private:
+            static void default_deleter(pointer_type ptr)
+            {
+                delete ptr;
+            }
+
+            size_t try_acquire_hazard_slot()
+            {
+                for (size_t i = 0; i < MAX_HAZARD_POINTERS; ++i)
+                {
+                    bool expected = false;
+
+                    if (hazard_records_[i].in_use_.compare_exchange_strong(expected, true,
+                                                                           minstd::memory_order_acq_rel,
+                                                                           minstd::memory_order_acquire))
+                    {
+                        hazard_records_[i].protected_ptr_.store(nullptr, minstd::memory_order_release);
+                        return i;
+                    }
+                }
+
+                return INVALID_SLOT_INDEX;
+            }
+
+            void store_hazard(size_t slot_index, pointer_type ptr)
+            {
+                hazard_records_[slot_index].protected_ptr_.store(ptr, minstd::memory_order_release);
+            }
+
+            void release_hazard_slot(size_t slot_index)
+            {
+                hazard_records_[slot_index].protected_ptr_.store(nullptr, minstd::memory_order_release);
+                hazard_records_[slot_index].in_use_.store(false, minstd::memory_order_release);
+            }
+
+            bool is_hazard_protected(pointer_type ptr) const
+            {
+                for (size_t i = 0; i < MAX_HAZARD_POINTERS; ++i)
+                {
+                    if (!hazard_records_[i].in_use_.load(minstd::memory_order_acquire))
+                    {
+                        continue;
+                    }
+
+                    if (hazard_records_[i].protected_ptr_.load(minstd::memory_order_acquire) == ptr)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            void force_reclaim_all()
+            {
+                for (size_t i = 0; i < MAX_RETIRED_RECORDS; ++i)
+                {
+                    if (!retired_records_[i].in_use_.load(minstd::memory_order_acquire))
+                    {
+                        continue;
+                    }
+
+                    pointer_type ptr_to_delete = retired_records_[i].retired_ptr_;
+                    deleter_type deleter = retired_records_[i].deleter_;
+
+                    retired_records_[i].active_.store(false, minstd::memory_order_release);
+                    retired_records_[i].retired_ptr_ = nullptr;
+                    retired_records_[i].deleter_ = nullptr;
+                    retired_records_[i].in_use_.store(false, minstd::memory_order_release);
+
+                    if ((ptr_to_delete != nullptr) && (deleter != nullptr))
+                    {
+                        deleter(ptr_to_delete);
+                    }
+                }
+            }
+
+            minstd::array<hazard_record, MAX_HAZARD_POINTERS> hazard_records_{};
+            minstd::array<retired_record, MAX_RETIRED_RECORDS> retired_records_{};
+            minstd::atomic<size_t> retire_since_scan_{0};
+        };
+    }
+}
