@@ -255,6 +255,12 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr uint32_t UNLINKS_PER_RECLAIM_TRIGGER = 5;
             static constexpr uint32_t MAINTENANCE_UNLINK_BUDGET = 2;
             static constexpr uint32_t MAINTENANCE_MAX_SCAN_STEPS = 128;
+            static constexpr uint32_t FIND_INCREMENTAL_UNLINK_BUDGET = 4;
+            static constexpr uint32_t MUTATION_EVENTS_PER_LOCAL_MAINTENANCE = 4;
+            static constexpr uint32_t LOCAL_MAINTENANCE_UNLINK_BUDGET = 1;
+            static constexpr uint32_t LOCAL_MAINTENANCE_RECLAIM_BUDGET = 64;
+            static constexpr uint32_t PER_CPU_RECLAIM_TRIGGER_NODES = 32;
+            static constexpr uint32_t TRANSACTION_ID_BLOCK_SIZE = 256;
             static constexpr uint32_t GC_MAX_SCAN_STEPS = 5000000;
             static constexpr uint32_t BACKOFF_MAX_RELAX_SPINS = 32;
             static constexpr bool ENABLE_BACKGROUND_MAINTENANCE = false;
@@ -269,6 +275,8 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 return deleted_at_transaction != NOT_TOMBSTONED;
             }
+
+            struct skipnode_allocation_tracker;
 
             struct SkipNode
             {
@@ -312,6 +320,8 @@ namespace MINIMAL_STD_NAMESPACE
                 SkipNode *retired_next = nullptr;
                 atomic<bool> retirement_enqueued_{false};
                 atomic<bool> fully_unlinked_{false};
+                atomic<bool> reclaimed_{false};
+                skipnode_allocation_tracker *allocation_tracker_ = nullptr;
                 uint64_t retired_epoch_ = 0;
             };
 
@@ -339,6 +349,19 @@ namespace MINIMAL_STD_NAMESPACE
                 size_t cpu_slot_ = 0;
             };
 
+            struct skipnode_allocation_tracker
+            {
+                atomic<SkipNode *> node_{nullptr};
+                skipnode_allocation_tracker *next_ = nullptr;
+            };
+
+            struct retired_epoch_bucket
+            {
+                uint64_t epoch_ = 0;
+                SkipNode *nodes_head_ = nullptr;
+                retired_epoch_bucket *next_ = nullptr;
+            };
+
         public:
 
         using key_type = KeyType;
@@ -355,6 +378,18 @@ namespace MINIMAL_STD_NAMESPACE
                 uint64_t remove_bottom_cas_failures = 0;
                 uint64_t find_tombstone_skips = 0;
             };
+
+            struct reclamation_counters
+            {
+                uint64_t current_epoch = 0;
+                uint64_t retire_enqueued_nodes = 0;
+                uint64_t reclaim_invocations = 0;
+                uint64_t reclaim_total_reclaimed = 0;
+                uint64_t reclaim_scan_eligible = 0;
+                uint64_t reclaim_scan_ineligible = 0;
+                uint64_t total_pending_nodes = 0;
+                uint32_t max_slot_pending_nodes = 0;
+            };
 #endif
 
             SkipList()
@@ -365,10 +400,23 @@ namespace MINIMAL_STD_NAMESPACE
                 for (size_t i = 0; i < MAX_EPOCH_CPUS; ++i)
                 {
                     epoch_slot_cpu_ids_[i].store(INVALID_CPU_ID, memory_order_relaxed);
+                    retired_epoch_buckets_heads_[i].store(nullptr, memory_order_relaxed);
+                    retired_nodes_locks_[i].store(false, memory_order_relaxed);
+                    retired_nodes_reclaim_locks_[i].store(false, memory_order_relaxed);
+                    retired_nodes_pending_counts_[i].store(0, memory_order_relaxed);
+                    local_maintenance_event_counters_[i].store(0, memory_order_relaxed);
+                    retired_bucket_cached_epochs_[i] = INVALID_RETIRED_BUCKET_EPOCH;
+                    retired_bucket_cached_ptrs_[i] = nullptr;
+                    transaction_id_refill_locks_[i].store(false, memory_order_relaxed);
+                    transaction_id_block_next_[i].store(0, memory_order_relaxed);
+                    transaction_id_block_limit_[i].store(0, memory_order_relaxed);
                 }
 
                 NIL = new SkipNode(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
                 head = new SkipNode(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL);
+
+                NIL->allocation_tracker_ = register_node_allocation(NIL);
+                head->allocation_tracker_ = register_node_allocation(head);
             }
 
             ~SkipList()
@@ -379,10 +427,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     SkipNode *next_node = current_node->next_node[0].get_reference();
 
-                    if (!current_node->retirement_enqueued_.load(memory_order_acquire))
-                    {
-                        delete current_node;
-                    }
+                    (void)try_reclaim_node(current_node);
 
                     current_node = next_node;
                 }
@@ -390,8 +435,10 @@ namespace MINIMAL_STD_NAMESPACE
                 reclaim_all_abandoned_new_nodes();
                 reclaim_all_retired_nodes();
 
-                delete head;
-                delete NIL;
+                (void)try_reclaim_node(head);
+                (void)try_reclaim_node(NIL);
+
+                reclaim_allocation_trackers();
             };
 
             ValueType *find(const KeyType search_key) const
@@ -493,7 +540,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 epoch_read_section_guard read_guard(this);
 
-                const TransactionId transaction_id = NextTransactionId();
+                const TransactionId transaction_id = NextTransactionId(read_guard.cpu_slot_);
                 uint32_t insert_level0_retry_count = 0;
                 uint32_t insert_level0_backoff = 0;
                 uint32_t insert_upper_level_backoff = 0;
@@ -514,6 +561,7 @@ namespace MINIMAL_STD_NAMESPACE
                     else
                     {
                         auto new_node = new SkipNode(key, value, top_level);
+                        new_node->allocation_tracker_ = register_node_allocation(new_node);
 
                         for (auto level = 1; level < top_level; ++level)
                         {
@@ -580,6 +628,7 @@ namespace MINIMAL_STD_NAMESPACE
                             }
                         }
 
+                        local_maintenance_on_mutation(read_guard.cpu_slot_);
                         return true;
                     }
                 }
@@ -589,7 +638,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 epoch_read_section_guard read_guard(this);
 
-                const TransactionId transaction_id = NextTransactionId();
+                const TransactionId transaction_id = NextTransactionId(read_guard.cpu_slot_);
 
                 SkipNode *preds[MAX_LEVELS + 1];
                 SkipNode *succs[MAX_LEVELS + 1];
@@ -655,6 +704,7 @@ namespace MINIMAL_STD_NAMESPACE
                                 // this thread soft deleted the node
 
                                 maintenance_on_release(read_guard.cpu_slot_);
+                                local_maintenance_on_mutation(read_guard.cpu_slot_);
 
                                 return true;
                             }
@@ -718,6 +768,31 @@ namespace MINIMAL_STD_NAMESPACE
                 return counters;
             }
 
+            reclamation_counters debug_get_reclamation_counters() const
+            {
+                reclamation_counters counters;
+
+                counters.current_epoch = global_epoch_.load(memory_order_relaxed);
+                counters.retire_enqueued_nodes = retire_enqueued_nodes_.load(memory_order_relaxed);
+                counters.reclaim_invocations = reclaim_invocations_.load(memory_order_relaxed);
+                counters.reclaim_total_reclaimed = reclaim_total_reclaimed_.load(memory_order_relaxed);
+                counters.reclaim_scan_eligible = reclaim_scan_eligible_.load(memory_order_relaxed);
+                counters.reclaim_scan_ineligible = reclaim_scan_ineligible_.load(memory_order_relaxed);
+
+                for (size_t slot = 0; slot < MAX_EPOCH_CPUS; ++slot)
+                {
+                    const uint32_t slot_pending = retired_nodes_pending_counts_[slot].load(memory_order_relaxed);
+                    counters.total_pending_nodes += slot_pending;
+
+                    if (slot_pending > counters.max_slot_pending_nodes)
+                    {
+                        counters.max_slot_pending_nodes = slot_pending;
+                    }
+                }
+
+                return counters;
+            }
+
             bool debug_validate_ordering() const
             {
                 epoch_read_section_guard read_guard(this);
@@ -771,17 +846,44 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return true;
             }
+
+            void debug_force_cleanup_for_asan()
+            {
+                for (size_t pass = 0; pass < 2048; ++pass)
+                {
+                    const uint32_t unlinked = gc();
+                    const bool reclaimed = force_reclaim_all_retired_nodes_for_testing();
+
+                    if ((unlinked == 0) && !reclaimed)
+                    {
+                        break;
+                    }
+                }
+
+                (void)force_reclaim_all_retired_nodes_for_testing();
+                reclaim_all_abandoned_new_nodes();
+            }
 #endif
 
         private:
             SkipNode *head;
             SkipNode *NIL;
-            atomic<SkipNode *> retired_nodes_head_{nullptr};
+            array<atomic<retired_epoch_bucket *>, MAX_EPOCH_CPUS> retired_epoch_buckets_heads_{};
             atomic<SkipNode *> abandoned_new_nodes_head_{nullptr};
-            mutable atomic<bool> retired_nodes_lock_{false};
+            mutable array<atomic<bool>, MAX_EPOCH_CPUS> retired_nodes_locks_{};
+            mutable array<atomic<bool>, MAX_EPOCH_CPUS> retired_nodes_reclaim_locks_{};
             mutable atomic<bool> abandoned_new_nodes_lock_{false};
             mutable array<epoch_reader_state, MAX_EPOCH_CPUS> epoch_reader_states_{};
             mutable array<atomic<uint32_t>, MAX_EPOCH_CPUS> epoch_slot_cpu_ids_{};
+            mutable array<atomic<uint32_t>, MAX_EPOCH_CPUS> retired_nodes_pending_counts_{};
+            mutable array<atomic<uint64_t>, MAX_EPOCH_CPUS> local_maintenance_event_counters_{};
+            mutable array<uint64_t, MAX_EPOCH_CPUS> retired_bucket_cached_epochs_{};
+            mutable array<retired_epoch_bucket *, MAX_EPOCH_CPUS> retired_bucket_cached_ptrs_{};
+            mutable array<atomic<bool>, MAX_EPOCH_CPUS> transaction_id_refill_locks_{};
+            mutable array<atomic<uint64_t>, MAX_EPOCH_CPUS> transaction_id_block_next_{};
+            mutable array<atomic<uint64_t>, MAX_EPOCH_CPUS> transaction_id_block_limit_{};
+            mutable atomic<skipnode_allocation_tracker *> allocation_trackers_head_{nullptr};
+            mutable atomic<bool> allocation_trackers_lock_{false};
             mutable atomic<uint64_t> global_epoch_{1};
             mutable atomic<uint64_t> release_event_counter_{0};
             mutable atomic<uint32_t> pending_unlinks_for_reclaim_{0};
@@ -792,17 +894,62 @@ namespace MINIMAL_STD_NAMESPACE
             mutable atomic<uint64_t> remove_mark_retries_{0};
             mutable atomic<uint64_t> remove_bottom_cas_failures_{0};
             mutable atomic<uint64_t> find_tombstone_skips_{0};
+            mutable atomic<uint64_t> retire_enqueued_nodes_{0};
+            mutable atomic<uint64_t> reclaim_invocations_{0};
+            mutable atomic<uint64_t> reclaim_total_reclaimed_{0};
+            mutable atomic<uint64_t> reclaim_scan_eligible_{0};
+            mutable atomic<uint64_t> reclaim_scan_ineligible_{0};
 #endif
 
             Xoroshiro128PlusPlusRNG rng_;
 
             const float probability;
 
+            static constexpr uint64_t INVALID_RETIRED_BUCKET_EPOCH = std::numeric_limits<uint64_t>::max();
+
             atomic<uint64_t> transaction_counter_;
 
-            TransactionId NextTransactionId()
+            TransactionId NextTransactionId(size_t slot)
             {
-                return TransactionId{transaction_counter_.fetch_add(1, memory_order_relaxed)};
+                const size_t bounded_slot = slot % MAX_EPOCH_CPUS;
+
+                while (true)
+                {
+                    uint64_t block_next = transaction_id_block_next_[bounded_slot].load(memory_order_acquire);
+                    const uint64_t block_limit = transaction_id_block_limit_[bounded_slot].load(memory_order_acquire);
+
+                    if (block_next < block_limit)
+                    {
+                        if (transaction_id_block_next_[bounded_slot].compare_exchange_strong(block_next, block_next + 1, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            return TransactionId{block_next};
+                        }
+
+                        continue;
+                    }
+
+                    spin_lock(transaction_id_refill_locks_[bounded_slot]);
+
+                    block_next = transaction_id_block_next_[bounded_slot].load(memory_order_acquire);
+                    const uint64_t refreshed_limit = transaction_id_block_limit_[bounded_slot].load(memory_order_acquire);
+
+                    if (block_next < refreshed_limit)
+                    {
+                        spin_unlock(transaction_id_refill_locks_[bounded_slot]);
+                        continue;
+                    }
+
+                    const uint64_t block_start = transaction_counter_.fetch_add(TRANSACTION_ID_BLOCK_SIZE, memory_order_relaxed);
+                    const uint64_t next_block_value = block_start + 1;
+                    const uint64_t next_block_limit = block_start + TRANSACTION_ID_BLOCK_SIZE;
+
+                    transaction_id_block_next_[bounded_slot].store(next_block_value, memory_order_release);
+                    transaction_id_block_limit_[bounded_slot].store(next_block_limit, memory_order_release);
+
+                    spin_unlock(transaction_id_refill_locks_[bounded_slot]);
+
+                    return TransactionId{block_start};
+                }
             }
 
             int random_level()
@@ -861,6 +1008,63 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
+            static bool try_reclaim_node(SkipNode *node)
+            {
+                if (node == nullptr)
+                {
+                    return false;
+                }
+
+                bool expected_not_reclaimed = false;
+
+                if (!node->reclaimed_.compare_exchange_strong(expected_not_reclaimed, true, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return false;
+                }
+
+                if (node->allocation_tracker_ != nullptr)
+                {
+                    node->allocation_tracker_->node_.store(nullptr, memory_order_release);
+                }
+
+                delete node;
+                return true;
+            }
+
+            skipnode_allocation_tracker *register_node_allocation(SkipNode *node)
+            {
+                auto *tracker = new skipnode_allocation_tracker();
+                tracker->node_.store(node, memory_order_relaxed);
+
+                spin_lock(allocation_trackers_lock_);
+                tracker->next_ = allocation_trackers_head_.load(memory_order_relaxed);
+                allocation_trackers_head_.store(tracker, memory_order_release);
+                spin_unlock(allocation_trackers_lock_);
+
+                return tracker;
+            }
+
+            void reclaim_allocation_trackers()
+            {
+                spin_lock(allocation_trackers_lock_);
+                skipnode_allocation_tracker *tracker = allocation_trackers_head_.exchange(nullptr, memory_order_acq_rel);
+                spin_unlock(allocation_trackers_lock_);
+
+                while (tracker != nullptr)
+                {
+                    SkipNode *node = tracker->node_.load(memory_order_acquire);
+
+                    if (node != nullptr)
+                    {
+                        (void)try_reclaim_node(node);
+                    }
+
+                    skipnode_allocation_tracker *next = tracker->next_;
+                    delete tracker;
+                    tracker = next;
+                }
+            }
+
             void retire_node(SkipNode *node)
             {
                 bool expected_not_enqueued = false;
@@ -871,11 +1075,87 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 node->retired_epoch_ = global_epoch_.load(memory_order_acquire);
+                const size_t slot = current_cpu_slot();
 
-                spin_lock(retired_nodes_lock_);
-                node->retired_next = retired_nodes_head_.load(memory_order_relaxed);
-                retired_nodes_head_.store(node, memory_order_release);
-                spin_unlock(retired_nodes_lock_);
+                spin_lock(retired_nodes_locks_[slot]);
+                retired_epoch_bucket *bucket = nullptr;
+
+                if (retired_bucket_cached_epochs_[slot] == node->retired_epoch_)
+                {
+                    bucket = retired_bucket_cached_ptrs_[slot];
+                }
+
+                if (bucket == nullptr)
+                {
+                    bucket = retired_epoch_buckets_heads_[slot].load(memory_order_relaxed);
+
+                    while ((bucket != nullptr) && (bucket->epoch_ != node->retired_epoch_))
+                    {
+                        bucket = bucket->next_;
+                    }
+
+                    if (bucket == nullptr)
+                    {
+                        bucket = new retired_epoch_bucket();
+                        bucket->epoch_ = node->retired_epoch_;
+                        bucket->nodes_head_ = nullptr;
+                        bucket->next_ = retired_epoch_buckets_heads_[slot].load(memory_order_relaxed);
+                        retired_epoch_buckets_heads_[slot].store(bucket, memory_order_release);
+                    }
+
+                    retired_bucket_cached_epochs_[slot] = node->retired_epoch_;
+                    retired_bucket_cached_ptrs_[slot] = bucket;
+                }
+
+                node->retired_next = bucket->nodes_head_;
+                bucket->nodes_head_ = node;
+                spin_unlock(retired_nodes_locks_[slot]);
+
+                const uint32_t pending_nodes = retired_nodes_pending_counts_[slot].fetch_add(1, memory_order_relaxed) + 1;
+
+#ifdef __MINIMAL_STD_TEST__
+                retire_enqueued_nodes_.fetch_add(1, memory_order_relaxed);
+#endif
+
+                if (pending_nodes < PER_CPU_RECLAIM_TRIGGER_NODES)
+                {
+                    return;
+                }
+
+                bool expected_unlocked = false;
+
+                if (!retired_nodes_reclaim_locks_[slot].compare_exchange_strong(expected_unlocked, true, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return;
+                }
+
+                (void)try_advance_epoch(slot);
+                (void)reclaim_retired_nodes_by_epoch_for_slot(slot, LOCAL_MAINTENANCE_RECLAIM_BUDGET);
+                retired_nodes_reclaim_locks_[slot].store(false, memory_order_release);
+            }
+
+            void local_maintenance_on_mutation(size_t slot)
+            {
+                const size_t bounded_slot = slot % MAX_EPOCH_CPUS;
+                const uint64_t maintenance_events = local_maintenance_event_counters_[bounded_slot].fetch_add(1, memory_order_relaxed) + 1;
+
+                if ((maintenance_events % MUTATION_EVENTS_PER_LOCAL_MAINTENANCE) != 0)
+                {
+                    return;
+                }
+
+                (void)assist_unlink_tombstoned_nodes(LOCAL_MAINTENANCE_UNLINK_BUDGET);
+
+                bool expected_unlocked = false;
+
+                if (!retired_nodes_reclaim_locks_[bounded_slot].compare_exchange_strong(expected_unlocked, true, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return;
+                }
+
+                (void)try_advance_epoch(bounded_slot);
+                (void)reclaim_retired_nodes_by_epoch_for_slot(bounded_slot, LOCAL_MAINTENANCE_RECLAIM_BUDGET);
+                retired_nodes_reclaim_locks_[bounded_slot].store(false, memory_order_release);
             }
 
             uint32_t assist_unlink_tombstoned_nodes(uint32_t unlink_budget)
@@ -1069,65 +1349,127 @@ namespace MINIMAL_STD_NAMESPACE
                 return global_epoch_.compare_exchange_strong(current_epoch, current_epoch + 1, memory_order_seq_cst);
             }
 
-            void reclaim_retired_nodes_by_epoch()
+            uint32_t reclaim_retired_nodes_by_epoch_for_slot(size_t slot, uint32_t reclaim_budget = std::numeric_limits<uint32_t>::max())
             {
                 uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
 
+#ifdef __MINIMAL_STD_TEST__
+                reclaim_invocations_.fetch_add(1, memory_order_relaxed);
+#endif
+
                 if (current_epoch <= EPOCH_RECLAIM_LAG)
                 {
-                    return;
+                    return 0;
                 }
 
                 const uint64_t reclaim_epoch = current_epoch - EPOCH_RECLAIM_LAG;
+                const size_t bounded_slot = slot % MAX_EPOCH_CPUS;
 
-                spin_lock(retired_nodes_lock_);
-                SkipNode *retired_list = retired_nodes_head_.exchange(nullptr, memory_order_acq_rel);
-                spin_unlock(retired_nodes_lock_);
+                spin_lock(retired_nodes_locks_[bounded_slot]);
+                retired_bucket_cached_epochs_[bounded_slot] = INVALID_RETIRED_BUCKET_EPOCH;
+                retired_bucket_cached_ptrs_[bounded_slot] = nullptr;
+                retired_epoch_bucket *bucket_list = retired_epoch_buckets_heads_[bounded_slot].exchange(nullptr, memory_order_acq_rel);
+                spin_unlock(retired_nodes_locks_[bounded_slot]);
 
-                SkipNode *retained_list = nullptr;
-                SkipNode *reclaim_list = nullptr;
+                retired_epoch_bucket *retained_buckets = nullptr;
+                uint32_t reclaimed_count = 0;
 
-                while (retired_list != nullptr)
+                while (bucket_list != nullptr)
                 {
-                    SkipNode *next = retired_list->retired_next;
-                    const bool reclaim_eligible = retired_list->fully_unlinked_.load(memory_order_acquire);
+                    retired_epoch_bucket *next_bucket = bucket_list->next_;
 
-                    if (reclaim_eligible && (retired_list->retired_epoch_ <= reclaim_epoch))
+                    if (bucket_list->epoch_ > reclaim_epoch)
                     {
-                        retired_list->retired_next = reclaim_list;
-                        reclaim_list = retired_list;
+                        bucket_list->next_ = retained_buckets;
+                        retained_buckets = bucket_list;
+                        bucket_list = next_bucket;
+                        continue;
+                    }
+
+                    SkipNode *retained_nodes = nullptr;
+                    SkipNode *node = bucket_list->nodes_head_;
+
+                    while (node != nullptr)
+                    {
+                        SkipNode *next_node = node->retired_next;
+                        const bool reclaim_eligible = node->fully_unlinked_.load(memory_order_acquire);
+
+#ifdef __MINIMAL_STD_TEST__
+                        if (reclaim_eligible)
+                        {
+                            reclaim_scan_eligible_.fetch_add(1, memory_order_relaxed);
+                        }
+                        else
+                        {
+                            reclaim_scan_ineligible_.fetch_add(1, memory_order_relaxed);
+                        }
+#endif
+
+                        if (reclaim_eligible && (reclaimed_count < reclaim_budget))
+                        {
+                            const bool reclaimed = try_reclaim_node(node);
+                            retired_nodes_pending_counts_[bounded_slot].fetch_sub(1, memory_order_relaxed);
+
+                            if (reclaimed)
+                            {
+                                ++reclaimed_count;
+                            }
+
+#ifdef __MINIMAL_STD_TEST__
+                            if (reclaimed)
+                            {
+                                reclaim_total_reclaimed_.fetch_add(1, memory_order_relaxed);
+                            }
+#endif
+                        }
+                        else
+                        {
+                            node->retired_next = retained_nodes;
+                            retained_nodes = node;
+                        }
+
+                        node = next_node;
+                    }
+
+                    if (retained_nodes != nullptr)
+                    {
+                        bucket_list->nodes_head_ = retained_nodes;
+                        bucket_list->next_ = retained_buckets;
+                        retained_buckets = bucket_list;
                     }
                     else
                     {
-                        retired_list->retired_next = retained_list;
-                        retained_list = retired_list;
+                        delete bucket_list;
                     }
 
-                    retired_list = next;
+                    bucket_list = next_bucket;
                 }
 
-                if (retained_list != nullptr)
+                if (retained_buckets != nullptr)
                 {
-                    spin_lock(retired_nodes_lock_);
-                    SkipNode *current_head = retired_nodes_head_.load(memory_order_relaxed);
+                    spin_lock(retired_nodes_locks_[bounded_slot]);
+                    retired_epoch_bucket *current_head = retired_epoch_buckets_heads_[bounded_slot].load(memory_order_relaxed);
 
-                    while (retained_list != nullptr)
+                    while (retained_buckets != nullptr)
                     {
-                        SkipNode *next = retained_list->retired_next;
-                        retained_list->retired_next = current_head;
-                        current_head = retained_list;
-                        retained_list = next;
+                        retired_epoch_bucket *next = retained_buckets->next_;
+                        retained_buckets->next_ = current_head;
+                        current_head = retained_buckets;
+                        retained_buckets = next;
                     }
 
-                    retired_nodes_head_.store(current_head, memory_order_release);
-                    spin_unlock(retired_nodes_lock_);
+                    retired_epoch_buckets_heads_[bounded_slot].store(current_head, memory_order_release);
+                    spin_unlock(retired_nodes_locks_[bounded_slot]);
                 }
 
-                while (reclaim_list != nullptr)
+                return reclaimed_count;
+            }
+
+            void reclaim_retired_nodes_by_epoch()
+            {
+                for (size_t slot = 0; slot < MAX_EPOCH_CPUS; ++slot)
                 {
-                    SkipNode *next = reclaim_list->retired_next;
-                    delete reclaim_list;
-                    reclaim_list = next;
+                    (void)reclaim_retired_nodes_by_epoch_for_slot(slot);
                 }
             }
 
@@ -1139,15 +1481,31 @@ namespace MINIMAL_STD_NAMESPACE
 
             void reclaim_all_retired_nodes()
             {
-                spin_lock(retired_nodes_lock_);
-                SkipNode *node = retired_nodes_head_.exchange(nullptr, memory_order_acq_rel);
-                spin_unlock(retired_nodes_lock_);
-
-                while (node != nullptr)
+                for (size_t slot = 0; slot < MAX_EPOCH_CPUS; ++slot)
                 {
-                    SkipNode *next = node->retired_next;
-                    delete node;
-                    node = next;
+                    spin_lock(retired_nodes_locks_[slot]);
+                    retired_bucket_cached_epochs_[slot] = INVALID_RETIRED_BUCKET_EPOCH;
+                    retired_bucket_cached_ptrs_[slot] = nullptr;
+                    retired_epoch_bucket *bucket = retired_epoch_buckets_heads_[slot].exchange(nullptr, memory_order_acq_rel);
+                    spin_unlock(retired_nodes_locks_[slot]);
+                    retired_nodes_pending_counts_[slot].store(0, memory_order_relaxed);
+                    retired_nodes_reclaim_locks_[slot].store(false, memory_order_relaxed);
+
+                    while (bucket != nullptr)
+                    {
+                        SkipNode *node = bucket->nodes_head_;
+
+                        while (node != nullptr)
+                        {
+                            SkipNode *next_node = node->retired_next;
+                            (void)try_reclaim_node(node);
+                            node = next_node;
+                        }
+
+                        retired_epoch_bucket *next_bucket = bucket->next_;
+                        delete bucket;
+                        bucket = next_bucket;
+                    }
                 }
             }
 
@@ -1168,15 +1526,56 @@ namespace MINIMAL_STD_NAMESPACE
                 while (node != nullptr)
                 {
                     SkipNode *next = node->retired_next;
-                    delete node;
+                    (void)try_reclaim_node(node);
                     node = next;
                 }
+            }
+
+            bool force_reclaim_all_retired_nodes_for_testing()
+            {
+                bool reclaimed_any = false;
+
+                for (size_t slot = 0; slot < MAX_EPOCH_CPUS; ++slot)
+                {
+                    spin_lock(retired_nodes_locks_[slot]);
+                    retired_bucket_cached_epochs_[slot] = INVALID_RETIRED_BUCKET_EPOCH;
+                    retired_bucket_cached_ptrs_[slot] = nullptr;
+                    retired_epoch_bucket *bucket = retired_epoch_buckets_heads_[slot].exchange(nullptr, memory_order_acq_rel);
+                    spin_unlock(retired_nodes_locks_[slot]);
+
+                    while (bucket != nullptr)
+                    {
+                        SkipNode *node = bucket->nodes_head_;
+
+                        while (node != nullptr)
+                        {
+                            SkipNode *next_node = node->retired_next;
+
+                            if (try_reclaim_node(node))
+                            {
+                                reclaimed_any = true;
+                            }
+
+                            node = next_node;
+                        }
+
+                        retired_epoch_bucket *next_bucket = bucket->next_;
+                        delete bucket;
+                        bucket = next_bucket;
+                    }
+
+                    retired_nodes_pending_counts_[slot].store(0, memory_order_relaxed);
+                    retired_nodes_reclaim_locks_[slot].store(false, memory_order_relaxed);
+                }
+
+                return reclaimed_any;
             }
 
             FindResult find_with_nodelists(const KeyType search_key, SkipNode **preds, SkipNode **succs)
             {
                 TransactionId deletion_transaction = NOT_TOMBSTONED;
                 bool soft_deleted = false;
+                uint32_t incremental_unlink_budget = FIND_INCREMENTAL_UNLINK_BUDGET;
 
                 SkipNode *pred, *curr, *succ;
 
@@ -1196,11 +1595,43 @@ namespace MINIMAL_STD_NAMESPACE
                             find_tombstone_skips_.fetch_add(1, memory_order_relaxed);
 #endif
 
+                            if ((incremental_unlink_budget > 0) && (pred->next_node[level].compare_exchange_strong(curr, succ, NOT_TOMBSTONED)))
+                            {
+                                --incremental_unlink_budget;
+
+                                if (level == 0)
+                                {
+                                    const bool fully_unlinked = unlink_tombstoned_node_upper_levels(curr);
+
+                                    if (fully_unlinked)
+                                    {
+                                        curr->fully_unlinked_.store(true, memory_order_release);
+                                        retire_node(curr);
+                                    }
+                                }
+
+                                curr = succ;
+
+                                if (curr == NIL)
+                                {
+                                    break;
+                                }
+
+                                succ = curr->next_node[level].get(deletion_transaction);
+                                continue;
+                            }
+
                             if (curr->key == search_key)
                             {
                                 soft_deleted = true;
                                 break;
                             }
+
+                            if (curr == NIL)
+                            {
+                                break;
+                            }
+
                             curr = succ;
                             succ = curr->next_node[level].get(deletion_transaction);
                         }
