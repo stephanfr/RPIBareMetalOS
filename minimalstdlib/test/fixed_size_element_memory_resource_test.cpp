@@ -39,7 +39,7 @@ namespace
     constexpr size_t default_alignment = alignof(max_align_t);
 
     constexpr size_t buffer_size = 128 * 1048576; // 128 MB
-    char buffer[buffer_size];
+    char* buffer = new char[buffer_size]();
 
     minstd::atomic<bool> start_allocations = false;
 

@@ -89,6 +89,8 @@
     "cpputestTestAdapter.debugLaunchConfigurationName": "(gdb) Launch",
     "chat.tools.terminal.autoApprove": {
         "make": true,
-        "./minimalstdlib/test/build/cpputest_stdlib_main.exe": true
+        "./minimalstdlib/test/build/cpputest_stdlib_main.exe": true,
+        "seq": true,
+        "timeout": true
     }
 }

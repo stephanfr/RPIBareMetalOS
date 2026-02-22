@@ -14,7 +14,6 @@
 #include <sched.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <string.h>
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
@@ -26,15 +25,11 @@ namespace
     static constexpr size_t SKIPLIST_STRESS_ITERATIONS_PER_THREAD = 20000;
     static constexpr uint32_t SKIPLIST_STRESS_KEY_SPACE = 4096;
     static constexpr size_t SKIPLIST_PERF_DEFAULT_MULTIPLIER = 500;
-    static constexpr size_t SKIPLIST_MIXED_DEFAULT_MULTIPLIER = 100;
-    static constexpr uint32_t WRITE_LOAD_BPS_0_1_PERCENT = 10;
-    static constexpr uint32_t WRITE_LOAD_BPS_1_PERCENT = 100;
-    static constexpr uint32_t WRITE_LOAD_BPS_5_PERCENT = 500;
-    static constexpr uint32_t WRITE_LOAD_BPS_10_PERCENT = 1000;
-    static constexpr uint32_t WRITE_LOAD_BPS_20_PERCENT = 2000;
+    static constexpr size_t SKIPLIST_MIXED_DEFAULT_MULTIPLIER = 10;
     static constexpr size_t SKIPLIST_COMPOSITE_BUFFER_SIZE = 64 * 1024 * 1024;
+    static constexpr size_t SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT = 50;
 
-    char skiplist_composite_resource_buffer[SKIPLIST_COMPOSITE_BUFFER_SIZE];
+    char* skiplist_composite_resource_buffer = new char[SKIPLIST_COMPOSITE_BUFFER_SIZE]();
 
     size_t skiplist_scaling_iterations_per_thread()
     {
@@ -114,7 +109,7 @@ namespace
 
         if ((thread_count_text == nullptr) || (thread_count_text[0] == '\0'))
         {
-            return SKIPLIST_STRESS_MAX_THREADS;
+            return SKIPLIST_STRESS_NUM_THREADS;
         }
 
         char *parse_end = nullptr;
@@ -195,253 +190,20 @@ namespace
         uint64_t checksum_ = 0;
     };
 
-    struct rwlock_sorted_vector
+    template <typename list_type>
+    struct skiplist_perf_write_load_thread_args
     {
-        rwlock_sorted_vector()
-        {
-            capacity_ = SKIPLIST_STRESS_KEY_SPACE;
-            entries_ = static_cast<entry_type *>(malloc(sizeof(entry_type) * capacity_));
-
-            if (entries_ == nullptr)
-            {
-                capacity_ = 0;
-            }
-
-            pthread_rwlock_init(&lock_, nullptr);
-        }
-
-        ~rwlock_sorted_vector()
-        {
-            pthread_rwlock_wrlock(&lock_);
-            free(entries_);
-            entries_ = nullptr;
-            size_ = 0;
-            capacity_ = 0;
-            pthread_rwlock_unlock(&lock_);
-            pthread_rwlock_destroy(&lock_);
-        }
-
-        bool insert(uint32_t key, uint32_t value)
-        {
-            pthread_rwlock_wrlock(&lock_);
-
-            const size_t position = lower_bound_position(key);
-
-            if ((position < size_) && (entries_[position].key_ == key))
-            {
-                pthread_rwlock_unlock(&lock_);
-                return false;
-            }
-
-            if (!ensure_capacity(size_ + 1))
-            {
-                pthread_rwlock_unlock(&lock_);
-                return false;
-            }
-
-            if (position < size_)
-            {
-                memmove(entries_ + position + 1, entries_ + position, sizeof(entry_type) * (size_ - position));
-            }
-
-            entries_[position].key_ = key;
-            entries_[position].value_ = value;
-            size_++;
-
-            pthread_rwlock_unlock(&lock_);
-            return true;
-        }
-
-        bool remove(uint32_t key)
-        {
-            pthread_rwlock_wrlock(&lock_);
-
-            const size_t position = lower_bound_position(key);
-
-            if ((position >= size_) || (entries_[position].key_ != key))
-            {
-                pthread_rwlock_unlock(&lock_);
-                return false;
-            }
-
-            if (position + 1 < size_)
-            {
-                memmove(entries_ + position, entries_ + position + 1, sizeof(entry_type) * ((size_ - position) - 1));
-            }
-
-            size_--;
-
-            pthread_rwlock_unlock(&lock_);
-            return true;
-        }
-
-        bool find(uint32_t key, uint32_t &value) const
-        {
-            pthread_rwlock_rdlock(const_cast<pthread_rwlock_t *>(&lock_));
-
-            const size_t position = lower_bound_position(key);
-
-            if ((position < size_) && (entries_[position].key_ == key))
-            {
-                value = entries_[position].value_;
-                pthread_rwlock_unlock(const_cast<pthread_rwlock_t *>(&lock_));
-                return true;
-            }
-
-            pthread_rwlock_unlock(const_cast<pthread_rwlock_t *>(&lock_));
-            return false;
-        }
-
-        struct entry_type
-        {
-            uint32_t key_;
-            uint32_t value_;
-        };
-
-        bool ensure_capacity(size_t required)
-        {
-            if (required <= capacity_)
-            {
-                return true;
-            }
-
-            size_t next_capacity = (capacity_ == 0) ? 16 : capacity_;
-
-            while (next_capacity < required)
-            {
-                next_capacity *= 2;
-            }
-
-            auto *resized = static_cast<entry_type *>(realloc(entries_, sizeof(entry_type) * next_capacity));
-
-            if (resized == nullptr)
-            {
-                return false;
-            }
-
-            entries_ = resized;
-            capacity_ = next_capacity;
-            return true;
-        }
-
-        size_t lower_bound_position(uint32_t key) const
-        {
-            size_t left = 0;
-            size_t right = size_;
-
-            while (left < right)
-            {
-                const size_t middle = left + ((right - left) / 2);
-
-                if (entries_[middle].key_ < key)
-                {
-                    left = middle + 1;
-                }
-                else
-                {
-                    right = middle;
-                }
-            }
-
-            return left;
-        }
-
-        pthread_rwlock_t lock_{};
-        entry_type *entries_ = nullptr;
-        size_t size_ = 0;
-        size_t capacity_ = 0;
-    };
-
-    struct skiplist_benchmark_adapter
-    {
-        using list_type = minstd::SkipList<uint32_t, uint32_t>;
-
-        bool insert(uint32_t key, uint32_t value)
-        {
-            return list_.insert(key, value);
-        }
-
-        bool remove(uint32_t key)
-        {
-            return list_.remove(key);
-        }
-
-        bool find(uint32_t key, uint32_t &value)
-        {
-            auto *found = list_.find(key);
-
-            if (found == nullptr)
-            {
-                return false;
-            }
-
-            value = *found;
-            return true;
-        }
-
-        void finalize()
-        {
-            list_.gc();
-            list_.debug_force_cleanup_for_asan();
-        }
-
-        void periodic_maintenance(uint32_t thread_id, size_t iteration)
-        {
-            if ((thread_id == 0u) && ((iteration & 0x0FFFu) == 0u))
-            {
-                list_.gc();
-            }
-        }
-
-        auto debug_get_reclamation_counters() const
-        {
-            return list_.debug_get_reclamation_counters();
-        }
-
-        list_type list_{};
-    };
-
-    struct rwlock_sorted_vector_benchmark_adapter
-    {
-        bool insert(uint32_t key, uint32_t value)
-        {
-            return list_.insert(key, value);
-        }
-
-        bool remove(uint32_t key)
-        {
-            return list_.remove(key);
-        }
-
-        bool find(uint32_t key, uint32_t &value)
-        {
-            return list_.find(key, value);
-        }
-
-        void finalize()
-        {
-        }
-
-        void periodic_maintenance(uint32_t, size_t)
-        {
-        }
-
-        rwlock_sorted_vector list_{};
-    };
-
-    template <typename adapter_type>
-    struct write_load_perf_thread_args
-    {
-        adapter_type *adapter_ = nullptr;
+        list_type *list_ = nullptr;
+        minstd::pmr::memory_resource *memory_resource_ = nullptr;
         minstd::atomic<bool> *start_ = nullptr;
         minstd::atomic<size_t> *ready_count_ = nullptr;
+        minstd::atomic<size_t> *allocation_failures_ = nullptr;
         uint32_t thread_id_ = 0;
+        size_t write_period_ = 0;  // 0 = reads only; N = 1-in-N ops is a write
         size_t iterations_ = 0;
         uint32_t key_space_ = 0;
-        uint32_t write_load_bps_ = 0;
         size_t operations_completed_ = 0;
-        size_t read_operations_ = 0;
-        size_t write_operations_ = 0;
+        size_t composite_allocations_ = 0;
         size_t insert_successes_ = 0;
         size_t remove_successes_ = 0;
         uint64_t checksum_ = 0;
@@ -615,10 +377,10 @@ namespace
         return nullptr;
     }
 
-    template <typename adapter_type>
-    void *write_load_perf_worker(void *arg)
+    template <typename list_type>
+    void *skiplist_perf_write_load_worker(void *arg)
     {
-        auto *args = static_cast<write_load_perf_thread_args<adapter_type> *>(arg);
+        auto *args = static_cast<skiplist_perf_write_load_thread_args<list_type> *>(arg);
 
         args->ready_count_->fetch_add(1, minstd::memory_order_release);
 
@@ -628,197 +390,80 @@ namespace
         }
 
         uint64_t checksum = 0;
-        size_t read_operations = 0;
-        size_t write_operations = 0;
+        size_t composite_allocations = 0;
         size_t insert_successes = 0;
         size_t remove_successes = 0;
+        size_t write_op_counter = 0;
+
+        uint64_t rng_state = 0x9e3779b97f4a7c15ull ^
+                             (static_cast<uint64_t>(args->thread_id_) << 32) ^
+                             static_cast<uint64_t>(args->iterations_);
+
+        auto next_random = [&rng_state]() -> uint64_t
+        {
+            rng_state ^= (rng_state << 13);
+            rng_state ^= (rng_state >> 7);
+            rng_state ^= (rng_state << 17);
+            return rng_state;
+        };
 
         for (size_t i = 0; i < args->iterations_; ++i)
         {
-            const uint32_t seed = static_cast<uint32_t>(i) ^ ((args->thread_id_ + 1u) * 0x9E3779B9u);
+            const uint32_t key = static_cast<uint32_t>(next_random() % static_cast<uint64_t>(args->key_space_));
 
-            uint32_t op_mixed = seed + 0x7F4A7C15u;
-            op_mixed ^= op_mixed >> 16;
-            op_mixed *= 0x85EBCA6Bu;
-            op_mixed ^= op_mixed >> 13;
-            op_mixed *= 0xC2B2AE35u;
-            op_mixed ^= op_mixed >> 16;
+            const size_t block_size = 32 + static_cast<size_t>(next_random() & 0xFFu);
+            void *ptr = args->memory_resource_->allocate(block_size);
 
-            uint32_t key_mixed = seed + 0x51ED270Bu;
-            key_mixed ^= key_mixed >> 15;
-            key_mixed *= 0x7FEB352Du;
-            key_mixed ^= key_mixed >> 12;
-            key_mixed *= 0x846CA68Bu;
-            key_mixed ^= key_mixed >> 16;
-
-            const uint32_t key = key_mixed % args->key_space_;
-            const uint32_t op_roll = op_mixed % 10000u;
-
-            if (op_roll < args->write_load_bps_)
+            if (ptr == nullptr)
             {
-                write_operations++;
+                args->allocation_failures_->fetch_add(1, minstd::memory_order_relaxed);
+            }
+            else
+            {
+                args->memory_resource_->deallocate(ptr, block_size);
+                composite_allocations++;
+            }
 
-                if (((op_mixed >> 10) & 1u) == 0u)
+            const bool do_write = (args->write_period_ > 0) && ((next_random() % args->write_period_) == 0);
+
+            if (!do_write)
+            {
+                auto *value = args->list_->find(key);
+
+                if (value != nullptr)
                 {
-                    if (args->adapter_->insert(key, key))
-                    {
-                        insert_successes++;
-                    }
-                }
-                else
-                {
-                    if (args->adapter_->remove(key))
-                    {
-                        remove_successes++;
-                    }
+                    checksum += *value;
                 }
             }
             else
             {
-                read_operations++;
-                uint32_t value = 0;
-
-                if (args->adapter_->find(key, value))
+                if ((write_op_counter & 1u) == 0u)
                 {
-                    checksum += value;
+                    if (args->list_->remove(key))
+                    {
+                        remove_successes++;
+                    }
                 }
+                else
+                {
+                    if (args->list_->insert(key, key))
+                    {
+                        insert_successes++;
+                    }
+                }
+
+                write_op_counter++;
             }
 
-            args->adapter_->periodic_maintenance(args->thread_id_, i + 1u);
             args->operations_completed_++;
         }
 
-        args->read_operations_ = read_operations;
-        args->write_operations_ = write_operations;
+        args->composite_allocations_ = composite_allocations;
         args->insert_successes_ = insert_successes;
         args->remove_successes_ = remove_successes;
         args->checksum_ = checksum;
 
         return nullptr;
-    }
-
-    struct write_load_perf_result
-    {
-        size_t threads_ = 0;
-        size_t iterations_per_thread_ = 0;
-        uint32_t write_load_bps_ = 0;
-        size_t total_operations_ = 0;
-        size_t total_read_operations_ = 0;
-        size_t total_write_operations_ = 0;
-        size_t total_insert_successes_ = 0;
-        size_t total_remove_successes_ = 0;
-        uint64_t checksum_ = 0;
-        double duration_seconds_ = 0.0;
-        double ops_per_sec_ = 0.0;
-    };
-
-    template <typename adapter_type>
-    write_load_perf_result run_write_load_perf_case(const char *label, uint32_t write_load_bps)
-    {
-        const size_t threads = skiplist_perf_thread_count();
-        const size_t iterations_per_thread = skiplist_mixed_iterations_per_thread();
-
-        adapter_type adapter;
-
-        const uint32_t prefill_count = static_cast<uint32_t>((SKIPLIST_STRESS_KEY_SPACE * 9u) / 10u);
-
-        for (uint32_t key = 0; key < prefill_count; ++key)
-        {
-            CHECK_TRUE(adapter.insert(key, key));
-        }
-
-        pthread_t workers[SKIPLIST_STRESS_MAX_THREADS]{};
-        write_load_perf_thread_args<adapter_type> thread_args[SKIPLIST_STRESS_MAX_THREADS]{};
-
-        minstd::atomic<bool> start{false};
-        minstd::atomic<size_t> ready_count{0};
-
-        for (size_t index = 0; index < threads; ++index)
-        {
-            thread_args[index].adapter_ = &adapter;
-            thread_args[index].start_ = &start;
-            thread_args[index].ready_count_ = &ready_count;
-            thread_args[index].thread_id_ = static_cast<uint32_t>(index);
-            thread_args[index].iterations_ = iterations_per_thread;
-            thread_args[index].key_space_ = SKIPLIST_STRESS_KEY_SPACE;
-            thread_args[index].write_load_bps_ = write_load_bps;
-
-            CHECK_EQUAL(0, pthread_create(&workers[index], nullptr, write_load_perf_worker<adapter_type>, &thread_args[index]));
-        }
-
-        while (ready_count.load(minstd::memory_order_acquire) < threads)
-        {
-            sched_yield();
-        }
-
-        timespec start_time{};
-        timespec end_time{};
-        clock_gettime(CLOCK_MONOTONIC, &start_time);
-
-        start.store(true, minstd::memory_order_release);
-
-        write_load_perf_result result;
-        result.threads_ = threads;
-        result.iterations_per_thread_ = iterations_per_thread;
-        result.write_load_bps_ = write_load_bps;
-
-        for (size_t index = 0; index < threads; ++index)
-        {
-            CHECK_EQUAL(0, pthread_join(workers[index], nullptr));
-            result.total_operations_ += thread_args[index].operations_completed_;
-            result.total_read_operations_ += thread_args[index].read_operations_;
-            result.total_write_operations_ += thread_args[index].write_operations_;
-            result.total_insert_successes_ += thread_args[index].insert_successes_;
-            result.total_remove_successes_ += thread_args[index].remove_successes_;
-            result.checksum_ += thread_args[index].checksum_;
-        }
-
-        if constexpr (requires(const adapter_type &adapter_ref) { adapter_ref.debug_get_reclamation_counters(); })
-        {
-            const auto reclamation = adapter.debug_get_reclamation_counters();
-
-            printf("Reclaim telemetry: impl=%s write_load=%.1f%% epoch=%llu retired=%llu reclaim_calls=%llu reclaimed=%llu eligible=%llu ineligible=%llu pending_total=%llu pending_max_slot=%u\n",
-                   label,
-                   static_cast<double>(write_load_bps) / 100.0,
-                   static_cast<unsigned long long>(reclamation.current_epoch),
-                   static_cast<unsigned long long>(reclamation.retire_enqueued_nodes),
-                   static_cast<unsigned long long>(reclamation.reclaim_invocations),
-                   static_cast<unsigned long long>(reclamation.reclaim_total_reclaimed),
-                   static_cast<unsigned long long>(reclamation.reclaim_scan_eligible),
-                   static_cast<unsigned long long>(reclamation.reclaim_scan_ineligible),
-                   static_cast<unsigned long long>(reclamation.total_pending_nodes),
-                   static_cast<unsigned int>(reclamation.max_slot_pending_nodes));
-        }
-
-        adapter.finalize();
-
-        clock_gettime(CLOCK_MONOTONIC, &end_time);
-
-        result.duration_seconds_ = static_cast<double>(end_time.tv_sec - start_time.tv_sec) +
-                                   (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
-        result.ops_per_sec_ = static_cast<double>(result.total_operations_) / result.duration_seconds_;
-
-        const size_t expected_operations = threads * iterations_per_thread;
-        const double write_load_percent = static_cast<double>(write_load_bps) / 100.0;
-
-        printf("Write-load perf: impl=%s write_load=%.1f%% threads=%zu iterations/thread=%zu ops/sec=%f reads=%zu writes=%zu inserts=%zu removes=%zu\n",
-               label,
-               write_load_percent,
-               threads,
-               iterations_per_thread,
-               result.ops_per_sec_,
-               result.total_read_operations_,
-               result.total_write_operations_,
-               result.total_insert_successes_,
-               result.total_remove_successes_);
-
-        CHECK_EQUAL(expected_operations, result.total_operations_);
-        CHECK_EQUAL(expected_operations, result.total_read_operations_ + result.total_write_operations_);
-        CHECK_TRUE(result.duration_seconds_ > 0.0);
-        CHECK_TRUE(result.ops_per_sec_ > 0.0);
-        CHECK_TRUE(result.checksum_ > 0);
-
-        return result;
     }
 
 #pragma GCC diagnostic push
@@ -1364,38 +1009,128 @@ namespace
         CHECK_TRUE(checksum > 0);
     }
 
-    TEST(SkiplistPerformanceTests, PerfReadWriteLoadMatrixSkiplistVsRwSortedVector)
+    TEST(SkiplistPerformanceTests, PerfMixedWriteLoadWithCompositeResource)
     {
         memory_leak_overload_scope_guard memory_leak_overload_guard;
 
-        const uint32_t write_loads_bps[] = {
-            WRITE_LOAD_BPS_0_1_PERCENT,
-            WRITE_LOAD_BPS_1_PERCENT,
-            WRITE_LOAD_BPS_5_PERCENT,
-            WRITE_LOAD_BPS_10_PERCENT,
-            WRITE_LOAD_BPS_20_PERCENT
+        using list_type = minstd::SkipList<uint32_t, uint32_t>;
+
+        const size_t iterations_per_thread = skiplist_mixed_iterations_per_thread();
+        const size_t num_threads = skiplist_perf_thread_count();
+
+        // Write load configurations: label + write_period (1-in-N ops is a write; 0 = reads only)
+        struct write_load_config
+        {
+            const char *label;
+            size_t write_period;  // 0 = read-only; N = 1-in-N ops is a write
         };
 
-        printf("Write-load benchmark matrix (skiplist vs rwlock-sorted-vector):\n");
+        static const write_load_config configs[] = {
+            {"0.1%",  1000},
+            {"1%",    100},
+            {"5%",    20},
+            {"10%",   10},
+            {"20%",   5},
+        };
 
-        for (size_t index = 0; index < (sizeof(write_loads_bps) / sizeof(write_loads_bps[0])); ++index)
+        printf("Skiplist + composite write-load perf: threads=%zu iterations/thread=%zu initial_occupancy=%zu%%\n",
+               num_threads, iterations_per_thread, SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT);
+
+        for (size_t cfg_idx = 0; cfg_idx < sizeof(configs) / sizeof(configs[0]); ++cfg_idx)
         {
-            const uint32_t write_load_bps = write_loads_bps[index];
-            const double write_load_percent = static_cast<double>(write_load_bps) / 100.0;
+            const write_load_config &cfg = configs[cfg_idx];
 
-            const auto skiplist_result = run_write_load_perf_case<skiplist_benchmark_adapter>("skiplist", write_load_bps);
-                 const auto sorted_vector_result = run_write_load_perf_case<rwlock_sorted_vector_benchmark_adapter>("rwlock_sorted_vector", write_load_bps);
+            list_type list;
 
-                 const double ratio = skiplist_result.ops_per_sec_ / sorted_vector_result.ops_per_sec_;
+            const uint32_t initial_count = static_cast<uint32_t>(SKIPLIST_STRESS_KEY_SPACE * SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT / 100u);
+            for (uint32_t key = 0; key < initial_count; ++key)
+            {
+                CHECK_TRUE(list.insert(key, key));
+            }
 
-                 printf("Write-load summary: write_load=%.1f%% skiplist_ops/sec=%f rwvector_ops/sec=%f ratio=%f\n",
-                   write_load_percent,
-                   skiplist_result.ops_per_sec_,
-                     sorted_vector_result.ops_per_sec_,
-                   ratio);
+            minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, false> composite_resource(
+                skiplist_composite_resource_buffer,
+                SKIPLIST_COMPOSITE_BUFFER_SIZE,
+                skiplist_perf_num_arenas());
 
-            CHECK_TRUE(skiplist_result.total_write_operations_ > 0);
-                 CHECK_TRUE(sorted_vector_result.total_write_operations_ > 0);
+            pthread_t workers[SKIPLIST_STRESS_MAX_THREADS]{};
+            skiplist_perf_write_load_thread_args<list_type> thread_args[SKIPLIST_STRESS_MAX_THREADS]{};
+
+            minstd::atomic<bool> start{false};
+            minstd::atomic<size_t> ready_count{0};
+            minstd::atomic<size_t> allocation_failures{0};
+
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                thread_args[i].list_ = &list;
+                thread_args[i].memory_resource_ = &composite_resource;
+                thread_args[i].start_ = &start;
+                thread_args[i].ready_count_ = &ready_count;
+                thread_args[i].allocation_failures_ = &allocation_failures;
+                thread_args[i].thread_id_ = static_cast<uint32_t>(i);
+                thread_args[i].write_period_ = cfg.write_period;
+                thread_args[i].iterations_ = iterations_per_thread;
+                thread_args[i].key_space_ = SKIPLIST_STRESS_KEY_SPACE;
+                thread_args[i].operations_completed_ = 0;
+                thread_args[i].composite_allocations_ = 0;
+                thread_args[i].insert_successes_ = 0;
+                thread_args[i].remove_successes_ = 0;
+                thread_args[i].checksum_ = 0;
+
+                CHECK_EQUAL(0, pthread_create(&workers[i], nullptr, skiplist_perf_write_load_worker<list_type>, &thread_args[i]));
+            }
+
+            while (ready_count.load(minstd::memory_order_acquire) < num_threads)
+            {
+                sched_yield();
+            }
+
+            timespec start_time{};
+            timespec end_time{};
+            clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+            start.store(true, minstd::memory_order_release);
+
+            size_t total_operations = 0;
+            size_t total_composite_allocations = 0;
+            size_t total_insert_successes = 0;
+            size_t total_remove_successes = 0;
+            uint64_t checksum = 0;
+
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                CHECK_EQUAL(0, pthread_join(workers[i], nullptr));
+                total_operations += thread_args[i].operations_completed_;
+                total_composite_allocations += thread_args[i].composite_allocations_;
+                total_insert_successes += thread_args[i].insert_successes_;
+                total_remove_successes += thread_args[i].remove_successes_;
+                checksum += thread_args[i].checksum_;
+            }
+
+            const size_t total_gc_reclaimed_nodes = list.gc();
+
+            clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+            const size_t expected_operations = num_threads * iterations_per_thread;
+            const double duration = static_cast<double>(end_time.tv_sec - start_time.tv_sec) +
+                                    (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
+            const double ops_per_sec = static_cast<double>(total_operations) / duration;
+
+            printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu gc_nodes=%zu allocs=%zu\n",
+                   cfg.label,
+                   ops_per_sec,
+                   total_insert_successes,
+                   total_remove_successes,
+                   total_gc_reclaimed_nodes,
+                   total_composite_allocations);
+
+            CHECK_EQUAL(expected_operations, total_operations);
+            CHECK_EQUAL(expected_operations, total_composite_allocations);
+            CHECK_EQUAL(static_cast<size_t>(0), allocation_failures.load(minstd::memory_order_acquire));
+            CHECK_TRUE(duration > 0.0);
+            CHECK_TRUE(ops_per_sec > 0.0);
+            CHECK_TRUE((total_insert_successes + total_remove_successes) > 0);
+            CHECK_TRUE(checksum > 0);
         }
     }
 

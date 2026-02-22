@@ -61,3 +61,13 @@ private:
 
 ### Reference Files
 - `lockfree_single_block_resource.h`, `avl_tree`, `list`, `forward_list`
+
+## Pre-Commit Cleanup
+
+Always remove temporary, debug, and junk files before creating any commit.
+
+### Rules
+- **Never commit temp/debug output**: Files such as `gdb_output*.txt`, `core`, `*.log`, `*.tmp`, scratch files, or any file created during a debugging session must be deleted before committing.
+- **Inspect before staging**: Run `git status` and review all untracked and modified files. Remove anything that is not intentional source, documentation, or build configuration.
+- **Use `.gitignore`**: If a category of temp file recurs, add a pattern to `.gitignore` rather than relying on manual cleanup each time.
+- **No "I'll clean it up later" commits**: Every commit should leave the repository in a clean, reviewable state with no leftover investigation artifacts.

@@ -51,7 +51,7 @@ namespace
     }
 
     constexpr size_t buffer_size = 768 * 1048576; // 768 MB
-    char buffer[buffer_size];
+    char* buffer = new char[buffer_size]();
 
     minstd::atomic<bool> start_allocations = false;
 
