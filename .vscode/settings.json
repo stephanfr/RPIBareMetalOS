@@ -91,6 +91,7 @@
         "make": true,
         "./minimalstdlib/test/build/cpputest_stdlib_main.exe": true,
         "seq": true,
-        "timeout": true
+        "timeout": true,
+        "java": true
     }
 }
