@@ -9,6 +9,7 @@
 
 #include <lockfree/skiplist>
 #include <__memory_resource/composite_pool_resource.h>
+#include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include <pthread.h>
 #include <sched.h>
@@ -133,6 +134,19 @@ namespace
         return static_cast<size_t>(parsed_thread_count);
     }
 
+    bool skiplist_perf_probe_enabled()
+    {
+        const char *probe_text = getenv("SKIPLIST_PERF_PROBE");
+
+        if ((probe_text == nullptr) || (probe_text[0] == '\0'))
+        {
+            return false;
+        }
+
+        return (probe_text[0] == '1');
+    }
+
+
     template <typename list_type>
     struct skiplist_stress_thread_args
     {
@@ -207,6 +221,7 @@ namespace
         size_t insert_successes_ = 0;
         size_t remove_successes_ = 0;
         uint64_t checksum_ = 0;
+        uint64_t rng_seed_ = 0;
     };
 
     struct memory_leak_overload_scope_guard
@@ -393,11 +408,15 @@ namespace
         size_t composite_allocations = 0;
         size_t insert_successes = 0;
         size_t remove_successes = 0;
-        size_t write_op_counter = 0;
 
-        uint64_t rng_state = 0x9e3779b97f4a7c15ull ^
-                             (static_cast<uint64_t>(args->thread_id_) << 32) ^
-                             static_cast<uint64_t>(args->iterations_);
+        uint64_t rng_state = args->rng_seed_;
+
+        if (rng_state == 0)
+        {
+            rng_state = 0x9e3779b97f4a7c15ull ^
+                        (static_cast<uint64_t>(args->thread_id_) << 32) ^
+                        static_cast<uint64_t>(args->iterations_);
+        }
 
         auto next_random = [&rng_state]() -> uint64_t
         {
@@ -437,7 +456,7 @@ namespace
             }
             else
             {
-                if ((write_op_counter & 1u) == 0u)
+                if ((next_random() & 1ull) == 0ull)
                 {
                     if (args->list_->remove(key))
                     {
@@ -451,8 +470,6 @@ namespace
                         insert_successes++;
                     }
                 }
-
-                write_op_counter++;
             }
 
             args->operations_completed_++;
@@ -1033,7 +1050,7 @@ namespace
             {"20%",   5},
         };
 
-        printf("Skiplist + composite write-load perf: threads=%zu iterations/thread=%zu initial_occupancy=%zu%%\n",
+        printf("Skiplist + malloc/free wrapper write-load perf: threads=%zu iterations/thread=%zu initial_occupancy=%zu%%\n",
                num_threads, iterations_per_thread, SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT);
 
         for (size_t cfg_idx = 0; cfg_idx < sizeof(configs) / sizeof(configs[0]); ++cfg_idx)
@@ -1048,10 +1065,7 @@ namespace
                 CHECK_TRUE(list.insert(key, key));
             }
 
-            minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, false> composite_resource(
-                skiplist_composite_resource_buffer,
-                SKIPLIST_COMPOSITE_BUFFER_SIZE,
-                skiplist_perf_num_arenas());
+            minstd::pmr::malloc_free_wrapper_memory_resource malloc_free_resource(nullptr);
 
             pthread_t workers[SKIPLIST_STRESS_MAX_THREADS]{};
             skiplist_perf_write_load_thread_args<list_type> thread_args[SKIPLIST_STRESS_MAX_THREADS]{};
@@ -1060,10 +1074,18 @@ namespace
             minstd::atomic<size_t> ready_count{0};
             minstd::atomic<size_t> allocation_failures{0};
 
+            timespec seed_time{};
+            clock_gettime(CLOCK_MONOTONIC, &seed_time);
+            const uint64_t run_seed =
+                (static_cast<uint64_t>(seed_time.tv_sec) << 32) ^
+                static_cast<uint64_t>(seed_time.tv_nsec) ^
+                (static_cast<uint64_t>(cfg_idx) * 0x9e3779b97f4a7c15ull) ^
+                static_cast<uint64_t>(cfg.write_period);
+
             for (size_t i = 0; i < num_threads; ++i)
             {
                 thread_args[i].list_ = &list;
-                thread_args[i].memory_resource_ = &composite_resource;
+                thread_args[i].memory_resource_ = &malloc_free_resource;
                 thread_args[i].start_ = &start;
                 thread_args[i].ready_count_ = &ready_count;
                 thread_args[i].allocation_failures_ = &allocation_failures;
@@ -1076,6 +1098,9 @@ namespace
                 thread_args[i].insert_successes_ = 0;
                 thread_args[i].remove_successes_ = 0;
                 thread_args[i].checksum_ = 0;
+                thread_args[i].rng_seed_ = run_seed ^
+                                           (static_cast<uint64_t>(i + 1) * 0xbf58476d1ce4e5b9ull) ^
+                                           (static_cast<uint64_t>(thread_args[i].thread_id_) << 17);
 
                 CHECK_EQUAL(0, pthread_create(&workers[i], nullptr, skiplist_perf_write_load_worker<list_type>, &thread_args[i]));
             }
@@ -1124,6 +1149,28 @@ namespace
                    total_gc_reclaimed_nodes,
                    total_composite_allocations);
 
+                        if (skiplist_perf_probe_enabled())
+                        {
+                                auto counters = list.debug_get_contention_counters();
+                                auto diag = list.debug_get_diagnostics();
+
+                                printf("           probe skips=%lu ins_l0_fail=%lu ins_up_fail=%lu rm_mark_retry=%lu rm_l0_fail=%lu "
+                                             "epoch=%lu adv=%lu/%lu retired_q=%lu retire=%lu dup=%lu tomb=%lu live=%lu\n",
+                                             counters.find_tombstone_skips,
+                                             counters.insert_level0_cas_failures,
+                                             counters.insert_upper_level_cas_failures,
+                                             counters.remove_mark_retries,
+                                             counters.remove_bottom_cas_failures,
+                                             diag.current_epoch,
+                                             diag.epoch_advance_successes,
+                                             diag.epoch_advance_attempts,
+                                             diag.retired_queue_depth,
+                                             diag.retire_calls,
+                                             diag.retire_already_enqueued,
+                                             diag.level0_tombstone_count,
+                                             diag.level0_live_count);
+                        }
+
             CHECK_EQUAL(expected_operations, total_operations);
             CHECK_EQUAL(expected_operations, total_composite_allocations);
             CHECK_EQUAL(static_cast<size_t>(0), allocation_failures.load(minstd::memory_order_acquire));
@@ -1133,6 +1180,7 @@ namespace
             CHECK_TRUE(checksum > 0);
         }
     }
+
 
     TEST(SkiplistTests, MultiThreadedStressOrderingAndContentCorrectness)
     {
