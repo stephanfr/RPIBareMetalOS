@@ -134,19 +134,6 @@ namespace
         return static_cast<size_t>(parsed_thread_count);
     }
 
-    bool skiplist_perf_probe_enabled()
-    {
-        const char *probe_text = getenv("SKIPLIST_PERF_PROBE");
-
-        if ((probe_text == nullptr) || (probe_text[0] == '\0'))
-        {
-            return false;
-        }
-
-        return (probe_text[0] == '1');
-    }
-
-
     template <typename list_type>
     struct skiplist_stress_thread_args
     {
@@ -1148,28 +1135,6 @@ namespace
                    total_remove_successes,
                    total_gc_reclaimed_nodes,
                    total_composite_allocations);
-
-                        if (skiplist_perf_probe_enabled())
-                        {
-                                auto counters = list.debug_get_contention_counters();
-                                auto diag = list.debug_get_diagnostics();
-
-                                printf("           probe skips=%lu ins_l0_fail=%lu ins_up_fail=%lu rm_mark_retry=%lu rm_l0_fail=%lu "
-                                             "epoch=%lu adv=%lu/%lu retired_q=%lu retire=%lu dup=%lu tomb=%lu live=%lu\n",
-                                             counters.find_tombstone_skips,
-                                             counters.insert_level0_cas_failures,
-                                             counters.insert_upper_level_cas_failures,
-                                             counters.remove_mark_retries,
-                                             counters.remove_bottom_cas_failures,
-                                             diag.current_epoch,
-                                             diag.epoch_advance_successes,
-                                             diag.epoch_advance_attempts,
-                                             diag.retired_queue_depth,
-                                             diag.retire_calls,
-                                             diag.retire_already_enqueued,
-                                             diag.level0_tombstone_count,
-                                             diag.level0_live_count);
-                        }
 
             CHECK_EQUAL(expected_operations, total_operations);
             CHECK_EQUAL(expected_operations, total_composite_allocations);

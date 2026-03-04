@@ -239,12 +239,107 @@ namespace MINIMAL_STD_NAMESPACE
                 uint64_t retired_epoch_ = 0;
             };
 
-            struct epoch_reader_state
+            struct alignas(64) cpu_slot_state
             {
-                atomic<bool> active_{false};
-                atomic<uint64_t> epoch_{0};
-                atomic<uint32_t> read_depth_{0};
+                uint32_t reclaim_throttle_counter_ = 0;
+                atomic<bool> reader_active_{false};
+                atomic<uint64_t> reader_epoch_{0};
+                atomic<uint32_t> reader_depth_{0};
+                atomic<uint32_t> assigned_cpu_id_{0};
+                atomic<uint64_t> rng_state_{0};
+                uint8_t padding_[64]{};
+
+                void initialize(uint32_t unassigned_cpu_id, uint64_t rng_seed)
+                {
+                    reclaim_throttle_counter_ = 0;
+                    reader_active_.store(false, memory_order_relaxed);
+                    reader_epoch_.store(0, memory_order_relaxed);
+                    reader_depth_.store(0, memory_order_relaxed);
+                    assigned_cpu_id_.store(unassigned_cpu_id, memory_order_relaxed);
+                    rng_state_.store(rng_seed, memory_order_relaxed);
+                }
+
+                bool try_claim_cpu_id(uint32_t cpu_id, uint32_t unassigned_cpu_id)
+                {
+                    uint32_t expected_unassigned = unassigned_cpu_id;
+                    return assigned_cpu_id_.compare_exchange_strong(expected_unassigned, cpu_id, memory_order_acq_rel, memory_order_acquire);
+                }
+
+                bool is_owned_by_cpu_id(uint32_t cpu_id) const
+                {
+                    return assigned_cpu_id_.load(memory_order_acquire) == cpu_id;
+                }
+
+                uint32_t begin_read_section(uint64_t current_epoch)
+                {
+                    const uint32_t previous_depth = reader_depth_.fetch_add(1, memory_order_acq_rel);
+
+                    if (previous_depth == 0)
+                    {
+                        reader_epoch_.store(current_epoch, memory_order_release);
+                        reader_active_.store(true, memory_order_release);
+                    }
+
+                    return previous_depth;
+                }
+
+                void end_read_section()
+                {
+                    uint32_t current_depth = reader_depth_.load(memory_order_acquire);
+
+                    while (true)
+                    {
+                        if (current_depth == 0)
+                        {
+                            return;
+                        }
+
+                        const uint32_t next_depth = current_depth - 1;
+
+                        if (reader_depth_.compare_exchange_strong(current_depth, next_depth, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            if (next_depth == 0)
+                            {
+                                reader_active_.store(false, memory_order_release);
+                            }
+
+                            return;
+                        }
+                    }
+                }
+
+                bool reader_is_active() const
+                {
+                    return reader_active_.load(memory_order_acquire);
+                }
+
+                uint64_t reader_snapshot_epoch() const
+                {
+                    return reader_epoch_.load(memory_order_acquire);
+                }
+
+                uint32_t increment_reclaim_throttle()
+                {
+                    return ++reclaim_throttle_counter_;
+                }
+
+                void reset_reclaim_throttle()
+                {
+                    reclaim_throttle_counter_ = 0;
+                }
+
+                uint64_t load_rng_state() const
+                {
+                    return rng_state_.load(memory_order_relaxed);
+                }
+
+                void store_rng_state(uint64_t state)
+                {
+                    rng_state_.store(state, memory_order_relaxed);
+                }
             };
+
+            static_assert((sizeof(cpu_slot_state) % 64) == 0, "cpu_slot_state must be cache-line sized");
 
             struct epoch_read_section_guard
             {
@@ -270,35 +365,11 @@ namespace MINIMAL_STD_NAMESPACE
         
         using allocator_type = allocator<value_type>;
 
-#ifdef __MINIMAL_STD_TEST__
-            struct contention_counters
-            {
-                uint64_t insert_level0_cas_failures = 0;
-                uint64_t insert_upper_level_cas_failures = 0;
-                uint64_t remove_mark_retries = 0;
-                uint64_t remove_bottom_cas_failures = 0;
-                uint64_t find_tombstone_skips = 0;
-            };
-
-            struct diagnostic_snapshot
-            {
-                uint64_t epoch_advance_attempts = 0;
-                uint64_t epoch_advance_successes = 0;
-                uint64_t retired_queue_depth = 0;
-                uint64_t level0_tombstone_count = 0;
-                uint64_t level0_live_count = 0;
-                uint64_t retire_calls = 0;
-                uint64_t retire_already_enqueued = 0;
-                uint64_t current_epoch = 0;
-            };
-#endif
-
             SkipList()
             {
                 for (size_t i = 0; i < MAX_EPOCH_CPUS; ++i)
                 {
-                    epoch_slot_cpu_ids_[i].store(INVALID_CPU_ID, memory_order_relaxed);
-                    level_rng_states_[i].store(0x9e3779b97f4a7c15ull ^ (static_cast<uint64_t>(i) * 0xbf58476d1ce4e5b9ull), memory_order_relaxed);
+                    cpu_slots_[i].initialize(INVALID_CPU_ID, 0x9e3779b97f4a7c15ull ^ (static_cast<uint64_t>(i) * 0xbf58476d1ce4e5b9ull));
                 }
 
                 NIL = new SkipNode(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
@@ -497,10 +568,6 @@ namespace MINIMAL_STD_NAMESPACE
                                 break;
                             }
 
-#ifdef __MINIMAL_STD_TEST__
-                            insert_level0_cas_failures_.fetch_add(1, memory_order_relaxed);
-#endif
-
                             ++insert_level0_retry_count;
 
                             if (insert_level0_retry_count >= MAX_INSERT_LEVEL0_RETRIES)
@@ -531,10 +598,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 while (tombstoned(deletion_transaction))
                                 {
-#ifdef __MINIMAL_STD_TEST__
-                                    find_tombstone_skips_.fetch_add(1, memory_order_relaxed);
-#endif
-
                                     SkipNode *tombstoned_node = curr;
 
                                     if (curr->key == key)
@@ -605,10 +668,6 @@ namespace MINIMAL_STD_NAMESPACE
                                     break;
                                 }
 
-#ifdef __MINIMAL_STD_TEST__
-                                insert_upper_level_cas_failures_.fetch_add(1, memory_order_relaxed);
-#endif
-
                                 ++upper_level_retry_count;
 
                                 if (upper_level_retry_count >= MAX_INSERT_UPPER_LEVEL_RETRIES)
@@ -665,10 +724,6 @@ namespace MINIMAL_STD_NAMESPACE
                                 node_to_remove->next_node[level].soft_delete(transaction_id);
                                 succ = node_to_remove->next_node[level].get(deletion_transaction);
 
-#ifdef __MINIMAL_STD_TEST__
-                                remove_mark_retries_.fetch_add(1, memory_order_relaxed);
-#endif
-
                                 ++mark_retry_count;
 
                                 if (mark_retry_count >= MAX_REMOVE_MARK_RETRIES_PER_LEVEL)
@@ -707,12 +762,18 @@ namespace MINIMAL_STD_NAMESPACE
                                     }
                                 }
 
-                                try_advance_epoch(read_guard.cpu_slot_);
+                                cpu_slot_state &slot_state = cpu_slots_[read_guard.cpu_slot_];
 
-                                if (++reclaim_throttle_counters_[read_guard.cpu_slot_] >= EPOCH_RECLAIM_THROTTLE)
+                                if (slot_state.increment_reclaim_throttle() >= EPOCH_RECLAIM_THROTTLE)
                                 {
-                                    reclaim_throttle_counters_[read_guard.cpu_slot_] = 0;
-                                    reclaim_retired_nodes_by_epoch();
+                                    slot_state.reset_reclaim_throttle();
+
+                                    if (node_to_remove->upper_levels_remaining_.load(memory_order_acquire) > 0)
+                                    {
+                                        unlink_tombstoned_node_upper_levels(node_to_remove);
+                                    }
+
+                                    advance_epoch_and_reclaim_retired_nodes(read_guard.cpu_slot_);
                                 }
 
                                 return true;
@@ -723,10 +784,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 return false;
                             }
-
-#ifdef __MINIMAL_STD_TEST__
-                            remove_bottom_cas_failures_.fetch_add(1, memory_order_relaxed);
-#endif
 
                             ++bottom_retry_count;
 
@@ -747,9 +804,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 while (tombstoned(deletion_transaction))
                                 {
-#ifdef __MINIMAL_STD_TEST__
-                                    find_tombstone_skips_.fetch_add(1, memory_order_relaxed);
-#endif
                                     SkipNode *tombstoned_node = curr;
                                     if (curr->key == key) { soft_deleted = true; }
                                     curr = succ;
@@ -815,52 +869,6 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
 #ifdef __MINIMAL_STD_TEST__
-            contention_counters debug_get_contention_counters() const
-            {
-                contention_counters counters;
-
-                counters.insert_level0_cas_failures = insert_level0_cas_failures_.load(memory_order_relaxed);
-                counters.insert_upper_level_cas_failures = insert_upper_level_cas_failures_.load(memory_order_relaxed);
-                counters.remove_mark_retries = remove_mark_retries_.load(memory_order_relaxed);
-                counters.remove_bottom_cas_failures = remove_bottom_cas_failures_.load(memory_order_relaxed);
-                counters.find_tombstone_skips = find_tombstone_skips_.load(memory_order_relaxed);
-
-                return counters;
-            }
-
-            diagnostic_snapshot debug_get_diagnostics() const
-            {
-                diagnostic_snapshot snap;
-
-                snap.epoch_advance_attempts = epoch_advance_attempts_.load(memory_order_relaxed);
-                snap.epoch_advance_successes = epoch_advance_successes_.load(memory_order_relaxed);
-                snap.retired_queue_depth = retired_queue_depth_.load(memory_order_relaxed);
-                snap.retire_calls = retire_calls_.load(memory_order_relaxed);
-                snap.retire_already_enqueued = retire_already_enqueued_.load(memory_order_relaxed);
-                snap.current_epoch = global_epoch_.load(memory_order_relaxed);
-
-                SkipNode *curr = head->next_node[0].get_reference();
-
-                while (curr != NIL)
-                {
-                    TransactionId deletion_transaction = NOT_TOMBSTONED;
-                    SkipNode *next = curr->next_node[0].get(deletion_transaction);
-
-                    if (tombstoned(deletion_transaction))
-                    {
-                        snap.level0_tombstone_count++;
-                    }
-                    else
-                    {
-                        snap.level0_live_count++;
-                    }
-
-                    curr = next;
-                }
-
-                return snap;
-            }
-
             bool debug_validate_ordering() const
             {
                 epoch_read_section_guard read_guard(this);
@@ -920,25 +928,10 @@ namespace MINIMAL_STD_NAMESPACE
             SkipNode *head;
             SkipNode *NIL;
             atomic<SkipNode *> retired_nodes_head_{nullptr};
-            mutable array<uint32_t, MAX_EPOCH_CPUS> reclaim_throttle_counters_{};
-            mutable array<epoch_reader_state, MAX_EPOCH_CPUS> epoch_reader_states_{};
-            mutable array<atomic<uint32_t>, MAX_EPOCH_CPUS> epoch_slot_cpu_ids_{};
+            atomic<SkipNode *> deferred_retired_nodes_head_{nullptr};
+            mutable array<cpu_slot_state, MAX_EPOCH_CPUS> cpu_slots_{};
             mutable atomic<uint64_t> global_epoch_{1};
-#ifdef __MINIMAL_STD_TEST__
-            mutable atomic<uint64_t> insert_level0_cas_failures_{0};
-            mutable atomic<uint64_t> insert_upper_level_cas_failures_{0};
-            mutable atomic<uint64_t> remove_mark_retries_{0};
-            mutable atomic<uint64_t> remove_bottom_cas_failures_{0};
-            mutable atomic<uint64_t> find_tombstone_skips_{0};
-            mutable atomic<uint64_t> epoch_advance_attempts_{0};
-            mutable atomic<uint64_t> epoch_advance_successes_{0};
-            mutable atomic<uint64_t> retired_queue_depth_{0};
-            mutable atomic<uint64_t> retire_calls_{0};
-            mutable atomic<uint64_t> retire_already_enqueued_{0};
-#endif
-
-            mutable array<atomic<uint64_t>, MAX_EPOCH_CPUS> level_rng_states_{};
-
+            mutable atomic<uint64_t> deferred_scan_reclaim_epoch_{0};
             static TransactionId cpu_transaction_id(size_t cpu_slot)
             {
                 return TransactionId{static_cast<uint64_t>(cpu_slot) + static_cast<uint64_t>(FIRST_USER_TRANSACTION)};
@@ -947,7 +940,7 @@ namespace MINIMAL_STD_NAMESPACE
             int random_level()
             {
                 const size_t slot = current_cpu_slot();
-                uint64_t state = level_rng_states_[slot].load(memory_order_relaxed);
+                uint64_t state = cpu_slots_[slot].load_rng_state();
 
                 int new_level = 1;
 
@@ -970,7 +963,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                level_rng_states_[slot].store(state, memory_order_relaxed);
+                cpu_slots_[slot].store_rng_state(state);
 
                 return new_level;
             }
@@ -999,13 +992,13 @@ namespace MINIMAL_STD_NAMESPACE
 
             void backoff(uint32_t &backoff_state, size_t cpu_slot)
             {
-                uint64_t state = level_rng_states_[cpu_slot].load(memory_order_relaxed);
+                uint64_t state = cpu_slots_[cpu_slot].load_rng_state();
 
                 state ^= (state << 13);
                 state ^= (state >> 7);
                 state ^= (state << 17);
 
-                level_rng_states_[cpu_slot].store(state, memory_order_relaxed);
+                cpu_slots_[cpu_slot].store_rng_state(state);
 
                 const uint32_t base_spins = (backoff_state < BACKOFF_MAX_RELAX_SPINS) ? backoff_state : BACKOFF_MAX_RELAX_SPINS;
                 const uint32_t jitter_spins = static_cast<uint32_t>(state & 0x3u);
@@ -1028,16 +1021,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                 if (!node->retirement_enqueued_.compare_exchange_strong(expected_not_enqueued, true, memory_order_acq_rel, memory_order_acquire))
                 {
-#ifdef __MINIMAL_STD_TEST__
-                    retire_already_enqueued_.fetch_add(1, memory_order_relaxed);
-#endif
                     return;
                 }
-
-#ifdef __MINIMAL_STD_TEST__
-                retire_calls_.fetch_add(1, memory_order_relaxed);
-                retired_queue_depth_.fetch_add(1, memory_order_relaxed);
-#endif
 
                 node->retired_epoch_ = global_epoch_.load(memory_order_acquire);
 
@@ -1058,16 +1043,12 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     const size_t slot = (initial_slot + probe) % MAX_EPOCH_CPUS;
 
-                    uint32_t expected_unassigned = INVALID_CPU_ID;
-
-                    if (epoch_slot_cpu_ids_[slot].compare_exchange_strong(expected_unassigned, cpu_id, memory_order_acq_rel, memory_order_acquire))
+                    if (cpu_slots_[slot].try_claim_cpu_id(cpu_id, INVALID_CPU_ID))
                     {
                         return slot;
                     }
 
-                    const uint32_t assigned_cpu = epoch_slot_cpu_ids_[slot].load(memory_order_acquire);
-
-                    if (assigned_cpu == cpu_id)
+                    if (cpu_slots_[slot].is_owned_by_cpu_id(cpu_id))
                     {
                         return slot;
                     }
@@ -1080,63 +1061,34 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 const size_t slot = current_cpu_slot();
 
-                const uint32_t previous_depth = epoch_reader_states_[slot].read_depth_.fetch_add(1, memory_order_acq_rel);
-
-                if (previous_depth == 0)
-                {
-                    const uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
-                    epoch_reader_states_[slot].epoch_.store(current_epoch, memory_order_release);
-                    epoch_reader_states_[slot].active_.store(true, memory_order_release);
-                }
+                const uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
+                (void)cpu_slots_[slot].begin_read_section(current_epoch);
 
                 return slot;
             }
 
             void exit_read_section(size_t slot) const
             {
-                uint32_t current_depth = epoch_reader_states_[slot].read_depth_.load(memory_order_acquire);
-
-                while (true)
-                {
-                    if (current_depth == 0)
-                    {
-                        return;
-                    }
-
-                    const uint32_t next_depth = current_depth - 1;
-
-                    if (epoch_reader_states_[slot].read_depth_.compare_exchange_strong(current_depth, next_depth, memory_order_acq_rel, memory_order_acquire))
-                    {
-                        if (next_depth == 0)
-                        {
-                            epoch_reader_states_[slot].active_.store(false, memory_order_release);
-                        }
-
-                        return;
-                    }
-                }
+                cpu_slots_[slot].end_read_section();
             }
 
             bool try_advance_epoch(size_t exempt_slot)
             {
-#ifdef __MINIMAL_STD_TEST__
-                (void)exempt_slot;
-#else
-                (void)exempt_slot;
-#endif
-#ifdef __MINIMAL_STD_TEST__
-                epoch_advance_attempts_.fetch_add(1, memory_order_relaxed);
-#endif
                 uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
 
                 for (size_t i = 0; i < MAX_EPOCH_CPUS; ++i)
                 {
-                    if (!epoch_reader_states_[i].active_.load(memory_order_acquire))
+                    if (i == exempt_slot)
                     {
                         continue;
                     }
 
-                    const uint64_t reader_epoch = epoch_reader_states_[i].epoch_.load(memory_order_acquire);
+                    if (!cpu_slots_[i].reader_is_active())
+                    {
+                        continue;
+                    }
+
+                    const uint64_t reader_epoch = cpu_slots_[i].reader_snapshot_epoch();
 
                     if (reader_epoch < current_epoch)
                     {
@@ -1146,17 +1098,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                 bool advanced = global_epoch_.compare_exchange_strong(current_epoch, current_epoch + 1, memory_order_seq_cst);
 
-#ifdef __MINIMAL_STD_TEST__
-                if (advanced)
-                {
-                    epoch_advance_successes_.fetch_add(1, memory_order_relaxed);
-                }
-#endif
-
                 return advanced;
             }
 
-            void reclaim_retired_nodes_by_epoch()
+            void reclaim_retired_nodes_by_epoch(size_t exempt_slot)
             {
                 uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
 
@@ -1165,17 +1110,48 @@ namespace MINIMAL_STD_NAMESPACE
                     return;
                 }
 
+                const uint64_t reclaim_epoch = current_epoch - EPOCH_RECLAIM_LAG;
+
                 for (size_t i = 0; i < MAX_EPOCH_CPUS; ++i)
                 {
-                    if (epoch_reader_states_[i].active_.load(memory_order_acquire))
+                    if (i == exempt_slot)
+                    {
+                        continue;
+                    }
+
+                    if (!cpu_slots_[i].reader_is_active())
+                    {
+                        continue;
+                    }
+
+                    const uint64_t reader_epoch = cpu_slots_[i].reader_snapshot_epoch();
+
+                    if (reader_epoch <= reclaim_epoch)
                     {
                         return;
                     }
                 }
 
-                const uint64_t reclaim_epoch = current_epoch - EPOCH_RECLAIM_LAG;
-
                 SkipNode *retired_list = retired_nodes_head_.exchange(nullptr, memory_order_acq_rel);
+
+                const uint64_t last_deferred_scan_epoch = deferred_scan_reclaim_epoch_.load(memory_order_acquire);
+                if (reclaim_epoch > last_deferred_scan_epoch)
+                {
+                    deferred_scan_reclaim_epoch_.store(reclaim_epoch, memory_order_release);
+
+                    SkipNode *deferred_list = deferred_retired_nodes_head_.exchange(nullptr, memory_order_acq_rel);
+                    if (deferred_list != nullptr)
+                    {
+                        SkipNode *tail = deferred_list;
+                        while (tail->retired_next != nullptr)
+                        {
+                            tail = tail->retired_next;
+                        }
+
+                        tail->retired_next = retired_list;
+                        retired_list = deferred_list;
+                    }
+                }
 
                 SkipNode *retained_list = nullptr;
                 SkipNode *reclaim_list = nullptr;
@@ -1207,20 +1183,17 @@ namespace MINIMAL_STD_NAMESPACE
                         tail = tail->retired_next;
                     }
 
-                    SkipNode *current_head = retired_nodes_head_.load(memory_order_relaxed);
+                    SkipNode *current_head = deferred_retired_nodes_head_.load(memory_order_relaxed);
                     do
                     {
                         tail->retired_next = current_head;
-                    } while (!retired_nodes_head_.compare_exchange_weak(current_head, retained_list, memory_order_release, memory_order_relaxed));
+                    } while (!deferred_retired_nodes_head_.compare_exchange_weak(current_head, retained_list, memory_order_release, memory_order_relaxed));
                 }
 
                 while (reclaim_list != nullptr)
                 {
                     SkipNode *next = reclaim_list->retired_next;
                     delete reclaim_list;
-#ifdef __MINIMAL_STD_TEST__
-                    retired_queue_depth_.fetch_sub(1, memory_order_relaxed);
-#endif
                     reclaim_list = next;
                 }
             }
@@ -1228,12 +1201,21 @@ namespace MINIMAL_STD_NAMESPACE
             void advance_epoch_and_reclaim_retired_nodes(size_t exempt_slot)
             {
                 (void)try_advance_epoch(exempt_slot);
-                reclaim_retired_nodes_by_epoch();
+                reclaim_retired_nodes_by_epoch(exempt_slot);
             }
 
             void reclaim_all_retired_nodes()
             {
                 SkipNode *node = retired_nodes_head_.exchange(nullptr, memory_order_acq_rel);
+
+                while (node != nullptr)
+                {
+                    SkipNode *next = node->retired_next;
+                    delete node;
+                    node = next;
+                }
+
+                node = deferred_retired_nodes_head_.exchange(nullptr, memory_order_acq_rel);
 
                 while (node != nullptr)
                 {
@@ -1262,10 +1244,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                         while (tombstoned(deletion_transaction))
                         {
-#ifdef __MINIMAL_STD_TEST__
-                            find_tombstone_skips_.fetch_add(1, memory_order_relaxed);
-#endif
-
                             SkipNode *tombstoned_node = curr;
 
                             if (curr->key == search_key)
