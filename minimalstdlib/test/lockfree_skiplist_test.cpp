@@ -8,6 +8,9 @@
 #include <minstdconfig.h>
 
 #include <lockfree/skiplist>
+#include <avl_tree>
+#include <heap_allocator>
+#include <single_block_memory_heap>
 #include <__memory_resource/composite_pool_resource.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
@@ -453,6 +456,189 @@ namespace
                 else
                 {
                     if (args->list_->insert(key, key))
+                    {
+                        insert_successes++;
+                    }
+                }
+            }
+
+            args->operations_completed_++;
+        }
+
+        args->composite_allocations_ = composite_allocations;
+        args->insert_successes_ = insert_successes;
+        args->remove_successes_ = remove_successes;
+        args->checksum_ = checksum;
+
+        return nullptr;
+    }
+
+    //
+    //  Reader/writer lock protected ordered map baseline
+    //
+
+    struct rwlock_hash_map
+    {
+        using map_type = minstd::avl_tree<uint32_t, uint32_t>;
+        using node_allocator_type = minstd::heap_allocator<map_type::node_type>;
+
+        //  Allow for the full key space plus single_block_memory_heap block header overhead per node.
+        static constexpr size_t HEAP_BUFFER_BYTES = SKIPLIST_STRESS_KEY_SPACE * 128;
+
+        //  RAII guard for the malloc'd heap buffer.  Declared FIRST so it is constructed first
+        //  and destroyed LAST — after ~map_type() has returned all nodes to the heap.
+        struct heap_buffer_guard
+        {
+            uint8_t *const ptr;
+            explicit heap_buffer_guard(size_t size) : ptr(static_cast<uint8_t *>(malloc(size))) {}
+            ~heap_buffer_guard() { free(ptr); }
+        };
+
+        //  Members declared in strict construction order.
+        heap_buffer_guard heap_buf_;        //  first in, last out
+        minstd::single_block_memory_heap heap_;
+        node_allocator_type map_alloc_;
+        map_type map_;
+        pthread_rwlock_t rwlock_;
+
+        rwlock_hash_map()
+            : heap_buf_(HEAP_BUFFER_BYTES),
+              heap_(heap_buf_.ptr, HEAP_BUFFER_BYTES),
+              map_alloc_(heap_),
+              map_(map_alloc_)
+        {
+            pthread_rwlock_init(&rwlock_, nullptr);
+        }
+
+        ~rwlock_hash_map()
+        {
+            //  pthread_rwlock destroyed first; member destructors then run in reverse
+            //  declaration order: map_ → map_alloc_ → heap_ → heap_buf_ (free).
+            pthread_rwlock_destroy(&rwlock_);
+        }
+
+        bool find(uint32_t key, uint32_t &out_value)
+        {
+            pthread_rwlock_rdlock(&rwlock_);
+            auto it = map_.find(key);
+            const bool found = (it != map_.end());
+            if (found)
+            {
+                out_value = minstd::get<1>(*it);
+            }
+            pthread_rwlock_unlock(&rwlock_);
+            return found;
+        }
+
+        bool insert(uint32_t key, uint32_t value)
+        {
+            pthread_rwlock_wrlock(&rwlock_);
+            const auto result = map_.insert(key, value);
+            pthread_rwlock_unlock(&rwlock_);
+            return result.second;
+        }
+
+        bool remove(uint32_t key)
+        {
+            pthread_rwlock_wrlock(&rwlock_);
+            const size_t erased = map_.erase(key);
+            pthread_rwlock_unlock(&rwlock_);
+            return erased > 0;
+        }
+    };
+
+    struct rwlock_map_write_load_thread_args
+    {
+        rwlock_hash_map *map_ = nullptr;
+        minstd::pmr::memory_resource *memory_resource_ = nullptr;
+        minstd::atomic<bool> *start_ = nullptr;
+        minstd::atomic<size_t> *ready_count_ = nullptr;
+        minstd::atomic<size_t> *allocation_failures_ = nullptr;
+        uint32_t thread_id_ = 0;
+        size_t write_period_ = 0;  // 0 = reads only; N = 1-in-N ops is a write
+        size_t iterations_ = 0;
+        uint32_t key_space_ = 0;
+        size_t operations_completed_ = 0;
+        size_t composite_allocations_ = 0;
+        size_t insert_successes_ = 0;
+        size_t remove_successes_ = 0;
+        uint64_t checksum_ = 0;
+        uint64_t rng_seed_ = 0;
+    };
+
+    void *rwlock_map_write_load_worker(void *arg)
+    {
+        auto *args = static_cast<rwlock_map_write_load_thread_args *>(arg);
+
+        args->ready_count_->fetch_add(1, minstd::memory_order_release);
+
+        while (!args->start_->load(minstd::memory_order_acquire))
+        {
+            sched_yield();
+        }
+
+        uint64_t checksum = 0;
+        size_t composite_allocations = 0;
+        size_t insert_successes = 0;
+        size_t remove_successes = 0;
+
+        uint64_t rng_state = args->rng_seed_;
+
+        if (rng_state == 0)
+        {
+            rng_state = 0x9e3779b97f4a7c15ull ^
+                        (static_cast<uint64_t>(args->thread_id_) << 32) ^
+                        static_cast<uint64_t>(args->iterations_);
+        }
+
+        auto next_random = [&rng_state]() -> uint64_t
+        {
+            rng_state ^= (rng_state << 13);
+            rng_state ^= (rng_state >> 7);
+            rng_state ^= (rng_state << 17);
+            return rng_state;
+        };
+
+        for (size_t i = 0; i < args->iterations_; ++i)
+        {
+            const uint32_t key = static_cast<uint32_t>(next_random() % static_cast<uint64_t>(args->key_space_));
+
+            const size_t block_size = 32 + static_cast<size_t>(next_random() & 0xFFu);
+            void *ptr = args->memory_resource_->allocate(block_size);
+
+            if (ptr == nullptr)
+            {
+                args->allocation_failures_->fetch_add(1, minstd::memory_order_relaxed);
+            }
+            else
+            {
+                args->memory_resource_->deallocate(ptr, block_size);
+                composite_allocations++;
+            }
+
+            const bool do_write = (args->write_period_ > 0) && ((next_random() % args->write_period_) == 0);
+
+            if (!do_write)
+            {
+                uint32_t found_value = 0;
+
+                if (args->map_->find(key, found_value))
+                {
+                    checksum += found_value;
+                }
+            }
+            else
+            {
+                if ((next_random() & 1ull) == 0ull)
+                {
+                    if (args->map_->remove(key))
+                    {
+                        remove_successes++;
+                    }
+                }
+                else
+                {
+                    if (args->map_->insert(key, key))
                     {
                         insert_successes++;
                     }
@@ -1134,6 +1320,130 @@ namespace
             CHECK_TRUE(ops_per_sec > 0.0);
             CHECK_TRUE((total_insert_successes + total_remove_successes) > 0);
             CHECK_TRUE(checksum > 0);
+        }
+    }
+
+
+    TEST(SkiplistPerformanceTests, PerfMixedWriteLoadRWLockMapBaseline)
+    {
+        memory_leak_overload_scope_guard memory_leak_overload_guard;
+
+        const size_t iterations_per_thread = skiplist_mixed_iterations_per_thread();
+        const size_t num_threads = skiplist_perf_thread_count();
+
+        struct write_load_config
+        {
+            const char *label;
+            size_t write_period;  // 0 = read-only; N = 1-in-N ops is a write
+        };
+
+        static const write_load_config configs[] = {
+            {"0.1%",  1000},
+            {"1%",    100},
+            {"5%",    20},
+            {"10%",   10},
+            {"20%",   5},
+        };
+
+        printf("Reader/writer lock ordered map write-load perf (baseline): threads=%zu iterations/thread=%zu initial_occupancy=%zu%%\n",
+               num_threads, iterations_per_thread, SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT);
+
+        for (size_t cfg_idx = 0; cfg_idx < sizeof(configs) / sizeof(configs[0]); ++cfg_idx)
+        {
+            const write_load_config &cfg = configs[cfg_idx];
+
+            rwlock_hash_map map;
+
+            const uint32_t initial_count = static_cast<uint32_t>(SKIPLIST_STRESS_KEY_SPACE * SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT / 100u);
+            for (uint32_t key = 0; key < initial_count; ++key)
+            {
+                CHECK_TRUE(map.insert(key, key));
+            }
+
+            minstd::pmr::malloc_free_wrapper_memory_resource malloc_free_resource(nullptr);
+
+            pthread_t workers[SKIPLIST_STRESS_MAX_THREADS]{};
+            rwlock_map_write_load_thread_args thread_args[SKIPLIST_STRESS_MAX_THREADS]{};
+
+            minstd::atomic<bool> start{false};
+            minstd::atomic<size_t> ready_count{0};
+            minstd::atomic<size_t> allocation_failures{0};
+
+            timespec seed_time{};
+            clock_gettime(CLOCK_MONOTONIC, &seed_time);
+            const uint64_t run_seed =
+                (static_cast<uint64_t>(seed_time.tv_sec) << 32) ^
+                static_cast<uint64_t>(seed_time.tv_nsec) ^
+                (static_cast<uint64_t>(cfg_idx) * 0x9e3779b97f4a7c15ull) ^
+                static_cast<uint64_t>(cfg.write_period);
+
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                thread_args[i].map_ = &map;
+                thread_args[i].memory_resource_ = &malloc_free_resource;
+                thread_args[i].start_ = &start;
+                thread_args[i].ready_count_ = &ready_count;
+                thread_args[i].allocation_failures_ = &allocation_failures;
+                thread_args[i].thread_id_ = static_cast<uint32_t>(i);
+                thread_args[i].write_period_ = cfg.write_period;
+                thread_args[i].iterations_ = iterations_per_thread;
+                thread_args[i].key_space_ = SKIPLIST_STRESS_KEY_SPACE;
+                thread_args[i].operations_completed_ = 0;
+                thread_args[i].composite_allocations_ = 0;
+                thread_args[i].insert_successes_ = 0;
+                thread_args[i].remove_successes_ = 0;
+                thread_args[i].checksum_ = 0;
+                thread_args[i].rng_seed_ = run_seed ^
+                                           (static_cast<uint64_t>(i + 1) * 0xbf58476d1ce4e5b9ull) ^
+                                           (static_cast<uint64_t>(thread_args[i].thread_id_) << 17);
+
+                CHECK_EQUAL(0, pthread_create(&workers[i], nullptr, rwlock_map_write_load_worker, &thread_args[i]));
+            }
+
+            while (ready_count.load(minstd::memory_order_acquire) < num_threads)
+            {
+                sched_yield();
+            }
+
+            timespec start_time{};
+            timespec end_time{};
+            clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+            start.store(true, minstd::memory_order_release);
+
+            size_t total_operations = 0;
+            size_t total_composite_allocations = 0;
+            size_t total_insert_successes = 0;
+            size_t total_remove_successes = 0;
+
+            for (size_t i = 0; i < num_threads; ++i)
+            {
+                CHECK_EQUAL(0, pthread_join(workers[i], nullptr));
+                total_operations += thread_args[i].operations_completed_;
+                total_composite_allocations += thread_args[i].composite_allocations_;
+                total_insert_successes += thread_args[i].insert_successes_;
+                total_remove_successes += thread_args[i].remove_successes_;
+            }
+
+            clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+            const size_t expected_operations = num_threads * iterations_per_thread;
+            const double duration = static_cast<double>(end_time.tv_sec - start_time.tv_sec) +
+                                    (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
+            const double ops_per_sec = static_cast<double>(total_operations) / duration;
+
+            printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu allocs=%zu\n",
+                   cfg.label,
+                   ops_per_sec,
+                   total_insert_successes,
+                   total_remove_successes,
+                   total_composite_allocations);
+
+            CHECK_EQUAL(expected_operations, total_operations);
+            CHECK_EQUAL(expected_operations, total_composite_allocations);
+            CHECK_EQUAL(static_cast<size_t>(0), allocation_failures.load(minstd::memory_order_acquire));
+            CHECK_TRUE(duration > 0.0);
+            CHECK_TRUE(ops_per_sec > 0.0);
         }
     }
 
