@@ -554,9 +554,6 @@ namespace
             }
         }
 
-        list.gc();
-        list.gc();
-
         CHECK_EQUAL(81u, list.size());
 
         for (uint32_t i = 0; i <= 100; i++)
@@ -615,9 +612,6 @@ namespace
         {
             CHECK_TRUE(list.remove(i));
         }
-
-        list.gc();
-        list.gc();
 
         for (uint32_t i = 0; i < 128; ++i)
         {
@@ -1119,8 +1113,6 @@ namespace
                 checksum += thread_args[i].checksum_;
             }
 
-            const size_t total_gc_reclaimed_nodes = list.gc();
-
             clock_gettime(CLOCK_MONOTONIC, &end_time);
 
             const size_t expected_operations = num_threads * iterations_per_thread;
@@ -1128,12 +1120,11 @@ namespace
                                     (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
             const double ops_per_sec = static_cast<double>(total_operations) / duration;
 
-            printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu gc_nodes=%zu allocs=%zu\n",
+            printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu allocs=%zu\n",
                    cfg.label,
                    ops_per_sec,
                    total_insert_successes,
                    total_remove_successes,
-                   total_gc_reclaimed_nodes,
                    total_composite_allocations);
 
             CHECK_EQUAL(expected_operations, total_operations);
@@ -1266,9 +1257,6 @@ namespace
         CHECK_EQUAL(WRITE_TEST_NUM_THREADS * WRITE_TEST_ITERATIONS_PER_THREAD, total_operations);
         CHECK_EQUAL(0u, validation_failures.load(minstd::memory_order_relaxed));
 
-        list.gc();
-        list.gc();
-
         uint32_t expected_size = 0;
 
         for (uint32_t key = 0; key < WRITE_TEST_KEY_SPACE; ++key)
@@ -1306,9 +1294,6 @@ namespace
 
             CHECK_TRUE(list.find(key) == nullptr);
         }
-
-        list.gc();
-        list.gc();
 
         CHECK_EQUAL(0u, list.size());
 
