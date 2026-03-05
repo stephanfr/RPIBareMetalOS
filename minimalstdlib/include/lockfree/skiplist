@@ -8,9 +8,7 @@
 #include <array>
 #include <atomic>
 #include <limits>
-#include <lockfree/tagged_ptr>
 #include <random>
-#include <strong_typedef>
 #include <utility>
 #include <__platform/cpu_platform_abstractions.h>
 
@@ -20,13 +18,6 @@ namespace MINIMAL_STD_NAMESPACE
 {
     namespace skiplist_internal
     {
-        struct TransactionId : strong_type<uint64_t, TransactionId>
-        {
-        };
-
-        constexpr TransactionId NOT_TOMBSTONED = TransactionId(0);
-        constexpr TransactionId FIRST_USER_TRANSACTION = TransactionId(3);
-
         //  Embedded atomic forward link: packs pointer + tombstone + ABA counter
         //  into a single 64-bit atomic word, eliminating heap allocation and spin
         //  locks from the CAS path.
@@ -82,7 +73,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             //  Store a pointer (only for nodes not yet visible to other threads)
 
-            void set(T *ptr, TransactionId)
+            void set(T *ptr)
             {
                 packed_.store(pack(ptr, 0, false), memory_order_release);
             }
@@ -96,16 +87,16 @@ namespace MINIMAL_STD_NAMESPACE
 
             //  Atomic snapshot of pointer and tombstone state
 
-            T *get(TransactionId &deleted_at_transaction) const
+            T *get(bool &is_tombstoned) const
             {
                 const uint64_t v = packed_.load(memory_order_acquire);
-                deleted_at_transaction = is_tombstoned_val(v) ? TransactionId(1) : NOT_TOMBSTONED;
+                is_tombstoned = is_tombstoned_val(v);
                 return unpack_ptr(v);
             }
 
             //  Mark this link as tombstoned (CAS loop, preserves pointer)
 
-            void soft_delete(TransactionId)
+            void soft_delete()
             {
                 while (true)
                 {
@@ -128,9 +119,9 @@ namespace MINIMAL_STD_NAMESPACE
 
             //  CAS: succeeds only if current pointer == expected_value and link is
             //  not tombstoned.  On success, atomically sets the pointer to new_value
-            //  and optionally marks the link tombstoned (deletion_transaction != NOT_TOMBSTONED).
+            //  and optionally marks the link tombstoned (mark_tombstoned == true).
 
-            bool compare_exchange_strong(T *expected_value, T *new_value, TransactionId deletion_transaction)
+            bool compare_exchange_strong(T *expected_value, T *new_value, bool mark_tombstoned = false)
             {
                 uint64_t current = packed_.load(memory_order_acquire);
 
@@ -139,9 +130,8 @@ namespace MINIMAL_STD_NAMESPACE
                     return false;
                 }
 
-                const bool tomb = (deletion_transaction != NOT_TOMBSTONED);
                 const uint16_t next_aba = static_cast<uint16_t>(unpack_aba(current) + 1);
-                const uint64_t desired = pack(new_value, next_aba, tomb);
+                const uint64_t desired = pack(new_value, next_aba, mark_tombstoned);
 
                 return packed_.compare_exchange_strong(current, desired, memory_order_acq_rel, memory_order_acquire);
             }
@@ -168,11 +158,6 @@ namespace MINIMAL_STD_NAMESPACE
 #ifdef __MINIMAL_STD_TEST__
             static constexpr uint32_t DEBUG_MAX_VALIDATION_STEPS = 1000000;
 #endif
-
-            constexpr bool tombstoned(TransactionId deleted_at_transaction) const
-            {
-                return deleted_at_transaction != NOT_TOMBSTONED;
-            }
 
             enum class unlink_state : uint8_t
             {
@@ -207,7 +192,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     for (auto i = 0; i != next_node_size; ++i)
                     {
-                        next_node[i].set(next_node_target, NOT_TOMBSTONED);
+                        next_node[i].set(next_node_target);
                     }
                 }
 
@@ -270,7 +255,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 uint32_t begin_read_section(uint64_t current_epoch)
                 {
-                    const uint32_t previous_depth = reader_depth_.fetch_add(1, memory_order_acq_rel);
+                    const uint32_t previous_depth = reader_depth_.fetch_add(1, memory_order_relaxed);
 
                     if (previous_depth == 0)
                     {
@@ -283,26 +268,11 @@ namespace MINIMAL_STD_NAMESPACE
 
                 void end_read_section()
                 {
-                    uint32_t current_depth = reader_depth_.load(memory_order_acquire);
+                    const uint32_t previous_depth = reader_depth_.fetch_sub(1, memory_order_relaxed);
 
-                    while (true)
+                    if (previous_depth == 1)
                     {
-                        if (current_depth == 0)
-                        {
-                            return;
-                        }
-
-                        const uint32_t next_depth = current_depth - 1;
-
-                        if (reader_depth_.compare_exchange_strong(current_depth, next_depth, memory_order_acq_rel, memory_order_acquire))
-                        {
-                            if (next_depth == 0)
-                            {
-                                reader_active_.store(false, memory_order_release);
-                            }
-
-                            return;
-                        }
+                        reader_active_.store(false, memory_order_release);
                     }
                 }
 
@@ -417,7 +387,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 epoch_read_section_guard read_guard(this);
 
-                TransactionId deletion_transaction = NOT_TOMBSTONED;
+                bool is_tombstoned = false;
                 SkipNode *pred = head, *curr = nullptr, *succ = nullptr;
 
                 // traverse from top of head
@@ -427,9 +397,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                     while (true)
                     {
-                        succ = curr->next_node[level].get(deletion_transaction);
+                        succ = curr->next_node[level].get(is_tombstoned);
 
-                        while (tombstoned(deletion_transaction))
+                        while (is_tombstoned)
                         {
                             SkipNode *tombstoned_node = curr;
                             curr = succ;
@@ -439,16 +409,16 @@ namespace MINIMAL_STD_NAMESPACE
                                 return nullptr;
                             }
 
-                            succ = curr->next_node[level].get(deletion_transaction);
+                            succ = curr->next_node[level].get(is_tombstoned);
 
                             if (level > 0)
                             {
                                 //  Upper level: CAS out the tombstone and decrement
                                 //  the counter so level-0 knows when it's safe.
 
-                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr, NOT_TOMBSTONED))
+                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr))
                                 {
-                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_acq_rel);
+                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_release);
                                 }
                             }
                             else
@@ -457,7 +427,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
                                 {
-                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr, NOT_TOMBSTONED))
+                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
                                     {
                                         tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
                                         retire_node(tombstoned_node, read_guard.cpu_slot_);
@@ -487,7 +457,6 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 epoch_read_section_guard read_guard(this);
 
-                const TransactionId transaction_id = cpu_transaction_id(read_guard.cpu_slot_);
                 uint32_t insert_level0_retry_count = 0;
                 uint32_t insert_level0_backoff = 0;
                 uint32_t insert_upper_level_backoff = 0;
@@ -504,7 +473,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     FindResult found = find_with_nodelists(key, preds, succs, read_guard.cpu_slot_);
 
-                    if ((found == FindResult::FOUND) || (found == FindResult::SOFT_DELETED))
+                    if (found == FindResult::FOUND)
                     {
                         delete new_node;
                         return false;
@@ -519,17 +488,17 @@ namespace MINIMAL_STD_NAMESPACE
                         for (auto level = 1; level < top_level; ++level)
                         {
                             auto succ = succs[level];
-                            new_node->next_node[level].set(succ, transaction_id);
+                            new_node->next_node[level].set(succ);
                         }
 
                         auto pred = preds[0];
                         auto succ = succs[0];
 
-                        new_node->next_node[0].set(succ, transaction_id);
+                        new_node->next_node[0].set(succ);
 
                         while (true)
                         {
-                            if (pred->next_node[0].compare_exchange_strong(succ, new_node, NOT_TOMBSTONED))
+                            if (pred->next_node[0].compare_exchange_strong(succ, new_node))
                             {
                                 insert_level0_backoff = 0;
                                 break;
@@ -546,10 +515,10 @@ namespace MINIMAL_STD_NAMESPACE
                             backoff(insert_level0_backoff, read_guard.cpu_slot_);
 
                             // Rightward traversal on level 0 upon CAS failure
-                            TransactionId deletion_transaction = NOT_TOMBSTONED;
+                            bool is_tombstoned = false;
 
-                            pred->next_node[0].get(deletion_transaction);
-                            if (tombstoned(deletion_transaction))
+                            pred->next_node[0].get(is_tombstoned);
+                            if (is_tombstoned)
                             {
                                 goto RETRY_INSERT;
                             }
@@ -561,9 +530,9 @@ namespace MINIMAL_STD_NAMESPACE
                             
                             while (true)
                             {
-                                succ = curr->next_node[0].get(deletion_transaction);
+                                succ = curr->next_node[0].get(is_tombstoned);
 
-                                while (tombstoned(deletion_transaction))
+                                while (is_tombstoned)
                                 {
                                     SkipNode *tombstoned_node = curr;
 
@@ -573,11 +542,11 @@ namespace MINIMAL_STD_NAMESPACE
                                     }
 
                                     curr = succ;
-                                    succ = curr->next_node[0].get(deletion_transaction);
+                                    succ = curr->next_node[0].get(is_tombstoned);
 
                                     if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
                                     {
-                                        if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr, NOT_TOMBSTONED))
+                                        if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
                                         {
                                             tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
                                             retire_node(tombstoned_node, read_guard.cpu_slot_);
@@ -616,7 +585,7 @@ namespace MINIMAL_STD_NAMESPACE
                             preds[0] = pred;
                             succs[0] = curr;
                             succ = curr; // New expected reference for CAS failure retry
-                            new_node->next_node[0].set(succ, transaction_id);
+                            new_node->next_node[0].set(succ);
                         }
 
                         for (auto level = 1; level < top_level; ++level)
@@ -628,7 +597,7 @@ namespace MINIMAL_STD_NAMESPACE
                                 pred = preds[level];
                                 succ = succs[level];
 
-                                if (pred->next_node[level].compare_exchange_strong(succ, new_node, NOT_TOMBSTONED))
+                                if (pred->next_node[level].compare_exchange_strong(succ, new_node))
                                 {
                                     new_node->upper_levels_remaining_.fetch_add(1, memory_order_release);
                                     insert_upper_level_backoff = 0;
@@ -657,8 +626,6 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 epoch_read_section_guard read_guard(this);
 
-                const TransactionId transaction_id = cpu_transaction_id(read_guard.cpu_slot_);
-
                 SkipNode *preds[MAX_LEVELS + 1];
                 SkipNode *succs[MAX_LEVELS + 1];
                 SkipNode *succ;
@@ -678,18 +645,18 @@ namespace MINIMAL_STD_NAMESPACE
 
                         //  Mark as deleted on higher levels
 
-                        TransactionId deletion_transaction = NOT_TOMBSTONED;
+                        bool is_tombstoned = false;
 
                         for (auto level = node_to_remove->top_level - 1; level >= 1; --level)
                         {
-                            succ = node_to_remove->next_node[level].get(deletion_transaction);
+                            succ = node_to_remove->next_node[level].get(is_tombstoned);
                             uint32_t mark_retry_count = 0;
                             uint32_t mark_retry_backoff = 0;
 
-                            while (!tombstoned(deletion_transaction))
+                            while (!is_tombstoned)
                             {
-                                node_to_remove->next_node[level].soft_delete(transaction_id);
-                                succ = node_to_remove->next_node[level].get(deletion_transaction);
+                                node_to_remove->next_node[level].soft_delete();
+                                succ = node_to_remove->next_node[level].get(is_tombstoned);
 
                                 ++mark_retry_count;
 
@@ -704,8 +671,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                         //  Bottom level
 
-                        deletion_transaction = NOT_TOMBSTONED;
-                        succ = node_to_remove->next_node[0].get(deletion_transaction);
+                        is_tombstoned = false;
+                        succ = node_to_remove->next_node[0].get(is_tombstoned);
                         uint32_t bottom_retry_count = 0;
                         uint32_t bottom_retry_backoff = 0;
 
@@ -713,8 +680,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                         while (true)
                         {
-                            bool success = node_to_remove->next_node[0].compare_exchange_strong(succ, succ, transaction_id);
-                            succ = node_to_remove->next_node[0].get(deletion_transaction);
+                            bool success = node_to_remove->next_node[0].compare_exchange_strong(succ, succ, true);
+                            succ = node_to_remove->next_node[0].get(is_tombstoned);
 
                             if (success)
                             {
@@ -722,7 +689,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 if (node_to_remove->upper_levels_remaining_.load(memory_order_acquire) <= 0)
                                 {
-                                    if (pred->next_node[0].compare_exchange_strong(node_to_remove, succ, NOT_TOMBSTONED))
+                                    if (pred->next_node[0].compare_exchange_strong(node_to_remove, succ))
                                     {
                                         node_to_remove->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
                                         retire_node(node_to_remove, read_guard.cpu_slot_);
@@ -741,7 +708,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 return true;
                             }
-                            else if (tombstoned(deletion_transaction))
+                            else if (is_tombstoned)
                             {
                                 // another thread already soft deleted the node
 
@@ -763,18 +730,18 @@ namespace MINIMAL_STD_NAMESPACE
                             
                             while (true)
                             {
-                                succ = curr->next_node[0].get(deletion_transaction);
+                                succ = curr->next_node[0].get(is_tombstoned);
 
-                                while (tombstoned(deletion_transaction))
+                                while (is_tombstoned)
                                 {
                                     SkipNode *tombstoned_node = curr;
                                     if (curr->key == key) { soft_deleted = true; }
                                     curr = succ;
-                                    succ = curr->next_node[0].get(deletion_transaction);
+                                    succ = curr->next_node[0].get(is_tombstoned);
 
                                     if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
                                     {
-                                        if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr, NOT_TOMBSTONED))
+                                        if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
                                         {
                                             tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
                                             retire_node(tombstoned_node, read_guard.cpu_slot_);
@@ -801,7 +768,7 @@ namespace MINIMAL_STD_NAMESPACE
                                 return false;
                             }
                             node_to_remove = curr;
-                            succ = curr->next_node[0].get(deletion_transaction);
+                            succ = curr->next_node[0].get(is_tombstoned);
                         }
                     }
                 }
@@ -814,13 +781,13 @@ namespace MINIMAL_STD_NAMESPACE
                 auto current_node = head->next_node[0].get_reference();
 
                 uint32_t size = 0;
-                TransactionId node_deletion_transaction = NOT_TOMBSTONED;
+                bool node_is_tombstoned = false;
 
                 while (current_node->key != std::numeric_limits<KeyType>::max())
                 {
-                    current_node->next_node[0].get(node_deletion_transaction);
+                    current_node->next_node[0].get(node_is_tombstoned);
 
-                    if (!tombstoned(node_deletion_transaction))
+                    if (!node_is_tombstoned)
                     {
                         ++size;
                     }
@@ -844,10 +811,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                     while (true)
                     {
-                        TransactionId deletion_transaction = NOT_TOMBSTONED;
-                        SkipNode *next = current_node->next_node[level].get(deletion_transaction);
+                        bool is_tombstoned = false;
+                        SkipNode *next = current_node->next_node[level].get(is_tombstoned);
 
-                        while ((next != NIL) && tombstoned(deletion_transaction))
+                        while ((next != NIL) && is_tombstoned)
                         {
                             if (++visited_steps > DEBUG_MAX_VALIDATION_STEPS)
                             {
@@ -855,7 +822,7 @@ namespace MINIMAL_STD_NAMESPACE
                             }
 
                             current_node = next;
-                            next = current_node->next_node[level].get(deletion_transaction);
+                            next = current_node->next_node[level].get(is_tombstoned);
                         }
 
                         if (next == NIL)
@@ -892,10 +859,6 @@ namespace MINIMAL_STD_NAMESPACE
             SkipNode *NIL;
             mutable array<cpu_slot_state, NumCPUs> cpu_slots_{};
             mutable atomic<uint64_t> global_epoch_{1};
-            static TransactionId cpu_transaction_id(size_t cpu_slot)
-            {
-                return TransactionId{static_cast<uint64_t>(cpu_slot) + static_cast<uint64_t>(FIRST_USER_TRANSACTION)};
-            }
 
             int random_level()
             {
@@ -931,8 +894,7 @@ namespace MINIMAL_STD_NAMESPACE
             enum class FindResult
             {
                 FOUND,
-                NOT_FOUND,
-                SOFT_DELETED
+                NOT_FOUND
             };
 
             void backoff(uint32_t &backoff_state, size_t cpu_slot)
@@ -1046,7 +1008,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                bool advanced = global_epoch_.compare_exchange_strong(current_epoch, current_epoch + 1, memory_order_seq_cst);
+                bool advanced = global_epoch_.compare_exchange_strong(current_epoch, current_epoch + 1, memory_order_acq_rel, memory_order_acquire);
 
                 return advanced;
             }
@@ -1152,8 +1114,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             FindResult find_with_nodelists(const KeyType search_key, SkipNode **preds, SkipNode **succs, size_t cpu_slot)
             {
-                TransactionId deletion_transaction = NOT_TOMBSTONED;
-                bool soft_deleted = false;
+                bool is_tombstoned = false;
 
                 SkipNode *pred, *curr, *succ;
 
@@ -1165,32 +1126,27 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         //  Skip over soft deleted nodes
 
-                        succ = curr->next_node[level].get(deletion_transaction);
+                        succ = curr->next_node[level].get(is_tombstoned);
 
-                        while (tombstoned(deletion_transaction))
+                        while (is_tombstoned)
                         {
                             SkipNode *tombstoned_node = curr;
 
-                            if (curr->key == search_key)
-                            {
-                                soft_deleted = true;
-                            }
-
                             curr = succ;
-                            succ = curr->next_node[level].get(deletion_transaction);
+                            succ = curr->next_node[level].get(is_tombstoned);
 
                             if (level > 0)
                             {
-                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr, NOT_TOMBSTONED))
+                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr))
                                 {
-                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_acq_rel);
+                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_release);
                                 }
                             }
                             else
                             {
                                 if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
                                 {
-                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr, NOT_TOMBSTONED))
+                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
                                     {
                                         tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
                                         retire_node(tombstoned_node, cpu_slot);
@@ -1212,11 +1168,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                     preds[level] = pred;
                     succs[level] = curr;
-                }
-
-                if (soft_deleted)
-                {
-                    return FindResult::SOFT_DELETED;
                 }
 
                 return (curr->key == search_key) ? FindResult::FOUND : FindResult::NOT_FOUND;
