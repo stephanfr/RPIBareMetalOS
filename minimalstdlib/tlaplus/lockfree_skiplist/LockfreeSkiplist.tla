@@ -180,28 +180,38 @@ FinishOp(t) ==
 (***************************************************************************)
 (* Epoch advancement predicate.                                            *)
 (*                                                                          *)
-(* `CanAdvanceEpoch` matches C++ `try_advance_epoch`:                      *)
-(*   For every active CPU slot i: reader_epoch[i] >= current_epoch         *)
-(* (the calling CPU slot is exempted in C++ but we model it conservatively  *)
-(* as checking all slots, since the exemption is an optimisation detail.)  *)
+(* `CanAdvanceEpoch(callerCpu)` matches C++ `try_advance_epoch`:           *)
+(*   For every non-exempt active CPU slot i: reader_epoch[i] >= epoch      *)
+(* The calling CPU slot is exempted (matches C++ `if (i == exempt_slot)    *)
+(* continue`). This matters when the caller entered its read section at    *)
+(* an older epoch and the global epoch has since advanced.                  *)
 (***************************************************************************)
-CanAdvanceEpoch ==
+CanAdvanceEpoch(callerCpu) ==
     \A c \in Cpus :
-        (~readerActive[c]) \/ (readerEpoch[c] >= globalEpoch)
+        (c = callerCpu)
+        \/ (~readerActive[c])
+        \/ (readerEpoch[c] >= globalEpoch)
 
 (***************************************************************************)
 (* Reclaim predicate.                                                      *)
 (*                                                                          *)
-(* `CanReclaim` matches C++ `reclaim_retired_nodes_by_epoch`:              *)
-(*   If ANY epoch_reader_states_[i].active_ is true the function returns   *)
-(*   early WITHOUT reclaiming. So reclaim is only allowed when all CPUs    *)
-(*   are outside a read section.                                           *)
+(* `CanReclaim(callerCpu, epoch)` matches C++                              *)
+(* `reclaim_from_per_cpu_list`:                                            *)
+(*   reclaim_epoch = epoch - EpochLag                                      *)
+(*   For every non-exempt CPU slot i:                                      *)
+(*     if active AND reader_epoch <= reclaim_epoch => return 0             *)
+(*   So reclaim is allowed when all non-exempt active readers have         *)
+(*   reader_epoch > reclaim_epoch (they entered after the reclaim window). *)
 (*                                                                          *)
-(* This is stricter than CanAdvanceEpoch: advancement requires only that   *)
-(* active readers are at the current epoch; reclaim requires NO readers.   *)
+(* The calling CPU slot is self-exempt, matching the C++ loop:             *)
+(*   `if (i == cpu_slot) continue`.                                        *)
 (***************************************************************************)
-CanReclaim ==
-    \A c \in Cpus : ~readerActive[c]
+CanReclaim(callerCpu, epoch) ==
+    LET reclaimEpoch == IF epoch > EpochLag THEN epoch - EpochLag ELSE 0 IN
+    \A c \in Cpus :
+        (c = callerCpu)
+        \/ (~readerActive[c])
+        \/ (readerEpoch[c] > reclaimEpoch)
 
 (***************************************************************************)
 (* Reclaimable nodes: those that are:                                      *)
@@ -220,12 +230,15 @@ ReclaimableNodes(epoch) ==
 (***************************************************************************)
 (* AdvanceAndReclaim: combines try_advance_epoch + reclaim_retired_nodes.  *)
 (* Called after a successful remove-bottom or from gc.                     *)
+(* `callerCpu` is exempted from both the advance and reclaim guards,      *)
+(* matching the C++ `try_advance_epoch(slot)` and                         *)
+(* `reclaim_from_per_cpu_list(slot)` self-exemption.                      *)
 (***************************************************************************)
-AdvanceAndReclaim ==
-    LET nextEpoch   == IF CanAdvanceEpoch
+AdvanceAndReclaim(callerCpu) ==
+    LET nextEpoch   == IF CanAdvanceEpoch(callerCpu)
                           THEN IF globalEpoch < MaxEpoch THEN globalEpoch + 1 ELSE MaxEpoch
                           ELSE globalEpoch IN
-    LET reclaimable == IF CanReclaim THEN ReclaimableNodes(nextEpoch) ELSE {} IN
+    LET reclaimable == IF CanReclaim(callerCpu, nextEpoch) THEN ReclaimableNodes(nextEpoch) ELSE {} IN
     /\ globalEpoch' = nextEpoch
     /\ retired' = retired \ reclaimable
     /\ fullyUnlinked' = fullyUnlinked \ reclaimable
@@ -419,13 +432,14 @@ RemoveBottomSuccess(t) ==
     /\ op[t] = "remove"
     /\ opKey[t] \in tomb
     /\ LET k          == opKey[t] IN
+       LET c          == cpu_of(t) IN
        LET newRetired  == retired \cup {k} IN
        LET newFU       == fullyUnlinked \cup {k} IN
        LET newRetAt    == [retiredAt EXCEPT ![k] = globalEpoch] IN
-       LET nextEpoch   == IF CanAdvanceEpoch
+       LET nextEpoch   == IF CanAdvanceEpoch(c)
                             THEN IF globalEpoch < MaxEpoch THEN globalEpoch + 1 ELSE MaxEpoch
                             ELSE globalEpoch IN
-       LET reclaimable == IF CanReclaim THEN ReclaimableNodes(nextEpoch) ELSE {} IN
+       LET reclaimable == IF CanReclaim(c, nextEpoch) THEN ReclaimableNodes(nextEpoch) ELSE {} IN
        /\ tomb' = tomb \ {k}
        /\ retired' = newRetired \ reclaimable
        /\ fullyUnlinked' = newFU \ reclaimable
@@ -515,10 +529,11 @@ GcStep(t) ==
        LET newFU        == IF retireNow THEN fullyUnlinked \cup {opKey[t]} ELSE fullyUnlinked IN
        LET newRetAt     == [retiredAt EXCEPT ![opKey[t]] = IF retireNow THEN globalEpoch ELSE @] IN
        LET newTomb      == IF retireNow THEN tomb \ {opKey[t]} ELSE tomb IN
-       LET nextEpoch    == IF CanAdvanceEpoch
+       LET c            == cpu_of(t) IN
+       LET nextEpoch    == IF CanAdvanceEpoch(c)
                              THEN IF globalEpoch < MaxEpoch THEN globalEpoch + 1 ELSE MaxEpoch
                              ELSE globalEpoch IN
-       LET reclaimable  == IF CanReclaim
+       LET reclaimable  == IF CanReclaim(c, nextEpoch)
                            THEN { k \in newFU : newRetAt[k] > 0 /\ newRetAt[k] + EpochLag <= nextEpoch }
                            ELSE {} IN
        /\ present' = present

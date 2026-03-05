@@ -141,7 +141,7 @@ namespace MINIMAL_STD_NAMESPACE
         };
 
         template <typename KeyType, typename ValueType, size_t NumCPUs, int32_t MAX_LEVELS = DEFAULT_MAX_LEVELS> //  NumCPUs: CPU slot array size (mandatory — sizes cpu_slots_); MAX_LEVELS must be signed as we iterate down to and include index 0
-        class SkipList
+        class skip_list
         {
         private:
             static constexpr uint32_t MAX_INSERT_LEVEL0_RETRIES = 1024;
@@ -345,7 +345,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             struct epoch_read_section_guard
             {
-                explicit epoch_read_section_guard(const SkipList *list)
+                explicit epoch_read_section_guard(const skip_list *list)
                     : list_(list)
                 {
                     cpu_slot_ = list_->enter_read_section();
@@ -356,7 +356,7 @@ namespace MINIMAL_STD_NAMESPACE
                     list_->exit_read_section(cpu_slot_);
                 }
 
-                const SkipList *list_;
+                const skip_list *list_;
                 size_t cpu_slot_ = 0;
             };
 
@@ -367,7 +367,7 @@ namespace MINIMAL_STD_NAMESPACE
         
         using allocator_type = allocator<value_type>;
 
-            SkipList()
+            skip_list()
             {
                 for (size_t i = 0; i < NumCPUs; ++i)
                 {
@@ -378,7 +378,7 @@ namespace MINIMAL_STD_NAMESPACE
                 head = new SkipNode(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL);
             }
 
-            ~SkipList()
+            ~skip_list()
             {
                 SkipNode *current_node = head->next_node[0].get_reference();
 
@@ -1193,6 +1193,6 @@ namespace MINIMAL_STD_NAMESPACE
         };
     }
 
-    using skiplist_internal::SkipList;
+    using skiplist_internal::skip_list;
 
 } // namespace MINIMAL_STD_NAMESPACE

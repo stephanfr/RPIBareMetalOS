@@ -679,7 +679,7 @@ namespace
 
     TEST(SkiplistTests, BasicFunctionality)
     {
-        minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS> list;
+        minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS> list;
 
         for (uint32_t i = 0; i < 100; i++)
         {
@@ -778,7 +778,7 @@ namespace
 
     TEST(SkiplistTests, TemplateInstantiationWithCustomMaxLevels)
     {
-        minstd::SkipList<uint32_t, uint64_t, SKIPLIST_STRESS_MAX_THREADS, 8> list;
+        minstd::skip_list<uint32_t, uint64_t, SKIPLIST_STRESS_MAX_THREADS, 8> list;
 
         for (uint32_t i = 0; i < 256; ++i)
         {
@@ -814,7 +814,7 @@ namespace
 
     TEST(SkiplistTests, MultiThreadedStressInsertFindRemove)
     {
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
 
         list_type list;
 
@@ -882,7 +882,7 @@ namespace
 
     TEST(SkiplistTests, MultiThreadedStressThreadScaling)
     {
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
         const size_t iterations_per_thread = skiplist_scaling_iterations_per_thread();
 
         printf("Skiplist concurrent find ops/sec (iterations/thread=%zu):\n", iterations_per_thread);
@@ -960,7 +960,7 @@ namespace
 
     TEST(SkiplistPerformanceTests, PerfOnlyFindThreadScaling)
     {
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
         const size_t iterations_per_thread = skiplist_scaling_iterations_per_thread();
 
         printf("Skiplist perf-only find ops/sec (iterations/thread=%zu):\n", iterations_per_thread);
@@ -1033,7 +1033,7 @@ namespace
 
     TEST(SkiplistPerformanceTests, PerfOnlyFindFixedThreadCount)
     {
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
 
         const size_t iterations_per_thread = skiplist_scaling_iterations_per_thread();
         const size_t num_threads = skiplist_perf_thread_count();
@@ -1108,7 +1108,7 @@ namespace
     {
         memory_leak_overload_scope_guard memory_leak_overload_guard;
 
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
 
         const size_t iterations_per_thread = skiplist_scaling_iterations_per_thread();
         const size_t num_threads = skiplist_perf_thread_count();
@@ -1197,7 +1197,7 @@ namespace
     {
         memory_leak_overload_scope_guard memory_leak_overload_guard;
 
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
 
         const size_t iterations_per_thread = skiplist_mixed_iterations_per_thread();
         const size_t num_threads = skiplist_perf_thread_count();
@@ -1450,7 +1450,7 @@ namespace
 
     TEST(SkiplistTests, MultiThreadedStressOrderingAndContentCorrectness)
     {
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
 
         list_type list;
 
@@ -1516,7 +1516,7 @@ namespace
     {
         memory_leak_overload_scope_guard memory_leak_overload_guard;
 
-        using list_type = minstd::SkipList<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
 
         static constexpr size_t WRITE_TEST_NUM_THREADS = 8;
         static constexpr size_t WRITE_TEST_ITERATIONS_PER_THREAD = 4096;
