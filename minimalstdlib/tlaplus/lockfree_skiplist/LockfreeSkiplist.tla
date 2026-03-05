@@ -49,8 +49,7 @@ VARIABLES
     fullyUnlinked,    \* Keys with unlink_state::FULLY_UNLINKED set (upper levels cleared)
     retiredAt,        \* Epoch at which each key was retired
     globalEpoch,
-    readerDepth,      \* Per-CPU re-entrant read-section nesting depth
-    readerActive,     \* Per-CPU: true iff readerDepth > 0
+    readerDepth,      \* Per-CPU re-entrant read-section nesting depth (0 = idle)
     readerEpoch,      \* Per-CPU: epoch snapshot at outermost enter_read_section
     pc,
     op,
@@ -59,7 +58,7 @@ VARIABLES
     retryTick
 
 vars == <<present, tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-          readerDepth, readerActive, readerEpoch, pc, op, opKey, level, retryTick>>
+          readerDepth, readerEpoch, pc, op, opKey, level, retryTick>>
 
 PcStates == {
     "idle",
@@ -88,7 +87,6 @@ TypeOK ==
     /\ retiredAt \in [Keys -> 0..MaxEpoch]
     /\ globalEpoch \in 0..MaxEpoch
     /\ readerDepth \in [Cpus -> 0..MaxReadDepth]
-    /\ readerActive \in [Cpus -> BOOLEAN]
     /\ readerEpoch \in [Cpus -> 0..MaxEpoch]
     /\ pc \in [Threads -> PcStates]
     /\ op \in [Threads -> Ops]
@@ -97,7 +95,6 @@ TypeOK ==
     /\ retryTick \in [Threads -> 0..MaxRetryTicks]
     /\ Threads # {}
     /\ Cpus # {}
-    /\ \A c \in Cpus : readerActive[c] => readerDepth[c] > 0
 
 Init ==
     /\ present = {}
@@ -107,7 +104,6 @@ Init ==
     /\ retiredAt = [k \in Keys |-> 0]
     /\ globalEpoch = 1
     /\ readerDepth = [c \in Cpus |-> 0]
-    /\ readerActive = [c \in Cpus |-> FALSE]
     /\ readerEpoch = [c \in Cpus |-> 0]
     /\ pc = [t \in Threads |-> "idle"]
     /\ op = [t \in Threads |-> "none"]
@@ -123,7 +119,6 @@ InitRemoveScenario ==
     /\ retiredAt = [k \in Keys |-> 0]
     /\ globalEpoch = 1
     /\ readerDepth = [c \in Cpus |-> 0]
-    /\ readerActive = [c \in Cpus |-> FALSE]
     /\ readerEpoch = [c \in Cpus |-> 0]
     /\ pc = [t \in Threads |-> "idle"]
     /\ op = [t \in Threads |-> "none"]
@@ -142,7 +137,7 @@ ResetRetry(t) ==
 (*                                                                          *)
 (* EnterRead models `enter_read_section`:                                  *)
 (*   previous_depth = read_depth_.fetch_add(1)                             *)
-(*   if (previous_depth == 0) { epoch_.store(global_epoch_); active = true }*)
+(*   if (previous_depth == 0) { epoch_.store(global_epoch_) }              *)
 (*                                                                          *)
 (* Crucially, if a CPU is already inside a read section (readerDepth > 0)  *)
 (* -- i.e. an interrupt fires while a thread is in a skiplist op -- the    *)
@@ -154,7 +149,6 @@ EnterRead(t) ==
     LET c == cpu_of(t) IN
     /\ readerDepth[c] < MaxReadDepth
     /\ readerDepth' = [readerDepth EXCEPT ![c] = @ + 1]
-    /\ readerActive' = [readerActive EXCEPT ![c] = TRUE]
     /\ readerEpoch' = [readerEpoch EXCEPT ![c] =
                           IF readerDepth[c] = 0
                           THEN globalEpoch    \* first entry: snapshot current epoch
@@ -164,7 +158,6 @@ ExitRead(t) ==
     LET c == cpu_of(t) IN
     /\ readerDepth[c] > 0
     /\ readerDepth' = [readerDepth EXCEPT ![c] = @ - 1]
-    /\ readerActive' = [readerActive EXCEPT ![c] = (readerDepth[c] > 1)]
     /\ readerEpoch' = readerEpoch
 
 FinishOpCore(t) ==
@@ -181,15 +174,17 @@ FinishOp(t) ==
 (* Epoch advancement predicate.                                            *)
 (*                                                                          *)
 (* `CanAdvanceEpoch(callerCpu)` matches C++ `try_advance_epoch`:           *)
-(*   For every non-exempt active CPU slot i: reader_epoch[i] >= epoch      *)
-(* The calling CPU slot is exempted (matches C++ `if (i == exempt_slot)    *)
-(* continue`). This matters when the caller entered its read section at    *)
-(* an older epoch and the global epoch has since advanced.                  *)
+(*   For every CPU slot i:                                                  *)
+(*     - self-exempt if sole occupant (depth <= 1)                         *)
+(*     - skip if idle (depth = 0)                                          *)
+(*     - else require reader_epoch >= globalEpoch                          *)
+(* Uses readerDepth as the authoritative reader-presence indicator,        *)
+(* matching the fixed C++ which eliminated the racy reader_active_ flag.   *)
 (***************************************************************************)
 CanAdvanceEpoch(callerCpu) ==
     \A c \in Cpus :
-        (c = callerCpu)
-        \/ (~readerActive[c])
+        (c = callerCpu /\ readerDepth[c] <= 1)
+        \/ (readerDepth[c] = 0)
         \/ (readerEpoch[c] >= globalEpoch)
 
 (***************************************************************************)
@@ -198,19 +193,18 @@ CanAdvanceEpoch(callerCpu) ==
 (* `CanReclaim(callerCpu, epoch)` matches C++                              *)
 (* `reclaim_from_per_cpu_list`:                                            *)
 (*   reclaim_epoch = epoch - EpochLag                                      *)
-(*   For every non-exempt CPU slot i:                                      *)
-(*     if active AND reader_epoch <= reclaim_epoch => return 0             *)
-(*   So reclaim is allowed when all non-exempt active readers have         *)
-(*   reader_epoch > reclaim_epoch (they entered after the reclaim window). *)
-(*                                                                          *)
-(* The calling CPU slot is self-exempt, matching the C++ loop:             *)
-(*   `if (i == cpu_slot) continue`.                                        *)
+(*   For every CPU slot i:                                                 *)
+(*     - self-exempt ONLY if readerDepth <= 1 (sole occupant)              *)
+(*     - skip if idle (depth = 0), matching reader_is_active()=depth>0    *)
+(*     - else require reader_epoch > reclaim_epoch                         *)
+(*   Uses readerDepth as authoritative reader-presence indicator,          *)
+(*   matching the fixed C++ which eliminated the racy reader_active_ flag. *)
 (***************************************************************************)
 CanReclaim(callerCpu, epoch) ==
     LET reclaimEpoch == IF epoch > EpochLag THEN epoch - EpochLag ELSE 0 IN
     \A c \in Cpus :
-        (c = callerCpu)
-        \/ (~readerActive[c])
+        (c = callerCpu /\ readerDepth[c] <= 1)
+        \/ (readerDepth[c] = 0)
         \/ (readerEpoch[c] > reclaimEpoch)
 
 (***************************************************************************)
@@ -324,7 +318,7 @@ InsertFindMiss(t) ==
     /\ opKey[t] \notin (present \cup tomb)
     /\ pc' = [pc EXCEPT ![t] = "insert_link0"]
     /\ UNCHANGED <<present, tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, op, opKey, level, retryTick>>
+                   readerDepth, readerEpoch, op, opKey, level, retryTick>>
 
 InsertLink0Success(t) ==
     /\ pc[t] = "insert_link0"
@@ -335,7 +329,7 @@ InsertLink0Success(t) ==
     /\ level' = [level EXCEPT ![t] = 1]
     /\ retryTick' = retryTick
     /\ UNCHANGED <<tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, op, opKey>>
+                   readerDepth, readerEpoch, op, opKey>>
 
 \* CAS failure on level 0: retry insert_find loop, bounded by MaxRetryTicks
 InsertLink0Fail(t) ==
@@ -345,7 +339,7 @@ InsertLink0Fail(t) ==
     /\ pc' = [pc EXCEPT ![t] = "insert_find"]
     /\ retryTick' = TickRetry(t)
     /\ UNCHANGED <<present, tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, op, opKey, level>>
+                   readerDepth, readerEpoch, op, opKey, level>>
 
 \* Exceeded MAX_INSERT_LEVEL0_RETRIES: delete new_node and return false
 InsertLink0Abort(t) ==
@@ -391,7 +385,7 @@ RemoveFindHit(t) ==
     /\ level' = [level EXCEPT ![t] = MaxLevels]
     /\ retryTick' = ResetRetry(t)
     /\ UNCHANGED <<present, tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, op, opKey>>
+                   readerDepth, readerEpoch, op, opKey>>
 
 \* Mark one upper level as soft-deleted, decrement level counter.
 \* When level reaches 1, transition to remove_bottom.
@@ -410,7 +404,7 @@ RemoveMarkProgress(t) ==
                /\ level' = [level EXCEPT ![t] = @ - 1]
                /\ retryTick' = ResetRetry(t)
     /\ UNCHANGED <<retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, op, opKey>>
+                   readerDepth, readerEpoch, op, opKey>>
 
 \* Mark-retry exceeded MAX_REMOVE_MARK_RETRIES_PER_LEVEL: goto RETRY_REMOVE
 \* (restart from remove_find; key may have been re-inserted by then)
@@ -421,7 +415,7 @@ RemoveMarkGotoRetry(t) ==
     /\ pc' = [pc EXCEPT ![t] = "remove_find"]
     /\ retryTick' = ResetRetry(t)
     /\ UNCHANGED <<present, tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, op, opKey, level>>
+                   readerDepth, readerEpoch, op, opKey, level>>
 
 \* Level-0 CAS success: this thread soft-deleted the node.
 \* Node moves from tomb to retired+fullyUnlinked; epoch work triggered.
@@ -467,7 +461,7 @@ RemoveBottomRetryContinue(t) ==
     /\ retryTick[t] < MaxRetryTicks
     /\ retryTick' = TickRetry(t)
     /\ UNCHANGED <<present, tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, pc, op, opKey, level>>
+                   readerDepth, readerEpoch, pc, op, opKey, level>>
 
 \* Exceeded MAX_REMOVE_BOTTOM_RETRIES: goto RETRY_REMOVE
 RemoveBottomRetryRestart(t) ==
@@ -478,7 +472,7 @@ RemoveBottomRetryRestart(t) ==
     /\ pc' = [pc EXCEPT ![t] = "remove_find"]
     /\ retryTick' = ResetRetry(t)
     /\ UNCHANGED <<present, tomb, retired, fullyUnlinked, retiredAt, globalEpoch,
-                   readerDepth, readerActive, readerEpoch, op, opKey, level>>
+                   readerDepth, readerEpoch, op, opKey, level>>
 
 (***************************************************************************)
 (* FIND state machine                                                      *)

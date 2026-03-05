@@ -21,6 +21,7 @@ Matched exactly at control-flow level:
 - `FULLY_UNLINKED` gate: `fullyUnlinked` set tracks which retired nodes have had all upper-level pointer removals completed; reclaim only happens for nodes in `fullyUnlinked`
 - Reclaim guard: `CanReclaim(callerCpu, epoch)` self-exempts the calling CPU and requires all other active readers to have `reader_epoch > reclaim_epoch` (matches C++ `reclaim_from_per_cpu_list` which skips `cpu_slot` and checks remaining readers against `reclaim_epoch = epoch - EpochLag`)
 - Epoch advance guard: `CanAdvanceEpoch(callerCpu)` self-exempts the calling CPU and requires every other active reader to be at the current epoch (matches C++ `try_advance_epoch(exempt_slot)`)
+- Reader-presence: both guards use `readerDepth[c] = 0` to detect idle slots, matching the fixed C++ code which eliminated the separate `reader_active_` flag; `reader_depth_ > 0` is now the sole authoritative indicator
 - Interrupt re-entrancy: `EnterRead` only snapshots the epoch on the **first** nesting level (`readerDepth == 0`); nested ISR callers inherit the outer epoch — matching `if (previous_depth == 0) { epoch_.store(...) }`
 
 Abstracted/simplified:
@@ -71,7 +72,7 @@ All configs pass with **no errors**:
 | Config | States | Result |
 |---|---|---|
 | `deadlock` (2 keys, 1T, 1C) | 12,487 distinct | **No deadlock. All invariants hold.** |
-| `interrupt_reentrancy` (2 keys, 2T, 1C, depth=3) | 1,788,805 distinct | **`InterruptReentrancySafe` holds across all states.** |
+| `interrupt_reentrancy` (2 keys, 2T, 1C, depth=3) | 1,011,937 distinct | **`InterruptReentrancySafe` holds across all states.** |
 | `liveness` (1 key, 1T, 1C) | 469 distinct | **`ActiveOpsEventuallyFinish` holds under fairness.** |
 | `remove_liveness` (1 key, 1T, 1C) | 14 distinct | **`RemoveBottomEventuallyIdle` holds.** |
 | `remove_mark_livelock` (1 key, 1T, 1C) | 14 distinct | **`RemoveNoMarkLivelock` holds.** |
