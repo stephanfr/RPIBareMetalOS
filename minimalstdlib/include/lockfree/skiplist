@@ -255,7 +255,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                 uint32_t begin_read_section(uint64_t current_epoch)
                 {
-                    const uint32_t previous_depth = reader_depth_.fetch_add(1, memory_order_relaxed);
+                    // Multiple Linux test threads can share one slot when they run
+                    // on the same CPU id, so depth transitions must be synchronized.
+                    const uint32_t previous_depth = reader_depth_.fetch_add(1, memory_order_acq_rel);
 
                     if (previous_depth == 0)
                     {
@@ -268,11 +270,26 @@ namespace MINIMAL_STD_NAMESPACE
 
                 void end_read_section()
                 {
-                    const uint32_t previous_depth = reader_depth_.fetch_sub(1, memory_order_relaxed);
+                    uint32_t current_depth = reader_depth_.load(memory_order_acquire);
 
-                    if (previous_depth == 1)
+                    while (true)
                     {
-                        reader_active_.store(false, memory_order_release);
+                        if (current_depth == 0)
+                        {
+                            return;
+                        }
+
+                        const uint32_t next_depth = current_depth - 1;
+
+                        if (reader_depth_.compare_exchange_strong(current_depth, next_depth, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            if (next_depth == 0)
+                            {
+                                reader_active_.store(false, memory_order_release);
+                            }
+
+                            return;
+                        }
                     }
                 }
 
