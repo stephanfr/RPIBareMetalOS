@@ -24,28 +24,84 @@ namespace MINIMAL_STD_NAMESPACE
         //
         //  Layout (64 bits):
         //    Bit  63       : tombstone flag
-        //    Bits 62-48    : 15-bit ABA counter
-        //    Bits 47-0     : node pointer (48-bit address space)
+        //    Bits 62-32    : 31-bit ABA counter
+        //    Bits 31-0     : 32-bit slot table index (safe on all ARM64 configurations)
 
         template <typename T>
         struct atomic_forward_link
         {
+        public:
+            static constexpr uint32_t MAX_SLOTS = 16777216;
+
+            static inline atomic<uint32_t> next_free_slot_{1};
+            static inline array<atomic<T *>, MAX_SLOTS> slot_table_{};
+            static inline array<atomic<uint32_t>, MAX_SLOTS> free_next_slot_{};
+            static inline atomic<uint32_t> free_list_head_{0};
+
+            static uint32_t allocate_slot(T *ptr)
+            {
+                uint32_t head = free_list_head_.load(memory_order_acquire);
+                while (head != 0)
+                {
+                    const uint32_t next = free_next_slot_[head].load(memory_order_acquire);
+
+                    if (free_list_head_.compare_exchange_weak(head, next, memory_order_acq_rel))
+                    {
+                        slot_table_[head].store(ptr, memory_order_release);
+                        return head;
+                    }
+                }
+
+                uint32_t idx = next_free_slot_.fetch_add(1, memory_order_acq_rel);
+                if (idx < MAX_SLOTS)
+                {
+                    slot_table_[idx].store(ptr, memory_order_release);
+                    free_next_slot_[idx].store(0, memory_order_relaxed);
+                    return idx;
+                }
+
+                while (true) {} // Out of slots, hang or abort
+                return 0;
+            }
+
+            static void free_slot(uint32_t slot)
+            {
+                if (slot == 0) return;
+
+                uint32_t head = free_list_head_.load(memory_order_acquire);
+                while (true)
+                {
+                    // Never store freelist metadata in slot_table_. Readers of
+                    // unpack_ptr() must only ever observe real node pointers or nullptr.
+                    slot_table_[slot].store(nullptr, memory_order_release);
+                    free_next_slot_[slot].store(head, memory_order_release);
+
+                    if (free_list_head_.compare_exchange_weak(head, slot, memory_order_acq_rel))
+                    {
+                        break;
+                    }
+                }
+            }
+
         private:
             static constexpr uint64_t TOMBSTONE_BIT = uint64_t{1} << 63;
-            static constexpr int      ABA_SHIFT     = 48;
-            static constexpr uint64_t POINTER_MASK  = (uint64_t{1} << 48) - 1;
+            static constexpr int      ABA_SHIFT     = 32;
+            static constexpr uint64_t SLOT_MASK     = (uint64_t{1} << 32) - 1;
 
-            static uint64_t pack(T *ptr, uint16_t aba, bool tombstoned)
+            static uint64_t pack(T *ptr, uint32_t aba, bool tombstoned)
             {
-                uint64_t v = reinterpret_cast<uint64_t>(ptr) & POINTER_MASK;
-                v |= static_cast<uint64_t>(aba & 0x7FFF) << ABA_SHIFT;
+                uint32_t slot = (ptr == nullptr) ? 0 : ptr->internal_slot_;
+                uint64_t v = static_cast<uint64_t>(slot) & SLOT_MASK;
+                v |= static_cast<uint64_t>(aba & 0x7FFFFFFF) << ABA_SHIFT;
                 if (tombstoned) v |= TOMBSTONE_BIT;
                 return v;
             }
 
             static T *unpack_ptr(uint64_t v)
             {
-                return reinterpret_cast<T *>(static_cast<uintptr_t>(v & POINTER_MASK));
+                uint32_t slot = static_cast<uint32_t>(v & SLOT_MASK);
+                if (slot == 0) return nullptr;
+                return slot_table_[slot].load(memory_order_acquire);
             }
 
             static constexpr bool is_tombstoned_val(uint64_t v)
@@ -53,9 +109,9 @@ namespace MINIMAL_STD_NAMESPACE
                 return (v & TOMBSTONE_BIT) != 0;
             }
 
-            static constexpr uint16_t unpack_aba(uint64_t v)
+            static constexpr uint32_t unpack_aba(uint64_t v)
             {
-                return static_cast<uint16_t>((v >> ABA_SHIFT) & 0x7FFF);
+                return static_cast<uint32_t>((v >> ABA_SHIFT) & 0x7FFFFFFF);
             }
 
         public:
@@ -95,6 +151,9 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
             //  Mark this link as tombstoned (CAS loop, preserves pointer)
+            //
+            //  We manipulate the raw bits directly, preserving the slot-index
+            //  field unchanged while only toggling tombstone + ABA.
 
             void soft_delete()
             {
@@ -107,8 +166,10 @@ namespace MINIMAL_STD_NAMESPACE
                         return;
                     }
 
-                    const uint16_t next_aba = static_cast<uint16_t>(unpack_aba(current) + 1);
-                    const uint64_t desired = pack(unpack_ptr(current), next_aba, true);
+                    const uint32_t next_aba = unpack_aba(current) + 1;
+                    const uint64_t desired = (current & SLOT_MASK) |
+                                             (static_cast<uint64_t>(next_aba & 0x7FFFFFFFu) << ABA_SHIFT) |
+                                             TOMBSTONE_BIT;
 
                     if (packed_.compare_exchange_strong(current, desired, memory_order_acq_rel, memory_order_acquire))
                     {
@@ -120,17 +181,25 @@ namespace MINIMAL_STD_NAMESPACE
             //  CAS: succeeds only if current pointer == expected_value and link is
             //  not tombstoned.  On success, atomically sets the pointer to new_value
             //  and optionally marks the link tombstoned (mark_tombstoned == true).
+            //
+            //  We compare slot indices rather than going through slot_table_: the
+            //  table entry for expected_value's slot could have been recycled between
+            //  our load and the comparison, giving a stale pointer.  Comparing the
+            //  slot index stored in the packed word against expected_value->internal_slot_
+            //  avoids any slot_table_ read and is always safe because expected_value
+            //  is a live node held by the caller under the epoch read-section guard.
 
             bool compare_exchange_strong(T *expected_value, T *new_value, bool mark_tombstoned = false)
             {
                 uint64_t current = packed_.load(memory_order_acquire);
 
-                if ((unpack_ptr(current) != expected_value) || is_tombstoned_val(current))
+                const uint32_t expected_slot = (expected_value != nullptr) ? expected_value->internal_slot_ : 0u;
+                if (((current & SLOT_MASK) != static_cast<uint64_t>(expected_slot)) || is_tombstoned_val(current))
                 {
                     return false;
                 }
 
-                const uint16_t next_aba = static_cast<uint16_t>(unpack_aba(current) + 1);
+                const uint32_t next_aba = unpack_aba(current) + 1;
                 const uint64_t desired = pack(new_value, next_aba, mark_tombstoned);
 
                 return packed_.compare_exchange_strong(current, desired, memory_order_acq_rel, memory_order_acquire);
@@ -170,17 +239,20 @@ namespace MINIMAL_STD_NAMESPACE
                 // Constructor for standard nodes
                 SkipNode(const KeyType k, const ValueType &v, const int next_node_size) : key(k), value(v), top_level(next_node_size)
                 {
+                    internal_slot_ = atomic_forward_link<SkipNode>::allocate_slot(this);
                     intialize_next_nodes(next_node_size, nullptr);
                 }
 
                 // Constructor for sentinel nodes head and NIL
                 SkipNode(const KeyType k, const int next_node_size, SkipNode *next_node_target) : key(k), top_level(next_node_size)
                 {
+                    internal_slot_ = atomic_forward_link<SkipNode>::allocate_slot(this);
                     intialize_next_nodes(next_node_size, next_node_target);
                 }
 
                 ~SkipNode()
                 {
+                    atomic_forward_link<SkipNode>::free_slot(internal_slot_);
                 }
 
                 SkipNode(const SkipNode &) = delete;
@@ -202,6 +274,7 @@ namespace MINIMAL_STD_NAMESPACE
                 atomic<uint8_t> unlink_state_{static_cast<uint8_t>(unlink_state::ACTIVE)};
                 atomic<bool> retirement_enqueued_{false};
 
+                uint32_t internal_slot_;
                 KeyType key;
                 ValueType value;
                 int top_level;
