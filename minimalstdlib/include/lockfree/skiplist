@@ -43,6 +43,14 @@ namespace MINIMAL_STD_NAMESPACE
                 uint32_t head = free_list_head_.load(memory_order_acquire);
                 while (head != 0)
                 {
+                    if (head >= MAX_SLOTS)
+                    {
+                        // Corrupted freelist head; reset to fail-safe empty.
+                        free_list_head_.compare_exchange_strong(head, 0, memory_order_acq_rel, memory_order_acquire);
+                        head = free_list_head_.load(memory_order_acquire);
+                        continue;
+                    }
+
                     const uint32_t next = free_next_slot_[head].load(memory_order_acquire);
 
                     if (free_list_head_.compare_exchange_weak(head, next, memory_order_acq_rel))
@@ -66,7 +74,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             static void free_slot(uint32_t slot)
             {
-                if (slot == 0) return;
+                if ((slot == 0) || (slot >= MAX_SLOTS)) return;
 
                 uint32_t head = free_list_head_.load(memory_order_acquire);
                 while (true)
@@ -88,9 +96,25 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr int      ABA_SHIFT     = 32;
             static constexpr uint64_t SLOT_MASK     = (uint64_t{1} << 32) - 1;
 
+            static uint32_t pointer_slot_or_zero(T *ptr)
+            {
+                if (ptr == nullptr)
+                {
+                    return 0;
+                }
+
+                const uint32_t slot = ptr->internal_slot_;
+                if ((slot == 0) || (slot >= MAX_SLOTS))
+                {
+                    return 0;
+                }
+
+                return slot;
+            }
+
             static uint64_t pack(T *ptr, uint32_t aba, bool tombstoned)
             {
-                uint32_t slot = (ptr == nullptr) ? 0 : ptr->internal_slot_;
+                const uint32_t slot = pointer_slot_or_zero(ptr);
                 uint64_t v = static_cast<uint64_t>(slot) & SLOT_MASK;
                 v |= static_cast<uint64_t>(aba & 0x7FFFFFFF) << ABA_SHIFT;
                 if (tombstoned) v |= TOMBSTONE_BIT;
@@ -100,7 +124,7 @@ namespace MINIMAL_STD_NAMESPACE
             static T *unpack_ptr(uint64_t v)
             {
                 uint32_t slot = static_cast<uint32_t>(v & SLOT_MASK);
-                if (slot == 0) return nullptr;
+                if ((slot == 0) || (slot >= MAX_SLOTS)) return nullptr;
                 return slot_table_[slot].load(memory_order_acquire);
             }
 
@@ -193,7 +217,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 uint64_t current = packed_.load(memory_order_acquire);
 
-                const uint32_t expected_slot = (expected_value != nullptr) ? expected_value->internal_slot_ : 0u;
+                const uint32_t expected_slot = pointer_slot_or_zero(expected_value);
                 if (((current & SLOT_MASK) != static_cast<uint64_t>(expected_slot)) || is_tombstoned_val(current))
                 {
                     return false;
@@ -487,6 +511,13 @@ namespace MINIMAL_STD_NAMESPACE
 
                     while (true)
                     {
+                        if (curr == nullptr)
+                        {
+                            // Corrupted/null link observed; treat as end-of-list sentinel.
+                            curr = NIL;
+                            break;
+                        }
+
                         succ = curr->next_node[level].get(is_tombstoned);
 
                         while (is_tombstoned)
@@ -496,7 +527,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                             if (curr == nullptr)
                             {
-                                return nullptr;
+                                curr = NIL;
+                                is_tombstoned = false;
+                                break;
                             }
 
                             succ = curr->next_node[level].get(is_tombstoned);
@@ -540,7 +573,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                return (curr->key == search_key ? &curr->value : nullptr);
+                return ((curr != nullptr) && (curr->key == search_key) ? &curr->value : nullptr);
             }
 
             bool insert(const KeyType key, const ValueType &value)
@@ -1222,6 +1255,13 @@ namespace MINIMAL_STD_NAMESPACE
                     curr = pred->next_node[level].get_reference();
                     while (true)
                     {
+                        if (curr == nullptr)
+                        {
+                            // Corrupted/null link observed; treat as end-of-list sentinel.
+                            curr = NIL;
+                            break;
+                        }
+
                         //  Skip over soft deleted nodes
 
                         succ = curr->next_node[level].get(is_tombstoned);
@@ -1231,6 +1271,14 @@ namespace MINIMAL_STD_NAMESPACE
                             SkipNode *tombstoned_node = curr;
 
                             curr = succ;
+
+                            if (curr == nullptr)
+                            {
+                                curr = NIL;
+                                is_tombstoned = false;
+                                break;
+                            }
+
                             succ = curr->next_node[level].get(is_tombstoned);
 
                             if (level > 0)
@@ -1268,7 +1316,7 @@ namespace MINIMAL_STD_NAMESPACE
                     succs[level] = curr;
                 }
 
-                return (curr->key == search_key) ? FindResult::FOUND : FindResult::NOT_FOUND;
+                return ((curr != nullptr) && (curr->key == search_key)) ? FindResult::FOUND : FindResult::NOT_FOUND;
             }
 
         };
