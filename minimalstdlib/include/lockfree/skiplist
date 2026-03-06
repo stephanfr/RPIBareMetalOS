@@ -707,6 +707,13 @@ namespace MINIMAL_STD_NAMESPACE
                             
                             while (true)
                             {
+                                if (curr == nullptr)
+                                {
+                                    // Stale handle observed during retry traversal.
+                                    // Restart to refresh preds/succs from a clean search.
+                                    goto RETRY_INSERT;
+                                }
+
                                 succ = curr->next_node[0].get(is_tombstoned);
 
                                 while (is_tombstoned)
@@ -719,6 +726,13 @@ namespace MINIMAL_STD_NAMESPACE
                                     }
 
                                     curr = succ;
+
+                                    if (curr == nullptr)
+                                    {
+                                        // Stale handle observed while helping tombstone unlink.
+                                        goto RETRY_INSERT;
+                                    }
+
                                     succ = curr->next_node[0].get(is_tombstoned);
 
                                     if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
