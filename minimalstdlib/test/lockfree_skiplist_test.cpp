@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -655,6 +656,49 @@ namespace
 
         return nullptr;
     }
+
+    // ---- Interrupt-nested read section validation scaffolding (Phase A, Step 1) ----------
+    // A background "signal bomber" thread fires SIGUSR1 at the test thread while it
+    // loops calling find().  When SIGUSR1 arrives during an active read section (inside
+    // find()), the handler's own find() creates a nested read section — exactly the LIFO
+    // pattern a bare-metal hardware IRQ would cause.  If reader_depth_ accounting is
+    // correct, all increments and decrements balance to 0 and epoch reclaim stays live.
+    using intr_test_list_t = minstd::skip_list<uint32_t, uint32_t, 8>;
+    static intr_test_list_t *s_intr_list = nullptr;
+    static volatile sig_atomic_t s_intr_signal_count = 0;
+    static volatile sig_atomic_t s_intr_nested_count = 0;
+
+    static void sigusr1_nested_read_handler(int)
+    {
+        if (s_intr_list != nullptr)
+        {
+            auto *value = s_intr_list->find(0u);
+            if (value != nullptr)
+            {
+                // Use assignment form to avoid C++20 deprecated ++volatile warning.
+                s_intr_nested_count = s_intr_nested_count + 1;
+            }
+            s_intr_signal_count = s_intr_signal_count + 1;
+        }
+    }
+
+    struct intr_test_bomber_args
+    {
+        pthread_t target_thread;
+        minstd::atomic<bool> *stop_flag;
+    };
+
+    static void *intr_test_bomber_fn(void *arg)
+    {
+        auto *a = static_cast<intr_test_bomber_args *>(arg);
+        while (!a->stop_flag->load(minstd::memory_order_acquire))
+        {
+            pthread_kill(a->target_thread, SIGUSR1);
+            sched_yield();
+        }
+        return nullptr;
+    }
+    // ---------------------------------------------------------------------------------
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -1510,6 +1554,75 @@ namespace
 #ifdef __MINIMAL_STD_TEST__
         CHECK_TRUE(list.debug_validate_ordering());
 #endif
+    }
+
+    TEST(SkiplistTests, InterruptNestedReadSectionDepthCorrectness)
+    {
+        // Phase A Step 1: validate that begin_read_section / end_read_section are
+        // interrupt-safe under LIFO nesting without interrupt guards.
+        //
+        // A background signal-bomber thread fires SIGUSR1 at this thread while it
+        // loops calling find().  When the signal arrives inside an active find() call
+        // (which holds an epoch_read_section_guard), the handler's own find() creates
+        // a nested read section.  Correct atomic depth accounting: outer find enters
+        // (+1), handler's find enters (+1) and exits (-1), outer find exits (-1) —
+        // depth returns to 0 every time.  A phantom residual depth would block epoch
+        // advancement, observable via the insert/remove reclaim cycles below.
+        static constexpr uint32_t KEY_COUNT = 64;
+        static constexpr size_t FIND_ITERATIONS = 100000;
+
+        intr_test_list_t list;
+        for (uint32_t k = 0; k < KEY_COUNT; ++k)
+        {
+            CHECK_TRUE(list.insert(k, k));
+        }
+
+        s_intr_list = &list;
+        s_intr_signal_count = 0;
+        s_intr_nested_count = 0;
+
+        struct sigaction sa{};
+        struct sigaction sa_old{};
+        sa.sa_handler = sigusr1_nested_read_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = 0;
+        CHECK_EQUAL(0, sigaction(SIGUSR1, &sa, &sa_old));
+
+        minstd::atomic<bool> bomber_stop{false};
+        intr_test_bomber_args bargs{pthread_self(), &bomber_stop};
+        pthread_t bomber;
+        CHECK_EQUAL(0, pthread_create(&bomber, nullptr, intr_test_bomber_fn, &bargs));
+
+        for (size_t i = 0; i < FIND_ITERATIONS; ++i)
+        {
+            const uint32_t key = static_cast<uint32_t>(i % KEY_COUNT);
+            auto *value = list.find(key);
+            CHECK_TRUE(value != nullptr);
+            CHECK_EQUAL(key, *value);
+        }
+
+        bomber_stop.store(true, minstd::memory_order_release);
+        pthread_join(bomber, nullptr);
+
+        // At least some signals must have fired during active read sections.
+        CHECK_TRUE(s_intr_signal_count > 0);
+
+        // Verify epoch reclaim is unblocked (no phantom readers blocking advancement).
+        for (size_t cycle = 0; cycle < 5; ++cycle)
+        {
+            for (uint32_t k = 0; k < KEY_COUNT; ++k) { list.remove(k); }
+            for (uint32_t k = 0; k < KEY_COUNT; ++k)
+            {
+                CHECK_TRUE(list.insert(k, k + static_cast<uint32_t>(cycle) + 1u));
+            }
+        }
+
+#ifdef __MINIMAL_STD_TEST__
+        CHECK_TRUE(list.debug_validate_ordering());
+#endif
+
+        s_intr_list = nullptr;
+        sigaction(SIGUSR1, &sa_old, nullptr);
     }
 
     TEST(SkiplistWriteCorrectnessTests, ConcurrentInsertContentOrderingThenSequentialRemove)

@@ -368,7 +368,9 @@ namespace MINIMAL_STD_NAMESPACE
             struct alignas(64) cpu_slot_state
             {
                 // Cache line 1: fields accessed only by the owning CPU
-                uint32_t reclaim_throttle_counter_ = 0;
+                // atomic<uint32_t>: interrupt-safe under bare-metal LIFO preemption;
+                // relaxed ordering suffices (only the owning CPU reads/writes this field).
+                atomic<uint32_t> reclaim_throttle_counter_{0};
                 uint32_t reclaim_throttle_period_ = EPOCH_RECLAIM_THROTTLE_INITIAL;
                 atomic<SkipNode *> local_retired_head_{nullptr};
                 atomic<uint64_t> rng_state_{0};
@@ -390,7 +392,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 void initialize(uint32_t unassigned_cpu_id, uint64_t rng_seed)
                 {
-                    reclaim_throttle_counter_ = 0;
+                    reclaim_throttle_counter_.store(0, memory_order_relaxed);
                     reclaim_throttle_period_ = EPOCH_RECLAIM_THROTTLE_INITIAL;
                     local_retired_head_.store(nullptr, memory_order_relaxed);
                     rng_state_.store(rng_seed, memory_order_relaxed);
@@ -456,17 +458,17 @@ namespace MINIMAL_STD_NAMESPACE
 
                 void increment_reclaim_throttle()
                 {
-                    ++reclaim_throttle_counter_;
+                    reclaim_throttle_counter_.fetch_add(1, memory_order_relaxed);
                 }
 
                 bool reclaim_throttle_triggered() const
                 {
-                    return reclaim_throttle_counter_ >= reclaim_throttle_period_;
+                    return reclaim_throttle_counter_.load(memory_order_relaxed) >= reclaim_throttle_period_;
                 }
 
                 void adapt_reclaim_throttle(uint32_t nodes_freed, bool epoch_advanced)
                 {
-                    reclaim_throttle_counter_ = 0;
+                    reclaim_throttle_counter_.store(0, memory_order_relaxed);
 
                     if (nodes_freed > 0 && epoch_advanced)
                     {
