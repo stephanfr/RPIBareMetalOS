@@ -910,7 +910,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                             if (bottom_retry_count >= MAX_REMOVE_BOTTOM_RETRIES)
                             {
-                                goto RETRY_REMOVE;
+                                // Avoid livelock under heavy contention on the same key.
+                                // A future operation can retry from a fresh call boundary.
+                                return false;
                             }
 
                             backoff(bottom_retry_backoff, read_guard.cpu_slot_);
@@ -942,7 +944,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                                         if (local_assist_failures >= MAX_REMOVE_LOCAL_ASSIST_FAILURES)
                                         {
-                                            goto RETRY_REMOVE;
+                                            // Avoid spinning forever in local assist when
+                                            // upper-level progress does not converge.
+                                            return false;
                                         }
 
                                         backoff(bottom_retry_backoff, read_guard.cpu_slot_);
