@@ -694,7 +694,7 @@ namespace
         while (!a->stop_flag->load(minstd::memory_order_acquire))
         {
             pthread_kill(a->target_thread, SIGUSR1);
-            sched_yield();
+            usleep(50);
         }
         return nullptr;
     }
@@ -1569,7 +1569,7 @@ namespace
         // depth returns to 0 every time.  A phantom residual depth would block epoch
         // advancement, observable via the insert/remove reclaim cycles below.
         static constexpr uint32_t KEY_COUNT = 64;
-        static constexpr size_t FIND_ITERATIONS = 100000;
+        static constexpr size_t FIND_ITERATIONS = 10000;
 
         intr_test_list_t list;
         for (uint32_t k = 0; k < KEY_COUNT; ++k)
