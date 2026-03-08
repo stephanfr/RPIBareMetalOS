@@ -12,7 +12,14 @@
 #include <utility>
 #include <__platform/cpu_platform_abstractions.h>
 
+#include "epoch_policy"
+#include "epoch_reclaimer_core"
 #define DEFAULT_MAX_LEVELS 16
+
+#ifndef MINIMAL_STD_SKIPLIST_MAX_SLOTS
+// Default to 1M slots (was 16M) to reduce static memory footprint.
+#define MINIMAL_STD_SKIPLIST_MAX_SLOTS (1u << 20)
+#endif
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -31,7 +38,7 @@ namespace MINIMAL_STD_NAMESPACE
         struct atomic_forward_link
         {
         public:
-            static constexpr uint32_t MAX_SLOTS = 16777216;
+            static constexpr uint32_t MAX_SLOTS = MINIMAL_STD_SKIPLIST_MAX_SLOTS;
 
             struct slot_handle
             {
@@ -40,10 +47,24 @@ namespace MINIMAL_STD_NAMESPACE
             };
 
             static inline atomic<uint32_t> next_free_slot_{1};
+            static inline atomic<uint32_t> high_water_slot_{0};
             static inline array<atomic<T *>, MAX_SLOTS> slot_table_{};
             static inline array<atomic<uint32_t>, MAX_SLOTS> free_next_slot_{};
             static inline array<atomic<uint32_t>, MAX_SLOTS> slot_generation_{};
             static inline atomic<uint32_t> free_list_head_{0};
+
+            static void update_high_water_slot(uint32_t slot)
+            {
+                uint32_t observed = high_water_slot_.load(memory_order_relaxed);
+
+                while (observed < slot)
+                {
+                    if (high_water_slot_.compare_exchange_weak(observed, slot, memory_order_relaxed, memory_order_relaxed))
+                    {
+                        break;
+                    }
+                }
+            }
 
             static slot_handle allocate_slot(T *ptr)
             {
@@ -62,6 +83,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (free_list_head_.compare_exchange_weak(head, next, memory_order_acq_rel))
                     {
+                        update_high_water_slot(head);
+
                         uint32_t generation = slot_generation_[head].load(memory_order_relaxed);
                         generation = (generation + 1u) & GENERATION_MASK;
                         if (generation == 0)
@@ -78,6 +101,8 @@ namespace MINIMAL_STD_NAMESPACE
                 uint32_t idx = next_free_slot_.fetch_add(1, memory_order_acq_rel);
                 if (idx < MAX_SLOTS)
                 {
+                    update_high_water_slot(idx);
+
                     const uint32_t generation = 1;
                     slot_generation_[idx].store(generation, memory_order_release);
                     slot_table_[idx].store(ptr, memory_order_release);
@@ -190,6 +215,21 @@ namespace MINIMAL_STD_NAMESPACE
                 return static_cast<uint32_t>((v >> GENERATION_SHIFT) & GENERATION_MASK);
             }
 
+#ifdef __MINIMAL_STD_TEST__
+        public:
+            static uint32_t debug_slot_high_water_mark()
+            {
+                return high_water_slot_.load(memory_order_relaxed);
+            }
+
+            static void debug_reset_slot_high_water_mark()
+            {
+                high_water_slot_.store(0, memory_order_relaxed);
+            }
+
+        private:
+#endif
+
         public:
             atomic_forward_link(const atomic_forward_link &) = delete;
             atomic_forward_link &operator=(const atomic_forward_link &) = delete;
@@ -293,7 +333,6 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr uint32_t MAX_INSERT_LOCAL_ASSIST_FAILURES = 8;
             static constexpr uint32_t MAX_REMOVE_LOCAL_ASSIST_FAILURES = 8;
             static constexpr uint32_t BACKOFF_MAX_RELAX_SPINS = 32;
-            static constexpr uint32_t INVALID_CPU_ID = std::numeric_limits<uint32_t>::max();
             static constexpr uint64_t EPOCH_RECLAIM_LAG = 2;
             static constexpr uint32_t EPOCH_RECLAIM_THROTTLE_INITIAL = 16;
             static constexpr uint32_t EPOCH_RECLAIM_THROTTLE_MIN = 4;
@@ -365,153 +404,9 @@ namespace MINIMAL_STD_NAMESPACE
                 array<atomic_forward_link<SkipNode>, MAX_LEVELS + 1> next_node;
             };
 
-            struct alignas(64) cpu_slot_state
-            {
-                // Cache line 1: fields accessed only by the owning CPU
-                // atomic<uint32_t>: interrupt-safe under bare-metal LIFO preemption;
-                // relaxed ordering suffices (only the owning CPU reads/writes this field).
-                atomic<uint32_t> reclaim_throttle_counter_{0};
-                uint32_t reclaim_throttle_period_ = EPOCH_RECLAIM_THROTTLE_INITIAL;
-                atomic<SkipNode *> local_retired_head_{nullptr};
-                atomic<uint64_t> rng_state_{0};
-                uint8_t cl1_padding_[40]{}; // fills cache line 1 to 64 bytes
+            using slot_policy_type = bare_metal_cpu_slot_policy<SkipNode, NumCPUs, EPOCH_RECLAIM_THROTTLE_INITIAL, EPOCH_RECLAIM_THROTTLE_MIN>;
+            using epoch_reclaimer_type = epoch_reclaimer_core<slot_policy_type, NumCPUs, EPOCH_RECLAIM_LAG>;
 
-                // Cache line 2: fields accessed by all CPUs (epoch tracking + slot assignment)
-                // reader_depth_ is the sole authoritative reader-presence indicator.
-                // Using a separate reader_active_ flag caused two race windows:
-                //   1. Entry gap:  depth incremented (fetch_add) before active=true,
-                //      so reclaimer could skip the slot and free nodes mid-entry.
-                //   2. Exit clobber: late active=false store from an exiting thread
-                //      overwrote an entering thread's active=true, making the slot
-                //      appear idle while depth > 0.
-                // A single depth==0 check has neither window.
-                atomic<uint64_t> reader_epoch_{0};
-                atomic<uint32_t> reader_depth_{0};
-                atomic<uint32_t> assigned_cpu_id_{0};
-                uint8_t cl2_padding_[48]{}; // fills cache line 2 to 64 bytes
-
-                void initialize(uint32_t unassigned_cpu_id, uint64_t rng_seed)
-                {
-                    reclaim_throttle_counter_.store(0, memory_order_relaxed);
-                    reclaim_throttle_period_ = EPOCH_RECLAIM_THROTTLE_INITIAL;
-                    local_retired_head_.store(nullptr, memory_order_relaxed);
-                    rng_state_.store(rng_seed, memory_order_relaxed);
-                    reader_epoch_.store(0, memory_order_relaxed);
-                    reader_depth_.store(0, memory_order_relaxed);
-                    assigned_cpu_id_.store(unassigned_cpu_id, memory_order_relaxed);
-                }
-
-                bool try_claim_cpu_id(uint32_t cpu_id, uint32_t unassigned_cpu_id)
-                {
-                    uint32_t expected_unassigned = unassigned_cpu_id;
-                    return assigned_cpu_id_.compare_exchange_strong(expected_unassigned, cpu_id, memory_order_acq_rel, memory_order_acquire);
-                }
-
-                bool is_owned_by_cpu_id(uint32_t cpu_id) const
-                {
-                    return assigned_cpu_id_.load(memory_order_acquire) == cpu_id;
-                }
-
-                uint32_t begin_read_section(uint64_t current_epoch)
-                {
-                    // Multiple Linux test threads can share one slot when they run
-                    // on the same CPU id, so depth transitions must be synchronized.
-                    const uint32_t previous_depth = reader_depth_.fetch_add(1, memory_order_acq_rel);
-
-                    if (previous_depth == 0)
-                    {
-                        reader_epoch_.store(current_epoch, memory_order_release);
-                    }
-
-                    return previous_depth;
-                }
-
-                void end_read_section()
-                {
-                    uint32_t current_depth = reader_depth_.load(memory_order_acquire);
-
-                    while (true)
-                    {
-                        if (current_depth == 0)
-                        {
-                            return;
-                        }
-
-                        const uint32_t next_depth = current_depth - 1;
-
-                        if (reader_depth_.compare_exchange_strong(current_depth, next_depth, memory_order_acq_rel, memory_order_acquire))
-                        {
-                            return;
-                        }
-                    }
-                }
-
-                bool reader_is_active() const
-                {
-                    return reader_depth_.load(memory_order_acquire) > 0;
-                }
-
-                uint64_t reader_snapshot_epoch() const
-                {
-                    return reader_epoch_.load(memory_order_acquire);
-                }
-
-                void increment_reclaim_throttle()
-                {
-                    reclaim_throttle_counter_.fetch_add(1, memory_order_relaxed);
-                }
-
-                bool reclaim_throttle_triggered() const
-                {
-                    return reclaim_throttle_counter_.load(memory_order_relaxed) >= reclaim_throttle_period_;
-                }
-
-                void adapt_reclaim_throttle(uint32_t nodes_freed, bool epoch_advanced)
-                {
-                    reclaim_throttle_counter_.store(0, memory_order_relaxed);
-
-                    if (nodes_freed > 0 && epoch_advanced)
-                    {
-                        if (reclaim_throttle_period_ > EPOCH_RECLAIM_THROTTLE_MIN)
-                        {
-                            --reclaim_throttle_period_;
-                        }
-                    }
-                    else if (reclaim_throttle_period_ < EPOCH_RECLAIM_THROTTLE_INITIAL)
-                    {
-                        ++reclaim_throttle_period_;
-                    }
-                }
-
-                uint64_t load_rng_state() const
-                {
-                    return rng_state_.load(memory_order_relaxed);
-                }
-
-                void store_rng_state(uint64_t state)
-                {
-                    rng_state_.store(state, memory_order_relaxed);
-                }
-            };
-
-            static_assert((sizeof(cpu_slot_state) % 64) == 0, "cpu_slot_state must be cache-line sized");
-
-            struct epoch_read_section_guard
-            {
-                explicit epoch_read_section_guard(const skip_list *list)
-                    : list_(list)
-                {
-                    cpu_slot_ = list_->enter_read_section();
-                }
-
-                ~epoch_read_section_guard()
-                {
-                    list_->exit_read_section(cpu_slot_);
-                }
-
-                const skip_list *list_;
-                size_t cpu_slot_ = 0;
-            };
 
         public:
 
@@ -521,12 +416,8 @@ namespace MINIMAL_STD_NAMESPACE
         using allocator_type = allocator<value_type>;
 
             skip_list()
+                : epoch_reclaimer_(slot_policy_)
             {
-                for (size_t i = 0; i < NumCPUs; ++i)
-                {
-                    cpu_slots_[i].initialize(INVALID_CPU_ID, 0x9e3779b97f4a7c15ull ^ (static_cast<uint64_t>(i) * 0xbf58476d1ce4e5b9ull));
-                }
-
                 NIL = new SkipNode(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
                 head = new SkipNode(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL);
             }
@@ -889,7 +780,7 @@ namespace MINIMAL_STD_NAMESPACE
                                     }
                                 }
 
-                                cpu_slot_state &slot_state = cpu_slots_[read_guard.cpu_slot_];
+                                auto &slot_state = slot_policy_.slot(read_guard.cpu_slot_);
 
                                 slot_state.increment_reclaim_throttle();
 
@@ -996,6 +887,16 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
 #ifdef __MINIMAL_STD_TEST__
+            static uint32_t debug_slot_high_water_mark()
+            {
+                return atomic_forward_link<SkipNode>::debug_slot_high_water_mark();
+            }
+
+            static void debug_reset_slot_high_water_mark()
+            {
+                atomic_forward_link<SkipNode>::debug_reset_slot_high_water_mark();
+            }
+
             bool debug_validate_ordering() const
             {
                 epoch_read_section_guard read_guard(this);
@@ -1054,13 +955,13 @@ namespace MINIMAL_STD_NAMESPACE
         private:
             SkipNode *head;
             SkipNode *NIL;
-            mutable array<cpu_slot_state, NumCPUs> cpu_slots_{};
-            mutable atomic<uint64_t> global_epoch_{1};
+            mutable slot_policy_type slot_policy_{};
+            mutable epoch_reclaimer_type epoch_reclaimer_;
 
             int random_level()
             {
                 const size_t slot = current_cpu_slot();
-                uint64_t state = cpu_slots_[slot].load_rng_state();
+                uint64_t state = slot_policy_.slot(slot).load_rng_state();
 
                 int new_level = 1;
 
@@ -1083,7 +984,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                cpu_slots_[slot].store_rng_state(state);
+                slot_policy_.slot(slot).store_rng_state(state);
 
                 return new_level;
             }
@@ -1096,13 +997,13 @@ namespace MINIMAL_STD_NAMESPACE
 
             void backoff(uint32_t &backoff_state, size_t cpu_slot)
             {
-                uint64_t state = cpu_slots_[cpu_slot].load_rng_state();
+                uint64_t state = slot_policy_.slot(cpu_slot).load_rng_state();
 
                 state ^= (state << 13);
                 state ^= (state >> 7);
                 state ^= (state << 17);
 
-                cpu_slots_[cpu_slot].store_rng_state(state);
+                slot_policy_.slot(cpu_slot).store_rng_state(state);
 
                 const uint32_t base_spins = (backoff_state < BACKOFF_MAX_RELAX_SPINS) ? backoff_state : BACKOFF_MAX_RELAX_SPINS;
                 const uint32_t jitter_spins = static_cast<uint32_t>(state & 0x3u);
@@ -1128,13 +1029,13 @@ namespace MINIMAL_STD_NAMESPACE
                     return;
                 }
 
-                node->retired_epoch_ = global_epoch_.load(memory_order_acquire);
+                node->retired_epoch_ = epoch_reclaimer_.current_epoch();
 
                 // Push to per-CPU retired list. Using a CAS loop for correctness on
                 // test/Linux environments where thread migration can cause two logical
                 // threads to share the same CPU slot briefly. On bare-metal (one thread
                 // per CPU), the CAS succeeds first-try with zero contention.
-                cpu_slot_state &slot = cpu_slots_[cpu_slot];
+                auto &slot = slot_policy_.slot(cpu_slot);
                 SkipNode *old_head = slot.local_retired_head_.load(memory_order_relaxed);
                 do
                 {
@@ -1144,115 +1045,28 @@ namespace MINIMAL_STD_NAMESPACE
 
             size_t current_cpu_slot() const
             {
-                const uint32_t cpu_id = pmr::platform::get_cpu_id();
-
-                const size_t initial_slot = static_cast<size_t>(cpu_id) % NumCPUs;
-
-                for (size_t probe = 0; probe < NumCPUs; ++probe)
-                {
-                    const size_t slot = (initial_slot + probe) % NumCPUs;
-
-                    if (cpu_slots_[slot].try_claim_cpu_id(cpu_id, INVALID_CPU_ID))
-                    {
-                        return slot;
-                    }
-
-                    if (cpu_slots_[slot].is_owned_by_cpu_id(cpu_id))
-                    {
-                        return slot;
-                    }
-                }
-
-                return initial_slot;
+                return slot_policy_.acquire_slot();
             }
 
+            public:
             size_t enter_read_section() const
             {
-                const size_t slot = current_cpu_slot();
-
-                const uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
-                (void)cpu_slots_[slot].begin_read_section(current_epoch);
-
-                return slot;
+                return epoch_reclaimer_.enter_read_section();
             }
 
             void exit_read_section(size_t slot) const
             {
-                cpu_slots_[slot].end_read_section();
+                epoch_reclaimer_.exit_read_section(slot);
             }
 
             bool try_advance_epoch(size_t exempt_slot)
             {
-                uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
-
-                for (size_t i = 0; i < NumCPUs; ++i)
-                {
-                    // Self-exempt only when we are the sole occupant of this slot.
-                    // On Linux/test environments, multiple threads can share a CPU slot;
-                    // if reader_depth > 1, a co-tenant's read section is also active
-                    // and its epoch must be respected.
-                    if (i == exempt_slot && cpu_slots_[i].reader_depth_.load(memory_order_acquire) <= 1)
-                    {
-                        continue;
-                    }
-
-                    if (!cpu_slots_[i].reader_is_active())
-                    {
-                        continue;
-                    }
-
-                    const uint64_t reader_epoch = cpu_slots_[i].reader_snapshot_epoch();
-
-                    if (reader_epoch < current_epoch)
-                    {
-                        return false;
-                    }
-                }
-
-                bool advanced = global_epoch_.compare_exchange_strong(current_epoch, current_epoch + 1, memory_order_acq_rel, memory_order_acquire);
-
-                return advanced;
+                return epoch_reclaimer_.try_advance_epoch(exempt_slot);
             }
 
-            uint32_t reclaim_from_per_cpu_list(size_t cpu_slot)
+            uint32_t reclaim_detached_retired_list(size_t cpu_slot, SkipNode *current, uint64_t reclaim_epoch)
             {
-                uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
-
-                if (current_epoch <= EPOCH_RECLAIM_LAG)
-                {
-                    return 0;
-                }
-
-                const uint64_t reclaim_epoch = current_epoch - EPOCH_RECLAIM_LAG;
-
-                // Verify all active readers have advanced past the reclaim watermark.
-                for (size_t i = 0; i < NumCPUs; ++i)
-                {
-                    // Self-exempt only when we are the sole occupant of this slot.
-                    // On Linux/test environments, multiple threads can share a CPU slot;
-                    // if reader_depth > 1, a co-tenant's read section is also active
-                    // and its (potentially older) epoch must be respected.
-                    if (i == cpu_slot && cpu_slots_[i].reader_depth_.load(memory_order_acquire) <= 1)
-                    {
-                        continue;
-                    }
-
-                    if (!cpu_slots_[i].reader_is_active())
-                    {
-                        continue;
-                    }
-
-                    const uint64_t reader_epoch = cpu_slots_[i].reader_snapshot_epoch();
-
-                    if (reader_epoch <= reclaim_epoch)
-                    {
-                        return 0; // not yet safe to reclaim
-                    }
-                }
-
-                // Take this CPU's per-CPU retired list.
-                cpu_slot_state &slot = cpu_slots_[cpu_slot];
-                SkipNode *current = slot.local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+                auto &slot = slot_policy_.slot(cpu_slot);
 
                 uint32_t nodes_freed = 0;
                 SkipNode *retained_head = nullptr;
@@ -1297,16 +1111,22 @@ namespace MINIMAL_STD_NAMESPACE
 
             pair<uint32_t, bool> advance_and_reclaim(size_t cpu_slot)
             {
-                const bool epoch_advanced = try_advance_epoch(cpu_slot);
-                const uint32_t nodes_freed = reclaim_from_per_cpu_list(cpu_slot);
-                return {nodes_freed, epoch_advanced};
+                return epoch_reclaimer_.advance_and_reclaim(
+                    cpu_slot,
+                    [this](size_t reclaim_slot) {
+                        return slot_policy_.slot(reclaim_slot).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+                    },
+                    [this](size_t reclaim_slot, SkipNode *detached_head, uint64_t reclaim_epoch) {
+                        return reclaim_detached_retired_list(reclaim_slot, detached_head, reclaim_epoch);
+                    }
+                );
             }
 
             void reclaim_all_retired_nodes()
             {
                 for (size_t i = 0; i < NumCPUs; ++i)
                 {
-                    SkipNode *node = cpu_slots_[i].local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+                    SkipNode *node = slot_policy_.slot(i).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
 
                     while (node != nullptr)
                     {
