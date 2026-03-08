@@ -95,8 +95,7 @@ namespace MINIMAL_STD_NAMESPACE
                     return current_block;
                 }
 
-                slot_block* new_block = allocator<slot_block>().allocate(1);
-                new (new_block) slot_block();
+                slot_block* new_block = new slot_block();
 
                 if (blocks_[block_index].compare_exchange_strong(current_block, new_block, memory_order_release, memory_order_acquire))
                 {
@@ -109,8 +108,7 @@ namespace MINIMAL_STD_NAMESPACE
                 }
                 else
                 {
-                    new_block->~slot_block();
-                    allocator<slot_block>().deallocate(new_block, 1);
+                    delete new_block;
                     return current_block;
                 }
             }
@@ -624,6 +622,11 @@ namespace MINIMAL_STD_NAMESPACE
                         if (new_node == nullptr)
                         {
                             new_node = new SkipNode(key, value, top_level);
+                            if (new_node->internal_slot_ == 0)
+                            {
+                                delete new_node;
+                                return false;
+                            }
                         }
 
                         for (auto level = 1; level < top_level; ++level)

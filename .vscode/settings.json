@@ -93,5 +93,6 @@
         "seq": true,
         "timeout": true,
         "java": true
-    }
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }
