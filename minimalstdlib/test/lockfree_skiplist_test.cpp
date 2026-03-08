@@ -8,6 +8,7 @@
 #include <minstdconfig.h>
 
 #include <lockfree/skiplist>
+#include <lockfree/__extensions/skiplist_statistics.h>
 #include <avl_tree>
 #include <heap_allocator>
 #include <single_block_memory_heap>
@@ -725,9 +726,9 @@ namespace
     {
         // 1024 slots per block, so shift is 10.
         // Needs minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS, minstd::skiplist_internal::DEFAULT_MAX_LEVELS, 10>
-        minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS, 16, 10> list;
+        minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS, 16, 10, minstd::skiplist_extensions::skiplist_statistics> list;
 
-        list.debug_reset_slot_high_water_mark();
+        list.reset_slot_high_water_mark();
 
         // Check it starts empty block-wise, or maybe 1 initial block is there?
         // Wait, atomic_forward_link starts with no blocks physically allocated until ensure_block_installed.
@@ -744,7 +745,7 @@ namespace
             CHECK_EQUAL(15000u, list.size());
             
             // Should have ~15 blocks allocated.
-            CHECK_TRUE(list.debug_active_blocks() >= 14);
+            CHECK_TRUE(list.active_blocks() >= 14);
 
             // Remove 14,500 items, leaving 500 items. 
             // We delete deterministically to empty full blocks. If we delete from the end, earlier blocks are left.
@@ -768,7 +769,7 @@ namespace
             // Because it deleted 14500 items, at least 13 blocks must be completely empty and thus returned to the OS.
             // The active blocks should go back down significantly.
             // Since there's only 500 items left, they could all fit in 1 block, although depending on fragmentation it could be slightly more.
-            CHECK_TRUE(list.debug_active_blocks() <= 5);
+            CHECK_TRUE(list.active_blocks() <= 5);
             
             // Clean up the remaining 500 items for the next cycle
             for (uint32_t i = 14501; i <= 15000; ++i)
@@ -1058,9 +1059,7 @@ namespace
 
             CHECK_EQUAL(SKIPLIST_STRESS_KEY_SPACE, list.size());
 
-#ifdef __MINIMAL_STD_TEST__
-            CHECK_TRUE(list.debug_validate_ordering());
-#endif
+            CHECK_TRUE(list.validate_ordering());
         }
     }
 
@@ -1303,7 +1302,7 @@ namespace
     {
         memory_leak_overload_scope_guard memory_leak_overload_guard;
 
-        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS, DEFAULT_MAX_LEVELS, 14, minstd::skiplist_extensions::skiplist_statistics>;
 
         const size_t iterations_per_thread = skiplist_mixed_iterations_per_thread();
         const size_t num_threads = skiplist_perf_thread_count();
@@ -1332,9 +1331,7 @@ namespace
         {
             const write_load_config &cfg = configs[cfg_idx];
 
-    #ifdef __MINIMAL_STD_TEST__
-            list_type::debug_reset_slot_high_water_mark();
-    #endif
+            list_type::reset_slot_high_water_mark();
 
             list_type list;
 
@@ -1420,13 +1417,11 @@ namespace
 
                  uint32_t slot_high_water = 0;
 
-        #ifdef __MINIMAL_STD_TEST__
-                 slot_high_water = list_type::debug_slot_high_water_mark();
+                 slot_high_water = list_type::slot_high_water_mark();
                  if (slot_high_water > overall_slot_high_water)
                  {
                   overall_slot_high_water = slot_high_water;
                  }
-        #endif
 
                  printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu allocs=%zu slot_high_water=%u\n",
                    cfg.label,
@@ -1633,9 +1628,7 @@ namespace
 
         CHECK_EQUAL(SKIPLIST_STRESS_KEY_SPACE, list.size());
 
-#ifdef __MINIMAL_STD_TEST__
-        CHECK_TRUE(list.debug_validate_ordering());
-#endif
+        CHECK_TRUE(list.validate_ordering());
     }
 
     TEST(SkiplistTests, InterruptNestedReadSectionDepthCorrectness)
@@ -1698,9 +1691,7 @@ namespace
             }
         }
 
-#ifdef __MINIMAL_STD_TEST__
-        CHECK_TRUE(list.debug_validate_ordering());
-#endif
+        CHECK_TRUE(list.validate_ordering());
 
         s_intr_list = nullptr;
         sigaction(SIGUSR1, &sa_old, nullptr);
@@ -1781,9 +1772,7 @@ namespace
 
         CHECK_EQUAL(expected_size, list.size());
 
-#ifdef __MINIMAL_STD_TEST__
-        CHECK_TRUE(list.debug_validate_ordering());
-#endif
+        CHECK_TRUE(list.validate_ordering());
 
         for (uint32_t key = 0; key < WRITE_TEST_KEY_SPACE; ++key)
         {
@@ -1801,8 +1790,6 @@ namespace
 
         CHECK_EQUAL(0u, list.size());
 
-    #ifdef __MINIMAL_STD_TEST__
-        CHECK_TRUE(list.debug_validate_ordering());
-    #endif
+        CHECK_TRUE(list.validate_ordering());
     }
 }

@@ -14,6 +14,7 @@
 
 #include "epoch_policy"
 #include "epoch_reclaimer_core"
+#include "__extensions/skiplist_statistics.h"
 #define DEFAULT_MAX_LEVELS 16
 
 #ifndef MINIMAL_STD_SKIPLIST_MAX_SLOTS
@@ -34,7 +35,7 @@ namespace MINIMAL_STD_NAMESPACE
         //    Bits 62-32    : 31-bit slot generation
         //    Bits 31-0     : 32-bit slot table index (safe on all ARM64 configurations)
 
-        template <typename T, uint32_t SlotsPerBlockShift = 14>
+        template <typename T, uint32_t SlotsPerBlockShift = 14, typename SlotStatistics = skiplist_extensions::null_skiplist_slot_statistics>
         struct atomic_forward_link
         {
         public:
@@ -51,11 +52,7 @@ namespace MINIMAL_STD_NAMESPACE
                 uint32_t generation = 0;
             };
 
-#ifdef __MINIMAL_STD_TEST__
-            static inline atomic<uint32_t> debug_active_blocks_{0};
-            static inline atomic<uint32_t> debug_blocks_allocated_{0};
-            static inline atomic<uint32_t> debug_blocks_freed_{0};
-#endif
+            static inline SlotStatistics slot_stats_;
 
             struct alignas(64) slot_block
             {
@@ -68,19 +65,15 @@ namespace MINIMAL_STD_NAMESPACE
                 slot_block* retired_next{nullptr};
                 uint64_t retired_epoch_{0};
 
-#ifdef __MINIMAL_STD_TEST__
                 slot_block()
                 {
-                    debug_active_blocks_.fetch_add(1, memory_order_relaxed);
-                    debug_blocks_allocated_.fetch_add(1, memory_order_relaxed);
+                    slot_stats_.block_allocated();
                 }
 
                 ~slot_block()
                 {
-                    debug_active_blocks_.fetch_sub(1, memory_order_relaxed);
-                    debug_blocks_freed_.fetch_add(1, memory_order_relaxed);
+                    slot_stats_.block_freed();
                 }
-#endif
             };
 
             static inline atomic<uint32_t> next_free_slot_{1};
@@ -371,22 +364,16 @@ namespace MINIMAL_STD_NAMESPACE
                 return static_cast<uint32_t>((v >> GENERATION_SHIFT) & GENERATION_MASK);
             }
 
-#ifdef __MINIMAL_STD_TEST__
         public:
-            static uint32_t debug_slot_high_water_mark()
+            static uint32_t slot_high_water_mark()
             {
                 return high_water_slot_.load(memory_order_relaxed);
             }
 
-            static void debug_reset_slot_high_water_mark()
+            static void reset_slot_high_water_mark()
             {
                 high_water_slot_.store(0, memory_order_relaxed);
             }
-
-        private:
-#endif
-
-        public:
             atomic_forward_link(const atomic_forward_link &) = delete;
             atomic_forward_link &operator=(const atomic_forward_link &) = delete;
             atomic_forward_link(atomic_forward_link &&) = delete;
@@ -478,9 +465,13 @@ namespace MINIMAL_STD_NAMESPACE
             atomic<uint64_t> packed_;
         };
 
-        template <typename KeyType, typename ValueType, size_t NumCPUs, int32_t MAX_LEVELS = DEFAULT_MAX_LEVELS, uint32_t SlotsPerBlockShift = 14> //  NumCPUs: CPU slot array size (mandatory — sizes cpu_slots_); MAX_LEVELS must be signed as we iterate down to and include index 0
-        class skip_list
+        template <typename KeyType, typename ValueType, size_t NumCPUs, int32_t MAX_LEVELS = DEFAULT_MAX_LEVELS, uint32_t SlotsPerBlockShift = 14, typename Statistics = skiplist_extensions::null_skiplist_statistics> //  NumCPUs: CPU slot array size (mandatory — sizes cpu_slots_); MAX_LEVELS must be signed as we iterate down to and include index 0
+        class skip_list : public Statistics
         {
+        private:
+            using slot_statistics_type = typename Statistics::slot_statistics_type;
+            struct SkipNode;
+            using forward_link_type = atomic_forward_link<SkipNode, SlotsPerBlockShift, slot_statistics_type>;
         private:
             static constexpr uint32_t MAX_INSERT_LEVEL0_RETRIES = 1024;
             static constexpr uint32_t MAX_INSERT_UPPER_LEVEL_RETRIES = 256;
@@ -492,9 +483,7 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr uint64_t EPOCH_RECLAIM_LAG = 2;
             static constexpr uint32_t EPOCH_RECLAIM_THROTTLE_INITIAL = 16;
             static constexpr uint32_t EPOCH_RECLAIM_THROTTLE_MIN = 4;
-#ifdef __MINIMAL_STD_TEST__
             static constexpr uint32_t DEBUG_MAX_VALIDATION_STEPS = 1000000;
-#endif
 
             enum class unlink_state : uint8_t
             {
@@ -507,7 +496,7 @@ namespace MINIMAL_STD_NAMESPACE
                 // Constructor for standard nodes
                 SkipNode(const KeyType k, const ValueType &v, const int next_node_size) : key(k), value(v), top_level(next_node_size)
                 {
-                    const auto slot = atomic_forward_link<SkipNode, SlotsPerBlockShift>::allocate_slot(this);
+                    const auto slot = forward_link_type::allocate_slot(this);
                     internal_slot_ = slot.slot;
                     internal_generation_ = slot.generation;
                     if (internal_slot_ != 0)
@@ -519,7 +508,7 @@ namespace MINIMAL_STD_NAMESPACE
                 // Constructor for sentinel nodes head and NIL
                 SkipNode(const KeyType k, const int next_node_size, SkipNode *next_node_target) : key(k), top_level(next_node_size)
                 {
-                    const auto slot = atomic_forward_link<SkipNode, SlotsPerBlockShift>::allocate_slot(this);
+                    const auto slot = forward_link_type::allocate_slot(this);
                     internal_slot_ = slot.slot;
                     internal_generation_ = slot.generation;
                     intialize_next_nodes(next_node_size, next_node_target);
@@ -527,7 +516,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 ~SkipNode()
                 {
-                    atomic_forward_link<SkipNode, SlotsPerBlockShift>::free_slot(internal_slot_);
+                    forward_link_type::free_slot(internal_slot_);
                 }
 
                 SkipNode(const SkipNode &) = delete;
@@ -560,7 +549,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 // Forward links: each packs slot generation + slot index + tombstone in 64 bits.
                 // Placed after hot metadata to avoid polluting the first cache line.
-                array<atomic_forward_link<SkipNode, SlotsPerBlockShift>, MAX_LEVELS + 1> next_node;
+                array<forward_link_type, MAX_LEVELS + 1> next_node;
             };
 
             using slot_policy_type = bare_metal_cpu_slot_policy<SkipNode, NumCPUs, EPOCH_RECLAIM_THROTTLE_INITIAL, EPOCH_RECLAIM_THROTTLE_MIN>;
@@ -1050,33 +1039,32 @@ namespace MINIMAL_STD_NAMESPACE
                 return size;
             }
 
-#ifdef __MINIMAL_STD_TEST__
-            static uint32_t debug_slot_high_water_mark()
+            static uint32_t slot_high_water_mark()
             {
-                return atomic_forward_link<SkipNode, SlotsPerBlockShift>::debug_slot_high_water_mark();
+                return forward_link_type::slot_high_water_mark();
             }
 
-            static void debug_reset_slot_high_water_mark()
+            static void reset_slot_high_water_mark()
             {
-                atomic_forward_link<SkipNode, SlotsPerBlockShift>::debug_reset_slot_high_water_mark();
+                forward_link_type::reset_slot_high_water_mark();
             }
 
-            static uint32_t debug_active_blocks()
+            static uint32_t active_blocks()
             {
-                return atomic_forward_link<SkipNode, SlotsPerBlockShift>::debug_active_blocks_.load(memory_order_relaxed);
+                return forward_link_type::slot_stats_.active_blocks();
             }
 
-            static uint32_t debug_blocks_allocated()
+            static uint32_t blocks_allocated()
             {
-                return atomic_forward_link<SkipNode, SlotsPerBlockShift>::debug_blocks_allocated_.load(memory_order_relaxed);
+                return forward_link_type::slot_stats_.blocks_allocated();
             }
 
-            static uint32_t debug_blocks_freed()
+            static uint32_t blocks_freed()
             {
-                return atomic_forward_link<SkipNode, SlotsPerBlockShift>::debug_blocks_freed_.load(memory_order_relaxed);
+                return forward_link_type::slot_stats_.blocks_freed();
             }
 
-            bool debug_validate_ordering() const
+            bool validate_ordering() const
             {
                 epoch_read_section_guard read_guard(this);
 
@@ -1129,14 +1117,13 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return true;
             }
-#endif
 
         private:
             SkipNode *head;
             SkipNode *NIL;
             mutable slot_policy_type slot_policy_{};
             mutable epoch_reclaimer_type epoch_reclaimer_;
-            mutable array<atomic<typename atomic_forward_link<SkipNode, SlotsPerBlockShift>::slot_block*>, NumCPUs> cpu_retired_blocks_{};
+            mutable array<atomic<typename forward_link_type::slot_block*>, NumCPUs> cpu_retired_blocks_{};
 
             int random_level()
             {
@@ -1260,6 +1247,7 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         delete current;
                         ++nodes_freed;
+                        Statistics::node_reclaimed();
                     }
                     else
                     {
@@ -1291,8 +1279,8 @@ namespace MINIMAL_STD_NAMESPACE
 
             pair<uint32_t, bool> advance_and_reclaim(size_t cpu_slot)
             {
-                using slot_block = typename atomic_forward_link<SkipNode, SlotsPerBlockShift>::slot_block;
-                slot_block* unlinked = atomic_forward_link<SkipNode, SlotsPerBlockShift>::extract_unlinked_blocks();
+                using slot_block = typename forward_link_type::slot_block;
+                slot_block* unlinked = forward_link_type::extract_unlinked_blocks();
                 if (unlinked != nullptr)
                 {
                     uint64_t current_epoch = epoch_reclaimer_.current_epoch();
@@ -1311,13 +1299,13 @@ namespace MINIMAL_STD_NAMESPACE
                     } while (!cpu_retired_blocks_[cpu_slot].compare_exchange_weak(old_head, unlinked, memory_order_release, memory_order_relaxed));
                 }
 
-                return epoch_reclaimer_.advance_and_reclaim(
+                auto result = epoch_reclaimer_.advance_and_reclaim(
                     cpu_slot,
                     [this](size_t reclaim_slot) {
                         return slot_policy_.slot(reclaim_slot).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
                     },
                     [this](size_t reclaim_slot, SkipNode *detached_head, uint64_t reclaim_epoch) {
-                        using slot_block = typename atomic_forward_link<SkipNode, SlotsPerBlockShift>::slot_block;
+                        using slot_block = typename forward_link_type::slot_block;
                         slot_block* b_head = cpu_retired_blocks_[reclaim_slot].exchange(nullptr, memory_order_acq_rel);
                         slot_block* b_retained = nullptr;
                         
@@ -1325,6 +1313,7 @@ namespace MINIMAL_STD_NAMESPACE
                             slot_block* b_next = b_head->retired_next;
                             if (b_head->retired_epoch_ <= reclaim_epoch) {
                                 delete b_head;
+                                Statistics::block_reclaimed();
                             } else {
                                 b_head->retired_next = b_retained;
                                 b_retained = b_head;
@@ -1345,12 +1334,19 @@ namespace MINIMAL_STD_NAMESPACE
                         return reclaim_detached_retired_list(reclaim_slot, detached_head, reclaim_epoch);
                     }
                 );
+
+                if (result.second)
+                {
+                    Statistics::epoch_advanced();
+                }
+
+                return result;
             }
 
             void reclaim_all_retired_nodes()
             {
-                using slot_block = typename atomic_forward_link<SkipNode, SlotsPerBlockShift>::slot_block;
-                slot_block* unlinked = atomic_forward_link<SkipNode, SlotsPerBlockShift>::extract_unlinked_blocks();
+                using slot_block = typename forward_link_type::slot_block;
+                slot_block* unlinked = forward_link_type::extract_unlinked_blocks();
                 while (unlinked != nullptr)
                 {
                     slot_block* next = unlinked->retired_next;
