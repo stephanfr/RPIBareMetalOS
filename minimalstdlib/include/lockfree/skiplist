@@ -58,6 +58,9 @@ namespace MINIMAL_STD_NAMESPACE
                 array<atomic<uint32_t>, SLOTS_PER_BLOCK> slot_generation_{};
                 atomic<uint32_t> free_list_head_{0};
                 atomic<uint32_t> active_slots_{0};
+
+                slot_block* retired_next{nullptr};
+                uint64_t retired_epoch_{0};
             };
 
             static inline atomic<uint32_t> next_free_slot_{1};
@@ -65,6 +68,30 @@ namespace MINIMAL_STD_NAMESPACE
             static inline atomic<uint32_t> high_water_block_{0};
             static inline array<atomic<slot_block*>, MAX_BLOCKS> blocks_{};
             static inline atomic<uint64_t> partially_free_blocks_{0};
+            static inline atomic<slot_block*> unlinked_blocks_{nullptr};
+
+            static void retire_block(slot_block* block, uint32_t block_idx)
+            {
+                uint32_t expected = 0;
+                if (block->active_slots_.compare_exchange_strong(expected, UINT32_MAX, memory_order_acq_rel, memory_order_acquire))
+                {
+                    partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
+                    
+                    slot_block* expected_block = block;
+                    if (blocks_[block_idx].compare_exchange_strong(expected_block, nullptr, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        slot_block* old_unlinked = unlinked_blocks_.load(memory_order_relaxed);
+                        do {
+                            block->retired_next = old_unlinked;
+                        } while (!unlinked_blocks_.compare_exchange_weak(old_unlinked, block, memory_order_release, memory_order_relaxed));
+                    }
+                }
+            }
+
+            static slot_block* extract_unlinked_blocks()
+            {
+                return unlinked_blocks_.exchange(nullptr, memory_order_acq_rel);
+            }
 
             static uint32_t slot_to_block_index(uint32_t slot)
             {
@@ -126,6 +153,22 @@ namespace MINIMAL_STD_NAMESPACE
                     slot_block* block = blocks_[block_idx].load(memory_order_acquire);
                     if (block != nullptr)
                     {
+                        uint32_t active = block->active_slots_.load(memory_order_acquire);
+                        while (active != UINT32_MAX)
+                        {
+                            if (block->active_slots_.compare_exchange_weak(active, active + 1, memory_order_acquire))
+                            {
+                                break;
+                            }
+                        }
+
+                        if (active == UINT32_MAX)
+                        {
+                            partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
+                            available_blocks &= ~(1ULL << block_idx);
+                            continue;
+                        }
+
                         uint32_t head = block->free_list_head_.load(memory_order_acquire);
                         while (head != 0)
                         {
@@ -138,8 +181,6 @@ namespace MINIMAL_STD_NAMESPACE
                                 {
                                     partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
                                 }
-
-                                block->active_slots_.fetch_add(1, memory_order_relaxed);
 
                                 update_high_water_slot(head);
 
@@ -156,10 +197,12 @@ namespace MINIMAL_STD_NAMESPACE
                             }
                         }
                         
-                        if (head == 0)
+                        if (block->active_slots_.fetch_sub(1, memory_order_release) == 1)
                         {
-                            partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
+                             retire_block(block, block_idx);
                         }
+
+                        partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
                     }
                     else
                     {
@@ -211,7 +254,10 @@ namespace MINIMAL_STD_NAMESPACE
                     if (block->free_list_head_.compare_exchange_weak(head, slot, memory_order_acq_rel))
                     {
                         partially_free_blocks_.fetch_or(1ULL << block_idx, memory_order_release);
-                        block->active_slots_.fetch_sub(1, memory_order_release);
+                        if (block->active_slots_.fetch_sub(1, memory_order_release) == 1)
+                        {
+                            retire_block(block, block_idx);
+                        }
                         break;
                     }
                 }
@@ -1055,6 +1101,7 @@ namespace MINIMAL_STD_NAMESPACE
             SkipNode *NIL;
             mutable slot_policy_type slot_policy_{};
             mutable epoch_reclaimer_type epoch_reclaimer_;
+            mutable array<atomic<typename atomic_forward_link<SkipNode>::slot_block*>, NumCPUs> cpu_retired_blocks_{};
 
             int random_level()
             {
@@ -1209,12 +1256,57 @@ namespace MINIMAL_STD_NAMESPACE
 
             pair<uint32_t, bool> advance_and_reclaim(size_t cpu_slot)
             {
+                using slot_block = typename atomic_forward_link<SkipNode>::slot_block;
+                slot_block* unlinked = atomic_forward_link<SkipNode>::extract_unlinked_blocks();
+                if (unlinked != nullptr)
+                {
+                    uint64_t current_epoch = epoch_reclaimer_.current_epoch();
+
+                    slot_block* tail = unlinked;
+                    tail->retired_epoch_ = current_epoch;
+                    while (tail->retired_next != nullptr)
+                    {
+                        tail = tail->retired_next;
+                        tail->retired_epoch_ = current_epoch;
+                    }
+                    
+                    slot_block* old_head = cpu_retired_blocks_[cpu_slot].load(memory_order_relaxed);
+                    do {
+                        tail->retired_next = old_head;
+                    } while (!cpu_retired_blocks_[cpu_slot].compare_exchange_weak(old_head, unlinked, memory_order_release, memory_order_relaxed));
+                }
+
                 return epoch_reclaimer_.advance_and_reclaim(
                     cpu_slot,
                     [this](size_t reclaim_slot) {
                         return slot_policy_.slot(reclaim_slot).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
                     },
                     [this](size_t reclaim_slot, SkipNode *detached_head, uint64_t reclaim_epoch) {
+                        using slot_block = typename atomic_forward_link<SkipNode>::slot_block;
+                        slot_block* b_head = cpu_retired_blocks_[reclaim_slot].exchange(nullptr, memory_order_acq_rel);
+                        slot_block* b_retained = nullptr;
+                        
+                        while(b_head != nullptr) {
+                            slot_block* b_next = b_head->retired_next;
+                            if (b_head->retired_epoch_ <= reclaim_epoch) {
+                                delete b_head;
+                            } else {
+                                b_head->retired_next = b_retained;
+                                b_retained = b_head;
+                            }
+                            b_head = b_next;
+                        }
+
+                        if (b_retained != nullptr) {
+                            slot_block* b_tail = b_retained;
+                            while (b_tail->retired_next != nullptr) b_tail = b_tail->retired_next;
+                            
+                            slot_block* b_old = cpu_retired_blocks_[reclaim_slot].load(memory_order_relaxed);
+                            do {
+                                b_tail->retired_next = b_old;
+                            } while (!cpu_retired_blocks_[reclaim_slot].compare_exchange_weak(b_old, b_retained, memory_order_release, memory_order_relaxed));
+                        }
+
                         return reclaim_detached_retired_list(reclaim_slot, detached_head, reclaim_epoch);
                     }
                 );
@@ -1222,6 +1314,15 @@ namespace MINIMAL_STD_NAMESPACE
 
             void reclaim_all_retired_nodes()
             {
+                using slot_block = typename atomic_forward_link<SkipNode>::slot_block;
+                slot_block* unlinked = atomic_forward_link<SkipNode>::extract_unlinked_blocks();
+                while (unlinked != nullptr)
+                {
+                    slot_block* next = unlinked->retired_next;
+                    delete unlinked;
+                    unlinked = next;
+                }
+
                 for (size_t i = 0; i < NumCPUs; ++i)
                 {
                     SkipNode *node = slot_policy_.slot(i).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
@@ -1231,6 +1332,14 @@ namespace MINIMAL_STD_NAMESPACE
                         SkipNode *next = node->retired_next;
                         delete node;
                         node = next;
+                    }
+
+                    slot_block* b_node = cpu_retired_blocks_[i].exchange(nullptr, memory_order_acq_rel);
+                    while (b_node != nullptr)
+                    {
+                        slot_block* next = b_node->retired_next;
+                        delete b_node;
+                        b_node = next;
                     }
                 }
             }
