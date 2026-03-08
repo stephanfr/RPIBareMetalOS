@@ -38,7 +38,12 @@ namespace MINIMAL_STD_NAMESPACE
         struct atomic_forward_link
         {
         public:
-            static constexpr uint32_t MAX_SLOTS = MINIMAL_STD_SKIPLIST_MAX_SLOTS;
+            static constexpr uint32_t SLOTS_PER_BLOCK_SHIFT = 14;
+            static constexpr uint32_t SLOTS_PER_BLOCK = 1u << SLOTS_PER_BLOCK_SHIFT; // 16384
+            static constexpr uint32_t BLOCK_MASK = SLOTS_PER_BLOCK - 1;
+            
+            static constexpr uint32_t MAX_BLOCKS = (MINIMAL_STD_SKIPLIST_MAX_SLOTS + SLOTS_PER_BLOCK - 1) / SLOTS_PER_BLOCK;
+            static constexpr uint32_t MAX_SLOTS = MAX_BLOCKS * SLOTS_PER_BLOCK;
 
             struct slot_handle
             {
@@ -46,12 +51,28 @@ namespace MINIMAL_STD_NAMESPACE
                 uint32_t generation = 0;
             };
 
+            struct alignas(64) slot_block
+            {
+                array<atomic<T *>, SLOTS_PER_BLOCK> slot_table_{};
+                array<atomic<uint32_t>, SLOTS_PER_BLOCK> free_next_slot_{};
+                array<atomic<uint32_t>, SLOTS_PER_BLOCK> slot_generation_{};
+            };
+
             static inline atomic<uint32_t> next_free_slot_{1};
             static inline atomic<uint32_t> high_water_slot_{0};
-            static inline array<atomic<T *>, MAX_SLOTS> slot_table_{};
-            static inline array<atomic<uint32_t>, MAX_SLOTS> free_next_slot_{};
-            static inline array<atomic<uint32_t>, MAX_SLOTS> slot_generation_{};
+            static inline atomic<uint32_t> high_water_block_{0};
+            static inline array<atomic<slot_block*>, MAX_BLOCKS> blocks_{};
             static inline atomic<uint32_t> free_list_head_{0};
+
+            static uint32_t slot_to_block_index(uint32_t slot)
+            {
+                return slot >> SLOTS_PER_BLOCK_SHIFT;
+            }
+
+            static uint32_t slot_to_block_offset(uint32_t slot)
+            {
+                return slot & BLOCK_MASK;
+            }
 
             static void update_high_water_slot(uint32_t slot)
             {
@@ -63,6 +84,34 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         break;
                     }
+                }
+            }
+
+            static slot_block* ensure_block_installed(uint32_t block_index)
+            {
+                slot_block* current_block = blocks_[block_index].load(memory_order_acquire);
+                if (current_block != nullptr)
+                {
+                    return current_block;
+                }
+
+                slot_block* new_block = allocator<slot_block>().allocate(1);
+                new (new_block) slot_block();
+
+                if (blocks_[block_index].compare_exchange_strong(current_block, new_block, memory_order_release, memory_order_acquire))
+                {
+                    uint32_t observed_hw = high_water_block_.load(memory_order_relaxed);
+                    while (observed_hw < block_index &&
+                           !high_water_block_.compare_exchange_weak(observed_hw, block_index, memory_order_relaxed, memory_order_relaxed))
+                    {
+                    }
+                    return new_block;
+                }
+                else
+                {
+                    new_block->~slot_block();
+                    allocator<slot_block>().deallocate(new_block, 1);
+                    return current_block;
                 }
             }
 
@@ -79,21 +128,25 @@ namespace MINIMAL_STD_NAMESPACE
                         continue;
                     }
 
-                    const uint32_t next = free_next_slot_[head].load(memory_order_acquire);
+                    uint32_t block_idx = slot_to_block_index(head);
+                    uint32_t offset = slot_to_block_offset(head);
+                    slot_block* block = blocks_[block_idx].load(memory_order_acquire);
+
+                    const uint32_t next = block->free_next_slot_[offset].load(memory_order_acquire);
 
                     if (free_list_head_.compare_exchange_weak(head, next, memory_order_acq_rel))
                     {
                         update_high_water_slot(head);
 
-                        uint32_t generation = slot_generation_[head].load(memory_order_relaxed);
+                        uint32_t generation = block->slot_generation_[offset].load(memory_order_relaxed);
                         generation = (generation + 1u) & GENERATION_MASK;
                         if (generation == 0)
                         {
                             generation = 1;
                         }
 
-                        slot_generation_[head].store(generation, memory_order_release);
-                        slot_table_[head].store(ptr, memory_order_release);
+                        block->slot_generation_[offset].store(generation, memory_order_release);
+                        block->slot_table_[offset].store(ptr, memory_order_release);
                         return {head, generation};
                     }
                 }
@@ -101,30 +154,39 @@ namespace MINIMAL_STD_NAMESPACE
                 uint32_t idx = next_free_slot_.fetch_add(1, memory_order_acq_rel);
                 if (idx < MAX_SLOTS)
                 {
+                    uint32_t block_idx = slot_to_block_index(idx);
+                    uint32_t offset = slot_to_block_offset(idx);
+                    
+                    slot_block* block = ensure_block_installed(block_idx);
+
                     update_high_water_slot(idx);
 
                     const uint32_t generation = 1;
-                    slot_generation_[idx].store(generation, memory_order_release);
-                    slot_table_[idx].store(ptr, memory_order_release);
-                    free_next_slot_[idx].store(0, memory_order_relaxed);
+                    block->slot_generation_[offset].store(generation, memory_order_release);
+                    block->slot_table_[offset].store(ptr, memory_order_release);
+                    block->free_next_slot_[offset].store(0, memory_order_relaxed);
                     return {idx, generation};
                 }
 
-                while (true) {} // Out of slots, hang or abort
-                return {};
+                return {0, 0};
             }
 
             static void free_slot(uint32_t slot)
             {
                 if ((slot == 0) || (slot >= MAX_SLOTS)) return;
 
+                uint32_t block_idx = slot_to_block_index(slot);
+                uint32_t offset = slot_to_block_offset(slot);
+                slot_block* block = blocks_[block_idx].load(memory_order_acquire);
+                if (block == nullptr) return; // Should not happen for a valid allocated slot
+
                 uint32_t head = free_list_head_.load(memory_order_acquire);
                 while (true)
                 {
                     // Never store freelist metadata in slot_table_. Readers of
                     // unpack_ptr() must only ever observe real node pointers or nullptr.
-                    slot_table_[slot].store(nullptr, memory_order_release);
-                    free_next_slot_[slot].store(head, memory_order_release);
+                    block->slot_table_[offset].store(nullptr, memory_order_release);
+                    block->free_next_slot_[offset].store(head, memory_order_release);
 
                     if (free_list_head_.compare_exchange_weak(head, slot, memory_order_acq_rel))
                     {
@@ -196,13 +258,19 @@ namespace MINIMAL_STD_NAMESPACE
                 if ((slot == 0) || (slot >= MAX_SLOTS)) return nullptr;
 
                 const uint32_t handle_generation = unpack_generation(v);
-                const uint32_t table_generation = slot_generation_[slot].load(memory_order_acquire);
+                
+                uint32_t block_idx = slot_to_block_index(slot);
+                uint32_t offset = slot_to_block_offset(slot);
+                slot_block* block = blocks_[block_idx].load(memory_order_acquire);
+                if (block == nullptr) return nullptr;
+
+                const uint32_t table_generation = block->slot_generation_[offset].load(memory_order_acquire);
                 if ((handle_generation == 0) || (table_generation != handle_generation))
                 {
                     return nullptr;
                 }
 
-                return slot_table_[slot].load(memory_order_acquire);
+                return block->slot_table_[offset].load(memory_order_acquire);
             }
 
             static constexpr bool is_tombstoned_val(uint64_t v)
@@ -354,7 +422,10 @@ namespace MINIMAL_STD_NAMESPACE
                     const auto slot = atomic_forward_link<SkipNode>::allocate_slot(this);
                     internal_slot_ = slot.slot;
                     internal_generation_ = slot.generation;
-                    intialize_next_nodes(next_node_size, nullptr);
+                    if (internal_slot_ != 0)
+                    {
+                        intialize_next_nodes(next_node_size, nullptr);
+                    }
                 }
 
                 // Constructor for sentinel nodes head and NIL

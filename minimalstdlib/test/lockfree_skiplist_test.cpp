@@ -1264,9 +1264,15 @@ namespace
         printf("Skiplist + malloc/free wrapper write-load perf: threads=%zu iterations/thread=%zu initial_occupancy=%zu%%\n",
                num_threads, iterations_per_thread, SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT);
 
+        uint32_t overall_slot_high_water = 0;
+
         for (size_t cfg_idx = 0; cfg_idx < sizeof(configs) / sizeof(configs[0]); ++cfg_idx)
         {
             const write_load_config &cfg = configs[cfg_idx];
+
+    #ifdef __MINIMAL_STD_TEST__
+            list_type::debug_reset_slot_high_water_mark();
+    #endif
 
             list_type list;
 
@@ -1350,12 +1356,23 @@ namespace
                                     (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
             const double ops_per_sec = static_cast<double>(total_operations) / duration;
 
-            printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu allocs=%zu\n",
+                 uint32_t slot_high_water = 0;
+
+        #ifdef __MINIMAL_STD_TEST__
+                 slot_high_water = list_type::debug_slot_high_water_mark();
+                 if (slot_high_water > overall_slot_high_water)
+                 {
+                  overall_slot_high_water = slot_high_water;
+                 }
+        #endif
+
+                 printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu allocs=%zu slot_high_water=%u\n",
                    cfg.label,
                    ops_per_sec,
                    total_insert_successes,
                    total_remove_successes,
-                   total_composite_allocations);
+                     total_composite_allocations,
+                     slot_high_water);
 
             CHECK_EQUAL(expected_operations, total_operations);
             CHECK_EQUAL(expected_operations, total_composite_allocations);
@@ -1365,6 +1382,9 @@ namespace
             CHECK_TRUE((total_insert_successes + total_remove_successes) > 0);
             CHECK_TRUE(checksum > 0);
         }
+
+        printf("Skiplist mixed write-load overall slot high-water mark: %u\n", overall_slot_high_water);
+        CHECK_TRUE(overall_slot_high_water > 0u);
     }
 
 
@@ -1569,7 +1589,6 @@ namespace
         // depth returns to 0 every time.  A phantom residual depth would block epoch
         // advancement, observable via the insert/remove reclaim cycles below.
         static constexpr uint32_t KEY_COUNT = 64;
-        static constexpr size_t FIND_ITERATIONS = 10000;
 
         intr_test_list_t list;
         for (uint32_t k = 0; k < KEY_COUNT; ++k)
@@ -1593,7 +1612,7 @@ namespace
         pthread_t bomber;
         CHECK_EQUAL(0, pthread_create(&bomber, nullptr, intr_test_bomber_fn, &bargs));
 
-        for (size_t i = 0; i < FIND_ITERATIONS; ++i)
+        for (size_t i = 0; s_intr_signal_count < 100; ++i)
         {
             const uint32_t key = static_cast<uint32_t>(i % KEY_COUNT);
             auto *value = list.find(key);

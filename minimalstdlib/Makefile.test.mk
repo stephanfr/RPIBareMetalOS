@@ -27,11 +27,19 @@ LDLIBS := -L../minimalclib/lib/x64 -lminimalclib
 TEST_LIB := -L$(CPPUTEST_PATH)/lib -lCppUTest -lCppUTestExt
 
 
-test : clean clean_test lib $(TEST_EXE)
+.PHONY: test test-incremental test-coverage clean_test
+
+
+test:
+	$(MAKE) -f Makefile.test.mk clean
+	$(MAKE) -f Makefile.test.mk clean_test
+	$(MAKE) -f Makefile.test.mk test-incremental
 
 test-incremental : lib $(TEST_EXE)
 
-test-coverage : clean_test $(COVERAGE_EXE)
+test-coverage:
+	$(MAKE) -f Makefile.test.mk clean_test
+	$(MAKE) -f Makefile.test.mk $(COVERAGE_EXE)
 	cd $(COVERAGE_TEST_OBJ_DIR)
 	gcov ../cpputest_main.cpp --object-directory .
 	lcov --capture --directory . --output-file $(COVERAGE_TEST_OBJ_DIR)/test_coverage.info
