@@ -56,13 +56,15 @@ namespace MINIMAL_STD_NAMESPACE
                 array<atomic<T *>, SLOTS_PER_BLOCK> slot_table_{};
                 array<atomic<uint32_t>, SLOTS_PER_BLOCK> free_next_slot_{};
                 array<atomic<uint32_t>, SLOTS_PER_BLOCK> slot_generation_{};
+                atomic<uint32_t> free_list_head_{0};
+                atomic<uint32_t> active_slots_{0};
             };
 
             static inline atomic<uint32_t> next_free_slot_{1};
             static inline atomic<uint32_t> high_water_slot_{0};
             static inline atomic<uint32_t> high_water_block_{0};
             static inline array<atomic<slot_block*>, MAX_BLOCKS> blocks_{};
-            static inline atomic<uint32_t> free_list_head_{0};
+            static inline atomic<uint64_t> partially_free_blocks_{0};
 
             static uint32_t slot_to_block_index(uint32_t slot)
             {
@@ -115,38 +117,56 @@ namespace MINIMAL_STD_NAMESPACE
 
             static slot_handle allocate_slot(T *ptr)
             {
-                uint32_t head = free_list_head_.load(memory_order_acquire);
-                while (head != 0)
+                uint64_t available_blocks = partially_free_blocks_.load(memory_order_acquire);
+                
+                while (available_blocks != 0)
                 {
-                    if (head >= MAX_SLOTS)
-                    {
-                        // Corrupted freelist head; reset to fail-safe empty.
-                        free_list_head_.compare_exchange_strong(head, 0, memory_order_acq_rel, memory_order_acquire);
-                        head = free_list_head_.load(memory_order_acquire);
-                        continue;
-                    }
-
-                    uint32_t block_idx = slot_to_block_index(head);
-                    uint32_t offset = slot_to_block_offset(head);
+                    uint32_t block_idx = __builtin_ctzll(available_blocks);
+                    
                     slot_block* block = blocks_[block_idx].load(memory_order_acquire);
-
-                    const uint32_t next = block->free_next_slot_[offset].load(memory_order_acquire);
-
-                    if (free_list_head_.compare_exchange_weak(head, next, memory_order_acq_rel))
+                    if (block != nullptr)
                     {
-                        update_high_water_slot(head);
-
-                        uint32_t generation = block->slot_generation_[offset].load(memory_order_relaxed);
-                        generation = (generation + 1u) & GENERATION_MASK;
-                        if (generation == 0)
+                        uint32_t head = block->free_list_head_.load(memory_order_acquire);
+                        while (head != 0)
                         {
-                            generation = 1;
-                        }
+                            uint32_t offset = slot_to_block_offset(head);
+                            const uint32_t next = block->free_next_slot_[offset].load(memory_order_acquire);
 
-                        block->slot_generation_[offset].store(generation, memory_order_release);
-                        block->slot_table_[offset].store(ptr, memory_order_release);
-                        return {head, generation};
+                            if (block->free_list_head_.compare_exchange_weak(head, next, memory_order_acq_rel))
+                            {
+                                if (next == 0)
+                                {
+                                    partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
+                                }
+
+                                block->active_slots_.fetch_add(1, memory_order_relaxed);
+
+                                update_high_water_slot(head);
+
+                                uint32_t generation = block->slot_generation_[offset].load(memory_order_relaxed);
+                                generation = (generation + 1u) & GENERATION_MASK;
+                                if (generation == 0)
+                                {
+                                    generation = 1;
+                                }
+
+                                block->slot_generation_[offset].store(generation, memory_order_release);
+                                block->slot_table_[offset].store(ptr, memory_order_release);
+                                return {head, generation};
+                            }
+                        }
+                        
+                        if (head == 0)
+                        {
+                            partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
+                        }
                     }
+                    else
+                    {
+                        partially_free_blocks_.fetch_and(~(1ULL << block_idx), memory_order_release);
+                    }
+                    
+                    available_blocks = partially_free_blocks_.load(memory_order_acquire);
                 }
 
                 uint32_t idx = next_free_slot_.fetch_add(1, memory_order_acq_rel);
@@ -156,6 +176,8 @@ namespace MINIMAL_STD_NAMESPACE
                     uint32_t offset = slot_to_block_offset(idx);
                     
                     slot_block* block = ensure_block_installed(block_idx);
+
+                    block->active_slots_.fetch_add(1, memory_order_relaxed);
 
                     update_high_water_slot(idx);
 
@@ -178,7 +200,7 @@ namespace MINIMAL_STD_NAMESPACE
                 slot_block* block = blocks_[block_idx].load(memory_order_acquire);
                 if (block == nullptr) return; // Should not happen for a valid allocated slot
 
-                uint32_t head = free_list_head_.load(memory_order_acquire);
+                uint32_t head = block->free_list_head_.load(memory_order_acquire);
                 while (true)
                 {
                     // Never store freelist metadata in slot_table_. Readers of
@@ -186,8 +208,10 @@ namespace MINIMAL_STD_NAMESPACE
                     block->slot_table_[offset].store(nullptr, memory_order_release);
                     block->free_next_slot_[offset].store(head, memory_order_release);
 
-                    if (free_list_head_.compare_exchange_weak(head, slot, memory_order_acq_rel))
+                    if (block->free_list_head_.compare_exchange_weak(head, slot, memory_order_acq_rel))
                     {
+                        partially_free_blocks_.fetch_or(1ULL << block_idx, memory_order_release);
+                        block->active_slots_.fetch_sub(1, memory_order_release);
                         break;
                     }
                 }
