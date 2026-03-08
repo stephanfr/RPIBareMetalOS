@@ -721,6 +721,68 @@ namespace
     };
 #pragma GCC diagnostic pop
 
+    TEST(SkiplistTests, BlockGarbageCollection)
+    {
+        // 1024 slots per block, so shift is 10.
+        // Needs minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS, minstd::skiplist_internal::DEFAULT_MAX_LEVELS, 10>
+        minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS, 16, 10> list;
+
+        list.debug_reset_slot_high_water_mark();
+
+        // Check it starts empty block-wise, or maybe 1 initial block is there?
+        // Wait, atomic_forward_link starts with no blocks physically allocated until ensure_block_installed.
+        // Actually, next_free_slot_=1 so slot 0 is skipped.
+
+        for (uint32_t cycle = 0; cycle < 10; ++cycle)
+        {
+            // Insert 15,000 items -> requires 15 blocks.
+            for (uint32_t i = 1; i <= 15000; ++i)
+            {
+                CHECK_TRUE(list.insert(i, i));
+            }
+            
+            CHECK_EQUAL(15000u, list.size());
+            
+            // Should have ~15 blocks allocated.
+            CHECK_TRUE(list.debug_active_blocks() >= 14);
+
+            // Remove 14,500 items, leaving 500 items. 
+            // We delete deterministically to empty full blocks. If we delete from the end, earlier blocks are left.
+            // But wait, the blocks themselves are allocated dynamically based on `next_free_slot_` or `partially_free_blocks_`.
+            // If we remove all, it will definitely empty them!
+            for (uint32_t i = 1; i <= 14500; ++i)
+            {
+                CHECK_TRUE(list.remove(i));
+            }
+
+            CHECK_EQUAL(500u, list.size());
+
+            // Force epochs to advance so unlinked blocks get fully deleted.
+            // On a single-threaded test, advancing the epoch is enough. 
+            for (uint32_t i = 0; i < 50; ++i)
+            {
+                list.try_advance_epoch(0); // slot 0 might not be valid wait...
+                list.find(0xFFFFFFFF); // Traversal participates in epochs
+            }
+
+            // Because it deleted 14500 items, at least 13 blocks must be completely empty and thus returned to the OS.
+            // The active blocks should go back down significantly.
+            // Since there's only 500 items left, they could all fit in 1 block, although depending on fragmentation it could be slightly more.
+            CHECK_TRUE(list.debug_active_blocks() <= 5);
+            
+            // Clean up the remaining 500 items for the next cycle
+            for (uint32_t i = 14501; i <= 15000; ++i)
+            {
+                CHECK_TRUE(list.remove(i));
+            }
+            
+            // Flush again
+            for (uint32_t i = 0; i < 50; ++i)
+            {
+                list.find(0xFFFFFFFF); 
+            }
+        }
+    }
     TEST(SkiplistTests, BasicFunctionality)
     {
         minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS> list;
