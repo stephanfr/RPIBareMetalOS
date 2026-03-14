@@ -955,10 +955,6 @@ namespace
             sched_yield();
         }
 
-        timespec start_time{};
-        timespec end_time{};
-        clock_gettime(CLOCK_MONOTONIC, &start_time);
-
         start.store(true, minstd::memory_order_release);
 
         size_t total_operations = 0;
@@ -969,19 +965,10 @@ namespace
             total_operations += thread_args[i].operations_completed_;
         }
 
-        clock_gettime(CLOCK_MONOTONIC, &end_time);
-
         const size_t expected_operations = SKIPLIST_STRESS_NUM_THREADS * SKIPLIST_STRESS_ITERATIONS_PER_THREAD;
-        const double duration = static_cast<double>(end_time.tv_sec - start_time.tv_sec) +
-                                (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
-        const double ops_per_sec = static_cast<double>(total_operations) / duration;
-
-        printf("Skiplist stress (fixed %zu threads): %f ops/sec\n", SKIPLIST_STRESS_NUM_THREADS, ops_per_sec);
 
         CHECK_EQUAL(expected_operations, total_operations);
         CHECK_EQUAL(static_cast<size_t>(0), validation_failures.load(minstd::memory_order_acquire));
-        CHECK_TRUE(duration > 0.0);
-        CHECK_TRUE(ops_per_sec > 0.0);
 
         CHECK_EQUAL(SKIPLIST_STRESS_KEY_SPACE, list.size());
     }
@@ -990,8 +977,6 @@ namespace
     {
         using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
         const size_t iterations_per_thread = skiplist_scaling_iterations_per_thread();
-
-        printf("Skiplist concurrent find ops/sec (iterations/thread=%zu):\n", iterations_per_thread);
 
         for (size_t num_threads = 1; num_threads <= SKIPLIST_STRESS_MAX_THREADS; ++num_threads)
         {
@@ -1028,10 +1013,6 @@ namespace
                 sched_yield();
             }
 
-            timespec start_time{};
-            timespec end_time{};
-            clock_gettime(CLOCK_MONOTONIC, &start_time);
-
             start.store(true, minstd::memory_order_release);
 
             size_t total_operations = 0;
@@ -1042,19 +1023,10 @@ namespace
                 total_operations += thread_args[i].operations_completed_;
             }
 
-            clock_gettime(CLOCK_MONOTONIC, &end_time);
-
             const size_t expected_operations = num_threads * iterations_per_thread;
-            const double duration = static_cast<double>(end_time.tv_sec - start_time.tv_sec) +
-                                    (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
-            const double ops_per_sec = static_cast<double>(total_operations) / duration;
-
-            printf("  %2zu threads: %f\n", num_threads, ops_per_sec);
 
             CHECK_EQUAL(expected_operations, total_operations);
             CHECK_EQUAL(static_cast<size_t>(0), validation_failures.load(minstd::memory_order_acquire));
-            CHECK_TRUE(duration > 0.0);
-            CHECK_TRUE(ops_per_sec > 0.0);
 
             CHECK_EQUAL(SKIPLIST_STRESS_KEY_SPACE, list.size());
 
