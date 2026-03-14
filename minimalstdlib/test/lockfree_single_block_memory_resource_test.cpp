@@ -31,7 +31,7 @@ namespace
     };
 #pragma GCC diagnostic pop
 
-    constexpr size_t default_alignment = alignof(max_align_t);
+    constexpr size_t DEFAULT_ALIGNMENT = alignof(max_align_t);
 
     constexpr size_t NUM_ALLOCATIONS_PER_THREAD = 5000;
 
@@ -53,8 +53,8 @@ namespace
         return (value < 1.0) ? 1 : static_cast<size_t>(value);
     }
 
-    constexpr size_t buffer_size = 512 * 1048576; // 512 MB
-    char* buffer = new char[buffer_size]();
+    constexpr size_t BUFFER_SIZE = 512 * 1048576; // 512 MB
+    char *buffer = new char[BUFFER_SIZE]();
 
     minstd::atomic<bool> start_allocations = false;
     minstd::atomic<bool> exit_thread = false;
@@ -189,23 +189,23 @@ namespace
         {
             for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
             {
-                args->mem_resource->deallocate( args->pointers_allocated[i], args->sizes_allocated[i] );
+                args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
 
                 size_t block_size = 128 + (rng() % 7000);
 
                 void *ptr = args->mem_resource->allocate(block_size);
-    
+
                 if (ptr == nullptr)
                 {
                     printf("thread got nullptr");
                     return nullptr;
                 }
-    
+
                 args->pointers_allocated[i] = ptr;
                 args->sizes_allocated[i] = block_size;
             }
 
-//            sleep(0.1);
+            //            sleep(0.1);
         }
 
         for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
@@ -233,7 +233,8 @@ namespace
         for (size_t i = 0; i < PERF_ALLOCATIONS_PER_THREAD; i++)
         {
             size_t block_size = lognormal_sample(rng);
-            if (block_size > PERF_MAX_ALLOCATION_SIZE) block_size = PERF_MAX_ALLOCATION_SIZE;
+            if (block_size > PERF_MAX_ALLOCATION_SIZE)
+                block_size = PERF_MAX_ALLOCATION_SIZE;
 
             void *ptr = args->mem_resource->allocate(block_size);
 
@@ -254,7 +255,8 @@ namespace
                 args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
 
                 size_t block_size = lognormal_sample(rng);
-                if (block_size > PERF_MAX_ALLOCATION_SIZE) block_size = PERF_MAX_ALLOCATION_SIZE;
+                if (block_size > PERF_MAX_ALLOCATION_SIZE)
+                    block_size = PERF_MAX_ALLOCATION_SIZE;
 
                 void *ptr = args->mem_resource->allocate(block_size);
 
@@ -297,7 +299,7 @@ namespace
             size_t locked = 0;
             size_t metadata_available = 0;
 
-            for (auto itr = ((lockfree_single_block_resource_with_stats*)(args->mem_resource))->begin(); itr != ((lockfree_single_block_resource_with_stats *)(args->mem_resource))->end(); ++itr)
+            for (auto itr = ((lockfree_single_block_resource_with_stats *)(args->mem_resource))->begin(); itr != ((lockfree_single_block_resource_with_stats *)(args->mem_resource))->end(); ++itr)
             {
                 auto alloc_info = *itr;
 
@@ -486,7 +488,7 @@ namespace
         }
 
         double duration = (end_time.tv_sec - start_time.tv_sec) +
-                  (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+                          (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
         printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
 
@@ -640,7 +642,7 @@ namespace
         clock_gettime(CLOCK_MONOTONIC, &end_time);
 
         duration = (end_time.tv_sec - start_time.tv_sec) +
-               (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+                   (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
         printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
     }
@@ -684,31 +686,30 @@ namespace
 
         clock_gettime(CLOCK_MONOTONIC, &end_time);
         double duration = (end_time.tv_sec - start_time.tv_sec) +
-                  (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+                          (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
         printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
 
         //  Force two reclaimation passes, with no other threads running this should move all
         //      metadata records into the free headers list.  The free block bins should be empty.
 
-//        resource.reclaim();
-//        resource.reclaim();
-//        resource.reclaim();
-//        resource.reclaim();
-//        resource.reclaim();
-//        resource.reclaim();
+        //        resource.reclaim();
+        //        resource.reclaim();
+        //        resource.reclaim();
+        //        resource.reclaim();
+        //        resource.reclaim();
+        //        resource.reclaim();
 
+        //        printf("Total number of allocations: %zu  deallocations: %zu\n", resource.total_allocations(), resource.total_deallocations());
+        //        printf("Current allocations: %zu  bytes allocated: %zu\n", resource.current_allocated(), resource.current_bytes_allocated());
 
-//        printf("Total number of allocations: %zu  deallocations: %zu\n", resource.total_allocations(), resource.total_deallocations());
-//        printf("Current allocations: %zu  bytes allocated: %zu\n", resource.current_allocated(), resource.current_bytes_allocated());
-
-//        CHECK_EQUAL(0, resource.current_allocated());
-//        CHECK_EQUAL(0, resource.current_bytes_allocated());
+        //        CHECK_EQUAL(0, resource.current_allocated());
+        //        CHECK_EQUAL(0, resource.current_bytes_allocated());
 
         //  Do it again with malloc/free
 
         start_allocations = false;
 
-        minstd::pmr::malloc_free_wrapper_memory_resource  malloc_free_resource(nullptr);
+        minstd::pmr::malloc_free_wrapper_memory_resource malloc_free_resource(nullptr);
 
         for (size_t i = 0; i < NUM_THREADS; i++)
         {
@@ -730,7 +731,7 @@ namespace
 
         clock_gettime(CLOCK_MONOTONIC, &end_time);
         duration = (end_time.tv_sec - start_time.tv_sec) +
-               (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+                   (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
         printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
     }
 
@@ -786,7 +787,7 @@ namespace
             clock_gettime(CLOCK_MONOTONIC, &end_time);
 
             double lockfree_elapsed_time = (end_time.tv_sec - start_time.tv_sec) +
-                                          (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+                                           (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
             double lockfree_total_ops_per_second = total_operations / lockfree_elapsed_time;
             double lockfree_efficiency = lockfree_total_ops_per_second / num_threads;
@@ -821,7 +822,7 @@ namespace
             clock_gettime(CLOCK_MONOTONIC, &end_time);
 
             double malloc_elapsed_time = (end_time.tv_sec - start_time.tv_sec) +
-                                        (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+                                         (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
             double malloc_total_ops_per_second = total_operations / malloc_elapsed_time;
             double malloc_efficiency = malloc_total_ops_per_second / num_threads;
@@ -831,10 +832,8 @@ namespace
                 baseline_lockfree_efficiency = lockfree_efficiency;
             }
 
-            double lockfree_scalability = baseline_lockfree_efficiency > 0 ?
-                                         (lockfree_efficiency / baseline_lockfree_efficiency) : 1.0;
-            double speedup = malloc_total_ops_per_second > 0 ?
-                            (lockfree_total_ops_per_second / malloc_total_ops_per_second) : 0.0;
+            double lockfree_scalability = baseline_lockfree_efficiency > 0 ? (lockfree_efficiency / baseline_lockfree_efficiency) : 1.0;
+            double speedup = malloc_total_ops_per_second > 0 ? (lockfree_total_ops_per_second / malloc_total_ops_per_second) : 0.0;
 
             printf("  %2zu   | %14.0f | %12.0f | %11.0f | %8.0f | %6.2fx | %6.2fx\n",
                    num_threads, lockfree_total_ops_per_second, malloc_total_ops_per_second,

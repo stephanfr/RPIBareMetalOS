@@ -27,15 +27,15 @@ namespace
 
     static char buffer[TEST_BUFFER_SIZE];
 
-    class TestElement
+    class test_element
     {
     public:
-        explicit TestElement(uint32_t value)
+        explicit test_element(uint32_t value)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value() const
         {
@@ -47,13 +47,13 @@ namespace
         char text_[20];
     };
 
-    using Uint32tVector = minstd::vector<uint32_t, 0, 6>;
+    using uint32t_vector = minstd::vector<uint32_t, 0, 6>;
 
     using Uint32tVectorAllocator = minstd::allocator<Uint32tVector::element_type>;
     using Uint32tVectorStaticHeapAllocator = minstd::heap_allocator<Uint32tVector::element_type>;
     using Uint32tVectorStackAllocator = minstd::stack_allocator<Uint32tVector::element_type, 24>;
 
-    using TestElementVector = minstd::vector<TestElement, 0, 6>;
+    using test_element_vector = minstd::vector<test_element, 0, 6>;
 
     using TestElementVectorAllocator = minstd::allocator<TestElementVector::element_type>;
     using TestElementVectorStaticHeapAllocator = minstd::heap_allocator<TestElementVector::element_type>;
@@ -63,7 +63,7 @@ namespace
     void iteratorInvariantsTest(Uint32tVectorAllocator &allocator)
     {
         {
-            Uint32tVector test_vector(allocator);
+            uint32t_vector test_vector(allocator);
 
             CHECK(test_vector.empty());
             CHECK(test_vector.size() == 0);
@@ -82,7 +82,7 @@ namespace
         }
 
         {
-            const Uint32tVector test_vector(allocator);
+            const uint32t_vector test_vector(allocator);
 
             CHECK(test_vector.empty());
             CHECK(test_vector.size() == 0);
@@ -90,7 +90,7 @@ namespace
 
             CHECK(test_vector.begin() == test_vector.end());
 
-            const_cast<Uint32tVector &>(test_vector).push_back(1);
+            const_cast<uint32t_vector &>(test_vector).push_back(1);
 
             CHECK(test_vector.begin() != test_vector.end());
             CHECK(*test_vector.begin() == 1);
@@ -103,7 +103,7 @@ namespace
 
     void pushPopUintTest(Uint32tVectorAllocator &allocator)
     {
-        Uint32tVector test_vector(allocator);
+        uint32t_vector test_vector(allocator);
 
         CHECK(test_vector.empty());
         CHECK(test_vector.size() == 0);
@@ -155,13 +155,13 @@ namespace
 
     void pushPopTestElementTest(TestElementVectorAllocator &allocator)
     {
-        TestElementVector test_vector(allocator);
+        test_element_vector test_vector(allocator);
 
         CHECK(test_vector.empty());
         CHECK(test_vector.size() == 0);
         CHECK(test_vector.max_size() == 6);
 
-        test_vector.push_back(TestElement(1));
+        test_vector.push_back(test_element(1));
 
         CHECK(test_vector.front().value() == 1);
         CHECK(test_vector.back().value() == 1);
@@ -184,7 +184,7 @@ namespace
         CHECK(!test_vector.empty());
         CHECK(test_vector.size() == 2);
 
-        TestElement &last_value = test_vector.emplace_back(3);
+        test_element &last_value = test_vector.emplace_back(3);
 
         CHECK(test_vector.front().value() == 1);
         CHECK(test_vector.back().value() == 3);
@@ -207,7 +207,7 @@ namespace
 
     void basicUintTest(Uint32tVectorAllocator &allocator)
     {
-        Uint32tVector test_vector(allocator);
+        uint32t_vector test_vector(allocator);
 
         test_vector.push_back(5);
         test_vector.insert(--test_vector.end(), 4);
@@ -253,10 +253,10 @@ namespace
 
     void basicTestElementTest(TestElementVectorAllocator &allocator)
     {
-        TestElementVector test_vector(allocator);
+        test_element_vector test_vector(allocator);
 
-        test_vector.push_back(TestElement(5));
-        test_vector.insert(--test_vector.end(), TestElement(4));
+        test_vector.push_back(test_element(5));
+        test_vector.insert(--test_vector.end(), test_element(4));
 
         auto itr = test_vector.end();
 
@@ -265,14 +265,14 @@ namespace
 
         CHECK( test_vector.emplace(itr, 3)->value() == 3 );
         CHECK( test_vector.emplace(test_vector.end(), 6)->value() == 6 );
-        CHECK( test_vector.insert(test_vector.end(), TestElement(7))->value() == 7 );
-        test_vector.insert(test_vector.begin(), TestElement(1));
+        CHECK( test_vector.insert(test_vector.end(), test_element(7))->value() == 7 );
+        test_vector.insert(test_vector.begin(), test_element(1));
 
         itr = test_vector.begin();
 
         itr++;
 
-        test_vector.insert(itr, TestElement(2));
+        test_vector.insert(itr, test_element(2));
 
         CHECK(test_vector.size() == 7);
 
@@ -284,9 +284,9 @@ namespace
         CHECK(test_vector[5].value() == 6);
         CHECK(test_vector[6].value() == 7);
 
-        test_vector[0] = TestElement(11);
-        test_vector[2] = TestElement(33);
-        test_vector[5] = TestElement(66);
+        test_vector[0] = test_element(11);
+        test_vector[2] = test_element(33);
+        test_vector[5] = test_element(66);
 
         CHECK(test_vector[0].value() == 11);
         CHECK(test_vector[1].value() == 2);

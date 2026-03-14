@@ -180,7 +180,7 @@ namespace MINIMAL_STD_NAMESPACE
                   cpu_shards_(cpu_shards > 0 ? cpu_shards : 1),
                   number_of_active_iterators_(0),
                   hard_delete_before_counter_cutoff_(SIZE_MAX),
-                  itr_end_(*this, &end_of_metadata_list_sentinel_)
+                  itr_end_(*this, &END_OF_METADATA_LIST_SENTINEL)
             {
                 //  Allocate the per-CPU shard arrays from the start of the managed block.
                 //  Layout: [soft_deleted_heads][free_metadata_heads][64-byte align][free_block_bins][64-byte align][allocations...]
@@ -247,7 +247,7 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            inline static const block_metadata end_of_metadata_list_sentinel_ = {0, nullptr, 0, 0, 0, 0, 0, 0, {}};
+            inline static const block_metadata END_OF_METADATA_LIST_SENTINEL = {0, nullptr, 0, 0, 0, 0, 0, 0, {}};
 
             using metadata_tag = lockfree::tagged_ptr<block_metadata, uint16_t>;
             using block_tag = lockfree::tagged_ptr<block_header, uint16_t>;
@@ -261,45 +261,45 @@ namespace MINIMAL_STD_NAMESPACE
                 using pointer = block_header *;
                 using storage_type = uint64_t;
 
-                static constexpr int ptr_bits = 48;
-                static constexpr int state_bits = 8;
-                static constexpr int version_bits = 8;
+                static constexpr int PTR_BITS = 48;
+                static constexpr int STATE_BITS = 8;
+                static constexpr int VERSION_BITS = 8;
 
-                static constexpr storage_type ptr_mask = (1ULL << ptr_bits) - 1;
-                static constexpr storage_type state_mask = 0xFFULL;
-                static constexpr storage_type version_mask = 0xFFULL;
+                static constexpr storage_type PTR_MASK = (1ULL << PTR_BITS) - 1;
+                static constexpr storage_type STATE_MASK = 0xFFULL;
+                static constexpr storage_type VERSION_MASK = 0xFFULL;
 
                 static constexpr storage_type pack(pointer ptr, uint8_t state, uint8_t version = 0)
                 {
-                    return (static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr)) & ptr_mask)
+                    return (static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr)) & PTR_MASK)
                          | (static_cast<storage_type>(state) << 48)
                          | (static_cast<storage_type>(version) << 56);
                 }
 
                 static constexpr pointer unpack_ptr(storage_type value)
                 {
-                    return reinterpret_cast<pointer>(static_cast<uintptr_t>(value & ptr_mask));
+                    return reinterpret_cast<pointer>(static_cast<uintptr_t>(value & PTR_MASK));
                 }
 
                 static constexpr uint8_t unpack_state(storage_type value)
                 {
-                    return static_cast<uint8_t>((value >> 48) & state_mask);
+                    return static_cast<uint8_t>((value >> 48) & STATE_MASK);
                 }
 
                 static constexpr uint8_t unpack_version(storage_type value)
                 {
-                    return static_cast<uint8_t>((value >> 56) & version_mask);
+                    return static_cast<uint8_t>((value >> 56) & VERSION_MASK);
                 }
 
                 static constexpr storage_type with_state(storage_type value, uint8_t state)
                 {
-                    return (value & ~(state_mask << 48)) | (static_cast<storage_type>(state) << 48);
+                    return (value & ~(STATE_MASK << 48)) | (static_cast<storage_type>(state) << 48);
                 }
 
                 static constexpr storage_type increment_version(storage_type value)
                 {
                     uint8_t new_version = static_cast<uint8_t>(unpack_version(value) + 1);
-                    return (value & ~(version_mask << 56)) | (static_cast<storage_type>(new_version) << 56);
+                    return (value & ~(VERSION_MASK << 56)) | (static_cast<storage_type>(new_version) << 56);
                 }
 
                 static constexpr storage_type with_state_and_increment_version(storage_type value, uint8_t state)
@@ -322,7 +322,7 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
             static constexpr size_t NUM_FREE_BLOCK_BINS = 257;
 
-            static constexpr array<const size_t, NUM_FREE_BLOCK_BINS> free_block_bin_sizes =
+            static constexpr array<const size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES =
                 {64, 64 * 2, 64 * 3, 64 * 4, 64 * 5, 64 * 6, 64 * 7, 64 * 8, 64 * 9, 64 * 10, 64 * 11, 64 * 12, 64 * 13, 64 * 14, 64 * 15,
                  1024, 1024 + 128, 1024 + (128 * 2), 1024 + (128 * 3), 1024 + (128 * 4), 1024 + (128 * 5), 1024 + (128 * 6), 1024 + (128 * 7), 1024 + (128 * 8), 1024 + (128 * 9), 1024 + (128 * 10), 1024 + (128 * 11), 1024 + (128 * 12), 1024 + (128 * 13), 1024 + (128 * 14), 1024 + (128 * 15),
                  3072, 3072 + 256, 3072 + (256 * 2), 3072 + (256 * 3), 3072 + (256 * 4), 3072 + (256 * 5), 3072 + (256 * 6), 3072 + (256 * 7), 3072 + (256 * 8), 3072 + (256 * 9), 3072 + (256 * 10), 3072 + (256 * 11), 3072 + (256 * 12), 3072 + (256 * 13), 3072 + (256 * 14), 3072 + (256 * 15),

@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "minstdconfig.h"
 #include "atomic"
+#include "minstdconfig.h"
 
 namespace MINIMAL_STD_NAMESPACE
 {

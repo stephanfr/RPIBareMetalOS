@@ -18,7 +18,7 @@ namespace
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    TEST_GROUP(BitsetTests)
+    TEST_GROUP (BitsetTests)
     {
     };
 #pragma GCC diagnostic pop

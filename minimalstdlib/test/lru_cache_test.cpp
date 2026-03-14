@@ -38,22 +38,22 @@ namespace
     };
 #pragma GCC diagnostic pop
 
-    class TestElement
+    class test_element
     {
     public:
-        explicit TestElement(uint32_t value)
+        explicit test_element(uint32_t value)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value() const
         {
             return value_;
         }
 
-        bool operator<(const TestElement &other) const
+        bool operator<(const test_element &other) const
         {
             return value_ < other.value_;
         }
@@ -63,13 +63,13 @@ namespace
         char empty_space_[18];
     };
 
-    using TestElementAllocator = minstd::heap_allocator<TestElement>;
+    using test_element_allocator = minstd::heap_allocator<test_element>;
 
-    using LRUCacheWithElements = minstd::lru_cache<uint32_t, TestElement>;
+    using lru_cache_with_elements = minstd::lru_cache<uint32_t, test_element>;
     using LRUCacheWithElementsEntryHeapAllocator = minstd::heap_allocator<LRUCacheWithElements::list_entry_type>;
     using LRUCacheWithElementsMapHeapAllocator = minstd::heap_allocator<LRUCacheWithElements::map_entry_type>;
 
-    using LRUCacheWithPointers = minstd::lru_cache<uint32_t, minstd::unique_ptr<TestElement>>;
+    using lru_cache_with_pointers = minstd::lru_cache<uint32_t, minstd::unique_ptr<test_element>>;
     using LRUCacheWithPointersEntryHeapAllocator = minstd::heap_allocator<LRUCacheWithPointers::list_entry_type>;
     using LRUCacheWithPointersMapHeapAllocator = minstd::heap_allocator<LRUCacheWithPointers::map_entry_type>;
 

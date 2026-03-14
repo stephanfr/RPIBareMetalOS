@@ -22,41 +22,41 @@ namespace
     char buf1[1024] __attribute__((aligned(4)));
     char buf2[1024] __attribute__((aligned(4)));
 
-    struct A
+    struct a
     {
-        A(int &&n) { value = n; } //  rvalue overload
-        A(int &n) { value = n; }  //  lvalue overload
+        a(int &&n) { value = n; } //  rvalue overload
+        a(int &n) { value = n; }  //  lvalue overload
 
         int value;
     };
 
-    class B
+    class b
     {
     public:
         template <class T1, class T2, class T3>
-        B(T1 &&t1, T2 &&t2, T3 &&t3) : a1_{minstd::forward<T1>(t1)},
+        b(T1 &&t1, T2 &&t2, T3 &&t3) : a1_{minstd::forward<T1>(t1)},
                                        a2_{minstd::forward<T2>(t2)},
                                        a3_{minstd::forward<T3>(t3)}
         {
         }
 
-        const A get_a1() const
+        const a get_a1() const
         {
             return a1_;
         }
 
-        const A get_a2() const
+        const a get_a2() const
         {
             return a2_;
         }
 
-        const A get_a3() const
+        const a get_a3() const
         {
             return a3_;
         }
 
     private:
-        A a1_, a2_, a3_;
+        a a1_, a2_, a3_;
     };
 
     template <class T, class U>
@@ -79,7 +79,7 @@ namespace
 
     auto make_B(auto &&...args) // since C++20
     {
-        return B(minstd::forward<decltype(args)>(args)...);
+        return b(minstd::forward<decltype(args)>(args)...);
     }
 
     TEST(ForwardTests, BasicTest)

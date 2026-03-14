@@ -25,16 +25,16 @@ namespace
 #pragma GCC diagnostic pop
 
     // Test element class
-    class TestElement
+    class test_element
     {
     public:
-        explicit TestElement(uint32_t value = 0)
+        explicit test_element(uint32_t value = 0)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &other) = default;
-        TestElement &operator=(const TestElement &other) = default;
+        test_element(const test_element &other) = default;
+        test_element &operator=(const test_element &other) = default;
 
         uint32_t value() const
         {
@@ -46,7 +46,7 @@ namespace
             value_ = value;
         }
 
-        bool operator==(const TestElement &other) const
+        bool operator==(const test_element &other) const
         {
             return value_ == other.value_;
         }
@@ -55,16 +55,16 @@ namespace
         uint32_t value_;
     };
 
-    using TestEliminationArray = minstd::elimination_array<TestElement, 16, 5000>;
+    using test_elimination_array = minstd::elimination_array<test_element, 16, 5000>;
 
     // Thread synchronization for multithreaded tests
     static volatile bool start_threads = false;
     static volatile bool stop_threads = false;
 
-    struct ThreadTestArgs
+    struct thread_test_args
     {
-        TestEliminationArray *array;
-        TestElement **elements;
+        test_elimination_array *array;
+        test_element **elements;
         size_t num_elements;
         size_t thread_id;
         size_t successful_eliminations;
@@ -147,7 +147,7 @@ namespace
     // Thread function for put operations
     void *put_thread_function(void *arg)
     {
-        ThreadTestArgs *args = static_cast<ThreadTestArgs *>(arg);
+        thread_test_args *args = static_cast<thread_test_args *>(arg);
         
         // Wait for start signal
         while (!start_threads)
@@ -176,7 +176,7 @@ namespace
     // Thread function for get operations
     void *get_thread_function(void *arg)
     {
-        ThreadTestArgs *args = static_cast<ThreadTestArgs *>(arg);
+        thread_test_args *args = static_cast<thread_test_args *>(arg);
         
         // Wait for start signal
         while (!start_threads)
@@ -187,7 +187,7 @@ namespace
         args->successful_eliminations = 0;
         args->failed_operations = 0;
         
-        TestElement *retrieved_element = nullptr;
+        test_element *retrieved_element = nullptr;
         
         for (size_t i = 0; i < args->num_elements && !stop_threads; ++i)
         {

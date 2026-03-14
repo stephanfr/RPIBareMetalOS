@@ -27,15 +27,15 @@ namespace
 
     static char buffer[TEST_BUFFER_SIZE];
 
-    class TestElement
+    class test_element
     {
     public:
-        explicit TestElement(uint32_t value)
+        explicit test_element(uint32_t value)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value() const
         {
@@ -47,7 +47,7 @@ namespace
         char empty_space_[18];
     };
 
-    using TestElementQueue = minstd::spsc_queue<TestElement>;
+    using test_element_queue = minstd::spsc_queue<test_element>;
 
     using QueueAllocator = minstd::allocator<TestElementQueue::value_type>;
     using QueueStaticHeapAllocator = minstd::heap_allocator<TestElementQueue::value_type>;
@@ -55,12 +55,12 @@ namespace
 
     void *produce(void *arguments)
     {
-        TestElementQueue *queue = static_cast<TestElementQueue *>(arguments);
+        test_element_queue *queue = static_cast<test_element_queue *>(arguments);
 
         for (int i = 0; i < 1000; i++)
         {
 
-            TestElement element(i);
+            test_element element(i);
 
             while (!queue->push_back(i))
             {
@@ -72,9 +72,9 @@ namespace
 
     void *consume(void *arguments)
     {
-        TestElementQueue *queue = static_cast<TestElementQueue *>(arguments);
+        test_element_queue *queue = static_cast<test_element_queue *>(arguments);
 
-        TestElement element(65536);
+        test_element element(65536);
 
         for (uint32_t i = 0; i < 1000; i++)
         {

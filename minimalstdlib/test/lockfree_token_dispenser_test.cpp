@@ -4,8 +4,8 @@
 
 #include <CppUTest/TestHarness.h>
 
-#include <lockfree/token_dispenser>
 #include <array>
+#include <lockfree/token_dispenser>
 
 #include <pthread.h>
 
@@ -21,17 +21,16 @@ namespace
     };
 #pragma GCC diagnostic pop
 
-
     struct args
     {
         minstd::token_dispenser<64> *dispenser;
-        minstd::array<uint32_t,1020> *tokens;
+        minstd::array<uint32_t, 1020> *tokens;
     };
 
     void *get_tokens(void *arguments)
     {
         minstd::token_dispenser<64> &dispenser = *static_cast<args *>(arguments)->dispenser;
-        minstd::array<uint32_t,1020> &tokens = *static_cast<args *>(arguments)->tokens;
+        minstd::array<uint32_t, 1020> &tokens = *static_cast<args *>(arguments)->tokens;
 
         for (int i = 0; i < 1020; i++)
         {
@@ -42,7 +41,6 @@ namespace
 
         return nullptr;
     }
-
 
     TEST(LockfreeTokenDispenserTests, BasicTest)
     {
@@ -56,38 +54,38 @@ namespace
 
     TEST(LockfreeTokenDispenserTests, MultithreadedTest)
     {
-        #ifdef __SANITIZE_THREAD__
+#ifdef __SANITIZE_THREAD__
         static constexpr size_t NUM_THREADS = 50;
-        #else
+#else
         static constexpr size_t NUM_THREADS = 1000;
-        #endif
+#endif
 
         minstd::token_dispenser test_dispenser(17);
 
-        minstd::array<uint32_t,1020> tokens[1000];
+        minstd::array<uint32_t, 1020> tokens[1000];
 
         pthread_t test_threads[NUM_THREADS];
 
         args thread_args[NUM_THREADS];
-        
-        for( uint32_t i = 0; i < NUM_THREADS; i++)
+
+        for (uint32_t i = 0; i < NUM_THREADS; i++)
         {
             thread_args[i].dispenser = &test_dispenser;
             thread_args[i].tokens = &tokens[i];
 
-            CHECK( pthread_create(&test_threads[i], nullptr, get_tokens, &thread_args[i]) == 0);
+            CHECK(pthread_create(&test_threads[i], nullptr, get_tokens, &thread_args[i]) == 0);
         }
 
-        for( uint32_t i = 0; i < NUM_THREADS; i++)
+        for (uint32_t i = 0; i < NUM_THREADS; i++)
         {
             pthread_join(test_threads[i], nullptr);
         }
 
-        minstd::array<uint32_t,17> aggregated_values;
+        minstd::array<uint32_t, 17> aggregated_values;
 
-        for(uint32_t i = 0; i < NUM_THREADS; i++)
+        for (uint32_t i = 0; i < NUM_THREADS; i++)
         {
-            for(uint32_t j = 0; j < 1020; j++)
+            for (uint32_t j = 0; j < 1020; j++)
             {
                 aggregated_values[tokens[i][j]]++;
             }
@@ -95,7 +93,7 @@ namespace
 
         uint32_t total = 0;
 
-        for(uint32_t i = 0; i < 17; i++)
+        for (uint32_t i = 0; i < 17; i++)
         {
             total += aggregated_values[i];
         }

@@ -29,8 +29,8 @@ namespace
 
     constexpr size_t NUM_ALLOCATIONS_PER_THREAD = 1000;
 
-    constexpr size_t buffer_size = 512 * 1048576; // 512 MB
-    char* buffer = new char[buffer_size]();
+    constexpr size_t BUFFER_SIZE = 512 * 1048576; // 512 MB
+    char* buffer = new char[BUFFER_SIZE]();
 
     minstd::atomic<bool> start_allocations = false;
 

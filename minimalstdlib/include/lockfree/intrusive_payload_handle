@@ -13,7 +13,7 @@ namespace MINIMAL_STD_NAMESPACE
             adopt
         };
 
-        inline constexpr adopt_ref_tag adopt_ref = adopt_ref_tag::adopt;
+        inline constexpr adopt_ref_tag ADOPT_REF = adopt_ref_tag::adopt;
 
         template <typename T>
         class intrusive_payload_handle

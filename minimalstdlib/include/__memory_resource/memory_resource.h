@@ -24,19 +24,19 @@ namespace MINIMAL_STD_NAMESPACE
 
         class memory_resource
         {
-            static const size_t __max_align = alignof(max_align_t);
+            static const size_t MAX_ALIGN = alignof(max_align_t);
 
         public:
             virtual ~memory_resource() = default;
 
             [[nodiscard]] 
-            _MINIMAL_STD_HIDDEN void * allocate(size_t __bytes, size_t __align = __max_align)
+            _MINIMAL_STD_HIDDEN void * allocate(size_t __bytes, size_t __align = MAX_ALIGN)
             {
                 return do_allocate(__bytes, __align);
             }
 
             _MINIMAL_STD_HIDDEN void
-            deallocate(void * __p, size_t __bytes, size_t __align = __max_align)
+            deallocate(void * __p, size_t __bytes, size_t __align = MAX_ALIGN)
             {
                 do_deallocate(__p, __bytes, __align);
             }

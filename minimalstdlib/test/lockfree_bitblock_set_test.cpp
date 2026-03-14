@@ -23,13 +23,12 @@ namespace
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    TEST_GROUP(BitblockSetTests)
+    TEST_GROUP (BitblockSetTests)
     {
     };
 #pragma GCC diagnostic pop
 
     using result = minstd::bitblock_set_result;
-
 
     TEST(BitblockSetTests, AcquireReleaseSingleBit)
     {
@@ -522,8 +521,8 @@ namespace
                blocks.total_bits_set());
 
         // This assertion will FAIL, demonstrating the bug
-        CHECK_EQUAL(1u, blocks.total_bits_set());  // Expected: only bit 63
-        CHECK_FALSE(blocks.is_acquired(62));       // Bit 62 should NOT be set
+        CHECK_EQUAL(1u, blocks.total_bits_set()); // Expected: only bit 63
+        CHECK_FALSE(blocks.is_acquired(62));      // Bit 62 should NOT be set
 
         // The orphan bit 62 is now stuck - trying to release it fails
         // because we never "acquired" it through the normal path

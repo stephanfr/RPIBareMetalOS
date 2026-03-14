@@ -4,17 +4,17 @@
 
 #pragma once
 
+#include <__platform/cpu_platform_abstractions.h>
 #include <allocator>
 #include <array>
 #include <atomic>
 #include <limits>
 #include <random>
 #include <utility>
-#include <__platform/cpu_platform_abstractions.h>
 
+#include "__extensions/skiplist_statistics.h"
 #include "epoch_policy"
 #include "epoch_reclaimer_core"
-#include "__extensions/skiplist_statistics.h"
 #define DEFAULT_MAX_LEVELS 16
 
 #ifndef MINIMAL_STD_SKIPLIST_MAX_SLOTS
@@ -42,7 +42,7 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr uint32_t SLOTS_PER_BLOCK_SHIFT = SlotsPerBlockShift;
             static constexpr uint32_t SLOTS_PER_BLOCK = 1u << SLOTS_PER_BLOCK_SHIFT; // 16384 default
             static constexpr uint32_t BLOCK_MASK = SLOTS_PER_BLOCK - 1;
-            
+
             static constexpr uint32_t MAX_BLOCKS = (MINIMAL_STD_SKIPLIST_MAX_SLOTS + SLOTS_PER_BLOCK - 1) / SLOTS_PER_BLOCK;
             static constexpr uint32_t MAX_SLOTS = MAX_BLOCKS * SLOTS_PER_BLOCK;
 
@@ -62,7 +62,7 @@ namespace MINIMAL_STD_NAMESPACE
                 atomic<uint32_t> free_list_head_{0};
                 atomic<uint32_t> active_slots_{0};
 
-                slot_block* retired_next{nullptr};
+                slot_block *retired_next{nullptr};
                 uint64_t retired_epoch_{0};
 
                 slot_block()
@@ -79,29 +79,30 @@ namespace MINIMAL_STD_NAMESPACE
             static inline atomic<uint32_t> next_free_slot_{1};
             static inline atomic<uint32_t> high_water_slot_{0};
             static inline atomic<uint32_t> high_water_block_{0};
-            static inline array<atomic<slot_block*>, MAX_BLOCKS> blocks_{};
+            static inline array<atomic<slot_block *>, MAX_BLOCKS> blocks_{};
             static inline atomic<uint64_t> partially_free_blocks_{0};
-            static inline atomic<slot_block*> unlinked_blocks_{nullptr};
+            static inline atomic<slot_block *> unlinked_blocks_{nullptr};
 
-            static void retire_block(slot_block* block, uint32_t block_idx)
+            static void retire_block(slot_block *block, uint32_t block_idx)
             {
                 uint32_t expected = 0;
                 if (block->active_slots_.compare_exchange_strong(expected, UINT32_MAX, memory_order_acq_rel, memory_order_acquire))
                 {
                     partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
-                    
-                    slot_block* expected_block = block;
+
+                    slot_block *expected_block = block;
                     if (blocks_[block_idx].compare_exchange_strong(expected_block, nullptr, memory_order_acq_rel, memory_order_acquire))
                     {
-                        slot_block* old_unlinked = unlinked_blocks_.load(memory_order_relaxed);
-                        do {
+                        slot_block *old_unlinked = unlinked_blocks_.load(memory_order_relaxed);
+                        do
+                        {
                             block->retired_next = old_unlinked;
                         } while (!unlinked_blocks_.compare_exchange_weak(old_unlinked, block, memory_order_release, memory_order_relaxed));
                     }
                 }
             }
 
-            static slot_block* extract_unlinked_blocks()
+            static slot_block *extract_unlinked_blocks()
             {
                 return unlinked_blocks_.exchange(nullptr, memory_order_acq_rel);
             }
@@ -129,15 +130,15 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            static slot_block* ensure_block_installed(uint32_t block_index)
+            static slot_block *ensure_block_installed(uint32_t block_index)
             {
-                slot_block* current_block = blocks_[block_index].load(memory_order_acquire);
+                slot_block *current_block = blocks_[block_index].load(memory_order_acquire);
                 if (current_block != nullptr)
                 {
                     return current_block;
                 }
 
-                slot_block* new_block = new slot_block();
+                slot_block *new_block = new slot_block();
 
                 if (blocks_[block_index].compare_exchange_strong(current_block, new_block, memory_order_release, memory_order_acquire))
                 {
@@ -158,12 +159,12 @@ namespace MINIMAL_STD_NAMESPACE
             static slot_handle allocate_slot(T *ptr)
             {
                 uint64_t available_blocks = partially_free_blocks_.load(memory_order_acquire);
-                
+
                 while (available_blocks != 0)
                 {
                     uint32_t block_idx = __builtin_ctzll(available_blocks);
-                    
-                    slot_block* block = blocks_[block_idx].load(memory_order_acquire);
+
+                    slot_block *block = blocks_[block_idx].load(memory_order_acquire);
                     if (block != nullptr)
                     {
                         uint32_t active = block->active_slots_.load(memory_order_acquire);
@@ -209,10 +210,10 @@ namespace MINIMAL_STD_NAMESPACE
                                 return {head, generation};
                             }
                         }
-                        
+
                         if (block->active_slots_.fetch_sub(1, memory_order_release) == 1)
                         {
-                             retire_block(block, block_idx);
+                            retire_block(block, block_idx);
                         }
 
                         partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
@@ -221,7 +222,7 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
                     }
-                    
+
                     available_blocks = partially_free_blocks_.load(memory_order_acquire);
                 }
 
@@ -230,8 +231,8 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     uint32_t block_idx = slot_to_block_index(idx);
                     uint32_t offset = slot_to_block_offset(idx);
-                    
-                    slot_block* block = ensure_block_installed(block_idx);
+
+                    slot_block *block = ensure_block_installed(block_idx);
 
                     block->active_slots_.fetch_add(1, memory_order_relaxed);
 
@@ -249,12 +250,14 @@ namespace MINIMAL_STD_NAMESPACE
 
             static void free_slot(uint32_t slot)
             {
-                if ((slot == 0) || (slot >= MAX_SLOTS)) return;
+                if ((slot == 0) || (slot >= MAX_SLOTS))
+                    return;
 
                 uint32_t block_idx = slot_to_block_index(slot);
                 uint32_t offset = slot_to_block_offset(slot);
-                slot_block* block = blocks_[block_idx].load(memory_order_acquire);
-                if (block == nullptr) return; // Should not happen for a valid allocated slot
+                slot_block *block = blocks_[block_idx].load(memory_order_acquire);
+                if (block == nullptr)
+                    return; // Should not happen for a valid allocated slot
 
                 uint32_t head = block->free_list_head_.load(memory_order_acquire);
                 while (true)
@@ -278,9 +281,9 @@ namespace MINIMAL_STD_NAMESPACE
 
         private:
             static constexpr uint64_t TOMBSTONE_BIT = uint64_t{1} << 63;
-            static constexpr int      GENERATION_SHIFT = 32;
+            static constexpr int GENERATION_SHIFT = 32;
             static constexpr uint32_t GENERATION_MASK = 0x7FFFFFFFu;
-            static constexpr uint64_t SLOT_MASK     = (uint64_t{1} << 32) - 1;
+            static constexpr uint64_t SLOT_MASK = (uint64_t{1} << 32) - 1;
 
             static uint32_t pointer_slot_or_zero(T *ptr)
             {
@@ -324,7 +327,8 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 uint64_t v = static_cast<uint64_t>(slot) & SLOT_MASK;
                 v |= static_cast<uint64_t>(generation & GENERATION_MASK) << GENERATION_SHIFT;
-                if (tombstoned) v |= TOMBSTONE_BIT;
+                if (tombstoned)
+                    v |= TOMBSTONE_BIT;
                 return v;
             }
 
@@ -336,14 +340,16 @@ namespace MINIMAL_STD_NAMESPACE
             static T *unpack_ptr(uint64_t v)
             {
                 uint32_t slot = static_cast<uint32_t>(v & SLOT_MASK);
-                if ((slot == 0) || (slot >= MAX_SLOTS)) return nullptr;
+                if ((slot == 0) || (slot >= MAX_SLOTS))
+                    return nullptr;
 
                 const uint32_t handle_generation = unpack_generation(v);
-                
+
                 uint32_t block_idx = slot_to_block_index(slot);
                 uint32_t offset = slot_to_block_offset(slot);
-                slot_block* block = blocks_[block_idx].load(memory_order_acquire);
-                if (block == nullptr) return nullptr;
+                slot_block *block = blocks_[block_idx].load(memory_order_acquire);
+                if (block == nullptr)
+                    return nullptr;
 
                 const uint32_t table_generation = block->slot_generation_[offset].load(memory_order_acquire);
                 if ((handle_generation == 0) || (table_generation != handle_generation))
@@ -470,8 +476,9 @@ namespace MINIMAL_STD_NAMESPACE
         {
         private:
             using slot_statistics_type = typename Statistics::slot_statistics_type;
-            struct SkipNode;
-            using forward_link_type = atomic_forward_link<SkipNode, SlotsPerBlockShift, slot_statistics_type>;
+            struct skip_node;
+            using forward_link_type = atomic_forward_link<skip_node, SlotsPerBlockShift, slot_statistics_type>;
+
         private:
             static constexpr uint32_t MAX_INSERT_LEVEL0_RETRIES = 1024;
             static constexpr uint32_t MAX_INSERT_UPPER_LEVEL_RETRIES = 256;
@@ -491,10 +498,10 @@ namespace MINIMAL_STD_NAMESPACE
                 FULLY_UNLINKED
             };
 
-            struct alignas(64) SkipNode
+            struct alignas(64) skip_node
             {
                 // Constructor for standard nodes
-                SkipNode(const KeyType k, const ValueType &v, const int next_node_size) : key(k), value(v), top_level(next_node_size)
+                skip_node(const KeyType k, const ValueType &v, const int next_node_size) : key(k), value(v), top_level(next_node_size)
                 {
                     const auto slot = forward_link_type::allocate_slot(this);
                     internal_slot_ = slot.slot;
@@ -506,7 +513,7 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 // Constructor for sentinel nodes head and NIL
-                SkipNode(const KeyType k, const int next_node_size, SkipNode *next_node_target) : key(k), top_level(next_node_size)
+                skip_node(const KeyType k, const int next_node_size, skip_node *next_node_target) : key(k), top_level(next_node_size)
                 {
                     const auto slot = forward_link_type::allocate_slot(this);
                     internal_slot_ = slot.slot;
@@ -514,17 +521,17 @@ namespace MINIMAL_STD_NAMESPACE
                     intialize_next_nodes(next_node_size, next_node_target);
                 }
 
-                ~SkipNode()
+                ~skip_node()
                 {
                     forward_link_type::free_slot(internal_slot_);
                 }
 
-                SkipNode(const SkipNode &) = delete;
-                SkipNode &operator=(const SkipNode &) = delete;
-                SkipNode(SkipNode &&) = delete;
-                SkipNode &operator=(SkipNode &&) = delete;
+                skip_node(const skip_node &) = delete;
+                skip_node &operator=(const skip_node &) = delete;
+                skip_node(skip_node &&) = delete;
+                skip_node &operator=(skip_node &&) = delete;
 
-                void intialize_next_nodes(const int next_node_size, SkipNode *next_node_target)
+                void intialize_next_nodes(const int next_node_size, skip_node *next_node_target)
                 {
                     for (auto i = 0; i != next_node_size; ++i)
                     {
@@ -544,7 +551,7 @@ namespace MINIMAL_STD_NAMESPACE
                 ValueType value;
                 int top_level;
 
-                SkipNode *retired_next = nullptr;
+                skip_node *retired_next = nullptr;
                 uint64_t retired_epoch_ = 0;
 
                 // Forward links: each packs slot generation + slot index + tombstone in 64 bits.
@@ -552,31 +559,29 @@ namespace MINIMAL_STD_NAMESPACE
                 array<forward_link_type, MAX_LEVELS + 1> next_node;
             };
 
-            using slot_policy_type = bare_metal_cpu_slot_policy<SkipNode, NumCPUs, EPOCH_RECLAIM_THROTTLE_INITIAL, EPOCH_RECLAIM_THROTTLE_MIN>;
+            using slot_policy_type = bare_metal_cpu_slot_policy<skip_node, NumCPUs, EPOCH_RECLAIM_THROTTLE_INITIAL, EPOCH_RECLAIM_THROTTLE_MIN>;
             using epoch_reclaimer_type = epoch_reclaimer_core<slot_policy_type, NumCPUs, EPOCH_RECLAIM_LAG>;
 
-
         public:
+            using key_type = KeyType;
+            using value_type = ValueType;
 
-        using key_type = KeyType;
-        using value_type = ValueType;
-        
-        using allocator_type = allocator<value_type>;
+            using allocator_type = allocator<value_type>;
 
             skip_list()
                 : epoch_reclaimer_(slot_policy_)
             {
-                NIL = new SkipNode(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
-                head = new SkipNode(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL);
+                NIL_ = new skip_node(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
+                head_ = new skip_node(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL_);
             }
 
             ~skip_list()
             {
-                SkipNode *current_node = head->next_node[0].get_reference();
+                skip_node *current_node = head_->next_node[0].get_reference();
 
-                while (current_node != NIL)
+                while (current_node != NIL_)
                 {
-                    SkipNode *next_node = current_node->next_node[0].get_reference();
+                    skip_node *next_node = current_node->next_node[0].get_reference();
 
                     if (!current_node->retirement_enqueued_.load(memory_order_acquire))
                     {
@@ -588,8 +593,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                 reclaim_all_retired_nodes();
 
-                delete head;
-                delete NIL;
+                delete head_;
+                delete NIL_;
             };
 
             ValueType *find(const KeyType search_key)
@@ -597,7 +602,7 @@ namespace MINIMAL_STD_NAMESPACE
                 epoch_read_section_guard read_guard(this);
 
                 bool is_tombstoned = false;
-                SkipNode *pred = head, *curr = nullptr, *succ = nullptr;
+                skip_node *pred = head_, *curr = nullptr, *succ = nullptr;
 
                 // traverse from top of head
                 for (int level = MAX_LEVELS; level >= 0; --level)
@@ -609,7 +614,7 @@ namespace MINIMAL_STD_NAMESPACE
                         if (curr == nullptr)
                         {
                             // Corrupted/null link observed; treat as end-of-list sentinel.
-                            curr = NIL;
+                            curr = NIL_;
                             break;
                         }
 
@@ -617,12 +622,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                         while (is_tombstoned)
                         {
-                            SkipNode *tombstoned_node = curr;
+                            skip_node *tombstoned_node = curr;
                             curr = succ;
 
                             if (curr == nullptr)
                             {
-                                curr = NIL;
+                                curr = NIL_;
                                 is_tombstoned = false;
                                 break;
                             }
@@ -681,17 +686,17 @@ namespace MINIMAL_STD_NAMESPACE
 
                 int top_level = random_level();
 
-                SkipNode *preds[MAX_LEVELS + 1];
-                SkipNode *succs[MAX_LEVELS + 1];
+                skip_node *preds[MAX_LEVELS + 1];
+                skip_node *succs[MAX_LEVELS + 1];
 
-                SkipNode *new_node = nullptr;
+                skip_node *new_node = nullptr;
 
             RETRY_INSERT:
                 while (true)
                 {
-                    FindResult found = find_with_nodelists(key, preds, succs, read_guard.cpu_slot_);
+                    find_result found = find_with_nodelists(key, preds, succs, read_guard.cpu_slot_);
 
-                    if (found == FindResult::FOUND)
+                    if (found == find_result::FOUND)
                     {
                         delete new_node;
                         return false;
@@ -700,7 +705,7 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         if (new_node == nullptr)
                         {
-                            new_node = new SkipNode(key, value, top_level);
+                            new_node = new skip_node(key, value, top_level);
                             if (new_node->internal_slot_ == 0)
                             {
                                 delete new_node;
@@ -749,8 +754,8 @@ namespace MINIMAL_STD_NAMESPACE
                             bool soft_deleted = false;
                             uint32_t local_assist_failures = 0;
 
-                            SkipNode *curr = pred->next_node[0].get_reference();
-                            
+                            skip_node *curr = pred->next_node[0].get_reference();
+
                             while (true)
                             {
                                 if (curr == nullptr)
@@ -764,7 +769,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 while (is_tombstoned)
                                 {
-                                    SkipNode *tombstoned_node = curr;
+                                    skip_node *tombstoned_node = curr;
 
                                     if (curr->key == key)
                                     {
@@ -863,16 +868,16 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 epoch_read_section_guard read_guard(this);
 
-                SkipNode *preds[MAX_LEVELS + 1];
-                SkipNode *succs[MAX_LEVELS + 1];
-                SkipNode *succ;
+                skip_node *preds[MAX_LEVELS + 1];
+                skip_node *succs[MAX_LEVELS + 1];
+                skip_node *succ;
 
             RETRY_REMOVE:
                 while (true)
                 {
-                    FindResult found = find_with_nodelists(key, preds, succs, read_guard.cpu_slot_);
+                    find_result found = find_with_nodelists(key, preds, succs, read_guard.cpu_slot_);
 
-                    if (found != FindResult::FOUND)
+                    if (found != find_result::FOUND)
                     {
                         return false; // nothing to delete
                     }
@@ -965,16 +970,19 @@ namespace MINIMAL_STD_NAMESPACE
 
                             bool soft_deleted = false;
                             uint32_t local_assist_failures = 0;
-                            SkipNode *curr = pred->next_node[0].get_reference();
-                            
+                            skip_node *curr = pred->next_node[0].get_reference();
+
                             while (true)
                             {
                                 succ = curr->next_node[0].get(is_tombstoned);
 
                                 while (is_tombstoned)
                                 {
-                                    SkipNode *tombstoned_node = curr;
-                                    if (curr->key == key) { soft_deleted = true; }
+                                    skip_node *tombstoned_node = curr;
+                                    if (curr->key == key)
+                                    {
+                                        soft_deleted = true;
+                                    }
                                     curr = succ;
                                     succ = curr->next_node[0].get(is_tombstoned);
 
@@ -985,7 +993,9 @@ namespace MINIMAL_STD_NAMESPACE
                                             tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
                                             retire_node(tombstoned_node, read_guard.cpu_slot_);
                                         }
-                                    } else {
+                                    }
+                                    else
+                                    {
                                         ++local_assist_failures;
 
                                         if (local_assist_failures >= MAX_REMOVE_LOCAL_ASSIST_FAILURES)
@@ -998,14 +1008,18 @@ namespace MINIMAL_STD_NAMESPACE
                                         backoff(bottom_retry_backoff, read_guard.cpu_slot_);
                                     }
                                 }
-                                if (curr->key < key) {
+                                if (curr->key < key)
+                                {
                                     pred = curr;
                                     curr = succ;
-                                } else {
+                                }
+                                else
+                                {
                                     break;
                                 }
                             }
-                            if (soft_deleted || curr->key != key) {
+                            if (soft_deleted || curr->key != key)
+                            {
                                 return false;
                             }
                             node_to_remove = curr;
@@ -1019,7 +1033,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 epoch_read_section_guard read_guard(this);
 
-                auto current_node = head->next_node[0].get_reference();
+                auto current_node = head_->next_node[0].get_reference();
 
                 uint32_t size = 0;
                 bool node_is_tombstoned = false;
@@ -1070,16 +1084,16 @@ namespace MINIMAL_STD_NAMESPACE
 
                 for (int level = MAX_LEVELS; level >= 0; --level)
                 {
-                    SkipNode *current_node = head;
+                    skip_node *current_node = head_;
                     KeyType last_key = current_node->key;
                     uint32_t visited_steps = 0;
 
                     while (true)
                     {
                         bool is_tombstoned = false;
-                        SkipNode *next = current_node->next_node[level].get(is_tombstoned);
+                        skip_node *next = current_node->next_node[level].get(is_tombstoned);
 
-                        while ((next != NIL) && is_tombstoned)
+                        while ((next != NIL_) && is_tombstoned)
                         {
                             if (++visited_steps > DEBUG_MAX_VALIDATION_STEPS)
                             {
@@ -1090,7 +1104,7 @@ namespace MINIMAL_STD_NAMESPACE
                             next = current_node->next_node[level].get(is_tombstoned);
                         }
 
-                        if (next == NIL)
+                        if (next == NIL_)
                         {
                             break;
                         }
@@ -1109,7 +1123,7 @@ namespace MINIMAL_STD_NAMESPACE
                         current_node = next;
                     }
 
-                    if (NIL->key < last_key)
+                    if (NIL_->key < last_key)
                     {
                         return false;
                     }
@@ -1119,11 +1133,11 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            SkipNode *head;
-            SkipNode *NIL;
+            skip_node *head_;
+            skip_node *NIL_;
             mutable slot_policy_type slot_policy_{};
             mutable epoch_reclaimer_type epoch_reclaimer_;
-            mutable array<atomic<typename forward_link_type::slot_block*>, NumCPUs> cpu_retired_blocks_{};
+            mutable array<atomic<typename forward_link_type::slot_block *>, NumCPUs> cpu_retired_blocks_{};
 
             int random_level()
             {
@@ -1156,7 +1170,7 @@ namespace MINIMAL_STD_NAMESPACE
                 return new_level;
             }
 
-            enum class FindResult
+            enum class find_result
             {
                 FOUND,
                 NOT_FOUND
@@ -1187,7 +1201,7 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            void retire_node(SkipNode *node, size_t cpu_slot)
+            void retire_node(skip_node *node, size_t cpu_slot)
             {
                 bool expected_not_enqueued = false;
 
@@ -1203,7 +1217,7 @@ namespace MINIMAL_STD_NAMESPACE
                 // threads to share the same CPU slot briefly. On bare-metal (one thread
                 // per CPU), the CAS succeeds first-try with zero contention.
                 auto &slot = slot_policy_.slot(cpu_slot);
-                SkipNode *old_head = slot.local_retired_head_.load(memory_order_relaxed);
+                skip_node *old_head = slot.local_retired_head_.load(memory_order_relaxed);
                 do
                 {
                     node->retired_next = old_head;
@@ -1215,7 +1229,7 @@ namespace MINIMAL_STD_NAMESPACE
                 return slot_policy_.acquire_slot();
             }
 
-            public:
+        public:
             size_t enter_read_section() const
             {
                 return epoch_reclaimer_.enter_read_section();
@@ -1231,16 +1245,16 @@ namespace MINIMAL_STD_NAMESPACE
                 return epoch_reclaimer_.try_advance_epoch(exempt_slot);
             }
 
-            uint32_t reclaim_detached_retired_list(size_t cpu_slot, SkipNode *current, uint64_t reclaim_epoch)
+            uint32_t reclaim_detached_retired_list(size_t cpu_slot, skip_node *current, uint64_t reclaim_epoch)
             {
                 auto &slot = slot_policy_.slot(cpu_slot);
 
                 uint32_t nodes_freed = 0;
-                SkipNode *retained_head = nullptr;
+                skip_node *retained_head = nullptr;
 
                 while (current != nullptr)
                 {
-                    SkipNode *next = current->retired_next;
+                    skip_node *next = current->retired_next;
                     const bool fully_unlinked = (current->unlink_state_.load(memory_order_acquire) == static_cast<uint8_t>(unlink_state::FULLY_UNLINKED));
 
                     if (fully_unlinked && (current->retired_epoch_ <= reclaim_epoch))
@@ -1261,13 +1275,13 @@ namespace MINIMAL_STD_NAMESPACE
                 // Put retained nodes back at the front of this CPU's retired list.
                 if (retained_head != nullptr)
                 {
-                    SkipNode *tail = retained_head;
+                    skip_node *tail = retained_head;
                     while (tail->retired_next != nullptr)
                     {
                         tail = tail->retired_next;
                     }
 
-                    SkipNode *current_head = slot.local_retired_head_.load(memory_order_relaxed);
+                    skip_node *current_head = slot.local_retired_head_.load(memory_order_relaxed);
                     do
                     {
                         tail->retired_next = current_head;
@@ -1280,60 +1294,69 @@ namespace MINIMAL_STD_NAMESPACE
             pair<uint32_t, bool> advance_and_reclaim(size_t cpu_slot)
             {
                 using slot_block = typename forward_link_type::slot_block;
-                slot_block* unlinked = forward_link_type::extract_unlinked_blocks();
+                slot_block *unlinked = forward_link_type::extract_unlinked_blocks();
                 if (unlinked != nullptr)
                 {
                     uint64_t current_epoch = epoch_reclaimer_.current_epoch();
 
-                    slot_block* tail = unlinked;
+                    slot_block *tail = unlinked;
                     tail->retired_epoch_ = current_epoch;
                     while (tail->retired_next != nullptr)
                     {
                         tail = tail->retired_next;
                         tail->retired_epoch_ = current_epoch;
                     }
-                    
-                    slot_block* old_head = cpu_retired_blocks_[cpu_slot].load(memory_order_relaxed);
-                    do {
+
+                    slot_block *old_head = cpu_retired_blocks_[cpu_slot].load(memory_order_relaxed);
+                    do
+                    {
                         tail->retired_next = old_head;
                     } while (!cpu_retired_blocks_[cpu_slot].compare_exchange_weak(old_head, unlinked, memory_order_release, memory_order_relaxed));
                 }
 
                 auto result = epoch_reclaimer_.advance_and_reclaim(
                     cpu_slot,
-                    [this](size_t reclaim_slot) {
+                    [this](size_t reclaim_slot)
+                    {
                         return slot_policy_.slot(reclaim_slot).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
                     },
-                    [this](size_t reclaim_slot, SkipNode *detached_head, uint64_t reclaim_epoch) {
+                    [this](size_t reclaim_slot, skip_node *detached_head, uint64_t reclaim_epoch)
+                    {
                         using slot_block = typename forward_link_type::slot_block;
-                        slot_block* b_head = cpu_retired_blocks_[reclaim_slot].exchange(nullptr, memory_order_acq_rel);
-                        slot_block* b_retained = nullptr;
-                        
-                        while(b_head != nullptr) {
-                            slot_block* b_next = b_head->retired_next;
-                            if (b_head->retired_epoch_ <= reclaim_epoch) {
+                        slot_block *b_head = cpu_retired_blocks_[reclaim_slot].exchange(nullptr, memory_order_acq_rel);
+                        slot_block *b_retained = nullptr;
+
+                        while (b_head != nullptr)
+                        {
+                            slot_block *b_next = b_head->retired_next;
+                            if (b_head->retired_epoch_ <= reclaim_epoch)
+                            {
                                 delete b_head;
                                 Statistics::block_reclaimed();
-                            } else {
+                            }
+                            else
+                            {
                                 b_head->retired_next = b_retained;
                                 b_retained = b_head;
                             }
                             b_head = b_next;
                         }
 
-                        if (b_retained != nullptr) {
-                            slot_block* b_tail = b_retained;
-                            while (b_tail->retired_next != nullptr) b_tail = b_tail->retired_next;
-                            
-                            slot_block* b_old = cpu_retired_blocks_[reclaim_slot].load(memory_order_relaxed);
-                            do {
+                        if (b_retained != nullptr)
+                        {
+                            slot_block *b_tail = b_retained;
+                            while (b_tail->retired_next != nullptr)
+                                b_tail = b_tail->retired_next;
+
+                            slot_block *b_old = cpu_retired_blocks_[reclaim_slot].load(memory_order_relaxed);
+                            do
+                            {
                                 b_tail->retired_next = b_old;
                             } while (!cpu_retired_blocks_[reclaim_slot].compare_exchange_weak(b_old, b_retained, memory_order_release, memory_order_relaxed));
                         }
 
                         return reclaim_detached_retired_list(reclaim_slot, detached_head, reclaim_epoch);
-                    }
-                );
+                    });
 
                 if (result.second)
                 {
@@ -1346,42 +1369,42 @@ namespace MINIMAL_STD_NAMESPACE
             void reclaim_all_retired_nodes()
             {
                 using slot_block = typename forward_link_type::slot_block;
-                slot_block* unlinked = forward_link_type::extract_unlinked_blocks();
+                slot_block *unlinked = forward_link_type::extract_unlinked_blocks();
                 while (unlinked != nullptr)
                 {
-                    slot_block* next = unlinked->retired_next;
+                    slot_block *next = unlinked->retired_next;
                     delete unlinked;
                     unlinked = next;
                 }
 
                 for (size_t i = 0; i < NumCPUs; ++i)
                 {
-                    SkipNode *node = slot_policy_.slot(i).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+                    skip_node *node = slot_policy_.slot(i).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
 
                     while (node != nullptr)
                     {
-                        SkipNode *next = node->retired_next;
+                        skip_node *next = node->retired_next;
                         delete node;
                         node = next;
                     }
 
-                    slot_block* b_node = cpu_retired_blocks_[i].exchange(nullptr, memory_order_acq_rel);
+                    slot_block *b_node = cpu_retired_blocks_[i].exchange(nullptr, memory_order_acq_rel);
                     while (b_node != nullptr)
                     {
-                        slot_block* next = b_node->retired_next;
+                        slot_block *next = b_node->retired_next;
                         delete b_node;
                         b_node = next;
                     }
                 }
             }
 
-            FindResult find_with_nodelists(const KeyType search_key, SkipNode **preds, SkipNode **succs, size_t cpu_slot)
+            find_result find_with_nodelists(const KeyType search_key, skip_node **preds, skip_node **succs, size_t cpu_slot)
             {
                 bool is_tombstoned = false;
 
-                SkipNode *pred, *curr, *succ;
+                skip_node *pred, *curr, *succ;
 
-                pred = head;
+                pred = head_;
                 for (auto level = MAX_LEVELS; level >= 0; --level)
                 {
                     curr = pred->next_node[level].get_reference();
@@ -1390,7 +1413,7 @@ namespace MINIMAL_STD_NAMESPACE
                         if (curr == nullptr)
                         {
                             // Corrupted/null link observed; treat as end-of-list sentinel.
-                            curr = NIL;
+                            curr = NIL_;
                             break;
                         }
 
@@ -1400,13 +1423,13 @@ namespace MINIMAL_STD_NAMESPACE
 
                         while (is_tombstoned)
                         {
-                            SkipNode *tombstoned_node = curr;
+                            skip_node *tombstoned_node = curr;
 
                             curr = succ;
 
                             if (curr == nullptr)
                             {
-                                curr = NIL;
+                                curr = NIL_;
                                 is_tombstoned = false;
                                 break;
                             }
@@ -1448,9 +1471,8 @@ namespace MINIMAL_STD_NAMESPACE
                     succs[level] = curr;
                 }
 
-                return ((curr != nullptr) && (curr->key == search_key)) ? FindResult::FOUND : FindResult::NOT_FOUND;
+                return ((curr != nullptr) && (curr->key == search_key)) ? find_result::FOUND : find_result::NOT_FOUND;
             }
-
         };
     }
 

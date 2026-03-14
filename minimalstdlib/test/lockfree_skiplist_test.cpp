@@ -2,25 +2,25 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include <CppUTest/TestHarness.h>
 #include <CppUTest/MemoryLeakWarningPlugin.h>
+#include <CppUTest/TestHarness.h>
 
 #include <minstdconfig.h>
 
-#include <lockfree/skiplist>
-#include <lockfree/__extensions/skiplist_statistics.h>
-#include <avl_tree>
-#include <heap_allocator>
-#include <single_block_memory_heap>
 #include <__memory_resource/composite_pool_resource.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
+#include <avl_tree>
+#include <heap_allocator>
+#include <lockfree/__extensions/skiplist_statistics.h>
+#include <lockfree/skiplist>
+#include <single_block_memory_heap>
 
 #include <pthread.h>
 #include <sched.h>
-#include <stdlib.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <signal.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -35,7 +35,7 @@ namespace
     static constexpr size_t SKIPLIST_COMPOSITE_BUFFER_SIZE = 64 * 1024 * 1024;
     static constexpr size_t SKIPLIST_WRITE_LOAD_INITIAL_OCCUPANCY_PCT = 50;
 
-    char* skiplist_composite_resource_buffer = new char[SKIPLIST_COMPOSITE_BUFFER_SIZE]();
+    char *skiplist_composite_resource_buffer = new char[SKIPLIST_COMPOSITE_BUFFER_SIZE]();
 
     size_t skiplist_scaling_iterations_per_thread()
     {
@@ -205,7 +205,7 @@ namespace
         minstd::atomic<size_t> *ready_count_ = nullptr;
         minstd::atomic<size_t> *allocation_failures_ = nullptr;
         uint32_t thread_id_ = 0;
-        size_t write_period_ = 0;  // 0 = reads only; N = 1-in-N ops is a write
+        size_t write_period_ = 0; // 0 = reads only; N = 1-in-N ops is a write
         size_t iterations_ = 0;
         uint32_t key_space_ = 0;
         size_t operations_completed_ = 0;
@@ -228,7 +228,6 @@ namespace
             MemoryLeakWarningPlugin::restoreNewDeleteOverloads();
         }
     };
-
 
     template <typename list_type>
     void *skiplist_stress_worker(void *arg)
@@ -497,7 +496,7 @@ namespace
         };
 
         //  Members declared in strict construction order.
-        heap_buffer_guard heap_buf_;        //  first in, last out
+        heap_buffer_guard heap_buf_; //  first in, last out
         minstd::single_block_memory_heap heap_;
         node_allocator_type map_alloc_;
         map_type map_;
@@ -557,7 +556,7 @@ namespace
         minstd::atomic<size_t> *ready_count_ = nullptr;
         minstd::atomic<size_t> *allocation_failures_ = nullptr;
         uint32_t thread_id_ = 0;
-        size_t write_period_ = 0;  // 0 = reads only; N = 1-in-N ops is a write
+        size_t write_period_ = 0; // 0 = reads only; N = 1-in-N ops is a write
         size_t iterations_ = 0;
         uint32_t key_space_ = 0;
         size_t operations_completed_ = 0;
@@ -741,13 +740,13 @@ namespace
             {
                 CHECK_TRUE(list.insert(i, i));
             }
-            
+
             CHECK_EQUAL(15000u, list.size());
-            
+
             // Should have ~15 blocks allocated.
             CHECK_TRUE(list.active_blocks() >= 14);
 
-            // Remove 14,500 items, leaving 500 items. 
+            // Remove 14,500 items, leaving 500 items.
             // We delete deterministically to empty full blocks. If we delete from the end, earlier blocks are left.
             // But wait, the blocks themselves are allocated dynamically based on `next_free_slot_` or `partially_free_blocks_`.
             // If we remove all, it will definitely empty them!
@@ -759,28 +758,28 @@ namespace
             CHECK_EQUAL(500u, list.size());
 
             // Force epochs to advance so unlinked blocks get fully deleted.
-            // On a single-threaded test, advancing the epoch is enough. 
+            // On a single-threaded test, advancing the epoch is enough.
             for (uint32_t i = 0; i < 50; ++i)
             {
                 list.try_advance_epoch(0); // slot 0 might not be valid wait...
-                list.find(0xFFFFFFFF); // Traversal participates in epochs
+                list.find(0xFFFFFFFF);     // Traversal participates in epochs
             }
 
             // Because it deleted 14500 items, at least 13 blocks must be completely empty and thus returned to the OS.
             // The active blocks should go back down significantly.
             // Since there's only 500 items left, they could all fit in 1 block, although depending on fragmentation it could be slightly more.
             CHECK_TRUE(list.active_blocks() <= 5);
-            
+
             // Clean up the remaining 500 items for the next cycle
             for (uint32_t i = 14501; i <= 15000; ++i)
             {
                 CHECK_TRUE(list.remove(i));
             }
-            
+
             // Flush again
             for (uint32_t i = 0; i < 50; ++i)
             {
-                list.find(0xFFFFFFFF); 
+                list.find(0xFFFFFFFF);
             }
         }
     }
@@ -1311,15 +1310,15 @@ namespace
         struct write_load_config
         {
             const char *label;
-            size_t write_period;  // 0 = read-only; N = 1-in-N ops is a write
+            size_t write_period; // 0 = read-only; N = 1-in-N ops is a write
         };
 
         static const write_load_config configs[] = {
-            {"0.1%",  1000},
-            {"1%",    100},
-            {"5%",    20},
-            {"10%",   10},
-            {"20%",   5},
+            {"0.1%", 1000},
+            {"1%", 100},
+            {"5%", 20},
+            {"10%", 10},
+            {"20%", 5},
         };
 
         printf("Skiplist + malloc/free wrapper write-load perf: threads=%zu iterations/thread=%zu initial_occupancy=%zu%%\n",
@@ -1415,21 +1414,21 @@ namespace
                                     (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
             const double ops_per_sec = static_cast<double>(total_operations) / duration;
 
-                 uint32_t slot_high_water = 0;
+            uint32_t slot_high_water = 0;
 
-                 slot_high_water = list_type::slot_high_water_mark();
-                 if (slot_high_water > overall_slot_high_water)
-                 {
-                  overall_slot_high_water = slot_high_water;
-                 }
+            slot_high_water = list_type::slot_high_water_mark();
+            if (slot_high_water > overall_slot_high_water)
+            {
+                overall_slot_high_water = slot_high_water;
+            }
 
-                 printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu allocs=%zu slot_high_water=%u\n",
+            printf("  write=%-5s ops/sec=%f inserts=%zu removes=%zu allocs=%zu slot_high_water=%u\n",
                    cfg.label,
                    ops_per_sec,
                    total_insert_successes,
                    total_remove_successes,
-                     total_composite_allocations,
-                     slot_high_water);
+                   total_composite_allocations,
+                   slot_high_water);
 
             CHECK_EQUAL(expected_operations, total_operations);
             CHECK_EQUAL(expected_operations, total_composite_allocations);
@@ -1444,7 +1443,6 @@ namespace
         CHECK_TRUE(overall_slot_high_water > 0u);
     }
 
-
     TEST(SkiplistPerformanceTests, PerfMixedWriteLoadRWLockMapBaseline)
     {
         memory_leak_overload_scope_guard memory_leak_overload_guard;
@@ -1455,15 +1453,15 @@ namespace
         struct write_load_config
         {
             const char *label;
-            size_t write_period;  // 0 = read-only; N = 1-in-N ops is a write
+            size_t write_period; // 0 = read-only; N = 1-in-N ops is a write
         };
 
         static const write_load_config configs[] = {
-            {"0.1%",  1000},
-            {"1%",    100},
-            {"5%",    20},
-            {"10%",   10},
-            {"20%",   5},
+            {"0.1%", 1000},
+            {"1%", 100},
+            {"5%", 20},
+            {"10%", 10},
+            {"20%", 5},
         };
 
         printf("Reader/writer lock ordered map write-load perf (baseline): threads=%zu iterations/thread=%zu initial_occupancy=%zu%%\n",
@@ -1568,7 +1566,6 @@ namespace
         }
     }
 
-
     TEST(SkiplistTests, MultiThreadedStressOrderingAndContentCorrectness)
     {
         using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
@@ -1655,8 +1652,12 @@ namespace
         s_intr_signal_count = 0;
         s_intr_nested_count = 0;
 
-        struct sigaction sa{};
-        struct sigaction sa_old{};
+        struct sigaction sa
+        {
+        };
+        struct sigaction sa_old
+        {
+        };
         sa.sa_handler = sigusr1_nested_read_handler;
         sigemptyset(&sa.sa_mask);
         sa.sa_flags = 0;
@@ -1684,7 +1685,10 @@ namespace
         // Verify epoch reclaim is unblocked (no phantom readers blocking advancement).
         for (size_t cycle = 0; cycle < 5; ++cycle)
         {
-            for (uint32_t k = 0; k < KEY_COUNT; ++k) { list.remove(k); }
+            for (uint32_t k = 0; k < KEY_COUNT; ++k)
+            {
+                list.remove(k);
+            }
             for (uint32_t k = 0; k < KEY_COUNT; ++k)
             {
                 CHECK_TRUE(list.insert(k, k + static_cast<uint32_t>(cycle) + 1u));

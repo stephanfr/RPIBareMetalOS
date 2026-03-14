@@ -4,8 +4,8 @@
 
 #pragma once
 
-#include "minstdconfig.h"
 #include "minimalcstdlib.h"
+#include "minstdconfig.h"
 
 #include <array>
 #include <atomic>
@@ -19,8 +19,7 @@ namespace MINIMAL_STD_NAMESPACE
     public:
         class token
         {
-            public :
-
+        public:
             token() = delete;
 
             token(const token &) = delete;
@@ -56,7 +55,7 @@ namespace MINIMAL_STD_NAMESPACE
               token_counter_(0)
         {
             assert(number_of_tokens <= 64);
-            
+
             tokens_ = 0;
         }
 
@@ -81,7 +80,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 expected_value = tokens_.load(memory_order::seq_cst);
 
-                if((expected_value & (1 << token_index)) != 0)
+                if ((expected_value & (1 << token_index)) != 0)
                 {
                     continue;
                 }
@@ -97,14 +96,13 @@ namespace MINIMAL_STD_NAMESPACE
 
         void release_token(const token &token)
         {
-            tokens_.and_fetch( ~(1 << token.token_index_ ));
+            tokens_.and_fetch(~(1 << token.token_index_));
         }
 
     private:
-
         uint32_t number_of_tokens_;
 
-        alignas(CACHE_LINE_SIZE) minstd::atomic<uint64_t>   tokens_;
+        alignas(CACHE_LINE_SIZE) minstd::atomic<uint64_t> tokens_;
 
         alignas(CACHE_LINE_SIZE) minstd::atomic<size_t> token_counter_;
     };

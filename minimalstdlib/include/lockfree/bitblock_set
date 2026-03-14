@@ -6,10 +6,10 @@
 
 #include "minstdconfig.h"
 
+#include <__platform/cpu_platform_abstractions.h>
 #include <array>
 #include <atomic>
 #include <optional>
-#include <__platform/cpu_platform_abstractions.h>
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -244,8 +244,8 @@ namespace MINIMAL_STD_NAMESPACE
                                                      uint64_t desired = expected | mask;
 
                                                      if (words_[word_idx].compare_exchange_weak(expected, desired,
-                                                                                                 minstd::memory_order_acquire,
-                                                                                                 minstd::memory_order_relaxed))
+                                                                                                minstd::memory_order_acquire,
+                                                                                                minstd::memory_order_relaxed))
                                                      {
                                                          advance_search_hint(bit_index + num_bits);
                                                          return minstd::optional<size_t>(bit_index);
@@ -368,8 +368,8 @@ namespace MINIMAL_STD_NAMESPACE
                 uint64_t desired = expected | mask;
 
                 if (words_[word_idx].compare_exchange_weak(expected, desired,
-                                                            minstd::memory_order_acquire,
-                                                            minstd::memory_order_relaxed))
+                                                           minstd::memory_order_acquire,
+                                                           minstd::memory_order_relaxed))
                 {
                     return bitblock_set_result::success;
                 }
@@ -398,8 +398,8 @@ namespace MINIMAL_STD_NAMESPACE
                 uint64_t desired = expected & ~mask;
 
                 if (words_[word_idx].compare_exchange_weak(expected, desired,
-                                                            minstd::memory_order_release,
-                                                            minstd::memory_order_relaxed))
+                                                           minstd::memory_order_release,
+                                                           minstd::memory_order_relaxed))
                 {
                     return bitblock_set_result::success;
                 }

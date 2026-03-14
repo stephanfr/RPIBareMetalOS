@@ -33,7 +33,7 @@ namespace
     };
 
     // a class with data members:
-    struct MyValue
+    struct my_value
     {
         int value;
         int fifth() { return value / 5; }

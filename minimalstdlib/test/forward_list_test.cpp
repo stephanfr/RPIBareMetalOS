@@ -24,15 +24,15 @@ namespace
 
     static char buffer[TEST_BUFFER_SIZE];
 
-    class TestElement
+    class test_element
     {
     public:
-        explicit TestElement(uint32_t value)
+        explicit test_element(uint32_t value)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value() const
         {
@@ -44,7 +44,7 @@ namespace
     };
 
 
-    using TestElementForwardList = minstd::forward_list<TestElement>;
+    using test_element_forward_list = minstd::forward_list<test_element>;
 
     using ForwardListAllocator = minstd::allocator<TestElementForwardList::node_type>;
     using ForwardListStaticHeapAllocator = minstd::heap_allocator<TestElementForwardList::node_type>;
@@ -54,7 +54,7 @@ namespace
     void testInvariants(ForwardListAllocator &allocator)
     {
         {
-            TestElementForwardList test_list(allocator);
+            test_element_forward_list test_list(allocator);
 
             CHECK(test_list.begin() == test_list.end());
 
@@ -70,7 +70,7 @@ namespace
         }
 
         {
-            const TestElementForwardList test_list(allocator);
+            const test_element_forward_list test_list(allocator);
 
             CHECK(test_list.begin() == test_list.end());
 
@@ -88,18 +88,18 @@ namespace
 
     void testListFunctionality(ForwardListAllocator &allocator)
     {
-        TestElementForwardList list1(allocator);
+        test_element_forward_list list1(allocator);
 
         CHECK( list1.empty() );
 
-        list1.push_front(TestElement(5));
+        list1.push_front(test_element(5));
 
         CHECK( !list1.empty() );
 
-        list1.push_front(TestElement(4));
-        list1.push_front(TestElement(3));
-        list1.push_front(TestElement(2));
-        list1.push_front(TestElement(1));
+        list1.push_front(test_element(4));
+        list1.push_front(test_element(3));
+        list1.push_front(test_element(2));
+        list1.push_front(test_element(1));
 
         CHECK(list1.front().value() == 1);
 
@@ -122,7 +122,7 @@ namespace
         CHECK((itr1++)->value() == 5);
         CHECK(itr1 == list1.end());
 
-        TestElementForwardList list2(allocator);
+        test_element_forward_list list2(allocator);
 
         list2.emplace_front(9);
         list2.emplace_front(8);
@@ -139,14 +139,14 @@ namespace
         CHECK((itr2++)->value() == 9);
         CHECK(itr2 == list2.end());
 
-        const TestElementForwardList list3(allocator);
+        const test_element_forward_list list3(allocator);
 
-        const_cast<TestElementForwardList&>(list3).push_front(TestElement(101));
-        auto ia_itr = const_cast<TestElementForwardList&>(list3).insert_after(list3.begin(), TestElement(102));
-        const_cast<TestElementForwardList&>(list3).emplace_front(100);
-        const_cast<TestElementForwardList&>(list3).emplace_after(ia_itr, 105);
-        ia_itr = const_cast<TestElementForwardList&>(list3).insert_after(ia_itr, TestElement(103));
-        const_cast<TestElementForwardList&>(list3).emplace_after(ia_itr, 104);
+        const_cast<test_element_forward_list&>(list3).push_front(test_element(101));
+        auto ia_itr = const_cast<test_element_forward_list&>(list3).insert_after(list3.begin(), test_element(102));
+        const_cast<test_element_forward_list&>(list3).emplace_front(100);
+        const_cast<test_element_forward_list&>(list3).emplace_after(ia_itr, 105);
+        ia_itr = const_cast<test_element_forward_list&>(list3).insert_after(ia_itr, test_element(103));
+        const_cast<test_element_forward_list&>(list3).emplace_after(ia_itr, 104);
 
         CHECK(list3.front().value() == 100);
 
@@ -164,16 +164,16 @@ namespace
         itr3++;
         itr3++;
 
-        const_cast<TestElementForwardList&>(list3).erase_after(itr3);
+        const_cast<test_element_forward_list&>(list3).erase_after(itr3);
 
         itr3 = list3.begin();
         itr3++;
         itr3++;
         itr3++;
 
-        const_cast<TestElementForwardList&>(list3).erase_after(itr3);
+        const_cast<test_element_forward_list&>(list3).erase_after(itr3);
 
-        const_cast<TestElementForwardList&>(list3).pop_front();
+        const_cast<test_element_forward_list&>(list3).pop_front();
 
         itr3 = list3.begin();
 

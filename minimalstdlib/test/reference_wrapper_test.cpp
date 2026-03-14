@@ -21,23 +21,23 @@ namespace
     {};
 #pragma GCC diagnostic pop
 
-    class TestElement
+    class test_element
     {
     public:
-        TestElement()
+        test_element()
             : value1_(0),
               value2_(0)
         {
         }
 
-        explicit TestElement(uint32_t value1,
+        explicit test_element(uint32_t value1,
                              uint32_t value2)
             : value1_(value1),
               value2_(value2)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value1() const
         {

@@ -262,7 +262,7 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr size_t BLOCK_HEADER_SIZE = internal::aligned_size(sizeof(block_header), DEFAULT_ALIGNMENT);
             static constexpr size_t NUM_DEALLOCATION_BINS = 16;
 
-            static constexpr array<const size_t, NUM_DEALLOCATION_BINS> deallocation_bin_sizes = {1024, 2048, 4096, 8192, 16384, 32768, 65536, 2 * 65536, 3 * 65536, 4 * 65536, 5 * 65536, 6 * 65536, 7 * 65536, 8 * 65536, 9 * 65536, 10 * 65536};
+            static constexpr array<const size_t, NUM_DEALLOCATION_BINS> DEALLOCATION_BIN_SIZES = {1024, 2048, 4096, 8192, 16384, 32768, 65536, 2 * 65536, 3 * 65536, 4 * 65536, 5 * 65536, 6 * 65536, 7 * 65536, 8 * 65536, 9 * 65536, 10 * 65536};
 
             void *const block_;
             const size_t size_;

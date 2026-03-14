@@ -50,8 +50,8 @@ namespace
         return (value < 1.0) ? 1 : static_cast<size_t>(value);
     }
 
-    constexpr size_t buffer_size = 768 * 1048576; // 768 MB
-    char* buffer = new char[buffer_size]();
+    constexpr size_t BUFFER_SIZE = 768 * 1048576; // 768 MB
+    char* buffer = new char[BUFFER_SIZE]();
 
     minstd::atomic<bool> start_allocations = false;
 

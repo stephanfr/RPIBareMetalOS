@@ -9,12 +9,12 @@
 #include <minimalcstdlib.h>
 
 #include <allocator>
+#include <functional>
+#include <new>
+#include <optional>
 #include <stddef.h>
 #include <type_traits>
 #include <utility>
-#include <new>
-#include <optional>
-#include <functional>
 
 #include <atomic>
 
@@ -115,7 +115,7 @@ namespace MINIMAL_STD_NAMESPACE
             return false;
         }
 
-        bool pop_front( T &front)
+        bool pop_front(T &front)
         {
             auto const current = read_index_.load(memory_order_relaxed);
 
@@ -149,13 +149,13 @@ namespace MINIMAL_STD_NAMESPACE
                 return optional<reference_wrapper<T>>();
             }
 
-            return optional<reference_wrapper<T>>( elements_[current] );
+            return optional<reference_wrapper<T>>(elements_[current]);
         }
 
         void popFront()
         {
             auto const current = read_index_.load(memory_order_relaxed);
-//            assert(current != write_index_.load(memory_order_acquire));
+            //            assert(current != write_index_.load(memory_order_acquire));
 
             auto next = current + 1;
 

@@ -22,10 +22,10 @@ namespace
     using dynamic_string16 = minstd::dynamic_string<16>;
     using dynamic_string128 = minstd::dynamic_string<128>;
 
-    using DynamicStringHeapAllocator = minstd::heap_allocator<char>;
+    using dynamic_string_heap_allocator = minstd::heap_allocator<char>;
 
     minstd::single_block_memory_heap test_heap(buffer, 4096);
-    DynamicStringHeapAllocator heap_allocator(test_heap);
+    dynamic_string_heap_allocator heap_allocator(test_heap);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -43,7 +43,7 @@ namespace
     };
 #pragma GCC diagnostic pop
 
-    void BasicStringTest(minstd::string &test_string, const minstd::string &test_string2, DynamicStringHeapAllocator allocator)
+    void BasicStringTest(minstd::string &test_string, const minstd::string &test_string2, dynamic_string_heap_allocator allocator)
     {
         CHECK_EQUAL(test_string.size(), 11);
         CHECK(test_string == "Test String");
@@ -62,7 +62,7 @@ namespace
 
     void TestDifferingLengthStrings(minstd::string &test_short_string,
                                     minstd::string &test_medium_string,
-                                    DynamicStringHeapAllocator allocator)
+                                    dynamic_string_heap_allocator allocator)
     {
         CHECK(test_short_string.length() == 8);
         CHECK(test_short_string == "01234567");
@@ -91,7 +91,7 @@ namespace
         CHECK(test_short_string != "abcdefghi");
     }
 
-    void TestConstructorFromCharPointer(const char *value, DynamicStringHeapAllocator allocator)
+    void TestConstructorFromCharPointer(const char *value, dynamic_string_heap_allocator allocator)
     {
         dynamic_string test_string(value, allocator);
 

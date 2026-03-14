@@ -25,7 +25,7 @@ namespace MINIMAL_STD_NAMESPACE
                 : upstream_resource_(*upstream_resource),
                   initial_size_(initial_size),
                   current_size_(initial_size),
-                  first_superblock_( new (upstream_resource_->allocate(initial_size + aligned_size(superblock_header, alignof(max_align_t)))) {initial_size, nullptr})
+                  first_superblock_( new (upstream_resource_.allocate(initial_size + aligned_size(superblock_header, alignof(max_align_t)))) {initial_size, nullptr})
 //                  header_size_(aligned_size(sizeof(block_header))),
 //                  block_alignment_(alignof(std::max_align_t))
             {
@@ -38,7 +38,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         private:
             
-            struct SuperBlock
+            struct super_block
             {
                 const size_t size_;
                 header *next_superblock_;
@@ -72,7 +72,7 @@ namespace MINIMAL_STD_NAMESPACE
             const size_t initial_size_;
             const size_t current_size_;
 
-            const superblock_header *first_superblock_;
+            const block_header *first_superblock_;
 
             size_t bytes_allocated_ = 0;
             size_t blocks_allocated_ = 0;

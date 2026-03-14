@@ -36,10 +36,10 @@ namespace
     constexpr size_t MAX_NUMBER_OF_BLOCKS = 12;
     constexpr size_t MAX_NUMBER_OF_ARENAS = 32;
 
-    constexpr size_t default_alignment = alignof(max_align_t);
+    constexpr size_t DEFAULT_ALIGNMENT = alignof(max_align_t);
 
-    constexpr size_t buffer_size = 128 * 1048576; // 128 MB
-    char* buffer = new char[buffer_size]();
+    constexpr size_t BUFFER_SIZE = 128 * 1048576; // 128 MB
+    char* buffer = new char[BUFFER_SIZE]();
 
     minstd::atomic<bool> start_allocations = false;
 

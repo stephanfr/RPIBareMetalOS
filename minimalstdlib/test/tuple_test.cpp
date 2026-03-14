@@ -120,38 +120,38 @@ namespace
         CHECK(minstd::is_trivially_move_assignable_v<tuple<>>);
     }
 
-    struct A
+    struct a
     {
         int value = 0;
     };
 
-    struct B
+    struct b
     {
         int value = 0;
-        B &operator=(B const &b)
+        b &operator=(b const &b)
         {
             value = b.value;
             return *this;
         }
-        B &operator=(B &&b)
+        b &operator=(b &&b)
         {
             value = b.value;
             return *this;
         }
     };
 
-    struct C
+    struct c
     {
         int value;
         template <class U>
-        C &operator=(U &&other)
+        c &operator=(U &&other)
         {
             value = other.value;
             return *this;
         }
     };
 
-    struct TestOtherThan
+    struct test_other_than
     {
         template <minstd::other_than<TestOtherThan> T>
         constexpr bool test(T &&)
@@ -159,11 +159,11 @@ namespace
             return true;
         }
 
-        constexpr bool test(TestOtherThan const &) { return false; }
-        constexpr bool test(TestOtherThan &&) { return false; }
+        constexpr bool test(test_other_than const &) { return false; }
+        constexpr bool test(test_other_than &&) { return false; }
     };
 
-    struct TestOtherThan2
+    struct test_other_than2
     {
         template <minstd::other_than<TestOtherThan2> T>
         constexpr bool test(T &&)
@@ -171,7 +171,7 @@ namespace
             return true;
         }
 
-        constexpr bool test(TestOtherThan2 &&) { return false; }
+        constexpr bool test(test_other_than2 &&) { return false; }
     };
 
     TEST(TupleTests, OtherThanTrait)
@@ -193,12 +193,12 @@ namespace
 
     TEST(TupleTests, OtherTraits)
     {
-        using tuple_A = tuple<int, int, int>;
-        using tuple_B = tuple<int, int, long>;
+        using tuple_a = tuple<int, int, int>;
+        using tuple_b = tuple<int, int, long>;
 
-        tuple_A a{0, 0, 0};
+        tuple_a a{0, 0, 0};
         auto const a_const = a;
-        tuple_B b{0, 0, 10};
+        tuple_b b{0, 0, 10};
 
         static_assert(noexcept(a = a), "Assigning a tuple to itself must be noexcept for trivial types");
         static_assert(noexcept(a = a_const), "Assigning a tuple to itself must be noexcept for trivial types");
@@ -759,13 +759,13 @@ namespace
     {
         using minstd::type_list;
 
-        struct Uncomparable
+        struct uncomparable
         {
         };
 
         auto t1 = tuple{1, 2, 3};
         auto t2 = tuple{minstd::fixed_string<64>{"Hello"}, 2, 3};
-        auto t3 = tuple{Uncomparable{}, 2, 3};
+        auto t3 = tuple{uncomparable{}, 2, 3};
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -819,7 +819,7 @@ namespace
 
     TEST(TupleTests, TupleConversionToStruct)
     {
-        struct Vals
+        struct vals
         {
             int a;
             int b;
@@ -829,7 +829,7 @@ namespace
 
         auto tup1 = tuple{1, 2, minstd::fixed_string<64>("Hello, world!")};
 
-        Vals val = minstd::convert{tup1};
+        vals val = minstd::convert{tup1};
 
         CHECK(val.a == 1);
         CHECK(val.b == 2);
@@ -890,7 +890,7 @@ namespace
 
     TEST(TupleTests, TupleAsConversionToStruct)
     {
-        struct Vals
+        struct vals
         {
             int a;
             int b;
@@ -899,7 +899,7 @@ namespace
 
         auto tup1 = tuple{1, 2, minstd::fixed_string<64>("Hello, world!")};
 
-        Vals val = tup1.as<Vals>();
+        vals val = tup1.as<vals>();
 
         CHECK(val.a == 1);
         CHECK(val.b == 2);
