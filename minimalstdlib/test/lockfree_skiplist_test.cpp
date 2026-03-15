@@ -1985,3 +1985,47 @@ namespace
         s_intr_list = nullptr;
     }
 }
+
+TEST(SkiplistTests, IteratorBasicTest)
+{
+    using skip_list_type = minstd::skip_list<uint32_t, uint32_t, 16, 16>;
+    skip_list_type list;
+
+    // Empty iteration
+    size_t count = 0;
+    for (auto it = list.begin(); it != list.end(); ++it)
+    {
+        count++;
+    }
+    CHECK_EQUAL(0, count);
+
+    // Insert 10 items
+    for (uint32_t i = 10; i < 20; ++i)
+    {
+        list.insert(i, i * 10);
+    }
+
+    count = 0;
+    uint32_t last_key = 0;
+    for (auto it = list.begin(); it != list.end(); ++it)
+    {
+        count++;
+        CHECK_TRUE(it->first > last_key);
+        CHECK_EQUAL(it->first * 10, it->second);
+        last_key = it->first;
+    }
+    CHECK_EQUAL(10, count);
+    CHECK_EQUAL(19, last_key);
+
+    // Delete some to see if iteration handles gaps
+    list.remove(15);
+    list.remove(10);
+    list.remove(19);
+
+    count = 0;
+    for (auto it = list.begin(); it != list.end(); ++it)
+    {
+        count++;
+    }
+    CHECK_EQUAL(7, count);
+}
