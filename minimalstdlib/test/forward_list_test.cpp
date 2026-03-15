@@ -46,12 +46,12 @@ namespace
 
     using test_element_forward_list = minstd::forward_list<test_element>;
 
-    using ForwardListAllocator = minstd::allocator<TestElementForwardList::node_type>;
-    using ForwardListStaticHeapAllocator = minstd::heap_allocator<TestElementForwardList::node_type>;
-    using ForwardListStackAllocator = minstd::stack_allocator<TestElementForwardList::node_type, 24>;
+    using forward_list_allocator = minstd::allocator<test_element_forward_list::node_type>;
+    using forward_list_static_heap_allocator = minstd::heap_allocator<test_element_forward_list::node_type>;
+    using forward_list_stack_allocator = minstd::stack_allocator<test_element_forward_list::node_type, 24>;
 
 
-    void testInvariants(ForwardListAllocator &allocator)
+    void testInvariants(forward_list_allocator &allocator)
     {
         {
             test_element_forward_list test_list(allocator);
@@ -86,7 +86,7 @@ namespace
         }
     }
 
-    void testListFunctionality(ForwardListAllocator &allocator)
+    void testListFunctionality(forward_list_allocator &allocator)
     {
         test_element_forward_list list1(allocator);
 
@@ -186,11 +186,11 @@ namespace
     TEST(ForwardListTests, ForwardListWithStaticHeapAndStackAllocatorsIteratorInvariantsTest)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        ForwardListStaticHeapAllocator heap_allocator(test_heap);
+        forward_list_static_heap_allocator heap_allocator(test_heap);
 
         testInvariants(heap_allocator);
 
-        ForwardListStackAllocator stack_allocator;
+        forward_list_stack_allocator stack_allocator;
 
         testInvariants(stack_allocator);
     }
@@ -198,13 +198,13 @@ namespace
     TEST(ForwardListTests, ForwardListWithStaticHeapAllocatorPositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        ForwardListStaticHeapAllocator heap_allocator(test_heap);
+        forward_list_static_heap_allocator heap_allocator(test_heap);
 
         testListFunctionality(heap_allocator);
 
         CHECK(test_heap.blocks_reserved() == 15);
 
-        ForwardListStackAllocator stack_allocator;
+        forward_list_stack_allocator stack_allocator;
 
         testListFunctionality(stack_allocator);
     }

@@ -339,47 +339,47 @@ namespace
 
     TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionality)
     {
-        lockfree_single_block_resource_with_stats resource(buffer, buffer_size);
+        lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
 
         void *ptr1 = resource.allocate(50);
 
         CHECK(ptr1 != nullptr);
-        CHECK((unsigned long)ptr1 % default_alignment == 0);
+        CHECK((unsigned long)ptr1 % DEFAULT_ALIGNMENT == 0);
 
         auto allocation_info = resource.get_allocation_info(ptr1);
         CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 50);
-        CHECK(allocation_info.alignment == default_alignment);
+        CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
         void *ptr2 = resource.allocate(1023);
 
         CHECK(ptr2 != nullptr);
-        CHECK((unsigned long)ptr2 % default_alignment == 0);
+        CHECK((unsigned long)ptr2 % DEFAULT_ALIGNMENT == 0);
 
         allocation_info = resource.get_allocation_info(ptr2);
         CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 1023);
-        CHECK(allocation_info.alignment == default_alignment);
+        CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
         void *ptr3 = resource.allocate(123);
 
         CHECK(ptr3 != nullptr);
-        CHECK((unsigned long)ptr3 % default_alignment == 0);
+        CHECK((unsigned long)ptr3 % DEFAULT_ALIGNMENT == 0);
 
         allocation_info = resource.get_allocation_info(ptr3);
         CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 123);
-        CHECK(allocation_info.alignment == default_alignment);
+        CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
         void *ptr4 = resource.allocate(45678);
 
         CHECK(ptr4 != nullptr);
-        CHECK((unsigned long)ptr4 % default_alignment == 0);
+        CHECK((unsigned long)ptr4 % DEFAULT_ALIGNMENT == 0);
 
         allocation_info = resource.get_allocation_info(ptr4);
         CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 45678);
-        CHECK(allocation_info.alignment == default_alignment);
+        CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
         int counter = 0;
 
@@ -413,17 +413,17 @@ namespace
         void *ptr5 = resource.allocate(100);
 
         CHECK(ptr5 != nullptr);
-        CHECK((unsigned long)ptr5 % default_alignment == 0);
+        CHECK((unsigned long)ptr5 % DEFAULT_ALIGNMENT == 0);
 
         allocation_info = resource.get_allocation_info(ptr5);
         CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
         CHECK(allocation_info.size == 100);
-        CHECK(allocation_info.alignment == default_alignment);
+        CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
     }
 
     TEST(LockfreeSingleBlockMemoryResourceTests, AllocationLargerThanMaxIsRejected)
     {
-        lockfree_single_block_resource_with_stats resource(buffer, buffer_size);
+        lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
 
         size_t too_large = lockfree_single_block_resource_with_stats::MAX_ALLOCATION_SIZE + 1;
         void *ptr = resource.allocate(too_large);
@@ -438,7 +438,7 @@ namespace
         start_allocations = false;
         exit_thread = false;
 
-        lockfree_single_block_resource_with_stats resource(buffer, buffer_size);
+        lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
 
         allocator_thread_arguments args[NUM_THREADS];
         pthread_t threads[NUM_THREADS];
@@ -653,7 +653,7 @@ namespace
 
         start_allocations = false;
 
-        lockfree_single_block_resource_without_stats resource(buffer, buffer_size);
+        lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
 
         allocator_thread_arguments args[NUM_THREADS];
         pthread_t threads[NUM_THREADS];
@@ -755,7 +755,7 @@ namespace
             start_allocations = false;
             exit_thread = false;
 
-            lockfree_single_block_resource_without_stats resource(buffer, buffer_size);
+            lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
 
             perf_thread_arguments args[MAX_THREADS];
             pthread_t threads[MAX_THREADS];

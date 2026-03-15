@@ -95,7 +95,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     for (size_t i = 0; i < NUM_DEALLOCATION_BINS; i++)
                     {
-                        if (bytes + BLOCK_HEADER_SIZE >= deallocation_bin_sizes[i])
+                        if (bytes + BLOCK_HEADER_SIZE >= DEALLOCATION_BIN_SIZES[i])
                         {
                             deallocation_bin = i;
                             break;
@@ -201,7 +201,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 for (size_t i = 0; i < NUM_DEALLOCATION_BINS; i++)
                 {
-                    if (bytes + BLOCK_HEADER_SIZE >= deallocation_bin_sizes[i])
+                    if (bytes + BLOCK_HEADER_SIZE >= DEALLOCATION_BIN_SIZES[i])
                     {
                         deallocation_bin = i;
                         break;

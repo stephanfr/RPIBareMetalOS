@@ -66,14 +66,14 @@ namespace
 
     TEST(ReferenceWrapperTests, ClassInstance)
     {
-        TestElement test_element(1, 2);
+        test_element test_elem(1, 2);
 
-        minstd::reference_wrapper<TestElement> test_ref_wrapper(test_element);
+        minstd::reference_wrapper<test_element> test_ref_wrapper(test_elem);
 
         CHECK(test_ref_wrapper.get().value1() == 1);
         CHECK(test_ref_wrapper.get().value2() == 2);
 
-        minstd::optional<minstd::reference_wrapper<TestElement>> test_optional_ref_wrapper(test_element);
+        minstd::optional<minstd::reference_wrapper<test_element>> test_optional_ref_wrapper(test_elem);
 
         CHECK(test_optional_ref_wrapper.has_value());
         CHECK(test_optional_ref_wrapper->get().value1() == 1);

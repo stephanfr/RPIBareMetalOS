@@ -173,7 +173,7 @@ namespace MINIMAL_STD_NAMESPACE
                   metadata_start_(static_cast<block_metadata *>(internal::align_pointer((char *)block + block_size, 64)) - 1),
                   next_empty_memory_block_(0),  // Will be set after allocating per-CPU arrays
                   current_metadata_record_count_(0),
-                  metadata_head_(metadata_tag::make((block_metadata *)&end_of_metadata_list_sentinel_)),
+                  metadata_head_(metadata_tag::make((block_metadata *)&END_OF_METADATA_LIST_SENTINEL)),
                   soft_deleted_metadata_heads_(nullptr),
                   free_metadata_heads_(nullptr),
                   free_block_bins_(nullptr),
@@ -342,7 +342,7 @@ namespace MINIMAL_STD_NAMESPACE
                  UINT64_MAX};
 
         public:
-            static constexpr size_t MAX_ALLOCATION_SIZE = free_block_bin_sizes[NUM_FREE_BLOCK_BINS - 2];
+            static constexpr size_t MAX_ALLOCATION_SIZE = FREE_BLOCK_BIN_SIZES[NUM_FREE_BLOCK_BINS - 2];
 
         private:
             const void *const block_;
@@ -397,9 +397,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                 while (true)
                 {
-                    if (free_block_bin_sizes[index] >= bytes)
+                    if (FREE_BLOCK_BIN_SIZES[index] >= bytes)
                     {
-                        if (free_block_bin_sizes[index - 1] < bytes)
+                        if (FREE_BLOCK_BIN_SIZES[index - 1] < bytes)
                         {
                             break;
                         }
@@ -769,7 +769,7 @@ namespace MINIMAL_STD_NAMESPACE
              */
             block_header *get_next_empty_memory_block(uint64_t free_block_bin)
             {
-                size_t allocation_size = free_block_bin_sizes[free_block_bin];
+                size_t allocation_size = FREE_BLOCK_BIN_SIZES[free_block_bin];
 
                 block_header *next = nullptr;
                 block_header *current;

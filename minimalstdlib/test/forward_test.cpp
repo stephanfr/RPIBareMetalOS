@@ -84,22 +84,22 @@ namespace
 
     TEST(ForwardTests, BasicTest)
     {
-        auto p1 = create1<A>(2); // rvalue
+        auto p1 = create1<a>(2); // rvalue
 
         CHECK(p1->value == 2);
 
         int i = 1;
-        auto p2 = create1<A>(i); // lvalue
+        auto p2 = create1<a>(i); // lvalue
 
         CHECK(p2->value == i);
 
-        auto t = create2<B>(2, i, 3);
+        auto t = create2<b>(2, i, 3);
 
         CHECK(t->get_a1().value == 2);
         CHECK(t->get_a2().value == 1);
         CHECK(t->get_a3().value == 3);
 
-        B b = make_B(4, i, 5);
+        b b = make_B(4, i, 5);
 
         CHECK(b.get_a1().value == 4);
         CHECK(b.get_a2().value == 1);
@@ -109,6 +109,6 @@ namespace
         //  Uncomment below to insure the compiler fails to compile an rvalue as an lvalue
         //
 
-        //    auto t2 = create2_fails_at_compile_time<B>(2, i, 3);
+        //    auto t2 = create2_fails_at_compile_time<b>(2, i, 3);
     }
 }

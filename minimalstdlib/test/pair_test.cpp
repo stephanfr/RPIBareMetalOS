@@ -71,9 +71,9 @@ namespace
 
     TEST(PairTests, ObjectTests)
     {
-        minstd::pair<minstd::fixed_string<>, TestElement> pair1;
+        minstd::pair<minstd::fixed_string<>, test_element> pair1;
 
-        minstd::pair<minstd::fixed_string<>, TestElement> pair2("string is first", TestElement(51));
+        minstd::pair<minstd::fixed_string<>, test_element> pair2("string is first", test_element(51));
         STRCMP_EQUAL(get<0>(pair2), "string is first");
         CHECK_EQUAL(get<1>(pair2).value(), 51);
 
@@ -81,11 +81,11 @@ namespace
         STRCMP_EQUAL(get<0>(pair1), "string is first");
         CHECK_EQUAL(get<1>(pair1).value(), 51);
 
-        minstd::pair<minstd::fixed_string<>, TestElement> pair3(pair1);
+        minstd::pair<minstd::fixed_string<>, test_element> pair3(pair1);
         STRCMP_EQUAL(get<0>(pair3), "string is first");
         CHECK_EQUAL(get<1>(pair3).value(), 51);
 
-        const minstd::pair<minstd::fixed_string<>, TestElement> pair4(pair3);
+        const minstd::pair<minstd::fixed_string<>, test_element> pair4(pair3);
         STRCMP_EQUAL(get<0>(pair4), "string is first");
         CHECK_EQUAL(get<1>(pair4).value(), 51);
     }

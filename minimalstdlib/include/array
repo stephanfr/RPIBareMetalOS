@@ -77,7 +77,7 @@ namespace MINIMAL_STD_NAMESPACE
             return iterator(data() + NUM_ELEMENTS);
         }
 
-        const iterator end() const noexcept
+        const_iterator end() const noexcept
         {
             return const_iterator(data() + NUM_ELEMENTS);
         }

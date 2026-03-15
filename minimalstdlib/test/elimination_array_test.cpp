@@ -73,12 +73,12 @@ namespace
 
     TEST(EliminationArrayTests, BasicConstruction)
     {
-        TestEliminationArray elimination_array(12345);
+        test_elimination_array elimination_array(12345);
         
         // Array should be constructed successfully
         // Test basic operations with nullptr
-        TestElement element(123);
-        TestElement *element2 = nullptr;
+        test_element element(123);
+        test_element *element2 = nullptr;
         CHECK_FALSE(elimination_array.put_element(&element));
         CHECK_FALSE(elimination_array.get_element(element2));
         CHECK(element2 == nullptr);
@@ -86,11 +86,11 @@ namespace
 
     TEST(EliminationArrayTests, BasicPutGet)
     {
-        TestEliminationArray elimination_array(12345);
+        test_elimination_array elimination_array(12345);
         
-        TestElement element1(42);
-        TestElement element2(100);
-        TestElement *retrieved_element = nullptr;
+        test_element element1(42);
+        test_element element2(100);
+        test_element *retrieved_element = nullptr;
 
         // Test that operations normally fail when there's no elimination partner
         CHECK_FALSE(elimination_array.put_element(&element1));
@@ -100,9 +100,9 @@ namespace
 
     TEST(EliminationArrayTests, NullPointerHandling)
     {
-        TestEliminationArray elimination_array(12345);
+        test_elimination_array elimination_array(12345);
         
-        TestElement *null_ptr = nullptr;
+        test_element *null_ptr = nullptr;
         
         // put_element with nullptr should return false
         CHECK_FALSE(elimination_array.put_element(nullptr));
@@ -114,10 +114,10 @@ namespace
 
     TEST(EliminationArrayTests, SequentialEliminationAttempts)
     {
-        TestEliminationArray elimination_array(12345);
+        test_elimination_array elimination_array(12345);
         
-        TestElement elements[10];
-        TestElement *retrieved_elements[10];
+        test_element elements[10];
+        test_element *retrieved_elements[10];
         
         // Initialize test elements
         for (int i = 0; i < 10; ++i)
@@ -210,11 +210,11 @@ namespace
     {
         static const size_t NUM_OPERATIONS = 10000;
         
-        TestEliminationArray elimination_array(time(nullptr));
+        test_elimination_array elimination_array(time(nullptr));
         
         // Create test elements
-        TestElement elements[NUM_OPERATIONS];
-        TestElement *element_ptrs[NUM_OPERATIONS];
+        test_element elements[NUM_OPERATIONS];
+        test_element *element_ptrs[NUM_OPERATIONS];
         
         for (size_t i = 0; i < NUM_OPERATIONS; ++i)
         {
@@ -223,13 +223,13 @@ namespace
         }
         
         // Setup thread arguments
-        ThreadTestArgs put_args;
+        thread_test_args put_args;
         put_args.array = &elimination_array;
         put_args.elements = element_ptrs;
         put_args.num_elements = NUM_OPERATIONS;
         put_args.thread_id = 1;
         
-        ThreadTestArgs get_args;
+        thread_test_args get_args;
         get_args.array = &elimination_array;
         get_args.elements = nullptr; // Not used for get operations
         get_args.num_elements = NUM_OPERATIONS;
@@ -273,11 +273,11 @@ namespace
         static const size_t NUM_CONSUMER_THREADS = 32;
         static const size_t NUM_OPERATIONS_PER_THREAD = 10000;
         
-        TestEliminationArray elimination_array(time(nullptr));
+        test_elimination_array elimination_array(time(nullptr));
         
         // Create test elements for all producer threads
-        TestElement elements[NUM_PRODUCER_THREADS * NUM_OPERATIONS_PER_THREAD];
-        TestElement *element_ptrs[NUM_PRODUCER_THREADS][NUM_OPERATIONS_PER_THREAD];
+        test_element elements[NUM_PRODUCER_THREADS * NUM_OPERATIONS_PER_THREAD];
+        test_element *element_ptrs[NUM_PRODUCER_THREADS][NUM_OPERATIONS_PER_THREAD];
         
         for (size_t i = 0; i < NUM_PRODUCER_THREADS; ++i)
         {
@@ -290,8 +290,8 @@ namespace
         }
         
         // Setup thread arguments
-        ThreadTestArgs producer_args[NUM_PRODUCER_THREADS];
-        ThreadTestArgs consumer_args[NUM_CONSUMER_THREADS];
+        thread_test_args producer_args[NUM_PRODUCER_THREADS];
+        thread_test_args consumer_args[NUM_CONSUMER_THREADS];
         
         for (size_t i = 0; i < NUM_PRODUCER_THREADS; ++i)
         {
@@ -380,11 +380,11 @@ namespace
     TEST(EliminationArrayTests, DifferentElementSizes)
     {
         // Test with different array sizes
-        minstd::elimination_array<TestElement, 4> small_array(123);
-        minstd::elimination_array<TestElement, 32> large_array(456);
+        minstd::elimination_array<test_element, 4> small_array(123);
+        minstd::elimination_array<test_element, 32> large_array(456);
         
-        TestElement element(999);
-        TestElement *retrieved = nullptr;
+        test_element element(999);
+        test_element *retrieved = nullptr;
         
         // Both should work but normally fail without elimination partners
         CHECK_FALSE(small_array.put_element(&element));
@@ -397,11 +397,11 @@ namespace
     TEST(EliminationArrayTests, RandomSeedVariation)
     {
         // Test that different seeds produce different behavior patterns
-        TestEliminationArray array1(12345);
-        TestEliminationArray array2(67890);
+        test_elimination_array array1(12345);
+        test_elimination_array array2(67890);
         
-        TestElement element(42);
-        TestElement *retrieved = nullptr;
+        test_element element(42);
+        test_element *retrieved = nullptr;
         
         // Both should behave similarly for basic operations
         CHECK_FALSE(array1.put_element(&element));
@@ -437,11 +437,11 @@ namespace
                 continue;
             }
             
-            TestEliminationArray elimination_array(time(nullptr) + test_idx);
+            test_elimination_array elimination_array(time(nullptr) + test_idx);
             
             // Create test elements for all producer threads
-            TestElement elements[num_producer_threads * OPERATIONS_PER_THREAD];
-            TestElement *element_ptrs[num_producer_threads][OPERATIONS_PER_THREAD];
+            test_element elements[num_producer_threads * OPERATIONS_PER_THREAD];
+            test_element *element_ptrs[num_producer_threads][OPERATIONS_PER_THREAD];
             
             for (size_t i = 0; i < num_producer_threads; ++i)
             {
@@ -454,8 +454,8 @@ namespace
             }
             
             // Setup thread arguments
-            ThreadTestArgs producer_args[num_producer_threads];
-            ThreadTestArgs consumer_args[num_consumer_threads];
+            thread_test_args producer_args[num_producer_threads];
+            thread_test_args consumer_args[num_consumer_threads];
             
             for (size_t i = 0; i < num_producer_threads; ++i)
             {

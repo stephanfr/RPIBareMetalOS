@@ -215,7 +215,7 @@ namespace
 
     TEST(FixedSizeElementMemoryResourceTests, SingleBlockResourceBasicFunctionality)
     {
-        minstd::pmr::single_block_resource upstream_resource(buffer, buffer_size);
+        minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
         minstd::pmr::fixed_size_element_resource<32, 2024, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS> resource(
             static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
@@ -224,7 +224,7 @@ namespace
         void *ptr1 = resource.allocate(50);
 
         CHECK(ptr1 != nullptr);
-        CHECK((unsigned long)ptr1 % default_alignment == 0);
+        CHECK((unsigned long)ptr1 % DEFAULT_ALIGNMENT == 0);
 
         CHECK(resource.current_allocated() == 1);
         CHECK(resource.current_bytes_allocated() == 96);
@@ -234,9 +234,9 @@ namespace
         void *ptr2 = resource.allocate(50);
 
         CHECK(ptr2 != nullptr);
-        CHECK((unsigned long)ptr2 % default_alignment == 0);
+        CHECK((unsigned long)ptr2 % DEFAULT_ALIGNMENT == 0);
         CHECK(ptr2 > ptr1);
-        CHECK((((unsigned long)ptr2 - (unsigned long)ptr1)) % default_alignment == 0);
+        CHECK((((unsigned long)ptr2 - (unsigned long)ptr1)) % DEFAULT_ALIGNMENT == 0);
         CHECK_EQUAL(96, ((unsigned long)ptr2 - (unsigned long)ptr1)); //  The difference between the two pointers should be 96 bytes
 
         CHECK(resource.current_allocated() == 2);
@@ -247,9 +247,9 @@ namespace
         void *ptr3 = resource.allocate(133);
 
         CHECK(ptr3 != nullptr);
-        CHECK((unsigned long)ptr3 % default_alignment == 0);
+        CHECK((unsigned long)ptr3 % DEFAULT_ALIGNMENT == 0);
         CHECK(ptr3 > ptr2);
-        CHECK((((unsigned long)ptr3 - (unsigned long)ptr2)) % default_alignment == 0);
+        CHECK((((unsigned long)ptr3 - (unsigned long)ptr2)) % DEFAULT_ALIGNMENT == 0);
         CHECK_EQUAL(96, ((unsigned long)ptr3 - (unsigned long)ptr2)); //  The difference between the two pointers should be 96 bytes
 
         CHECK(resource.current_allocated() == 3);
@@ -260,9 +260,9 @@ namespace
         void *ptr4 = resource.allocate(32);
 
         CHECK(ptr4 != nullptr);
-        CHECK((unsigned long)ptr4 % default_alignment == 0);
+        CHECK((unsigned long)ptr4 % DEFAULT_ALIGNMENT == 0);
         CHECK(ptr4 > ptr3);
-        CHECK((((unsigned long)ptr4 - (unsigned long)ptr3)) % default_alignment == 0);
+        CHECK((((unsigned long)ptr4 - (unsigned long)ptr3)) % DEFAULT_ALIGNMENT == 0);
         CHECK_EQUAL(160, ((unsigned long)ptr4 - (unsigned long)ptr3)); //  The difference between the two pointers should be 160 bytes, the size of ptr3 block
 
         CHECK(resource.current_allocated() == 4);
@@ -291,7 +291,7 @@ namespace
 
     TEST(FixedSizeElementMemoryResourceTests, GrowthUntilMemoryExhaustionTest)
     {
-        minstd::pmr::single_block_resource upstream_resource(buffer, buffer_size);
+        minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
         minstd::pmr::fixed_size_element_resource<32, 2048, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS> resource(
             static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
@@ -355,7 +355,7 @@ namespace
         constexpr size_t NUM_BYTES_PER_ELEMENT = 32;
         constexpr size_t NUM_ELEMENTS_PER_BLOCK = 1024;
 
-        minstd::pmr::single_block_resource upstream_resource(buffer, buffer_size);
+        minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
         auto *resource = new minstd::pmr::fixed_size_element_resource<NUM_BYTES_PER_ELEMENT, NUM_ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS, false>(
             static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
@@ -514,7 +514,7 @@ namespace
         {
             start_allocations = false;
 
-            minstd::pmr::single_block_resource upstream_resource(buffer, buffer_size);
+            minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
             auto *resource = new minstd::pmr::fixed_size_element_resource<NUM_BYTES_PER_ELEMENT, NUM_ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, PERF_MAX_BLOCKS, false>(
                 static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
@@ -641,7 +641,7 @@ namespace
 
             TEST(FixedSizeElementMemoryResourceTests, Benchmark)
             {
-                minstd::pmr::single_block_resource resource(buffer, buffer_size);
+                minstd::pmr::single_block_resource resource(buffer, BUFFER_SIZE);
 
                 minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(100, 1000));
 

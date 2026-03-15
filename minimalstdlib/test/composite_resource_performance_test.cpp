@@ -171,7 +171,7 @@ namespace
             double malloc_elapsed_time = 0.0;
 
             {
-                minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, false> composite_resource(buffer, buffer_size, get_number_of_arenas());
+                minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, false> composite_resource(buffer, BUFFER_SIZE, get_number_of_arenas());
 
                 for (size_t i = 0; i < num_threads; i++)
                 {
@@ -210,7 +210,7 @@ namespace
             start_allocations = false;
 
             {
-                minstd::pmr::lockfree_single_block_resource<minstd::pmr::extensions::null_memory_resource_statistics> lockfree_resource(buffer, buffer_size);
+                minstd::pmr::lockfree_single_block_resource<minstd::pmr::extensions::null_memory_resource_statistics> lockfree_resource(buffer, BUFFER_SIZE);
 
                 for (size_t i = 0; i < num_threads; i++)
                 {

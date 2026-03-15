@@ -129,7 +129,7 @@ namespace
         {
             start_allocations = false;
 
-            minstd::pmr::composite_pool_resource<> resource(buffer, buffer_size, get_number_of_arenas());
+            minstd::pmr::composite_pool_resource<> resource(buffer, BUFFER_SIZE, get_number_of_arenas());
 
             allocator_thread_arguments args[MAX_THREADS];
             pthread_t threads[MAX_THREADS];

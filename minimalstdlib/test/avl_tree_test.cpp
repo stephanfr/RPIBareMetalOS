@@ -20,13 +20,13 @@
 
 #define TEST_BUFFER_SIZE 65536
 
-#define CREATE_TEST_ELEMENT_UNIQUE_PTR(key, value) AVLTreeUniquePointer::value_type(key, minstd::move(minstd::unique_ptr<TestElement>(new (test_element_heap.allocate_block<TestElement>(1)) TestElement(value), test_element_heap)))
+#define CREATE_TEST_ELEMENT_UNIQUE_PTR(key, value) avl_tree_unique_pointer::value_type(key, minstd::move(minstd::unique_ptr<test_element>(new (test_element_heap.allocate_block<test_element>(1)) test_element(value), test_element_heap)))
 
 namespace
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    TEST_GROUP (AVLTreeTests)
+    TEST_GROUP (avl_treeTests)
     {
     };
 #pragma GCC diagnostic pop
@@ -101,33 +101,33 @@ namespace
 
     using avl_tree = minstd::avl_tree<uint32_t, test_element>;
 
-    using AVLTreeAllocator = minstd::allocator<AVLTree::node_type>;
-    using AVLTreeStaticHeapAllocator = minstd::heap_allocator<AVLTree::node_type>;
-    using AVLTreeStackAllocator = minstd::stack_allocator<AVLTree::node_type, 24>;
+    using avl_treeAllocator = minstd::allocator<avl_tree::node_type>;
+    using avl_treeStaticHeapAllocator = minstd::heap_allocator<avl_tree::node_type>;
+    using avl_treeStackAllocator = minstd::stack_allocator<avl_tree::node_type, 24>;
 
     using avl_tree_move_only = minstd::avl_tree<uint32_t, move_only_test_element>;
 
-    using AVLTreeMoveOnlyAllocator = minstd::allocator<AVLTreeMoveOnly::node_type>;
-    using AVLTreeMoveOnlyStaticHeapAllocator = minstd::heap_allocator<AVLTreeMoveOnly::node_type>;
-    using AVLTreeMoveOnlyStackAllocator = minstd::stack_allocator<AVLTreeMoveOnly::node_type, 24>;
+    using avl_tree_move_onlyAllocator = minstd::allocator<avl_tree_move_only::node_type>;
+    using avl_tree_move_onlyStaticHeapAllocator = minstd::heap_allocator<avl_tree_move_only::node_type>;
+    using avl_tree_move_onlyStackAllocator = minstd::stack_allocator<avl_tree_move_only::node_type, 24>;
 
     using avl_tree_unique_pointer = minstd::avl_tree<uint32_t, minstd::unique_ptr<test_element>>;
 
-    using AVLTreeUniquePointerStaticHeapAllocator = minstd::heap_allocator<AVLTreeUniquePointer::node_type>;
-    using AVLTreeUniquePointerStackAllocator = minstd::stack_allocator<AVLTreeUniquePointer::node_type, 24>;
+    using avl_tree_unique_pointerStaticHeapAllocator = minstd::heap_allocator<avl_tree_unique_pointer::node_type>;
+    using avl_tree_unique_pointerStackAllocator = minstd::stack_allocator<avl_tree_unique_pointer::node_type, 24>;
 
     bool operator==(const minstd::reference_wrapper<minstd::dynamic_string<128>> &lhs, const minstd::string &rhs)
     {
         return lhs.get() == rhs;
     }
 
-    using AVLTreeStringKey = minstd::avl_tree<minstd::reference_wrapper<minstd::dynamic_string<128>>, uint32_t>;
+    using avl_tree_string_key = minstd::avl_tree<minstd::reference_wrapper<minstd::dynamic_string<128>>, uint32_t>;
 
-    using AVLTreeStringKeyAllocator = minstd::allocator<AVLTreeStringKey::node_type>;
-    using AVLTreeStringKeyStaticHeapAllocator = minstd::heap_allocator<AVLTreeStringKey::node_type>;
-    using AVLTreeStringKeyStackAllocator = minstd::stack_allocator<AVLTreeStringKey::node_type, 24>;
+    using avl_tree_string_keyAllocator = minstd::allocator<avl_tree_string_key::node_type>;
+    using avl_tree_string_keyStaticHeapAllocator = minstd::heap_allocator<avl_tree_string_key::node_type>;
+    using avl_tree_string_keyStackAllocator = minstd::stack_allocator<avl_tree_string_key::node_type, 24>;
 
-    void iterator_invariants(minstd::allocator<AVLTree::node_type> &allocator)
+    void iterator_invariants(minstd::allocator<avl_tree::node_type> &allocator)
     {
         avl_tree tree(allocator);
 
@@ -141,7 +141,7 @@ namespace
         CHECK(--tree.end() == tree.end());
     }
 
-    void basic_iterator_tests(minstd::allocator<AVLTree::node_type> &allocator)
+    void basic_iterator_tests(minstd::allocator<avl_tree::node_type> &allocator)
     {
         avl_tree tree(allocator);
 
@@ -150,7 +150,7 @@ namespace
         CHECK(tree.empty());
         CHECK_EQUAL(tree.size(), 0);
 
-        CHECK(get<1>(tree.insert(AVLTree::value_type(5, TestElement(15)))));
+        CHECK(get<1>(tree.insert(avl_tree::value_type(5, test_element(15)))));
 
         CHECK(!tree.empty());
         CHECK_EQUAL(tree.size(), 1);
@@ -180,7 +180,7 @@ namespace
         CHECK_EQUAL(count, 1);
     }
 
-    void basic_tests(minstd::allocator<AVLTree::node_type> &allocator)
+    void basic_tests(minstd::allocator<avl_tree::node_type> &allocator)
     {
         avl_tree tree(allocator);
 
@@ -189,37 +189,37 @@ namespace
         CHECK(tree.empty());
         CHECK_EQUAL(tree.size(), 0);
 
-        CHECK(get<1>(tree.insert(AVLTree::value_type(5, TestElement(15)))));
+        CHECK(get<1>(tree.insert(avl_tree::value_type(5, test_element(15)))));
 
         CHECK(!tree.empty());
         CHECK_EQUAL(tree.size(), 1);
 
         CHECK_EQUAL(get<0>(*get<0>(tree.insert(10, test_element(110)))), 10);
         CHECK(get<1>(tree.insert(3, test_element(13))));
-        CHECK_EQUAL(get<1>(*get<0>(tree.insert(AVLTree::value_type(24, TestElement(124))))).value(), 124);
+        CHECK_EQUAL(get<1>(*get<0>(tree.insert(avl_tree::value_type(24, test_element(124))))).value(), 124);
 
         tree.insert(51, test_element(151));
-        tree.insert(AVLTree::value_type(17, TestElement(117)));
+        tree.insert(avl_tree::value_type(17, test_element(117)));
         tree.insert(12, test_element(112));
-        tree.insert(AVLTree::value_type(13, TestElement(113)));
+        tree.insert(avl_tree::value_type(13, test_element(113)));
         tree.insert(43, test_element(143));
-        tree.insert(AVLTree::value_type(22, TestElement(122)));
+        tree.insert(avl_tree::value_type(22, test_element(122)));
         tree.insert(96, test_element(196));
-        tree.insert(AVLTree::value_type(64, TestElement(164)));
+        tree.insert(avl_tree::value_type(64, test_element(164)));
         tree.insert(2, test_element(12));
-        tree.insert(AVLTree::value_type(33, TestElement(133)));
-        tree.insert(AVLTree::value_type(57, TestElement(157)));
-        tree.insert(AVLTree::value_type(9, TestElement(19)));
-        tree.insert(AVLTree::value_type(68, TestElement(168)));
-        tree.insert(AVLTree::value_type(73, TestElement(173)));
-        tree.insert(AVLTree::value_type(81, TestElement(181)));
-        CHECK(get<1>(tree.insert(AVLTree::value_type(6, TestElement(16)))));
+        tree.insert(avl_tree::value_type(33, test_element(133)));
+        tree.insert(avl_tree::value_type(57, test_element(157)));
+        tree.insert(avl_tree::value_type(9, test_element(19)));
+        tree.insert(avl_tree::value_type(68, test_element(168)));
+        tree.insert(avl_tree::value_type(73, test_element(173)));
+        tree.insert(avl_tree::value_type(81, test_element(181)));
+        CHECK(get<1>(tree.insert(avl_tree::value_type(6, test_element(16)))));
 
         CHECK_EQUAL(tree.size(), 20);
 
         //  Inserting an element with an existing key should fail and return an iterator to the existing element
 
-        auto bad_insert_result = tree.insert(AVLTree::value_type(57, TestElement(257)));
+        auto bad_insert_result = tree.insert(avl_tree::value_type(57, test_element(257)));
 
         CHECK(!get<1>(bad_insert_result));
         CHECK_EQUAL(get<0>(*get<0>(bad_insert_result)), 57);
@@ -230,7 +230,7 @@ namespace
         size_t count = 0;
         uint32_t last_key = 0;
 
-        for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
+        for (avl_tree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
             CHECK(get<0>(*itr) > last_key);
             last_key = get<0>(*itr);
@@ -243,7 +243,7 @@ namespace
         count = 0;
         last_key = 100;
 
-        for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
+        for (avl_tree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
             CHECK(get<0>(*itr) < last_key);
             last_key = get<0>(*itr);
@@ -265,7 +265,7 @@ namespace
         count = 0;
         last_key = 0;
 
-        for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
+        for (avl_tree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
             CHECK(get<0>(*itr) != key_to_delete);
             CHECK(get<0>(*itr) > last_key);
@@ -278,7 +278,7 @@ namespace
         count = 0;
         last_key = 100;
 
-        for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
+        for (avl_tree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
             CHECK(get<0>(*itr) != key_to_delete);
             CHECK(get<0>(*itr) < last_key);
@@ -294,14 +294,14 @@ namespace
 
         key_to_delete = 57;
 
-        AVLTree::iterator itr_to_erase = tree.find(key_to_delete);
+        avl_tree::iterator itr_to_erase = tree.find(key_to_delete);
 
         CHECK_EQUAL(get<0>(*tree.erase(itr_to_erase)), 64);
 
         count = 0;
         last_key = 0;
 
-        for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
+        for (avl_tree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
             CHECK(get<0>(*itr) != key_to_delete);
             CHECK(get<0>(*itr) > last_key);
@@ -315,7 +315,7 @@ namespace
         count = 0;
         last_key = 100;
 
-        for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
+        for (avl_tree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
             CHECK(get<0>(*itr) != key_to_delete);
             CHECK(get<0>(*itr) < last_key);
@@ -337,7 +337,7 @@ namespace
         count = 0;
         last_key = 0;
 
-        for (AVLTree::iterator itr = tree.begin(); itr != tree.end(); itr++)
+        for (avl_tree::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
             CHECK(get<0>(*itr) != key_to_delete);
             CHECK(get<0>(*itr) > last_key);
@@ -351,7 +351,7 @@ namespace
         count = 0;
         last_key = 100;
 
-        for (AVLTree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
+        for (avl_tree::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
             CHECK(get<0>(*itr) != key_to_delete);
             CHECK(get<0>(*itr) < last_key);
@@ -386,7 +386,7 @@ namespace
         CHECK_EQUAL(tree.size(), 17);
     }
 
-    void basic_tests_move_only(AVLTreeMoveOnlyAllocator &allocator)
+    void basic_tests_move_only(avl_tree_move_onlyAllocator &allocator)
     {
         avl_tree_move_only tree(allocator);
 
@@ -395,38 +395,38 @@ namespace
         CHECK(tree.empty());
         CHECK_EQUAL(tree.size(), 0);
 
-        CHECK(get<1>(tree.insert(AVLTreeMoveOnly::value_type(5, MoveOnlyTestElement(15)))));
+        CHECK(get<1>(tree.insert(avl_tree_move_only::value_type(5, move_only_test_element(15)))));
 
         CHECK(!tree.empty());
         CHECK_EQUAL(tree.size(), 1);
 
         CHECK_EQUAL(get<0>(*get<0>(tree.insert(10, move_only_test_element(110)))), 10);
         CHECK(get<1>(tree.insert(3, move_only_test_element(13))));
-        CHECK_EQUAL(get<1>(*get<0>(tree.insert(AVLTreeMoveOnly::value_type(24, MoveOnlyTestElement(124))))).value(), 124);
+        CHECK_EQUAL(get<1>(*get<0>(tree.insert(avl_tree_move_only::value_type(24, move_only_test_element(124))))).value(), 124);
 
         tree.insert(51, move_only_test_element(151));
-        tree.insert(AVLTreeMoveOnly::value_type(17, MoveOnlyTestElement(117)));
+        tree.insert(avl_tree_move_only::value_type(17, move_only_test_element(117)));
         tree.insert(12, move_only_test_element(112));
-        tree.insert(AVLTreeMoveOnly::value_type(13, MoveOnlyTestElement(113)));
+        tree.insert(avl_tree_move_only::value_type(13, move_only_test_element(113)));
         tree.insert(43, move_only_test_element(143));
-        tree.insert(AVLTreeMoveOnly::value_type(22, MoveOnlyTestElement(122)));
+        tree.insert(avl_tree_move_only::value_type(22, move_only_test_element(122)));
         tree.insert(96, move_only_test_element(196));
-        tree.insert(AVLTreeMoveOnly::value_type(64, MoveOnlyTestElement(164)));
+        tree.insert(avl_tree_move_only::value_type(64, move_only_test_element(164)));
         tree.insert(2, move_only_test_element(12));
-        tree.insert(AVLTreeMoveOnly::value_type(33, MoveOnlyTestElement(133)));
-        tree.insert(AVLTreeMoveOnly::value_type(57, MoveOnlyTestElement(157)));
-        tree.insert(AVLTreeMoveOnly::value_type(9, MoveOnlyTestElement(19)));
-        tree.insert(AVLTreeMoveOnly::value_type(68, MoveOnlyTestElement(168)));
-        tree.insert(AVLTreeMoveOnly::value_type(73, MoveOnlyTestElement(173)));
-        tree.insert(AVLTreeMoveOnly::value_type(81, MoveOnlyTestElement(181)));
+        tree.insert(avl_tree_move_only::value_type(33, move_only_test_element(133)));
+        tree.insert(avl_tree_move_only::value_type(57, move_only_test_element(157)));
+        tree.insert(avl_tree_move_only::value_type(9, move_only_test_element(19)));
+        tree.insert(avl_tree_move_only::value_type(68, move_only_test_element(168)));
+        tree.insert(avl_tree_move_only::value_type(73, move_only_test_element(173)));
+        tree.insert(avl_tree_move_only::value_type(81, move_only_test_element(181)));
 
-        CHECK(get<1>(tree.insert(AVLTreeMoveOnly::value_type(6, MoveOnlyTestElement(16)))));
+        CHECK(get<1>(tree.insert(avl_tree_move_only::value_type(6, move_only_test_element(16)))));
 
         CHECK_EQUAL(tree.size(), 20);
 
         //  Inserting an element with an existing key should fail and return an iterator to the existing element
 
-        auto bad_insert_result = tree.insert(AVLTreeMoveOnly::value_type(57, MoveOnlyTestElement(257)));
+        auto bad_insert_result = tree.insert(avl_tree_move_only::value_type(57, move_only_test_element(257)));
 
         CHECK(!get<1>(bad_insert_result));
         CHECK_EQUAL(get<0>(*get<0>(bad_insert_result)), 57);
@@ -437,7 +437,7 @@ namespace
         size_t count = 0;
         uint32_t last_key = 0;
 
-        for (AVLTreeMoveOnly::iterator itr = tree.begin(); itr != tree.end(); itr++)
+        for (avl_tree_move_only::iterator itr = tree.begin(); itr != tree.end(); itr++)
         {
             CHECK(get<0>(*itr) > last_key);
             last_key = get<0>(*itr);
@@ -450,7 +450,7 @@ namespace
         count = 0;
         last_key = 100;
 
-        for (AVLTreeMoveOnly::iterator itr = --tree.end(); itr != tree.begin(); itr--)
+        for (avl_tree_move_only::iterator itr = --tree.end(); itr != tree.begin(); itr--)
         {
             CHECK(get<0>(*itr) < last_key);
             last_key = get<0>(*itr);
@@ -458,7 +458,7 @@ namespace
         }
     }
 
-    void basic_tests_unique_pointer(minstd::allocator<AVLTreeUniquePointer::node_type> &allocator, minstd::single_block_memory_heap &test_element_heap)
+    void basic_tests_unique_pointer(minstd::allocator<avl_tree_unique_pointer::node_type> &allocator, minstd::single_block_memory_heap &test_element_heap)
     {
         avl_tree_unique_pointer tree(allocator);
 
@@ -664,61 +664,61 @@ namespace
         CHECK_EQUAL(tree.size(), 17);
     }
 
-    TEST(AVLTreeTests, TestAVLTreeIteratorInvariants)
+    TEST(avl_treeTests, Testavl_treeIteratorInvariants)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        AVLTreeStaticHeapAllocator heap_allocator(test_heap);
+        avl_treeStaticHeapAllocator heap_allocator(test_heap);
 
         iterator_invariants(heap_allocator);
         basic_iterator_tests(heap_allocator);
 
-        AVLTreeStackAllocator stack_allocator;
+        avl_treeStackAllocator stack_allocator;
 
         iterator_invariants(stack_allocator);
         basic_iterator_tests(stack_allocator);
     }
 
-    TEST(AVLTreeTests, TestAVLTreeBasicOperations)
+    TEST(avl_treeTests, Testavl_treeBasicOperations)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        AVLTreeStaticHeapAllocator heap_allocator(test_heap);
+        avl_treeStaticHeapAllocator heap_allocator(test_heap);
 
         basic_tests(heap_allocator);
 
-        AVLTreeStackAllocator stack_allocator;
+        avl_treeStackAllocator stack_allocator;
 
         basic_tests(stack_allocator);
     }
 
-    TEST(AVLTreeTests, TestAVLTreeBasicOperationsWithMoveOnlyValueType)
+    TEST(avl_treeTests, Testavl_treeBasicOperationsWithMoveOnlyValueType)
     {
-        MoveOnlyTestElement element1 = MoveOnlyTestElement(7654);
-        MoveOnlyTestElement element2 = MoveOnlyTestElement(minstd::move(element1));
+        move_only_test_element element1 = move_only_test_element(7654);
+        move_only_test_element element2 = move_only_test_element(minstd::move(element1));
 
         CHECK_EQUAL(element2.value(), 7654);
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        AVLTreeMoveOnlyStaticHeapAllocator heap_allocator(test_heap);
+        avl_tree_move_onlyStaticHeapAllocator heap_allocator(test_heap);
 
         basic_tests_move_only(heap_allocator);
 
-        AVLTreeMoveOnlyStackAllocator stack_allocator;
+        avl_tree_move_onlyStackAllocator stack_allocator;
 
         basic_tests_move_only(stack_allocator);
     }
 
-    TEST(AVLTreeTests, TestAVLTreeWithUniquePointerTypeForLeaks)
+    TEST(avl_treeTests, Testavl_treeWithUniquePointerTypeForLeaks)
     {
         minstd::single_block_memory_heap test_element_heap(buffer2, 4096);
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        AVLTreeUniquePointerStaticHeapAllocator heap_allocator(test_heap);
+        avl_tree_unique_pointerStaticHeapAllocator heap_allocator(test_heap);
 
         // constructing an AVL tree
         {
-            AVLTreeUniquePointer tree(heap_allocator);
+            avl_tree_unique_pointer tree(heap_allocator);
 
             CHECK(tree.empty());
             CHECK_EQUAL(tree.size(), 0);
@@ -742,7 +742,7 @@ namespace
         //  Check the clear operation
 
         {
-            AVLTreeUniquePointer tree(heap_allocator);
+            avl_tree_unique_pointer tree(heap_allocator);
 
             CHECK(tree.empty());
             CHECK_EQUAL(tree.size(), 0);
@@ -760,28 +760,28 @@ namespace
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
     }
 
-    TEST(AVLTreeTests, TestAVLTreeBasicOperationsWithUniquePointerType)
+    TEST(avl_treeTests, Testavl_treeBasicOperationsWithUniquePointerType)
     {
         minstd::single_block_memory_heap test_element_heap(buffer2, 4096);
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        AVLTreeUniquePointerStaticHeapAllocator heap_allocator(test_heap);
+        avl_tree_unique_pointerStaticHeapAllocator heap_allocator(test_heap);
 
         basic_tests_unique_pointer(heap_allocator, test_element_heap);
 
-        AVLTreeStackAllocator stack_allocator;
+        avl_treeStackAllocator stack_allocator;
 
         basic_tests_unique_pointer(heap_allocator, test_element_heap);
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
     }
 
-    TEST(AVLTreeTests, TestAVLTreeWithStringKeyOperations)
+    TEST(avl_treeTests, Testavl_treeWithStringKeyOperations)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        AVLTreeStringKeyStaticHeapAllocator heap_allocator(test_heap);
+        avl_tree_string_keyStaticHeapAllocator heap_allocator(test_heap);
 
         minstd::single_block_memory_heap string_test_heap(buffer2, 4096);
         minstd::heap_allocator<char> string_allocator(string_test_heap);
@@ -790,7 +790,7 @@ namespace
         CHECK_EQUAL(0, string_test_heap.bytes_in_use());
 
         {
-            AVLTreeStringKey tree(heap_allocator);
+            avl_tree_string_key tree(heap_allocator);
 
             // constructing an AVL tree
 

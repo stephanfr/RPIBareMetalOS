@@ -49,9 +49,9 @@ namespace
 
     using test_element_queue = minstd::spsc_queue<test_element>;
 
-    using QueueAllocator = minstd::allocator<TestElementQueue::value_type>;
-    using QueueStaticHeapAllocator = minstd::heap_allocator<TestElementQueue::value_type>;
-    using QueueStackAllocator = minstd::stack_allocator<TestElementQueue::value_type, 24>;
+    using queue_allocator = minstd::allocator<test_element_queue::value_type>;
+    using queue_static_heap_allocator = minstd::heap_allocator<test_element_queue::value_type>;
+    using queue_stack_allocator = minstd::stack_allocator<test_element_queue::value_type, 24>;
 
     void *produce(void *arguments)
     {
@@ -91,9 +91,9 @@ namespace
     TEST(SingleProducerSingleConsumerLockfreeQueueTests, BasicTest)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        QueueStaticHeapAllocator heap_allocator(test_heap, MAX_QUEUE_ELEMENTS);
+        queue_static_heap_allocator heap_allocator(test_heap, MAX_QUEUE_ELEMENTS);
 
-        TestElementQueue queue(heap_allocator, MAX_QUEUE_ELEMENTS);
+        test_element_queue queue(heap_allocator, MAX_QUEUE_ELEMENTS);
 
         CHECK(queue.empty());
         CHECK(queue.capacity() == MAX_QUEUE_ELEMENTS - 1);
@@ -105,7 +105,7 @@ namespace
             CHECK(queue.size_estimate() == i + 1);
         }
 
-        TestElement front(65536);
+        test_element front(65536);
 
         for (uint32_t i = 0; i < MAX_QUEUE_ELEMENTS - 2; i++)
         {
@@ -118,9 +118,9 @@ namespace
     TEST(SingleProducerSingleConsumerLockfreeQueueTests, MultithreadedTest)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        QueueStaticHeapAllocator heap_allocator(test_heap, MAX_QUEUE_ELEMENTS);
+        queue_static_heap_allocator heap_allocator(test_heap, MAX_QUEUE_ELEMENTS);
 
-        TestElementQueue queue(heap_allocator, MAX_QUEUE_ELEMENTS);
+        test_element_queue queue(heap_allocator, MAX_QUEUE_ELEMENTS);
 
         //  Test a producer and consumer in different threads, 1000 times
 

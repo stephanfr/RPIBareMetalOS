@@ -153,7 +153,7 @@ namespace
 
     struct test_other_than
     {
-        template <minstd::other_than<TestOtherThan> T>
+        template <minstd::other_than<test_other_than> T>
         constexpr bool test(T &&)
         {
             return true;
@@ -165,7 +165,7 @@ namespace
 
     struct test_other_than2
     {
-        template <minstd::other_than<TestOtherThan2> T>
+        template <minstd::other_than<test_other_than2> T>
         constexpr bool test(T &&)
         {
             return true;
@@ -176,18 +176,18 @@ namespace
 
     TEST(TupleTests, OtherThanTrait)
     {
-        static_assert(TestOtherThan{}.test(0));
-        static_assert(TestOtherThan2{}.test(0));
+        static_assert(test_other_than{}.test(0));
+        static_assert(test_other_than2{}.test(0));
         {
-            auto t1 = TestOtherThan{};
-            auto const t2 = TestOtherThan{};
-            static_assert(!TestOtherThan{}.test(t1));
-            static_assert(!TestOtherThan{}.test(t2));
-            static_assert(!TestOtherThan{}.test(minstd::move(t1)));
+            auto t1 = test_other_than{};
+            auto const t2 = test_other_than{};
+            static_assert(!test_other_than{}.test(t1));
+            static_assert(!test_other_than{}.test(t2));
+            static_assert(!test_other_than{}.test(minstd::move(t1)));
         }
         {
-            auto t1 = TestOtherThan2{};
-            static_assert(!TestOtherThan2{}.test(minstd::move(t1)));
+            auto t1 = test_other_than2{};
+            static_assert(!test_other_than2{}.test(minstd::move(t1)));
         }
     }
 
@@ -206,23 +206,23 @@ namespace
 
         a = b;
 
-        static_assert(minstd::is_trivially_assignable_v<tuple_A, tuple_A &>, "A tuple should be trivially assignable to itself if the members are");
-        static_assert(minstd::is_trivially_assignable_v<tuple_A, tuple_A &&>, "A tuple should be trivially assignable to itself if the members are");
-        static_assert(minstd::is_trivially_assignable_v<tuple_A, tuple_A const &>, "A tuple should be trivially assignable to itself if the members are");
+        static_assert(minstd::is_trivially_assignable_v<tuple_a, tuple_a &>, "A tuple should be trivially assignable to itself if the members are");
+        static_assert(minstd::is_trivially_assignable_v<tuple_a, tuple_a &&>, "A tuple should be trivially assignable to itself if the members are");
+        static_assert(minstd::is_trivially_assignable_v<tuple_a, tuple_a const &>, "A tuple should be trivially assignable to itself if the members are");
 
-        static_assert(minstd::is_trivially_copyable_v<tuple_A>, "Expected tuple<int, int, int> to be trivially copyable");
-        static_assert(minstd::is_default_constructible_v<tuple_A>, "Expected tuple<int, int, int> to be default constructible");
-        static_assert(minstd::is_aggregate_v<tuple_A>, "Expected tuple<int, int, int> to be an aggregate");
+        static_assert(minstd::is_trivially_copyable_v<tuple_a>, "Expected tuple<int, int, int> to be trivially copyable");
+        static_assert(minstd::is_default_constructible_v<tuple_a>, "Expected tuple<int, int, int> to be default constructible");
+        static_assert(minstd::is_aggregate_v<tuple_a>, "Expected tuple<int, int, int> to be an aggregate");
 
-        static_assert(minstd::is_trivially_copy_assignable_v<tuple_A>, "A tuple should be trivially assignable to itself if the members are");
-        static_assert(minstd::is_trivially_copy_assignable_v<tuple_B>, "A tuple should be trivially assignable to itself if the members are");
-        static_assert(minstd::is_trivially_assignable_v<tuple_B, tuple_B>, "A tuple should be trivially assignable to itself if the members are");
-        static_assert(!minstd::is_trivially_assignable_v<tuple_A, tuple_B>, "A tuple should not be trivially assignable to converted tuples");
-        static_assert(minstd::is_trivially_move_assignable_v<tuple_A>, "A tuple should be trivially move assignable if the members are");
-        static_assert(minstd::is_trivially_move_assignable_v<tuple_B>, "A tuple should be trivially move assignable if the members are");
+        static_assert(minstd::is_trivially_copy_assignable_v<tuple_a>, "A tuple should be trivially assignable to itself if the members are");
+        static_assert(minstd::is_trivially_copy_assignable_v<tuple_b>, "A tuple should be trivially assignable to itself if the members are");
+        static_assert(minstd::is_trivially_assignable_v<tuple_b, tuple_b>, "A tuple should be trivially assignable to itself if the members are");
+        static_assert(!minstd::is_trivially_assignable_v<tuple_a, tuple_b>, "A tuple should not be trivially assignable to converted tuples");
+        static_assert(minstd::is_trivially_move_assignable_v<tuple_a>, "A tuple should be trivially move assignable if the members are");
+        static_assert(minstd::is_trivially_move_assignable_v<tuple_b>, "A tuple should be trivially move assignable if the members are");
 
-        static_assert(minstd::is_trivial_v<tuple_A>, "A tuple should be trivial if it's members are.");
-        static_assert(minstd::is_trivial_v<tuple_B>, "A tuple should be trivial if it's members are.");
+        static_assert(minstd::is_trivial_v<tuple_a>, "A tuple should be trivial if it's members are.");
+        static_assert(minstd::is_trivial_v<tuple_b>, "A tuple should be trivial if it's members are.");
     }
 
     //  Functional tests
