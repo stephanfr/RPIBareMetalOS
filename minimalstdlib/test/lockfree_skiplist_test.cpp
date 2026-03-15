@@ -1831,6 +1831,18 @@ namespace
             }
             
             uint32_t op_val = rng();
+
+            // Intermittently try full iteration under concurrent mutation conditions
+            if (op_val % 10000 == 0)
+            {
+                size_t count = 0;
+                for (const auto& kv : *args->list_)
+                {
+                    (void)kv;
+                    count++;
+                }
+            }
+
             bool is_write = (write_period != 0) && ((op_val % write_period) == 0);
             uint32_t key = (op_val >> 16) % args->key_space_;
             
