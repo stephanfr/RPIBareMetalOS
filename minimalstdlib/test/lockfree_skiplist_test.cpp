@@ -1960,16 +1960,29 @@ namespace
         timespec end_time{};
         clock_gettime(CLOCK_MONOTONIC, &start_time);
         
+        size_t last_print_sec = 0;
         while (true)
         {
             clock_gettime(CLOCK_MONOTONIC, &end_time);
-            double elapsed = static_cast<double>(end_time.tv_sec - start_time.tv_sec) +
+            double elapsed = static_cast<double>(end_time.tv_sec - start_time.tv_sec) + 
                              (static_cast<double>(end_time.tv_nsec - start_time.tv_nsec) / 1e9);
+            
             if (elapsed >= SOAK_DURATION_SEC)
             {
                 break;
             }
-            usleep(10000); // 10ms
+            size_t current_sec = static_cast<size_t>(elapsed);
+            if (current_sec - last_print_sec >= 60)
+            {
+                size_t current_ops = 0;
+                for (size_t i = 0; i < NUM_THREADS; ++i) {
+                    current_ops += thread_args[i].operations_completed_;
+                }
+                printf("  ... elapsed: %zu / %zu seconds (Ops so far: %zu)\n", current_sec, SOAK_DURATION_SEC, current_ops);
+                fflush(stdout);
+                last_print_sec = current_sec;
+            }
+            usleep(100000); // 100ms
         }
         
         stop.store(true, minstd::memory_order_release);
