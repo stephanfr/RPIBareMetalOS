@@ -1792,14 +1792,17 @@ namespace
     struct skiplist_soak_peaky_worker_args
     {
         intr_test_list_t *list_;
+        minstd::pmr::memory_resource *memory_resource_;
         minstd::atomic<bool> *start_;
         minstd::atomic<size_t> *ready_count_;
+        minstd::atomic<size_t> *allocation_failures_;
         minstd::atomic<bool> *stop_;
         
         uint32_t thread_id_;
         uint32_t key_space_;
         
         size_t operations_completed_;
+        size_t composite_allocations_;
         size_t insert_successes_;
         size_t remove_successes_;
         size_t find_successes_;
@@ -1831,6 +1834,19 @@ namespace
             }
             
             uint32_t op_val = rng();
+
+            const size_t block_size = 32 + static_cast<size_t>(op_val & 0xFFu);
+            void *ptr = args->memory_resource_->allocate(block_size);
+
+            if (ptr == nullptr)
+            {
+                args->allocation_failures_->fetch_add(1, minstd::memory_order_relaxed);
+            }
+            else
+            {
+                args->memory_resource_->deallocate(ptr, block_size);
+                args->composite_allocations_++;
+            }
 
             // Intermittently try full iteration under concurrent mutation conditions
             if (op_val % 10000 == 0)
@@ -1912,6 +1928,11 @@ namespace
         {
             CHECK_TRUE(list.insert(i, i));
         }
+
+        minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, true> composite_resource(
+            skiplist_composite_resource_buffer,
+            SKIPLIST_COMPOSITE_BUFFER_SIZE,
+            skiplist_perf_num_arenas());
         
         pthread_t workers[16]{};
         skiplist_soak_peaky_worker_args thread_args[16]{};
@@ -1919,16 +1940,20 @@ namespace
         minstd::atomic<bool> start{false};
         minstd::atomic<bool> stop{false};
         minstd::atomic<size_t> ready_count{0};
+        minstd::atomic<size_t> allocation_failures{0};
         
         for (size_t i = 0; i < NUM_THREADS; ++i)
         {
             thread_args[i].list_ = &list;
+            thread_args[i].memory_resource_ = &composite_resource;
             thread_args[i].start_ = &start;
             thread_args[i].ready_count_ = &ready_count;
+            thread_args[i].allocation_failures_ = &allocation_failures;
             thread_args[i].stop_ = &stop;
             thread_args[i].thread_id_ = i;
             thread_args[i].key_space_ = KEY_SPACE;
             thread_args[i].operations_completed_ = 0;
+            thread_args[i].composite_allocations_ = 0;
             thread_args[i].insert_successes_ = 0;
             thread_args[i].remove_successes_ = 0;
             thread_args[i].find_successes_ = 0;
@@ -1972,7 +1997,7 @@ namespace
                 break;
             }
             size_t current_sec = static_cast<size_t>(elapsed);
-            if (current_sec - last_print_sec >= 60)
+            if (current_sec - last_print_sec >= 10)
             {
                 size_t current_ops = 0;
                 for (size_t i = 0; i < NUM_THREADS; ++i) {
@@ -1988,6 +2013,7 @@ namespace
         stop.store(true, minstd::memory_order_release);
         
         size_t total_operations = 0;
+        size_t total_composite_allocations = 0;
         size_t total_inserts = 0;
         size_t total_removes = 0;
         
@@ -1995,17 +2021,26 @@ namespace
         {
             pthread_join(workers[i], nullptr);
             total_operations += thread_args[i].operations_completed_;
+            total_composite_allocations += thread_args[i].composite_allocations_;
             total_inserts += thread_args[i].insert_successes_;
             total_removes += thread_args[i].remove_successes_;
         }
         pthread_join(bomber_thread, nullptr);
         
-        printf("Soak test completed. Operations: %zu, Inserts: %zu, Removes: %zu\n", total_operations, total_inserts, total_removes);
+        printf("Soak test completed. Operations: %zu, Mem Allocs: %zu, Inserts: %zu, Removes: %zu\n", total_operations, total_composite_allocations, total_inserts, total_removes);
+        printf("Pool allocations: %zu, Deallocations: %zu, Current allocated bytes: %zu\n",
+               composite_resource.total_allocations(), composite_resource.total_deallocations(),
+               composite_resource.current_allocated());
         printf("Signals delivered: %u, Nested reads: %u\n", (uint32_t)s_intr_signal_count, (uint32_t)s_intr_nested_count);
         
+        CHECK_EQUAL(static_cast<size_t>(0), allocation_failures.load(minstd::memory_order_acquire));
         CHECK_TRUE(s_intr_signal_count > 0);
         
         CHECK_TRUE(list.validate_ordering());
+        
+        // Verify no memory leaks occurred in the pool resource
+        CHECK_EQUAL(static_cast<size_t>(0), composite_resource.current_allocated());
+        CHECK_EQUAL(composite_resource.total_allocations(), composite_resource.total_deallocations());
         
         s_intr_list = nullptr;
     }

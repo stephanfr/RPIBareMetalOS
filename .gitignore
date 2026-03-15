@@ -7,3 +7,4 @@ gcc-cross
 **/doc
 **/*.dump
 minimalstdlib/tlaplus/tla2tools.jar
+*.log
