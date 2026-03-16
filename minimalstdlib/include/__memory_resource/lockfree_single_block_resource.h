@@ -19,7 +19,7 @@
 #include "lockfree/tagged_ptr"
 #include "memory_resource.h"
 
-#include "stdio.h"
+#include "minimalstdio.h"
 
 namespace MINIMAL_STD_NAMESPACE
 {

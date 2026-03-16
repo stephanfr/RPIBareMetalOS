@@ -50,10 +50,10 @@ minstd::single_block_memory_heap __os_static_heap_core(static_heap_buffer, TEST_
 
 minstd::single_block_memory_heap __os_dynamic_heap_core(dynamic_heap_buffer, TEST_DYNAMIC_HEAP_SIZE, 4);
 
-minstd::single_block_memory_heap &__os_static_heap = __os_static_heap_core;
-minstd::single_block_memory_heap &__os_dynamic_heap = __os_dynamic_heap_core;
+minstd::memory_heap &__os_static_heap = __os_static_heap_core;
+minstd::memory_heap &__os_dynamic_heap = __os_dynamic_heap_core;
 
-minstd::single_block_memory_heap &__os_filesystem_cache_heap = __os_dynamic_heap;
+minstd::memory_heap &__os_filesystem_cache_heap = __os_dynamic_heap;
 
 dynamic_allocator<char> __dynamic_string_allocator;
 

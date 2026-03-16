@@ -113,8 +113,8 @@ namespace task
 
     } // namespace internal
 
-    TaskManagerImpl::TaskManagerImpl()
-        : number_of_cores_(GetPlatformInfo().GetNumberOfCores())
+    TaskManagerImpl::TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc)
+        : number_of_cores_(GetPlatformInfo().GetNumberOfCores()), task_map_allocator_(alloc)
     {
     }
 
@@ -122,7 +122,7 @@ namespace task
     {
         if (!instance_.has_value())
         {
-            auto temp = minstd::unique_ptr<TaskManagerImpl>(new (__os_static_heap.allocate_block<TaskManagerImpl>(1)) TaskManagerImpl(), __os_static_heap);
+            auto temp = minstd::unique_ptr<TaskManagerImpl>(new (__os_static_heap.allocate_block<TaskManagerImpl>(1)) TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t>(&__os_dynamic_heap_resource)), __os_static_heap);
 
             instance_ = minstd::reference_wrapper<TaskManagerImpl>(*temp);
 
@@ -162,7 +162,7 @@ namespace task
                 ParkCore();
             }
 
-            instance_->get().idle_tasks_[core_id] = minstd::get<1>(*instance_->get().task_map_.find(fork_idle_task_result.Value())).get();
+            instance_->get().idle_tasks_[core_id] = instance_->get().task_map_.find(fork_idle_task_result.Value())->second;
         }
 
         //  Start the secondary cores
@@ -225,11 +225,10 @@ namespace task
     {
         //  We need to single-thread this method
 
-        LockGuard single_thread(const_cast<SpinLock &>(task_map_spinlock_));
 
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
-            if (callback(*(dynamic_cast<const Task *>(minstd::get<1>(*task_itr).get()))) == TaskListVisitorCallbackStatus::FINISHED)
+            if (callback(*(dynamic_cast<const Task *>(task_itr->second))) == TaskListVisitorCallbackStatus::FINISHED)
             {
                 break;
             }
@@ -354,11 +353,10 @@ namespace task
         {
             //  We need to single-thread actions on the task map
 
-            LockGuard lock(task_map_spinlock_);
 
             //  Add the task to the task map
 
-            task_map_.insert(task->ID(), minstd::move(task));
+            task_map_.insert(task->ID(), task.release());
         }
 
         //  Determine which core to schedule the task on
@@ -383,13 +381,12 @@ namespace task
 
     minstd::optional<minstd::reference_wrapper<Task>> TaskManagerImpl::FindTask(const UUID &task_id)
     {
-        LockGuard single_thread(task_map_spinlock_);
 
         auto task_itr = task_map_.find(task_id);
 
         if (task_itr != task_map_.end())
         {
-            return minstd::optional<minstd::reference_wrapper<Task>>(*(minstd::get<1>(*task_itr).get()));
+            return minstd::optional<minstd::reference_wrapper<Task>>(*(task_itr->second));
         }
 
         return minstd::optional<minstd::reference_wrapper<Task>>();
@@ -422,3 +419,10 @@ namespace task
     }
 
 } // namespace task
+
+namespace std {
+  [[noreturn]] void __throw_out_of_range(const char*) {
+    // Hang on out of range since there are no exceptions
+    while (1) {}
+  }
+}

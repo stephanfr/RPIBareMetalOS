@@ -569,6 +569,157 @@ namespace MINIMAL_STD_NAMESPACE
 
             using allocator_type = allocator<value_type>;
 
+            class iterator
+            {
+            public:
+                using value_type = minstd::pair<const KeyType, ValueType>;
+                using pointer = value_type*;
+                using reference = value_type&;
+
+            private:
+                skip_list* list_;
+                uint32_t current_slot_;
+                uint32_t current_generation_;
+                alignas(value_type) unsigned char cached_kv_storage_[sizeof(value_type)];
+                bool has_value_;
+
+                value_type* cached_kv() { return reinterpret_cast<value_type*>(cached_kv_storage_); }
+                const value_type* cached_kv() const { return reinterpret_cast<const value_type*>(cached_kv_storage_); }
+
+                void update_cache(const KeyType& k, const ValueType& v)
+                {
+                    if (has_value_)
+                    {
+                        cached_kv()->~value_type();
+                    }
+                    new (cached_kv_storage_) value_type(k, v);
+                    has_value_ = true;
+                }
+
+                void clear_cache()
+                {
+                    if (has_value_)
+                    {
+                        cached_kv()->~value_type();
+                        has_value_ = false;
+                    }
+                }
+
+                void attach_to_node(skip_node* node)
+                {
+                    if (node != nullptr && node != list_->NIL_)
+                    {
+                        current_slot_ = node->internal_slot_;
+                        current_generation_ = node->internal_generation_;
+                        update_cache(node->key, node->value);
+                    }
+                    else
+                    {
+                        current_slot_ = 0;
+                        current_generation_ = 0;
+                        clear_cache();
+                    }
+                }
+
+            public:
+                iterator() : list_(nullptr), current_slot_(0), current_generation_(0), has_value_(false) {}
+
+                iterator(skip_list* list, skip_node* start_node)
+                    : list_(list), current_slot_(0), current_generation_(0), has_value_(false)
+                {
+                    attach_to_node(start_node);
+                }
+
+                iterator(const iterator& other)
+                    : list_(other.list_), current_slot_(other.current_slot_), current_generation_(other.current_generation_), has_value_(false)
+                {
+                    if (other.has_value_)
+                    {
+                        update_cache(other.cached_kv()->first, other.cached_kv()->second);
+                    }
+                }
+
+                iterator& operator=(const iterator& other)
+                {
+                    if (this != &other)
+                    {
+                        list_ = other.list_;
+                        current_slot_ = other.current_slot_;
+                        current_generation_ = other.current_generation_;
+                        if (other.has_value_)
+                        {
+                            update_cache(other.cached_kv()->first, other.cached_kv()->second);
+                        }
+                        else
+                        {
+                            clear_cache();
+                        }
+                    }
+                    return *this;
+                }
+
+                ~iterator()
+                {
+                    clear_cache();
+                }
+
+                reference operator*()  { return *cached_kv(); }
+                pointer operator->()  { return cached_kv(); }
+
+                iterator& operator++()
+                {
+                    if (!has_value_) return *this;
+
+                    epoch_read_section_guard read_guard(list_);
+
+                    uint64_t packed_link = forward_link_type::pack_slot_generation(current_slot_, current_generation_, false);
+                    skip_node* curr_node = forward_link_type::unpack_ptr(packed_link);
+                    bool is_tombstoned = false;
+
+                    if (curr_node != nullptr)
+                    {
+                        // Node is alive, find next
+                        skip_node* next_n = curr_node->next_node[0].get_reference();
+                        while (next_n != nullptr && next_n != list_->NIL_)
+                        {
+                            next_n->next_node[0].get(is_tombstoned);
+                            if (!is_tombstoned && next_n->key > cached_kv()->first)
+                            {
+                                attach_to_node(next_n);
+                                return *this;
+                            }
+                            next_n = next_n->next_node[0].get_reference();
+                        }
+                        attach_to_node(nullptr);
+                        return *this;
+                    }
+                    else
+                    {
+                        // Node was reclaimed, leapfrog!
+                        skip_node* next_n = list_->find_lower_bound_after(cached_kv()->first);
+                        attach_to_node(next_n);
+                        return *this;
+                    }
+                }
+
+                iterator operator++(int)
+                {
+                    iterator tmp = *this;
+                    ++(*this);
+                    return tmp;
+                }
+
+                bool operator==(const iterator& other) const
+                {
+                    return list_ == other.list_ && current_slot_ == other.current_slot_ && current_generation_ == other.current_generation_;
+                }
+
+                bool operator!=(const iterator& other) const
+                {
+                    return !(*this == other);
+                }
+            };
+
             class const_iterator
             {
             public:
@@ -720,6 +871,29 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             };
 
+            iterator begin()
+            {
+                epoch_read_section_guard read_guard(this);
+                skip_node* next_n = head_->next_node[0].get_reference();
+                bool is_tombstoned = false;
+
+                while (next_n != nullptr && next_n != NIL_)
+                {
+                    next_n->next_node[0].get(is_tombstoned);
+                    if (!is_tombstoned)
+                    {
+                        return iterator(this, next_n);
+                    }
+                    next_n = next_n->next_node[0].get_reference();
+                }
+                return iterator(this, nullptr);
+            }
+
+            iterator end()
+            {
+                return iterator(this, nullptr);
+            }
+
             const_iterator begin() const
             {
                 epoch_read_section_guard read_guard(this);
@@ -773,7 +947,7 @@ namespace MINIMAL_STD_NAMESPACE
                 delete NIL_;
             };
 
-            ValueType *find(const KeyType search_key)
+            iterator find(const KeyType search_key)
             {
                 epoch_read_section_guard read_guard(this);
 
@@ -789,7 +963,6 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         if (curr == nullptr)
                         {
-                            // Corrupted/null link observed; treat as end-of-list sentinel.
                             curr = NIL_;
                             break;
                         }
@@ -809,12 +982,8 @@ namespace MINIMAL_STD_NAMESPACE
                             }
 
                             succ = curr->next_node[level].get(is_tombstoned);
-
                             if (level > 0)
                             {
-                                //  Upper level: CAS out the tombstone and decrement
-                                //  the counter so level-0 knows when it's safe.
-
                                 if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr))
                                 {
                                     tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_release);
@@ -822,8 +991,6 @@ namespace MINIMAL_STD_NAMESPACE
                             }
                             else
                             {
-                                //  Level 0: unlink only when all upper levels are done.
-
                                 if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
                                 {
                                     if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
@@ -834,8 +1001,6 @@ namespace MINIMAL_STD_NAMESPACE
                                 }
                             }
                         }
-
-                        //  Move down the skip list
 
                         if (curr->key < search_key)
                         {
@@ -849,7 +1014,80 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                return ((curr != nullptr) && (curr->key == search_key) ? &curr->value : nullptr);
+                if ((curr != nullptr) && (curr->key == search_key))
+                {
+                    return iterator(this, curr);
+                }
+                return end();
+            }
+
+            const_iterator find(const KeyType search_key) const
+            {
+                epoch_read_section_guard read_guard(this);
+
+                bool is_tombstoned = false;
+                skip_node *pred = head_, *curr = nullptr, *succ = nullptr;
+
+                for (int level = MAX_LEVELS; level >= 0; --level)
+                {
+                    curr = pred->next_node[level].get_reference();
+                    while (true)
+                    {
+                        if (curr == nullptr)
+                        {
+                            curr = NIL_;
+                            break;
+                        }
+                        succ = curr->next_node[level].get(is_tombstoned);
+                        while (is_tombstoned)
+                        {
+                            skip_node *tombstoned_node = curr;
+                            curr = succ;
+                            if (curr == nullptr)
+                            {
+                                curr = NIL_;
+                                is_tombstoned = false;
+                                break;
+                            }
+                            succ = curr->next_node[level].get(is_tombstoned);
+                            if (level > 0)
+                            {
+                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr))
+                                {
+                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_release);
+                                }
+                            }
+                            else
+                            {
+                                if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
+                                {
+                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
+                                    {
+                                        tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
+                                        // cannot retire here in const gracefully without mutable state, but this is a lock-free structure so const methods often do cleanup or we can just skip cleanup in const methods.
+                                        // Wait, the structure itself might have mutable members. Actually retire_node might be const if it uses mutable. Let's just cast away constness for the list to allow cleanup, since it's an internal optimization.
+                                        const_cast<skip_list*>(this)->retire_node(tombstoned_node, read_guard.cpu_slot_);
+                                    }
+                                }
+                            }
+                        }
+                        if (curr->key < search_key)
+                        {
+                            pred = curr;
+                            curr = succ;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if ((curr != nullptr) && (curr->key == search_key))
+                {
+                    return const_iterator(this, curr);
+                }
+                return end();
             }
 
             bool insert(const KeyType key, const ValueType &value)

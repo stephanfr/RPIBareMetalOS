@@ -1,7 +1,7 @@
 #!/bin/bash -eu
 
 ARM_TOOLCHAIN_VERSION=13.3.rel1
-ARM_TOOLCHAIN_NAME=arm-gnu-toolchain-$ARM_TOOLCHAIN_VERSION-x86_64-aarch64-none-elf
+ARM_TOOLCHAIN_NAME=arm-gnu-toolchain-$ARM_TOOLCHAIN_VERSION-aarch64-aarch64-none-elf
 
 mkdir ~/dev_tools
 

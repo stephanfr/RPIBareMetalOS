@@ -25,7 +25,7 @@ RandomNumberGenerator<RandomNumberGeneratorBase&, false> GetRandomNumberGenerato
 }
 
 
-minstd::unique_ptr<RandomNumberGeneratorBase> NewRandomNumberGenerator(minstd::single_block_memory_heap &heap)
+minstd::unique_ptr<RandomNumberGeneratorBase> NewRandomNumberGenerator(minstd::memory_heap &heap)
 {
     return minstd::unique_ptr<RandomNumberGeneratorBase>((RandomNumberGeneratorBase *)new (heap.allocate_block<Xoroshiro128PlusPlusRNG>(1)) Xoroshiro128PlusPlusRNG(GetXoroshiro128PlusPlusRootRandomNumberGenerator().Fork()), heap);
 }

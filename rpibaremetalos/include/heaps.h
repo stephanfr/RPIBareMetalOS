@@ -5,15 +5,18 @@
 #pragma once
 
 #include <memory>
+#include "__memory_resource/memory_resource.h"
 #include "synchronization.h"
 
 static SpinLock __os_static_heap_lock;
 static SpinLock __os_dynamic_heap_lock;
 
 
-extern minstd::single_block_memory_heap &__os_static_heap;
-extern minstd::single_block_memory_heap &__os_dynamic_heap;
-extern minstd::single_block_memory_heap &__os_filesystem_cache_heap;
+extern minstd::memory_heap &__os_static_heap;
+extern minstd::memory_heap &__os_dynamic_heap;
+extern minstd::pmr::memory_resource &__os_dynamic_heap_resource;
+extern minstd::pmr::memory_resource &__os_static_heap_resource;
+extern minstd::memory_heap &__os_filesystem_cache_heap;
 
 template <typename T>
 class static_allocator : public minstd::heap_allocator<T>

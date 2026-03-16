@@ -10,7 +10,7 @@ THIRD_PARTY := ${HOME}/dev/third-party
 GCC_CROSS_DIRECTORY := ${HOME}/dev/gcc-cross
 
 GCC_AARCH64_BARE_METAL_VERSION := 13.3.1
-GCC_AARCH64_BARE_METAL_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-elf/bin/
+GCC_AARCH64_BARE_METAL_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-aarch64-aarch64-none-elf/bin/
 GCC_AARCH64_BARE_METAL_INCLUDE := $(GCC_CROSS_DIRECTORY)/aarch64-none-elf
 
 CC := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-gcc
@@ -31,5 +31,5 @@ INCLUDE_DIRS := -I$(GCC_AARCH64_BARE_METAL_INCLUDE)/lib/gcc/aarch64-none-elf/$(G
 				-I$(GCC_AARCH64_BARE_METAL_INCLUDE)/aarch64-none-elf/include 
 
 
-docs :
-	@doxygen
+#docs :
+	#@doxygen

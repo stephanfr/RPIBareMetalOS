@@ -244,9 +244,9 @@ namespace
         for (size_t i = 0; i < args->iterations_; ++i)
         {
             const uint32_t key = static_cast<uint32_t>((i + (args->thread_id_ * 97u)) % args->key_space_);
-            auto *value = args->list_->find(key);
+            auto value = args->list_->find(key);
 
-            if ((value == nullptr) || (*value != key))
+            if ((value == args->list_->end()) || (value->second != key))
             {
                 args->validation_failures_->fetch_add(1, minstd::memory_order_relaxed);
             }
@@ -290,9 +290,9 @@ namespace
 
             if ((i % 8u) == 0u)
             {
-                auto *value = args->list_->find(key);
+                auto value = args->list_->find(key);
 
-                if ((value != nullptr) && (*value != key))
+                if ((value != args->list_->end()) && (value->second != key))
                 {
                     args->validation_failures_->fetch_add(1, minstd::memory_order_relaxed);
                 }
@@ -321,11 +321,11 @@ namespace
         for (size_t i = 0; i < args->iterations_; ++i)
         {
             const uint32_t key = static_cast<uint32_t>((i + (args->thread_id_ * 97u)) % args->key_space_);
-            auto *value = args->list_->find(key);
+            auto value = args->list_->find(key);
 
-            if (value != nullptr)
+            if (value != args->list_->end())
             {
-                checksum += *value;
+                checksum += value->second;
             }
 
             args->operations_completed_++;
@@ -354,11 +354,11 @@ namespace
         for (size_t i = 0; i < args->iterations_; ++i)
         {
             const uint32_t key = static_cast<uint32_t>((i + (args->thread_id_ * 97u)) % args->key_space_);
-            auto *value = args->list_->find(key);
+            auto value = args->list_->find(key);
 
-            if (value != nullptr)
+            if (value != args->list_->end())
             {
-                checksum += *value;
+                checksum += value->second;
             }
 
             const size_t block_size = 32 + static_cast<size_t>((key + static_cast<uint32_t>(i)) & 0xFFu);
@@ -438,11 +438,11 @@ namespace
 
             if (!do_write)
             {
-                auto *value = args->list_->find(key);
+                auto value = args->list_->find(key);
 
-                if (value != nullptr)
+                if (value != args->list_->end())
                 {
-                    checksum += *value;
+                    checksum += value->second;
                 }
             }
             else
@@ -672,8 +672,8 @@ namespace
     {
         if (s_intr_list != nullptr)
         {
-            auto *value = s_intr_list->find(0u);
-            if (value != nullptr)
+            auto value = s_intr_list->find(0u);
+            if (value != s_intr_list->end())
             {
                 // Use assignment form to avoid C++20 deprecated ++volatile warning.
                 s_intr_nested_count = s_intr_nested_count + 1;
@@ -796,11 +796,11 @@ namespace
 
         for (uint32_t i = 0; i < 100; i++)
         {
-            CHECK_TRUE(list.find(i) != nullptr);
-            CHECK_EQUAL(i, *list.find(i));
+            CHECK_TRUE(list.find(i) != list.end());
+            CHECK_EQUAL(i, list.find(i)->second);
         }
 
-        CHECK_TRUE(list.find(101) == nullptr);
+        CHECK_TRUE(list.find(101) == list.end());
 
         for (uint32_t i = 0; i < 10; i++)
         {
@@ -814,20 +814,20 @@ namespace
         {
             if ((i % 10 == 0) || ((i > 0) && ((i - 1) % 10 == 0)))
             {
-                CHECK_TRUE(list.find(i) == nullptr);
+                CHECK_TRUE(list.find(i) == list.end());
             }
             else
             {
-                CHECK_TRUE(list.find(i) != nullptr);
-                CHECK_EQUAL(i, *list.find(i));
+                CHECK_TRUE(list.find(i) != list.end());
+                CHECK_EQUAL(i, list.find(i)->second);
             }
         }
 
         CHECK_FALSE(list.insert(14, 114));
-        CHECK_EQUAL(14u, *list.find(14));
+        CHECK_EQUAL(14u, list.find(14)->second);
 
         CHECK_FALSE(list.insert(37, 137));
-        CHECK_EQUAL(37u, *list.find(37));
+        CHECK_EQUAL(37u, list.find(37)->second);
 
         CHECK_TRUE(list.insert(100, 100));
 
@@ -837,12 +837,12 @@ namespace
         {
             if (((i % 10 == 0) || ((i > 0) && ((i - 1) % 10 == 0))) && (i != 100))
             {
-                CHECK_TRUE(list.find(i) == nullptr);
+                CHECK_TRUE(list.find(i) == list.end());
             }
             else
             {
-                CHECK_TRUE(list.find(i) != nullptr);
-                CHECK_EQUAL(i, *list.find(i));
+                CHECK_TRUE(list.find(i) != list.end());
+                CHECK_EQUAL(i, list.find(i)->second);
             }
         }
 
@@ -852,12 +852,12 @@ namespace
         {
             if (((i % 10 == 0) || ((i > 0) && ((i - 1) % 10 == 0))) && (i != 100))
             {
-                CHECK_TRUE(list.find(i) == nullptr);
+                CHECK_TRUE(list.find(i) == list.end());
             }
             else
             {
-                CHECK_TRUE(list.find(i) != nullptr);
-                CHECK_EQUAL(i, *list.find(i));
+                CHECK_TRUE(list.find(i) != list.end());
+                CHECK_EQUAL(i, list.find(i)->second);
             }
         }
 
@@ -872,12 +872,12 @@ namespace
             if (((i % 10 == 0) || ((i > 0) && ((i - 1) % 10 == 0))) &&
                 (i != 10) && (i != 31) && (i != 71) && (i != 100))
             {
-                CHECK_TRUE(list.find(i) == nullptr);
+                CHECK_TRUE(list.find(i) == list.end());
             }
             else
             {
-                CHECK_TRUE(list.find(i) != nullptr);
-                CHECK_EQUAL(i, *list.find(i));
+                CHECK_TRUE(list.find(i) != list.end());
+                CHECK_EQUAL(i, list.find(i)->second);
             }
         }
     }
@@ -895,9 +895,9 @@ namespace
 
         for (uint32_t i = 0; i < 256; ++i)
         {
-            auto *value = list.find(i);
-            CHECK_TRUE(value != nullptr);
-            CHECK_EQUAL(static_cast<uint64_t>(i) * 10ull, *value);
+            auto value = list.find(i);
+            CHECK_TRUE(value != list.end());
+            CHECK_EQUAL(static_cast<uint64_t>(i) * 10ull, value->second);
         }
 
         for (uint32_t i = 0; i < 128; ++i)
@@ -907,14 +907,14 @@ namespace
 
         for (uint32_t i = 0; i < 128; ++i)
         {
-            CHECK_TRUE(list.find(i) == nullptr);
+            CHECK_TRUE(list.find(i) == list.end());
         }
 
         for (uint32_t i = 128; i < 256; ++i)
         {
-            auto *value = list.find(i);
-            CHECK_TRUE(value != nullptr);
-            CHECK_EQUAL(static_cast<uint64_t>(i) * 10ull, *value);
+            auto value = list.find(i);
+            CHECK_TRUE(value != list.end());
+            CHECK_EQUAL(static_cast<uint64_t>(i) * 10ull, value->second);
         }
     }
 
@@ -1590,9 +1590,9 @@ namespace
 
         for (uint32_t key = 0; key < SKIPLIST_STRESS_KEY_SPACE; ++key)
         {
-            auto *value = list.find(key);
-            CHECK_TRUE(value != nullptr);
-            CHECK_EQUAL(key, *value);
+            auto value = list.find(key);
+            CHECK_TRUE(value != list.end());
+            CHECK_EQUAL(key, value->second);
         }
 
         CHECK_EQUAL(SKIPLIST_STRESS_KEY_SPACE, list.size());
@@ -1643,9 +1643,9 @@ namespace
         for (size_t i = 0; s_intr_signal_count < 100; ++i)
         {
             const uint32_t key = static_cast<uint32_t>(i % KEY_COUNT);
-            auto *value = list.find(key);
-            CHECK_TRUE(value != nullptr);
-            CHECK_EQUAL(key, *value);
+            auto value = list.find(key);
+            CHECK_TRUE(value != list.end());
+            CHECK_EQUAL(key, value->second);
         }
 
         bomber_stop.store(true, minstd::memory_order_release);
@@ -1732,17 +1732,17 @@ namespace
 
         for (uint32_t key = 0; key < WRITE_TEST_KEY_SPACE; ++key)
         {
-            auto *value = list.find(key);
+            auto value = list.find(key);
 
             if (expected_present[key])
             {
-                CHECK_TRUE(value != nullptr);
-                CHECK_EQUAL(key, *value);
+                CHECK_TRUE(value != list.end());
+                CHECK_EQUAL(key, value->second);
                 expected_size++;
             }
             else
             {
-                CHECK_TRUE(value == nullptr);
+                CHECK_TRUE(value == list.end());
             }
         }
 
@@ -1761,7 +1761,7 @@ namespace
                 CHECK_FALSE(list.remove(key));
             }
 
-            CHECK_TRUE(list.find(key) == nullptr);
+            CHECK_TRUE(list.find(key) == list.end());
         }
 
         CHECK_EQUAL(0u, list.size());
@@ -1881,7 +1881,7 @@ namespace
             }
             else
             {
-                if (args->list_->find(key))
+                if (args->list_->find(key) != args->list_->end())
                 {
                     args->find_successes_++;
                 }

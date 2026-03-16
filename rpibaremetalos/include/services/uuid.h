@@ -77,6 +77,14 @@ public:
 
         return high_64_bits_ > uuid2.high_64_bits_;
     }
+    bool operator<=(const UUID &uuid2) const
+    {
+        return !(*this > uuid2);
+    }
+    bool operator>=(const UUID &uuid2) const
+    {
+        return !(*this < uuid2);
+    }
 
     char *ToString(char buffer[36]) const;
 
@@ -126,4 +134,14 @@ private:
 namespace FMT_FORMATTERS_NAMESPACE
 {
     DECLARE_TYPE_FORMATTER(const UUID&, UUIDFormatter, DEFAULT_STRING_FORMAT)
+}
+
+#include <limits>
+
+namespace std {
+    template <>
+    struct numeric_limits<UUID> {
+        static UUID min() { return UUID::NIL; }
+        static UUID max() { return UUID::MAX; }
+    };
 }

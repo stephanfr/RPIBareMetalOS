@@ -9,6 +9,8 @@
 #include <array>
 #include <functional> //  For minstd::reference_wrapper
 #include <lockfree/spsc_queue>
+#include <lockfree/skiplist>
+#include "__memory_resource/polymorphic_allocator.h"
 #include <optional>
 
 #include "result.h"
@@ -84,9 +86,7 @@ namespace task
         void AddTask(minstd::unique_ptr<TaskImpl> &task);
 
     private:
-        using TaskMap = minstd::map<UUID, minstd::unique_ptr<TaskImpl>>;
-        using TaskMapAllocator = minstd::allocator<TaskMap::node_type>;
-        using TaskMapHeapAllocator = minstd::heap_allocator<TaskMap::node_type>;
+        using TaskMap = minstd::skip_list<UUID, TaskImpl*, MAX_CORES>;
 
         //  Data members
 
@@ -103,10 +103,9 @@ namespace task
 
         //  Put the task map in the kernel dynamic heap
 
-        TaskMapHeapAllocator task_map_heap_allocator_{__os_dynamic_heap};
-        TaskMap task_map_{task_map_heap_allocator_};
+        minstd::pmr::polymorphic_allocator<uint8_t> task_map_allocator_;
+        TaskMap task_map_{};
 
-        SpinLock task_map_spinlock_;
 
         seconds zombie_lifetime_{600};
         
@@ -116,7 +115,9 @@ namespace task
 
         static void ReturnFromFork();
 
-        TaskManagerImpl();
+        explicit TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc);
+
+        
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition& task_definition);
     };

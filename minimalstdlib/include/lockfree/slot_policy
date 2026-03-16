@@ -4,7 +4,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
+#include <stdint.h>
 #include <limits>
 #include <minstdconfig.h>
 

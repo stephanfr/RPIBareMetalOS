@@ -6,10 +6,6 @@
 //  Stubs for C++ runtime
 //------------------------------------------------------------------------------------------
 
-void operator delete(void *, unsigned long)
-{
-}
-
 void *__dso_handle = 0;
 
 extern "C" int __cxa_atexit(void (*f)(void *), void *objptr, void *dso)
