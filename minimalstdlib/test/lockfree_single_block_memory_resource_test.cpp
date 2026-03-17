@@ -997,29 +997,61 @@ namespace
         size_t sizes[MAX_LIVE]{};
 
         size_t live_count = 0;
-        int current_phase = 0;
+        int current_phase = 0;       // 0=steady, 1=bursty, 2=recovery, 3=drain
+        int cycle_count = 0;          // counts full cycles through phases 0-2
         size_t loop_counter = 0;
+
+        // Timer-based phase transitions: 120 +/- 60 seconds per phase
+        time_t phase_start_time = time(NULL);
+        time_t phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
 
         while (!args->stop_flag->load(minstd::memory_order_acquire))
         {
+            // Check for phase transition every 100k loops to minimize syscall overhead
             if (++loop_counter % 100000 == 0)
             {
-                current_phase = (current_phase + 1) % 3;
+                time_t now = time(NULL);
+                if (now - phase_start_time >= phase_duration)
+                {
+                    if (current_phase == 0) {
+                        current_phase = 1;  // steady -> bursty
+                    } else if (current_phase == 1) {
+                        current_phase = 2;  // bursty -> recovery
+                    } else if (current_phase == 2) {
+                        cycle_count++;
+                        if (cycle_count % 4 == 0) {
+                            current_phase = 3;  // every 4th cycle: recovery -> drain
+                        } else {
+                            current_phase = 0;  // recovery -> steady
+                        }
+                    } else {
+                        current_phase = 0;  // drain -> steady
+                    }
+                    phase_start_time = now;
+                    phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
+                }
             }
-            
+
             size_t target_max;
             int alloc_chance;
             if (current_phase == 0) {
-                target_max = 1500;
-                alloc_chance = 3;
+                // Steady-state: balanced allocs/deallocs
+                target_max = 500;
+                alloc_chance = 2;   // 50% allocate
             } else if (current_phase == 1) {
+                // Bursty: heavy allocs, few deallocs
+                target_max = 3000;
+                alloc_chance = 10;  // 90% allocate
+            } else if (current_phase == 2) {
+                // Recovery: predominantly deletes
                 target_max = 10;
-                alloc_chance = 10;
+                alloc_chance = 10;  // 10% allocate
             } else {
+                // Drain: empty the pool entirely
                 target_max = 0;
                 alloc_chance = 10;
             }
-            
+
             if (live_count == 0 && target_max == 0)
             {
                 sched_yield();
@@ -1043,7 +1075,7 @@ namespace
                     args->failed_allocations++;
                 }
             }
-            else
+            else if (live_count > 0)
             {
                 size_t idx = rng() % live_count;
                 args->resource->deallocate(pointers[idx], sizes[idx]);
@@ -1052,7 +1084,7 @@ namespace
                 live_count--;
                 args->deallocations++;
             }
-            
+
             if ((args->allocations + args->deallocations) % 1000 == 0)
             {
                 sched_yield();
@@ -1150,13 +1182,13 @@ namespace
                     c_allocs += thread_args[i].allocations;
                     c_failed += thread_args[i].failed_allocations;
                 }
-                
+
                 size_t allocs_per_sec = (c_allocs - last_allocs) / 10;
                 size_t failed_per_sec = (c_failed - last_failed) / 10;
                 last_allocs = c_allocs;
                 last_failed = c_failed;
 
-                printf("Elapsed: %zu secs, Allocs: %zu ( %zu /sec ), Failed: %zu ( %zu /sec )\n", 
+                printf("Elapsed: %zu secs, Allocs: %zu ( %zu /sec ), Failed: %zu ( %zu /sec )\n",
                        elapsed / 10, c_allocs, allocs_per_sec, c_failed, failed_per_sec);
                 fflush(stdout);
             }
