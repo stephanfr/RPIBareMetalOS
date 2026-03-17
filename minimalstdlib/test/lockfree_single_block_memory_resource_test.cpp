@@ -16,6 +16,8 @@
 
 #include <stdio.h>
 #include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
 
 extern "C" double sqrt(double);
 extern "C" double log(double);
@@ -735,6 +737,121 @@ namespace
         printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
     }
 
+    // ---------------------------------------------------------------------------------
+    // Mid-list eviction test
+    // ---------------------------------------------------------------------------------
+    TEST(LockfreeSingleBlockMemoryResourceTests, ReclaimSoftDeletedMetadataMidListEviction)
+    {
+        lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
+
+        void* ptr1 = resource.allocate(64);
+        void* ptr2 = resource.allocate(64);
+        void* ptr3 = resource.allocate(64);
+        void* ptr4 = resource.allocate(64);
+        void* ptr5 = resource.allocate(64);
+
+        {
+            // Create an active iterator to hold the delete cutoff open
+            auto iter = resource.begin();
+
+            // Deallocate mid-list elements while iterator is active
+            resource.deallocate(ptr2, 64);
+            resource.deallocate(ptr4, 64);
+
+            // Iterator goes out of scope here. The destructor calls reclaim_soft_deleted_metadata()
+            // which will walk the soft-deleted list and physically unlink ptr2 and ptr4's metadata.
+        }
+
+        // Validate the structure is not corrupted and works properly.
+        void* ptr6 = resource.allocate(64);
+        CHECK(ptr6 != nullptr);
+
+        resource.deallocate(ptr1, 64);
+        resource.deallocate(ptr3, 64);
+        resource.deallocate(ptr5, 64);
+        resource.deallocate(ptr6, 64);
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Bomber thread test for hardware IRQ robustness
+    // ---------------------------------------------------------------------------------
+    static minstd::pmr::memory_resource *s_intr_resource = nullptr;
+    static volatile sig_atomic_t s_intr_signal_count = 0;
+    static volatile sig_atomic_t s_intr_nested_count = 0;
+
+    static void sigusr1_nested_alloc_handler(int)
+    {
+        if (s_intr_resource != nullptr)
+        {
+            // Triggers a nested operation — matching bare-metal hardware IRQ behavior
+            void* p = s_intr_resource->allocate(16);
+            if (p != nullptr)
+            {
+                s_intr_resource->deallocate(p, 16);
+                __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
+            }
+            __atomic_add_fetch(&s_intr_signal_count, 1, __ATOMIC_SEQ_CST);
+        }
+    }
+
+    struct intr_test_bomber_args
+    {
+        pthread_t target_thread;
+        minstd::atomic<bool> *stop_flag;
+    };
+
+    static void *intr_test_bomber_fn(void *arg)
+    {
+        auto *a = static_cast<intr_test_bomber_args *>(arg);
+        while (!a->stop_flag->load(minstd::memory_order_acquire))
+        {
+            pthread_kill(a->target_thread, SIGUSR1);
+            usleep(50);
+        }
+        return nullptr;
+    }
+
+    TEST(LockfreeSingleBlockMemoryResourceTests, InterruptRobustness)
+    {
+        lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
+        s_intr_resource = &resource;
+        s_intr_signal_count = 0;
+        s_intr_nested_count = 0;
+
+        struct sigaction sa = {};
+        sa.sa_handler = sigusr1_nested_alloc_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGUSR1, &sa, nullptr);
+
+        minstd::atomic<bool> stop_flag{false};
+        intr_test_bomber_args args{pthread_self(), &stop_flag};
+        pthread_t bomber;
+        CHECK_EQUAL(0, pthread_create(&bomber, nullptr, intr_test_bomber_fn, &args));
+
+        // Perform normal operations while being bombarded with signals
+        for (int i = 0; i < 50000; ++i)
+        {
+            void* p = resource.allocate(32);
+            if (p) 
+            {
+                resource.deallocate(p, 32);
+            }
+        }
+
+        stop_flag.store(true, minstd::memory_order_release);
+        pthread_join(bomber, nullptr);
+        
+        // Disable the handler
+        sa.sa_handler = SIG_DFL;
+        sigaction(SIGUSR1, &sa, nullptr);
+        s_intr_resource = nullptr;
+
+        // Ensure variables were actually triggered
+        CHECK_TRUE(s_intr_signal_count > 0);
+        CHECK_TRUE(s_intr_nested_count > 0);
+    }
+
     TEST(LockfreeSingleBlockMemoryResourceTests, ThreadScalabilitySensitivityAnalysis)
     {
         printf("\n=== Thread Scalability Analysis: Lockfree vs Malloc/Free Comparison ===\n");
@@ -857,5 +974,189 @@ namespace
         printf("- Allocation sizes: lognormal(5.4, 1.2) distribution, clamped to [1, %zu] bytes\n",
                PERF_MAX_ALLOCATION_SIZE);
         printf("- Both allocators tested with identical workloads for fair comparison\n");
+    }
+
+    struct soak_thread_args
+    {
+        lockfree_single_block_resource_with_stats *resource;
+        minstd::atomic<bool> *stop_flag;
+        uint64_t rng_seed;
+        size_t id;
+        size_t allocations = 0;
+        size_t deallocations = 0;
+        size_t failed_allocations = 0;
+    };
+
+    static void *soak_worker_thread(void *arg)
+    {
+        auto *args = static_cast<soak_thread_args *>(arg);
+        minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
+
+        constexpr size_t MAX_LIVE = 1000;
+        void* pointers[MAX_LIVE]{};
+        size_t sizes[MAX_LIVE]{};
+
+        size_t live_count = 0;
+
+        while (!args->stop_flag->load(minstd::memory_order_acquire))
+        {
+            if (live_count == 0 || (live_count < MAX_LIVE && (rng() % 3) != 0))
+            {
+                // Size between 1 and 32000
+                size_t sz = 1 + (rng() % 32000);
+                void* p = args->resource->allocate(sz);
+                if (p)
+                {
+                    pointers[live_count] = p;
+                    sizes[live_count] = sz;
+                    live_count++;
+                    args->allocations++;
+                }
+                else
+                {
+                    args->failed_allocations++;
+                }
+            }
+            else
+            {
+                size_t idx = rng() % live_count;
+                args->resource->deallocate(pointers[idx], sizes[idx]);
+                pointers[idx] = pointers[live_count - 1];
+                sizes[idx] = sizes[live_count - 1];
+                live_count--;
+                args->deallocations++;
+            }
+            
+            if ((args->allocations + args->deallocations) % 1000 == 0)
+            {
+                sched_yield();
+            }
+        }
+
+        for (size_t i = 0; i < live_count; ++i)
+        {
+            args->resource->deallocate(pointers[i], sizes[i]);
+            args->deallocations++;
+        }
+
+        return nullptr;
+    }
+
+    struct soak_bomber_args
+    {
+        pthread_t* targets;
+        size_t num_targets;
+        minstd::atomic<bool>* stop_flag;
+    };
+
+    static void *soak_bomber_thread(void *arg)
+    {
+        auto *a = static_cast<soak_bomber_args *>(arg);
+        while (!a->stop_flag->load(minstd::memory_order_acquire))
+        {
+            for (size_t i = 0; i < a->num_targets; i++)
+            {
+                pthread_kill(a->targets[i], SIGUSR1);
+            }
+            usleep(100);
+        }
+        return nullptr;
+    }
+
+    TEST(LockfreeSingleBlockMemoryResourceTests, SoakTest)
+    {
+        const size_t NUM_THREADS = 8;
+        
+        size_t SOAK_DURATION_SEC = 2;
+        const char* soak_duration_env = getenv("ALLOCATOR_SOAK_DURATION");
+        if (soak_duration_env)
+        {
+            SOAK_DURATION_SEC = atoi(soak_duration_env);
+        }
+        
+        printf("\nRunning Allocator SoakTest for %zu seconds...\n", SOAK_DURATION_SEC);
+
+        lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+        
+        struct sigaction sa = {};
+        sa.sa_handler = sigusr1_nested_alloc_handler;
+        sigemptyset(&sa.sa_mask);
+        sa.sa_flags = SA_RESTART;
+        sigaction(SIGUSR1, &sa, nullptr);
+
+        s_intr_resource = &resource;
+        s_intr_signal_count = 0;
+        s_intr_nested_count = 0;
+
+        minstd::atomic<bool> stop_flag{false};
+        
+        pthread_t workers[NUM_THREADS]{};
+        soak_thread_args thread_args[NUM_THREADS]{};
+        
+        for (size_t i = 0; i < NUM_THREADS; ++i)
+        {
+            thread_args[i].resource = &resource;
+            thread_args[i].stop_flag = &stop_flag;
+            thread_args[i].rng_seed = 987654321ULL + i;
+            thread_args[i].id = i;
+            
+            CHECK_EQUAL(0, pthread_create(&workers[i], nullptr, soak_worker_thread, &thread_args[i]));
+        }
+        
+        soak_bomber_args b_args;
+        b_args.targets = workers;
+        b_args.num_targets = NUM_THREADS;
+        b_args.stop_flag = &stop_flag;
+        
+        pthread_t bomber;
+        CHECK_EQUAL(0, pthread_create(&bomber, nullptr, soak_bomber_thread, &b_args));
+
+        size_t elapsed = 0;
+        while (elapsed < SOAK_DURATION_SEC * 10)
+        {
+            if (elapsed % 100 == 0 && elapsed > 0)
+            {
+                size_t c_allocs = 0, c_failed = 0;
+                for (size_t i = 0; i < NUM_THREADS; ++i)
+                {
+                    c_allocs += thread_args[i].allocations;
+                    c_failed += thread_args[i].failed_allocations;
+                }
+                printf("Elapsed: %zu secs, Allocs: %zu, Failed: %zu\n", elapsed / 10, c_allocs, c_failed);
+                fflush(stdout);
+            }
+            usleep(100000); // 100ms
+            elapsed++;
+        }
+
+        stop_flag.store(true, minstd::memory_order_release);
+
+        for (size_t i = 0; i < NUM_THREADS; ++i)
+        {
+            pthread_join(workers[i], nullptr);
+        }
+        
+        pthread_join(bomber, nullptr);
+        
+        sa.sa_handler = SIG_DFL;
+        sigaction(SIGUSR1, &sa, nullptr);
+        s_intr_resource = nullptr;
+
+        size_t total_alloc = 0;
+        size_t total_dealloc = 0;
+        for (size_t i = 0; i < NUM_THREADS; ++i)
+        {
+            total_alloc += thread_args[i].allocations;
+            total_dealloc += thread_args[i].deallocations;
+        }
+
+        printf("Soak test completed. Worker Allocs: %zu, Worker Deallocs: %zu, Failed Allocs: %zu\n",
+               total_alloc, total_dealloc, thread_args[0].failed_allocations);
+        printf("Signals delivered: %d, Nested allocs triggered: %d\n", (int)s_intr_signal_count, (int)s_intr_nested_count);
+        
+        // Assert no leaks 
+        CHECK_EQUAL(0, resource.current_bytes_allocated());
+        CHECK_EQUAL(total_alloc + s_intr_nested_count, resource.total_allocations());
+        CHECK_EQUAL(total_dealloc + s_intr_nested_count, resource.total_deallocations());
     }
 }
