@@ -553,27 +553,51 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     return nullptr;
                 }
+                // Pre-allocate metadata before grabbing block space
+                size_t metadata_index = get_next_metadata_record_index();
+                if (metadata_index == NULL_INDEX)
+                {
+                    return nullptr;
+                }
+
                 auto free_block_bin = free_block_bin_index(total_size);
                 auto shard = cpu_shard_index();
 
                 block_header *free_block = search_for_deallocated_block(free_block_bin, shard);
-
                 if (free_block == nullptr)
                 {
                     free_block = get_next_empty_memory_block(free_block_bin);
 
                     if (free_block == nullptr)
                     {
+                        // We must return the metadata record
+                        block_metadata *metadata = metadata_start_ - metadata_index;
+
+                        // Reset metadata fields completely so it's clean
+                        metadata->requested_size_.store(0, memory_order_release);
+                        metadata->total_size_ = 0;
+                        metadata->alignment_ = 0;
+
+                        // Change state back to FREE so we don't think it's IN_USE
+                        uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_acquire));
+                        metadata->block_state_.store(
+                            block_state_ptr::pack(nullptr, METADATA_AVAILABLE, version + 1),
+                            memory_order_release);
+
+                        // Push it back to the free_metadata_heads_ stack
+                        uint64_t current_tag = free_metadata_heads_[shard].load(memory_order_acquire);
+                        uint64_t new_tag = 0;
+                        do {
+                            block_metadata *current = metadata_tag::unpack_ptr(current_tag);
+                            metadata->next_free_header_index_ = current ? (metadata_start_ - current) : NULL_INDEX;
+                            new_tag = metadata_tag::pack(metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
+                        } while (!free_metadata_heads_[shard].compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
+
                         return nullptr;
                     }
                 }
 
-                //  Get a metadata record and fill it in for the allocation
-
-                size_t metadata_index = get_next_metadata_record_index();
-
                 free_block->metadata_index_ = metadata_index;
-
                 block_metadata *metadata = metadata_start_ - metadata_index;
 
                 // Get current version (if recycled metadata) and increment it
@@ -852,9 +876,47 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
+                auto shard = cpu_shard_index();
+
+                // Try stealing from other shards
+                for (size_t offset = 1; offset < cpu_shards_; ++offset)
+                {
+                    size_t other_shard = (shard + offset) % cpu_shards_;
+                    
+                    platform::interrupt_guard guard;
+
+                    uint64_t other_tag = free_metadata_heads_[other_shard].load(memory_order_acquire);
+                    size_t other_retries = 0;
+                    
+                    while (metadata_tag::unpack_ptr(other_tag) != nullptr)
+                    {
+                        back_off(other_retries);
+
+                        block_metadata *current = metadata_tag::unpack_ptr(other_tag);
+                        block_metadata *next = index_to_metadata(current->next_free_header_index_);
+                        uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(other_tag) + 1));
+                        
+                        if (free_metadata_heads_[other_shard].compare_exchange_strong(other_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            current->next_free_header_index_ = NULL_INDEX;
+                            return metadata_start_ - current;
+                        }
+                    }
+                }
+
                 //  If we are here, there were no metadata records available, so we have to allocate a new one.
 
                 auto next_record_index = current_metadata_record_count_.fetch_add(1, memory_order_acq_rel);
+
+                // Ensure the new metadata record doesnt overwrite a dynamically allocated block
+                uintptr_t new_metadata_end_ptr = (uintptr_t)metadata_start_ - ((next_record_index + 1) * ALLOCATION_METADATA_SIZE);
+                uint64_t current_empty_block_tag = next_empty_memory_block_.load(memory_order_acquire);
+                block_header* empty_block = block_tag::unpack_ptr(current_empty_block_tag);
+                
+                if (empty_block != nullptr && new_metadata_end_ptr <= (uintptr_t)empty_block)
+                {
+                    return NULL_INDEX;
+                }
 
                 block_metadata *metadata = metadata_start_ - next_record_index;
 
@@ -862,97 +924,72 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return next_record_index;
             }
-
             block_header *search_for_deallocated_block(uint64_t free_block_bin, size_t shard)
             {
-                //  Pop the top of the free block bin
-                //
-                //  This section is protected by an interrupt guard to prevent the ABA problem
-                //  that could occur if an interrupt handler performs allocations/deallocations
-                //  while we're in the middle of the CAS loop.
-
-            try_again:
-
-                block_metadata *head;
-                block_metadata *next = nullptr;
-                uint64_t head_tag;
-
+                for (size_t offset = 0; offset < cpu_shards_; ++offset)
                 {
-                    platform::interrupt_guard guard;
+                    size_t other_shard = (shard + offset) % cpu_shards_;
 
-                    size_t bin_index = free_block_bin * cpu_shards_ + shard;
-                    head_tag = free_block_bins_[bin_index].head_.load(memory_order_acquire);
+                try_again:
 
-                    size_t retries = 0;
+                    block_metadata *head;
+                    block_metadata *next = nullptr;
+                    uint64_t head_tag;
 
-                    uint64_t next_tag = 0;
-
-                    do
                     {
-                        back_off(retries);
+                        platform::interrupt_guard guard;
 
-                        //  If the head is the end of the list, then the list is empty so return nullptr
+                        size_t bin_index = free_block_bin * cpu_shards_ + other_shard;
+                        head_tag = free_block_bins_[bin_index].head_.load(memory_order_acquire);
+                        size_t retries = 0;
 
-                        head = metadata_tag::unpack_ptr(head_tag);
+                        uint64_t next_tag = 0;
 
-                        if (head == nullptr)
+                        do
                         {
-                            return nullptr;
-                        }
+                            back_off(retries);
 
-                        //  Read next pointer inside the loop. After a failed CAS, head is updated to the
-                        //  current value, so we must re-read next to match the new head.
+                            head = metadata_tag::unpack_ptr(head_tag);
 
-                        next = index_to_metadata(head->next_free_block_index_);
+                            if (head == nullptr)
+                            {
+                                goto next_shard;
+                            }
 
-                        next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
+                            next = index_to_metadata(head->next_free_block_index_);
+                            next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
+                        } while (!free_block_bins_[bin_index].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
+                    }
 
-                    } while (!free_block_bins_[bin_index].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
-                }
-
-                //  CAS succeeded, head is now popped from the bin
-
-                //  If the head is the last block and there is another block in the list, then fully release the block.
-
-                if (is_last_block(*head) && (head->next_free_block_index_ != NULL_INDEX))
-                {
-                    //  Calculate where next_empty_memory_block_ MUST be if head is truly the last block.
-                    //  Using a calculated expected value (not a fresh load) ensures re-entrancy safety:
-                    //  if an interrupt allocates memory between is_last_block() and this CAS, the CAS will
-                    //  fail because next_empty_memory_block_ will have moved past our expected position.
-
-                    block_header *head_memory_block = head->get_memory_block();
-                    block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
-                        reinterpret_cast<uint8_t *>(head_memory_block) + head->total_size_);
-
-                    //  If the next empty block pointer is moved back to the start of the block, then it is permanently
-                    //      deleted and we can put the metadata directly into the soft deleted list.
-
-                    uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
-
-                    if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
+                    if (is_last_block(*head) && (head->next_free_block_index_ != NULL_INDEX))
                     {
-                        uint64_t new_tag = block_tag::pack(head_memory_block,
-                                                          static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
+                        block_header *head_memory_block = head->get_memory_block();
+                        block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
+                            reinterpret_cast<uint8_t *>(head_memory_block) + head->total_size_);
 
-                        if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
+                        uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
+                        if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
                         {
-                            move_metadata_to_soft_deleted_list(*head);
+                            uint64_t new_tag = block_tag::pack(head_memory_block,
+                                                            static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
 
-                            goto try_again;
+                            if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
+                            {
+                                move_metadata_to_soft_deleted_list(*head);
+                                goto try_again;
+                            }
                         }
                     }
+
+                    {
+                        auto return_value = head->get_memory_block();
+                        move_metadata_to_soft_deleted_list(*head);
+                        return return_value;
+                    }
+
+                next_shard:;
                 }
-
-                //  We have the head, so get the block pointer
-
-                auto return_value = head->get_memory_block();
-
-                move_metadata_to_soft_deleted_list(*head);
-
-                //  Return the block
-
-                return return_value;
+                return nullptr;
             }
 
             void reclaim_soft_deleted_metadata(size_t shard)
@@ -974,6 +1011,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         previous = current;
                         current = index_to_metadata(current->next_soft_deleted_index_);
+                        continue;
                     }
 
                     //  The soft delete occurred before the current cutoff, so the metadata record can be
@@ -1095,7 +1133,10 @@ namespace MINIMAL_STD_NAMESPACE
 
             const_iterator begin() const
             {
-                const_cast<lockfree_single_block_resource &>(*this).number_of_active_iterators_.fetch_add(1, memory_order_acq_rel);
+                if (const_cast<lockfree_single_block_resource &>(*this).number_of_active_iterators_.add_fetch(1, memory_order_acq_rel) == 1)
+                {
+                    const_cast<lockfree_single_block_resource &>(*this).hard_delete_before_counter_cutoff_.store(platform::get_monotonic_counter() + 1, memory_order_release);
+                }
                 return const_iterator(*this, metadata_tag::unpack_ptr(metadata_head_.load(memory_order_acquire)));
             }
 

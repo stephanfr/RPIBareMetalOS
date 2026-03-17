@@ -992,15 +992,35 @@ namespace
         auto *args = static_cast<soak_thread_args *>(arg);
         minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
 
-        constexpr size_t MAX_LIVE = 1000;
+        constexpr size_t MAX_LIVE = 4000;
         void* pointers[MAX_LIVE]{};
         size_t sizes[MAX_LIVE]{};
 
         size_t live_count = 0;
+        int current_phase = 0;
+        size_t loop_counter = 0;
 
         while (!args->stop_flag->load(minstd::memory_order_acquire))
         {
-            if (live_count == 0 || (live_count < MAX_LIVE && (rng() % 3) != 0))
+            if (++loop_counter % 100000 == 0)
+            {
+                current_phase = (current_phase + 1) % 3;
+            }
+            
+            size_t target_max;
+            int alloc_chance;
+            if (current_phase == 0) {
+                target_max = 1500;
+                alloc_chance = 3;
+            } else if (current_phase == 1) {
+                target_max = 10;
+                alloc_chance = 10;
+            } else {
+                target_max = 0;
+                alloc_chance = 10;
+            }
+            
+            if (live_count < target_max && (rng() % alloc_chance) != 0)
             {
                 // Size between 1 and 32000
                 size_t sz = 1 + (rng() % 32000);
