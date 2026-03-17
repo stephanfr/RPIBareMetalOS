@@ -1029,6 +1029,11 @@ namespace
                     }
                     phase_start_time = now;
                     phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
+
+                    static const char* phase_names[] = {"STEADY", "BURSTY", "RECOVERY", "DRAIN"};
+                    printf("  [Thread %zu] Phase -> %s (duration: %zd secs, live: %zu, cycle: %d)\n",
+                           args->id, phase_names[current_phase], (ssize_t)phase_duration, live_count, cycle_count);
+                    fflush(stdout);
                 }
             }
 
@@ -1171,25 +1176,29 @@ namespace
 
         size_t elapsed = 0;
         size_t last_allocs = 0;
+        size_t last_deallocs = 0;
         size_t last_failed = 0;
         while (elapsed < SOAK_DURATION_SEC * 10)
         {
             if (elapsed % 100 == 0 && elapsed > 0)
             {
-                size_t c_allocs = 0, c_failed = 0;
+                size_t c_allocs = 0, c_deallocs = 0, c_failed = 0;
                 for (size_t i = 0; i < NUM_THREADS; ++i)
                 {
                     c_allocs += thread_args[i].allocations;
+                    c_deallocs += thread_args[i].deallocations;
                     c_failed += thread_args[i].failed_allocations;
                 }
 
                 size_t allocs_per_sec = (c_allocs - last_allocs) / 10;
+                size_t deallocs_per_sec = (c_deallocs - last_deallocs) / 10;
                 size_t failed_per_sec = (c_failed - last_failed) / 10;
                 last_allocs = c_allocs;
+                last_deallocs = c_deallocs;
                 last_failed = c_failed;
 
-                printf("Elapsed: %zu secs, Allocs: %zu ( %zu /sec ), Failed: %zu ( %zu /sec )\n",
-                       elapsed / 10, c_allocs, allocs_per_sec, c_failed, failed_per_sec);
+                printf("Elapsed: %zu secs, Allocs: %zu ( %zu /sec ), Deallocs: %zu ( %zu /sec ), Failed: %zu ( %zu /sec )\n",
+                       elapsed / 10, c_allocs, allocs_per_sec, c_deallocs, deallocs_per_sec, c_failed, failed_per_sec);
                 fflush(stdout);
             }
             usleep(100000); // 100ms
