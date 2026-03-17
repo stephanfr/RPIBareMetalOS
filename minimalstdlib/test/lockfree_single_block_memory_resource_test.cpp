@@ -1132,6 +1132,8 @@ namespace
         CHECK_EQUAL(0, pthread_create(&bomber, nullptr, soak_bomber_thread, &b_args));
 
         size_t elapsed = 0;
+        size_t last_allocs = 0;
+        size_t last_failed = 0;
         while (elapsed < SOAK_DURATION_SEC * 10)
         {
             if (elapsed % 100 == 0 && elapsed > 0)
@@ -1142,7 +1144,14 @@ namespace
                     c_allocs += thread_args[i].allocations;
                     c_failed += thread_args[i].failed_allocations;
                 }
-                printf("Elapsed: %zu secs, Allocs: %zu, Failed: %zu\n", elapsed / 10, c_allocs, c_failed);
+                
+                size_t allocs_per_sec = (c_allocs - last_allocs) / 10;
+                size_t failed_per_sec = (c_failed - last_failed) / 10;
+                last_allocs = c_allocs;
+                last_failed = c_failed;
+
+                printf("Elapsed: %zu secs, Allocs: %zu ( %zu /sec ), Failed: %zu ( %zu /sec )\n", 
+                       elapsed / 10, c_allocs, allocs_per_sec, c_failed, failed_per_sec);
                 fflush(stdout);
             }
             usleep(100000); // 100ms
