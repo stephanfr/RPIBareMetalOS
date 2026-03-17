@@ -226,6 +226,25 @@ namespace MINIMAL_STD_NAMESPACE
 
             ~lockfree_single_block_resource() = default;
 
+            // Diagnostic getters for soak test analysis
+            size_t debug_frontier_offset() const
+            {
+                auto frontier = block_tag::unpack_ptr(next_empty_memory_block_.load(memory_order_acquire));
+                return reinterpret_cast<uintptr_t>(frontier) - reinterpret_cast<uintptr_t>(block_);
+            }
+
+            size_t debug_metadata_count() const
+            {
+                return current_metadata_record_count_.load(memory_order_acquire);
+            }
+
+            size_t debug_metadata_boundary_offset() const
+            {
+                auto count = current_metadata_record_count_.load(memory_order_acquire);
+                uintptr_t boundary = reinterpret_cast<uintptr_t>(metadata_start_) - (count + 1) * ALLOCATION_METADATA_SIZE;
+                return boundary - reinterpret_cast<uintptr_t>(block_);
+            }
+
             allocation_info get_allocation_info(void *allocation) const
             {
                 const block_header &header = as_block_header(allocation);
@@ -915,6 +934,7 @@ namespace MINIMAL_STD_NAMESPACE
                 
                 if (empty_block != nullptr && new_metadata_end_ptr <= (uintptr_t)empty_block)
                 {
+                    current_metadata_record_count_.fetch_sub(1, memory_order_acq_rel);
                     return NULL_INDEX;
                 }
 
@@ -926,70 +946,94 @@ namespace MINIMAL_STD_NAMESPACE
             }
             block_header *search_for_deallocated_block(uint64_t free_block_bin, size_t shard)
             {
-                for (size_t offset = 0; offset < cpu_shards_; ++offset)
+                //  Pop the top of the free block bin
+                //
+                //  This section is protected by an interrupt guard to prevent the ABA problem
+                //  that could occur if an interrupt handler performs allocations/deallocations
+                //  while we're in the middle of the CAS loop.
+
+            try_again:
+
+                block_metadata *head;
+                block_metadata *next = nullptr;
+                uint64_t head_tag;
+
                 {
-                    size_t other_shard = (shard + offset) % cpu_shards_;
+                    platform::interrupt_guard guard;
 
-                try_again:
+                    size_t bin_index = free_block_bin * cpu_shards_ + shard;
+                    head_tag = free_block_bins_[bin_index].head_.load(memory_order_acquire);
 
-                    block_metadata *head;
-                    block_metadata *next = nullptr;
-                    uint64_t head_tag;
+                    size_t retries = 0;
 
+                    uint64_t next_tag = 0;
+
+                    do
                     {
-                        platform::interrupt_guard guard;
+                        back_off(retries);
 
-                        size_t bin_index = free_block_bin * cpu_shards_ + other_shard;
-                        head_tag = free_block_bins_[bin_index].head_.load(memory_order_acquire);
-                        size_t retries = 0;
+                        //  If the head is the end of the list, then the list is empty so return nullptr
 
-                        uint64_t next_tag = 0;
+                        head = metadata_tag::unpack_ptr(head_tag);
 
-                        do
+                        if (head == nullptr)
                         {
-                            back_off(retries);
+                            return nullptr;
+                        }
 
-                            head = metadata_tag::unpack_ptr(head_tag);
+                        //  Read next pointer inside the loop. After a failed CAS, head is updated to the
+                        //  current value, so we must re-read next to match the new head.
 
-                            if (head == nullptr)
-                            {
-                                goto next_shard;
-                            }
+                        next = index_to_metadata(head->next_free_block_index_);
 
-                            next = index_to_metadata(head->next_free_block_index_);
-                            next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
-                        } while (!free_block_bins_[bin_index].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
-                    }
+                        next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
 
-                    if (is_last_block(*head) && (head->next_free_block_index_ != NULL_INDEX))
+                    } while (!free_block_bins_[bin_index].head_.compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
+                }
+
+                //  CAS succeeded, head is now popped from the bin
+
+                //  If the head is the last block and there is another block in the list, then fully release the block.
+
+                if (is_last_block(*head) && (head->next_free_block_index_ != NULL_INDEX))
+                {
+                    //  Calculate where next_empty_memory_block_ MUST be if head is truly the last block.
+                    //  Using a calculated expected value (not a fresh load) ensures re-entrancy safety:
+                    //  if an interrupt allocates memory between is_last_block() and this CAS, the CAS will
+                    //  fail because next_empty_memory_block_ will have moved past our expected position.
+
+                    block_header *head_memory_block = head->get_memory_block();
+                    block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
+                        reinterpret_cast<uint8_t *>(head_memory_block) + head->total_size_);
+
+                    //  If the next empty block pointer is moved back to the start of the block, then it is permanently
+                    //      deleted and we can put the metadata directly into the soft deleted list.
+
+                    uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
+
+                    if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
                     {
-                        block_header *head_memory_block = head->get_memory_block();
-                        block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
-                            reinterpret_cast<uint8_t *>(head_memory_block) + head->total_size_);
+                        uint64_t new_tag = block_tag::pack(head_memory_block,
+                                                          static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
 
-                        uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
-                        if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
+                        if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
                         {
-                            uint64_t new_tag = block_tag::pack(head_memory_block,
-                                                            static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
+                            move_metadata_to_soft_deleted_list(*head);
 
-                            if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
-                            {
-                                move_metadata_to_soft_deleted_list(*head);
-                                goto try_again;
-                            }
+                            goto try_again;
                         }
                     }
-
-                    {
-                        auto return_value = head->get_memory_block();
-                        move_metadata_to_soft_deleted_list(*head);
-                        return return_value;
-                    }
-
-                next_shard:;
                 }
-                return nullptr;
+
+                //  We have the head, so get the block pointer
+
+                auto return_value = head->get_memory_block();
+
+                move_metadata_to_soft_deleted_list(*head);
+
+                //  Return the block
+
+                return return_value;
             }
 
             void reclaim_soft_deleted_metadata(size_t shard)

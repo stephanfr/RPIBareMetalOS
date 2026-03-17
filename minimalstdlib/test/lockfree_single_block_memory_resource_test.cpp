@@ -980,11 +980,15 @@ namespace
     {
         lockfree_single_block_resource_with_stats *resource;
         minstd::atomic<bool> *stop_flag;
+        minstd::atomic<int> *shared_phase;       // Phase set by main loop (0=steady,1=bursty,2=recovery,3=drain)
+        minstd::atomic<bool> *use_shared_phase;   // true=all threads follow shared_phase, false=per-thread cycling
+        minstd::atomic<int> *drained_count;       // Threads increment when live_count reaches 0 during drain
         uint64_t rng_seed;
         size_t id;
         size_t allocations = 0;
         size_t deallocations = 0;
         size_t failed_allocations = 0;
+        size_t current_live_count = 0;
     };
 
     static void *soak_worker_thread(void *arg)
@@ -997,73 +1001,92 @@ namespace
         size_t sizes[MAX_LIVE]{};
 
         size_t live_count = 0;
-        int current_phase = 0;       // 0=steady, 1=bursty, 2=recovery, 3=drain
-        int cycle_count = 0;          // counts full cycles through phases 0-2
         size_t loop_counter = 0;
+        bool drain_signaled = false;
 
-        // Timer-based phase transitions: 120 +/- 60 seconds per phase
-        time_t phase_start_time = time(NULL);
-        time_t phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
+        // Per-thread independent phase state
+        int local_phase = 0;
+        int local_cycle_count = 0;
+        time_t local_phase_start = time(NULL);
+        time_t local_phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
 
         while (!args->stop_flag->load(minstd::memory_order_acquire))
         {
-            // Check for phase transition every 100k loops to minimize syscall overhead
-            if (++loop_counter % 100000 == 0)
+            // Determine current phase: shared or independent
+            int current_phase;
+            if (args->use_shared_phase->load(minstd::memory_order_acquire))
             {
-                time_t now = time(NULL);
-                if (now - phase_start_time >= phase_duration)
+                current_phase = args->shared_phase->load(minstd::memory_order_acquire);
+            }
+            else
+            {
+                // Per-thread timer-based phase cycling
+                if (++loop_counter % 100000 == 0)
                 {
-                    if (current_phase == 0) {
-                        current_phase = 1;  // steady -> bursty
-                    } else if (current_phase == 1) {
-                        current_phase = 2;  // bursty -> recovery
-                    } else if (current_phase == 2) {
-                        cycle_count++;
-                        if (cycle_count % 4 == 0) {
-                            current_phase = 3;  // every 4th cycle: recovery -> drain
+                    time_t now = time(NULL);
+                    if (now - local_phase_start >= local_phase_duration)
+                    {
+                        if (local_phase == 0) {
+                            local_phase = 1;
+                        } else if (local_phase == 1) {
+                            local_phase = 2;
                         } else {
-                            current_phase = 0;  // recovery -> steady
+                            local_phase = 0;
+                            local_cycle_count++;
                         }
-                    } else {
-                        current_phase = 0;  // drain -> steady
-                    }
-                    phase_start_time = now;
-                    phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
+                        local_phase_start = now;
+                        local_phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
 
-                    static const char* phase_names[] = {"STEADY", "BURSTY", "RECOVERY", "DRAIN"};
-                    printf("  [Thread %zu] Phase -> %s (duration: %zd secs, live: %zu, cycle: %d)\n",
-                           args->id, phase_names[current_phase], (ssize_t)phase_duration, live_count, cycle_count);
-                    fflush(stdout);
+                        static const char* pnames[] = {"STEADY", "BURSTY", "RECOVERY"};
+                        printf("  [Thread %zu] Independent -> %s (duration: %zd secs, live: %zu)\n",
+                               args->id, pnames[local_phase], (ssize_t)local_phase_duration, live_count);
+                        fflush(stdout);
+                    }
+                }
+                current_phase = local_phase;
+            }
+
+            // Alloc probability varies by phase; BURSTY/RECOVERY revert to 50/50 once target is reached
+            int alloc_pct;
+            if (current_phase == 0) {
+                alloc_pct = 50;                          // STEADY: 50/50
+            } else if (current_phase == 1) {
+                alloc_pct = (live_count < 3500) ? 90 : 50;  // BURSTY: ramp to ~3500, then 50/50
+            } else if (current_phase == 2) {
+                alloc_pct = (live_count > 100) ? 10 : 50;   // RECOVERY: drain to ~100, then 50/50
+            } else {
+                alloc_pct = 0;                           // DRAIN: dealloc only
+            }
+
+            // Drain phase: signal when empty, yield until phase changes
+            if (current_phase == 3)
+            {
+                if (live_count == 0)
+                {
+                    if (!drain_signaled)
+                    {
+                        args->drained_count->fetch_add(1, minstd::memory_order_release);
+                        drain_signaled = true;
+                    }
+                    sched_yield();
+                    continue;
                 }
             }
-
-            size_t target_max;
-            int alloc_chance;
-            if (current_phase == 0) {
-                // Steady-state: balanced allocs/deallocs
-                target_max = 500;
-                alloc_chance = 2;   // 50% allocate
-            } else if (current_phase == 1) {
-                // Bursty: heavy allocs, few deallocs
-                target_max = 3000;
-                alloc_chance = 10;  // 90% allocate
-            } else if (current_phase == 2) {
-                // Recovery: predominantly deletes
-                target_max = 10;
-                alloc_chance = 10;  // 10% allocate
-            } else {
-                // Drain: empty the pool entirely
-                target_max = 0;
-                alloc_chance = 10;
-            }
-
-            if (live_count == 0 && target_max == 0)
+            else
             {
-                sched_yield();
-                continue;
+                drain_signaled = false;
             }
 
-            if (live_count == 0 || (live_count < target_max && (rng() % alloc_chance) != 0))
+            bool do_alloc;
+            if (live_count == 0 && current_phase != 3) {
+                do_alloc = true;
+            } else if (live_count >= MAX_LIVE) {
+                do_alloc = false;
+            } else {
+                do_alloc = ((int)(rng() % 100)) < alloc_pct;
+            }
+
+            if (do_alloc)
             {
                 // Size between 1 and 32000
                 size_t sz = 1 + (rng() % 32000);
@@ -1089,6 +1112,13 @@ namespace
                 live_count--;
                 args->deallocations++;
             }
+            else
+            {
+                // Nothing to deallocate — pause to avoid tight spin
+                sched_yield();
+            }
+
+            args->current_live_count = live_count;
 
             if ((args->allocations + args->deallocations) % 1000 == 0)
             {
@@ -1152,6 +1182,9 @@ namespace
         s_intr_nested_count = 0;
 
         minstd::atomic<bool> stop_flag{false};
+        minstd::atomic<int> shared_phase{0};
+        minstd::atomic<bool> use_shared_phase{true};
+        minstd::atomic<int> drained_count{0};
         
         pthread_t workers[NUM_THREADS]{};
         soak_thread_args thread_args[NUM_THREADS]{};
@@ -1160,6 +1193,9 @@ namespace
         {
             thread_args[i].resource = &resource;
             thread_args[i].stop_flag = &stop_flag;
+            thread_args[i].shared_phase = &shared_phase;
+            thread_args[i].use_shared_phase = &use_shared_phase;
+            thread_args[i].drained_count = &drained_count;
             thread_args[i].rng_seed = 987654321ULL + i;
             thread_args[i].id = i;
             
@@ -1174,20 +1210,94 @@ namespace
         pthread_t bomber;
         CHECK_EQUAL(0, pthread_create(&bomber, nullptr, soak_bomber_thread, &b_args));
 
+        // Main loop: manages phase transitions and reporting
+        minstd::Xoroshiro128PlusPlusRNG main_rng(minstd::Xoroshiro128PlusPlusRNG::Seed(123456789ULL, 987654321ULL));
+        int main_phase = 0;             // 0=steady, 1=bursty, 2=recovery, 3=drain
+        int main_cycle_count = 0;
+        bool main_shared_mode = true;
+        time_t phase_start = time(NULL);
+        time_t phase_dur = 120 + ((int64_t)(main_rng() % 121) - 60);
+
+        static const char* phase_names[] = {"STEADY", "BURSTY", "RECOVERY", "DRAIN"};
+        printf("Phase -> %s [SHARED] (duration: %zd secs)\n", phase_names[main_phase], (ssize_t)phase_dur);
+        fflush(stdout);
+
         size_t elapsed = 0;
         size_t last_allocs = 0;
         size_t last_deallocs = 0;
         size_t last_failed = 0;
         while (elapsed < SOAK_DURATION_SEC * 10)
         {
+            // Phase transition check every second
+            if (elapsed % 10 == 0)
+            {
+                time_t now = time(NULL);
+                bool transition = false;
+
+                if (main_phase == 3)
+                {
+                    // In drain: wait for all threads to signal empty
+                    if (drained_count.load(minstd::memory_order_acquire) >= (int)NUM_THREADS)
+                    {
+                        transition = true;
+                    }
+                }
+                else if (now - phase_start >= phase_dur)
+                {
+                    transition = true;
+                }
+
+                if (transition)
+                {
+                    if (main_phase == 0) {
+                        main_phase = 1;
+                    } else if (main_phase == 1) {
+                        main_phase = 2;
+                    } else if (main_phase == 2) {
+                        main_cycle_count++;
+                        if (main_cycle_count % 4 == 0) {
+                            main_phase = 3;     // every 4th cycle: drain
+                        } else {
+                            main_phase = 0;     // start new cycle
+                            // Flip coin for shared vs independent mode
+                            main_shared_mode = (main_rng() % 2) == 0;
+                        }
+                    } else {
+                        // After drain, always start fresh cycle in shared mode
+                        main_phase = 0;
+                        main_shared_mode = (main_rng() % 2) == 0;
+                    }
+
+                    phase_start = now;
+                    phase_dur = 120 + ((int64_t)(main_rng() % 121) - 60);
+
+                    // Drain always uses shared mode
+                    if (main_phase == 3) {
+                        use_shared_phase.store(true, minstd::memory_order_release);
+                        drained_count.store(0, minstd::memory_order_release);
+                    } else {
+                        use_shared_phase.store(main_shared_mode, minstd::memory_order_release);
+                    }
+                    shared_phase.store(main_phase, minstd::memory_order_release);
+
+                    printf("Phase -> %s [%s] (duration: %zd secs, cycle: %d)\n",
+                           phase_names[main_phase],
+                           (main_phase == 3 || main_shared_mode) ? "SHARED" : "INDEPENDENT",
+                           (ssize_t)phase_dur, main_cycle_count);
+                    fflush(stdout);
+                }
+            }
+
+            // Stats reporting every 10 seconds
             if (elapsed % 100 == 0 && elapsed > 0)
             {
-                size_t c_allocs = 0, c_deallocs = 0, c_failed = 0;
+                size_t c_allocs = 0, c_deallocs = 0, c_failed = 0, c_live = 0;
                 for (size_t i = 0; i < NUM_THREADS; ++i)
                 {
                     c_allocs += thread_args[i].allocations;
                     c_deallocs += thread_args[i].deallocations;
                     c_failed += thread_args[i].failed_allocations;
+                    c_live += thread_args[i].current_live_count;
                 }
 
                 size_t allocs_per_sec = (c_allocs - last_allocs) / 10;
@@ -1197,8 +1307,15 @@ namespace
                 last_deallocs = c_deallocs;
                 last_failed = c_failed;
 
-                printf("Elapsed: %zu secs, Allocs: %zu ( %zu /sec ), Deallocs: %zu ( %zu /sec ), Failed: %zu ( %zu /sec )\n",
-                       elapsed / 10, c_allocs, allocs_per_sec, c_deallocs, deallocs_per_sec, c_failed, failed_per_sec);
+                size_t frontier_off = resource.debug_frontier_offset();
+                size_t meta_count = resource.debug_metadata_count();
+                size_t meta_boundary = resource.debug_metadata_boundary_offset();
+                size_t gap = (meta_boundary > frontier_off) ? (meta_boundary - frontier_off) : 0;
+
+                printf("Elapsed: %zu secs, Live: %zu, Allocs: %zu ( %zu /sec ), Deallocs: %zu ( %zu /sec ), Failed: %zu ( %zu /sec )\n",
+                       elapsed / 10, c_live, c_allocs, allocs_per_sec, c_deallocs, deallocs_per_sec, c_failed, failed_per_sec);
+                printf("  Frontier: %zuMB, MetaCount: %zu, MetaBoundary: %zuMB, Gap: %zuMB\n",
+                       frontier_off / (1024*1024), meta_count, meta_boundary / (1024*1024), gap / (1024*1024));
                 fflush(stdout);
             }
             usleep(100000); // 100ms
