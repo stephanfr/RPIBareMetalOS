@@ -1020,7 +1020,13 @@ namespace
                 alloc_chance = 10;
             }
             
-            if (live_count < target_max && (rng() % alloc_chance) != 0)
+            if (live_count == 0 && target_max == 0)
+            {
+                sched_yield();
+                continue;
+            }
+
+            if (live_count == 0 || (live_count < target_max && (rng() % alloc_chance) != 0))
             {
                 // Size between 1 and 32000
                 size_t sz = 1 + (rng() % 32000);
