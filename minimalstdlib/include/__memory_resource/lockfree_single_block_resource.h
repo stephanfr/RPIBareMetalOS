@@ -30,7 +30,7 @@ namespace MINIMAL_STD_NAMESPACE
         {
             inline constexpr size_t lockfree_aligned_size(size_t unaligned_size_in_bytes, size_t alignment)
             {
-                return (((unaligned_size_in_bytes / alignment) + ((unaligned_size_in_bytes % alignment) == 0 ? 0 : 1)) * alignment);
+                return ((unaligned_size_in_bytes + alignment - 1) / alignment) * alignment;
             }
 
             inline void *align_pointer(void *ptr, size_t alignment)
@@ -76,7 +76,7 @@ namespace MINIMAL_STD_NAMESPACE
             struct alignas(64) block_metadata
             {
                 // 8-byte aligned fields
-                // Packed pointer + state + version: [ptr:48][state:8][version:8]
+                // Packed pointer + state + version: [ptr:48][state:4][version:12]
                 // This allows atomic CAS to verify both pointer AND state simultaneously
                 atomic<uint64_t> block_state_;                     // 0x00, 8B
                 atomic<block_metadata *> next_;                    // 0x08, 8B
@@ -293,7 +293,7 @@ namespace MINIMAL_STD_NAMESPACE
             using block_tag = lockfree::tagged_ptr<block_header, uint16_t>;
 
             // Packed pointer + state + version for atomic state transitions
-            // Layout: [ptr:48][state:8][version:8] = 64 bits
+            // Layout: [ptr:48][state:4][version:12] = 64 bits
             // This allows atomic CAS to verify both pointer AND state simultaneously,
             // providing stronger guarantees against ABA issues during deallocation.
             struct block_state_ptr
@@ -456,43 +456,24 @@ namespace MINIMAL_STD_NAMESPACE
 
             uint64_t free_block_bin_index(size_t bytes) const
             {
-                size_t offset = NUM_FREE_BLOCK_BINS / 4;
-                size_t index = NUM_FREE_BLOCK_BINS / 2;
+                size_t lo = 0;
+                size_t hi = NUM_FREE_BLOCK_BINS - 1;
 
-                while (true)
+                while (lo < hi)
                 {
-                    if (FREE_BLOCK_BIN_SIZES[index] >= bytes)
+                    size_t mid = lo + (hi - lo) / 2;
+
+                    if (FREE_BLOCK_BIN_SIZES[mid] < bytes)
                     {
-                        if (FREE_BLOCK_BIN_SIZES[index - 1] < bytes)
-                        {
-                            break;
-                        }
-                        else
-                        {
-                            index -= offset;
-                        }
+                        lo = mid + 1;
                     }
                     else
                     {
-                        index += offset;
-                    }
-
-                    if (index == 0)
-                    {
-                        break;
-                    }
-
-                    if (offset >= 8)
-                    {
-                        offset /= 2;
-                    }
-                    else
-                    {
-                        offset = 1;
+                        hi = mid;
                     }
                 }
 
-                return index;
+                return lo;
             }
 
             void back_off(size_t &retries)
@@ -509,6 +490,66 @@ namespace MINIMAL_STD_NAMESPACE
                 retries++;
             }
 
+            //  Guarded CAS push: atomically prepends `node` to the tagged-ptr list at `head`.
+            //  The `next_index_field` pointer-to-member selects which index field to thread the list through.
+            //  Protected by an interrupt guard to prevent ABA issues during the push operation.
+
+            void guarded_push(atomic<uint64_t> &head, block_metadata &node,
+                              uint32_t block_metadata::*next_index_field)
+            {
+                interrupt_guard_type guard;
+
+                uint64_t current_tag = head.load(memory_order_acquire);
+                size_t retries = 0;
+
+                do
+                {
+                    back_off(retries);
+
+                    node.*next_index_field = metadata_to_index(metadata_tag::unpack_ptr(current_tag));
+                } while (!head.compare_exchange_strong(
+                    current_tag,
+                    metadata_tag::pack(&node, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1)),
+                    memory_order_acq_rel, memory_order_acquire));
+            }
+
+            //  Guarded CAS pop: atomically removes and returns the head of the tagged-ptr list.
+            //  Returns nullptr if the list is empty.
+            //  Protected by an interrupt guard to prevent ABA issues during the pop operation.
+
+            block_metadata *guarded_pop(atomic<uint64_t> &head,
+                                        uint32_t block_metadata::*next_index_field)
+            {
+                interrupt_guard_type guard;
+
+                uint64_t current_tag = head.load(memory_order_acquire);
+                size_t retries = 0;
+
+                while (metadata_tag::unpack_ptr(current_tag) != nullptr)
+                {
+                    back_off(retries);
+
+                    block_metadata *current = metadata_tag::unpack_ptr(current_tag);
+
+                    if (current == nullptr)
+                    {
+                        return nullptr;
+                    }
+
+                    uint64_t next_tag = metadata_tag::pack(
+                        index_to_metadata(current->*next_index_field),
+                        static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
+
+                    if (head.compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        current->*next_index_field = NULL_INDEX;
+                        return current;
+                    }
+                }
+
+                return nullptr;
+            }
+
             void move_metadata_to_free_metadata_list(block_metadata &metadata)
             {
                 // Set state to METADATA_AVAILABLE, preserving pointer (nullptr) and incrementing version
@@ -517,30 +558,8 @@ namespace MINIMAL_STD_NAMESPACE
                     block_state_ptr::with_state_and_increment_version(current, METADATA_AVAILABLE),
                     memory_order_release);
 
-                //  Add head to the front of the free metadata list
-                //  Protect with interrupt guard to prevent ABA issues during the push operation.
-
-                {
-                    interrupt_guard_type guard;
-
-                    auto shard = cpu_shard_index();
-
-                    size_t retries = 0;
-
-                    uint64_t free_head_tag = free_metadata_heads_[shard].load(memory_order_acquire);
-
-                    uint64_t new_tag = 0;
-
-                    do
-                    {
-                        back_off(retries);
-
-                        block_metadata *free_head = metadata_tag::unpack_ptr(free_head_tag);
-                        metadata.next_free_header_index_ = metadata_to_index(free_head);
-
-                        new_tag = metadata_tag::pack(&metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(free_head_tag) + 1));
-                    } while (!free_metadata_heads_[shard].compare_exchange_strong(free_head_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
-                }
+                guarded_push(free_metadata_heads_[cpu_shard_index()], metadata,
+                             &block_metadata::next_free_header_index_);
 
                 metadata.next_soft_deleted_index_ = NULL_INDEX;
             }
@@ -571,30 +590,8 @@ namespace MINIMAL_STD_NAMESPACE
                         block_state_ptr::with_state_and_increment_version(current, SOFT_DELETED),
                         memory_order_release);
 
-                    //  Put the metadata record into the list of soft deleted blocks
-                    //  Protect with interrupt guard to prevent ABA issues during the push operation.
-
-                    {
-                        interrupt_guard_type guard;
-
-                        auto shard = cpu_shard_index();
-
-                        uint64_t soft_deleted_tag = soft_deleted_metadata_heads_[shard].load(memory_order_acquire);
-
-                        size_t retries = 0;
-
-                        uint64_t new_tag = 0;
-
-                        do
-                        {
-                            back_off(retries);
-
-                            block_metadata *soft_deleted_head = metadata_tag::unpack_ptr(soft_deleted_tag);
-                            metadata.next_soft_deleted_index_ = metadata_to_index(soft_deleted_head);
-
-                            new_tag = metadata_tag::pack(&metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(soft_deleted_tag) + 1));
-                        } while (!soft_deleted_metadata_heads_[shard].compare_exchange_strong(soft_deleted_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
-                    }
+                    guarded_push(soft_deleted_metadata_heads_[cpu_shard_index()], metadata,
+                                 &block_metadata::next_soft_deleted_index_);
                 }
             }
 
@@ -634,36 +631,13 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (free_block == nullptr)
                     {
-                        // We must return the metadata record
+                        // Return the unused metadata record to the free list
                         block_metadata *metadata = metadata_start_ - metadata_index;
-
-                        // Reset metadata fields completely so it's clean
                         metadata->requested_size_.store(0, memory_order_release);
                         metadata->total_size_ = 0;
                         metadata->alignment_ = 0;
 
-                        // Change state back to FREE so we don't think it's IN_USE
-                        uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_acquire));
-                        metadata->block_state_.store(
-                            block_state_ptr::pack(nullptr, METADATA_AVAILABLE, version + 1),
-                            memory_order_release);
-
-                        // Push it back to the free_metadata_heads_ stack
-                        {
-                            interrupt_guard_type guard;
-
-                            uint64_t current_tag = free_metadata_heads_[shard].load(memory_order_acquire);
-                            uint64_t new_tag = 0;
-                            size_t retries = 0;
-                            do
-                            {
-                                back_off(retries);
-
-                                block_metadata *current = metadata_tag::unpack_ptr(current_tag);
-                                metadata->next_free_header_index_ = current ? (metadata_start_ - current) : NULL_INDEX;
-                                new_tag = metadata_tag::pack(metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
-                            } while (!free_metadata_heads_[shard].compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
-                        }
+                        move_metadata_to_free_metadata_list(*metadata);
 
                         return nullptr;
                     }
@@ -783,37 +757,11 @@ namespace MINIMAL_STD_NAMESPACE
                     extensions::memory_resource_statistics::deallocation_made(bytes);
                 }
 
-                //  If this is the last block, we can reclaim it completely.
+                //  If this is the last block, try to reclaim it by rolling the frontier backward.
 
-                if (is_last_block(*block_to_deallocate))
+                if (try_reclaim_last_block(*block_to_deallocate))
                 {
-                    //  Calculate where next_empty_memory_block_ MUST be if this block is truly last.
-                    //  Using a calculated expected value (not a fresh load) ensures re-entrancy safety:
-                    //  if an interrupt allocates memory between is_last_block() and this CAS, the CAS will
-                    //  fail because next_empty_memory_block_ will have moved past our expected position.
-
-                    block_header *memory_block_ptr = block_to_deallocate->get_memory_block();
-                    block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
-                        reinterpret_cast<uint8_t *>(memory_block_ptr) + block_to_deallocate->total_size_);
-
-                    //  If the next empty block pointer is moved back to the start of the block, then it is permanently
-                    //      deleted and we can put the metadata directly into the soft deleted list.
-
-                    uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
-
-                    if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
-                    {
-                        uint64_t new_tag = block_tag::pack(memory_block_ptr,
-                                                          static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
-
-                        if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
-                        {
-                            move_metadata_to_soft_deleted_list(*block_to_deallocate);
-                            try_reclaim_frontier_blocks();
-
-                            return;
-                        }
-                    }
+                    return;
                 }
 
                 //  Mark the block as available (keep pointer, change state, increment version)
@@ -824,35 +772,15 @@ namespace MINIMAL_STD_NAMESPACE
                     memory_order_release);
                 block_to_deallocate->soft_deleted_at_counter_ = platform::get_monotonic_counter() + 1;
 
-                //  Finally, put the block into the correct free block bin
-                //  Protect with interrupt guard to prevent ABA issues during the push operation.
+                //  Put the block into the correct free block bin
 
                 auto free_block_bin = free_block_bin_index(block_to_deallocate->total_size_);
                 auto shard = cpu_shard_index();
                 auto addr_bin = address_bin_for(block_to_deallocate->get_memory_block());
+                size_t bin_index = free_block_bin * cpu_shards_ + shard;
 
-                {
-                    interrupt_guard_type guard;
-
-                    size_t bin_index = free_block_bin * cpu_shards_ + shard;
-                    uint64_t current_free_tag = free_block_bins_[bin_index].address_bin_heads_[addr_bin].load(memory_order_acquire);
-
-                    size_t retries = 0;
-
-                    uint64_t new_tag = 0;
-
-                    do
-                    {
-                        back_off(retries);
-
-                        block_metadata *current_free_block_metadata = metadata_tag::unpack_ptr(current_free_tag);
-                        block_to_deallocate->next_free_block_index_ = metadata_to_index(current_free_block_metadata);
-
-                        new_tag = metadata_tag::pack(block_to_deallocate, static_cast<uint16_t>(metadata_tag::unpack_counter(current_free_tag) + 1));
-                    } while (!free_block_bins_[bin_index].address_bin_heads_[addr_bin].compare_exchange_strong(current_free_tag, new_tag, memory_order_acq_rel, memory_order_acq_rel));
-                }
-
-                //  Finished
+                guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
+                             *block_to_deallocate, &block_metadata::next_free_block_index_);
             }
 
             bool do_is_equal(const memory_resource &other) const noexcept override
@@ -1012,60 +940,24 @@ namespace MINIMAL_STD_NAMESPACE
              */
             size_t get_next_metadata_record_index()
             {
-                //  Grab to the top of the free metadata list if it is not empty.
-                //
-                //  This section is protected by an interrupt guard to prevent ABA issues.
-
-                {
-                    interrupt_guard_type guard;
-
-                    auto shard = cpu_shard_index();
-
-                    uint64_t current_tag = free_metadata_heads_[shard].load(memory_order_acquire);
-
-                    size_t retries = 0;
-
-                    while (metadata_tag::unpack_ptr(current_tag) != nullptr)
-                    {
-                        back_off(retries);
-
-                        block_metadata *current = metadata_tag::unpack_ptr(current_tag);
-                        block_metadata *next = index_to_metadata(current->next_free_header_index_);
-                        uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
-
-                        if (free_metadata_heads_[shard].compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
-                        {
-                            current->next_free_header_index_ = NULL_INDEX;
-                            return metadata_start_ - current;
-                        }
-                    }
-                }
+                //  Try to pop from the local shard's free metadata list first.
 
                 auto shard = cpu_shard_index();
 
-                // Try stealing from other shards
+                if (auto *md = guarded_pop(free_metadata_heads_[shard], &block_metadata::next_free_header_index_))
+                {
+                    return metadata_to_index(md);
+                }
+
+                //  Try stealing from other shards.
+
                 for (size_t offset = 1; offset < cpu_shards_; ++offset)
                 {
                     size_t other_shard = (shard + offset) % cpu_shards_;
-                    
-                    interrupt_guard_type guard;
 
-                    uint64_t other_tag = free_metadata_heads_[other_shard].load(memory_order_acquire);
-                    size_t other_retries = 0;
-                    
-                    while (metadata_tag::unpack_ptr(other_tag) != nullptr)
+                    if (auto *md = guarded_pop(free_metadata_heads_[other_shard], &block_metadata::next_free_header_index_))
                     {
-                        back_off(other_retries);
-
-                        block_metadata *current = metadata_tag::unpack_ptr(other_tag);
-                        block_metadata *next = index_to_metadata(current->next_free_header_index_);
-                        uint64_t next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(other_tag) + 1));
-                        
-                        if (free_metadata_heads_[other_shard].compare_exchange_strong(other_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
-                        {
-                            current->next_free_header_index_ = NULL_INDEX;
-                            return metadata_start_ - current;
-                        }
+                        return metadata_to_index(md);
                     }
                 }
 
@@ -1097,189 +989,135 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return next_record_index;
             }
-            block_header *search_for_deallocated_block(uint64_t free_block_bin, size_t shard)
+            //  Attempts to reclaim the last block at the frontier by rolling the frontier backward.
+            //  Returns true if the block was successfully reclaimed.
+            //  Uses a calculated expected position (not a fresh load) to ensure re-entrancy safety:
+            //  if an interrupt allocates between is_last_block() and the CAS, the CAS fails safely.
+
+            bool try_reclaim_last_block(block_metadata &metadata)
             {
-                //  Scan address bins low-to-high, preferring low-address blocks.
-                //  Each bin attempt gets its own interrupt_guard scope.
-
-            try_again:
-
-                size_t bin_index = free_block_bin * cpu_shards_ + shard;
-
-                for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS; ++addr_bin)
+                if (!is_last_block(metadata))
                 {
-                    block_metadata *head = nullptr;
-                    uint64_t head_tag;
-                    bool popped = false;
+                    return false;
+                }
 
+                block_header *memory_block = metadata.get_memory_block();
+                block_header *expected_frontier_position = reinterpret_cast<block_header *>(
+                    reinterpret_cast<uint8_t *>(memory_block) + metadata.total_size_);
+
+                uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
+
+                if (block_tag::unpack_ptr(expected_tag) != expected_frontier_position)
+                {
+                    return false;
+                }
+
+                uint64_t new_tag = block_tag::pack(memory_block,
+                                                   static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
+
+                if (!next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return false;
+                }
+
+                move_metadata_to_soft_deleted_list(metadata);
+                try_reclaim_frontier_blocks();
+                return true;
+            }
+
+            //  After popping a block_metadata from a free-block bin, attempt to claim it for reuse.
+            //  Handles the state machine for AVAILABLE, FRONTIER_RECLAIM_IN_PROGRESS, FRONTIER_RECLAIMED,
+            //  and stale states. Returns true if the block was successfully claimed (AVAILABLE -> LOCKED).
+
+            bool try_claim_popped_block(block_metadata &head, atomic<uint64_t> &bin_head)
+            {
+                while (true)
+                {
+                    uint64_t head_block_state = head.block_state_.load(memory_order_acquire);
+                    uint8_t current_state = block_state_ptr::unpack_state(head_block_state);
+
+                    if (current_state == AVAILABLE)
                     {
-                        interrupt_guard_type guard;
-
-                        head_tag = free_block_bins_[bin_index].address_bin_heads_[addr_bin].load(memory_order_acquire);
-
-                        head = metadata_tag::unpack_ptr(head_tag);
-
-                        if (head != nullptr)
+                        if (head.block_state_.compare_exchange_strong(
+                                head_block_state,
+                                block_state_ptr::with_state_and_increment_version(head_block_state, LOCKED),
+                                memory_order_acq_rel, memory_order_acquire))
                         {
-                            size_t retries = 0;
-                            uint64_t next_tag = 0;
-
-                            do
-                            {
-                                back_off(retries);
-
-                                //  After a failed CAS, head_tag is updated to the current value,
-                                //  so we must re-read head to match the new tag.
-
-                                head = metadata_tag::unpack_ptr(head_tag);
-
-                                if (head == nullptr)
-                                {
-                                    break;
-                                }
-
-                                //  Read next pointer inside the loop to match the potentially updated head.
-
-                                block_metadata *next = index_to_metadata(head->next_free_block_index_);
-                                next_tag = metadata_tag::pack(next, static_cast<uint16_t>(metadata_tag::unpack_counter(head_tag) + 1));
-
-                            } while (!free_block_bins_[bin_index].address_bin_heads_[addr_bin].compare_exchange_strong(head_tag, next_tag, memory_order_acq_rel, memory_order_acquire));
-
-                            popped = (head != nullptr);
+                            return true;
                         }
-                    }
 
-                    if (!popped)
-                    {
+                        // CAS failed — state or version changed. Re-check in next iteration.
                         continue;
                     }
 
-                    //  CAS succeeded, head is now popped from this address bin.
-                    //  Atomically claim the block: CAS AVAILABLE -> LOCKED.
-                    //  This protects against a concurrent frontier reclamation walk
-                    //  that may be trying to claim the same block.
-                    //  Retry if the CAS fails but the state is still AVAILABLE (e.g. the walk
-                    //  temporarily claimed and restored the block, bumping the version counter).
-
+                    if (current_state == FRONTIER_RECLAIM_IN_PROGRESS)
                     {
-                        bool claimed = false;
-
-                        while (true)
-                        {
-                            uint64_t head_block_state = head->block_state_.load(memory_order_acquire);
-                            uint8_t current_state = block_state_ptr::unpack_state(head_block_state);
-
-                            if (current_state == AVAILABLE)
-                            {
-                                if (head->block_state_.compare_exchange_strong(
-                                        head_block_state,
-                                        block_state_ptr::with_state_and_increment_version(head_block_state, LOCKED),
-                                        memory_order_acq_rel, memory_order_acquire))
-                                {
-                                    claimed = true;
-                                    break;
-                                }
-
-                                // CAS failed — state or version changed. Re-check in next iteration.
-                                continue;
-                            }
-                            else if (current_state == FRONTIER_RECLAIM_IN_PROGRESS)
-                            {
-                                //  Walk is actively reclaiming this block. Re-push it back into the
-                                //  same bin with unbounded retries to prevent a permanent free-list leak.
-
-                                interrupt_guard_type guard;
-
-                                uint64_t current_bin_tag = free_block_bins_[bin_index].address_bin_heads_[addr_bin].load(memory_order_acquire);
-
-                                size_t repush_retries = 0;
-
-                                do
-                                {
-                                    back_off(repush_retries);
-
-                                    block_metadata *current_bin_head = metadata_tag::unpack_ptr(current_bin_tag);
-                                    head->next_free_block_index_ = metadata_to_index(current_bin_head);
-
-                                    uint64_t new_bin_tag = metadata_tag::pack(head, static_cast<uint16_t>(metadata_tag::unpack_counter(current_bin_tag) + 1));
-
-                                    if (free_block_bins_[bin_index].address_bin_heads_[addr_bin].compare_exchange_strong(
-                                            current_bin_tag, new_bin_tag, memory_order_acq_rel, memory_order_acquire))
-                                    {
-                                        break;
-                                    }
-                                } while (true);
-
-                                break;  // Exit claim loop, will continue to next address bin
-                            }
-                            else if (current_state == FRONTIER_RECLAIMED)
-                            {
-                                //  Walk already reclaimed this block. This pop has definitively
-                                //  unlinked the node — safe to recycle its metadata now.
-                                move_metadata_to_soft_deleted_list(*head);
-                                break;  // Exit claim loop, will continue to next address bin
-                            }
-                            else
-                            {
-                                //  Stale or non-allocatable state (SOFT_DELETED, METADATA_AVAILABLE,
-                                //  LOCKED, IN_USE, INVALID). Discard.
-                                break;  // Exit claim loop, will continue to next address bin
-                            }
-                        }
-
-                        if (!claimed)
-                        {
-                            continue;  // Next address bin
-                        }
+                        //  Walk is actively reclaiming this block. Re-push it to prevent a free-list leak.
+                        guarded_push(bin_head, head, &block_metadata::next_free_block_index_);
+                        return false;
                     }
 
-                    //  CAS AVAILABLE -> LOCKED succeeded — we own the block.
-
-                    //  If the head is the last block, attempt immediate frontier release.
-
-                    if (is_last_block(*head))
+                    if (current_state == FRONTIER_RECLAIMED)
                     {
-                        //  Calculate where next_empty_memory_block_ MUST be if head is truly the last block.
-                        //  Using a calculated expected value (not a fresh load) ensures re-entrancy safety:
-                        //  if an interrupt allocates memory between is_last_block() and this CAS, the CAS will
-                        //  fail because next_empty_memory_block_ will have moved past our expected position.
-
-                        block_header *head_memory_block = head->get_memory_block();
-                        block_header *expected_empty_block_position = reinterpret_cast<block_header *>(
-                            reinterpret_cast<uint8_t *>(head_memory_block) + head->total_size_);
-
-                        //  If the next empty block pointer is moved back to the start of the block, then it is permanently
-                        //      deleted and we can put the metadata directly into the soft deleted list.
-
-                        uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
-
-                        if (block_tag::unpack_ptr(expected_tag) == expected_empty_block_position)
-                        {
-                            uint64_t new_tag = block_tag::pack(head_memory_block,
-                                                              static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
-
-                            if (next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
-                            {
-                                move_metadata_to_soft_deleted_list(*head);
-                                try_reclaim_frontier_blocks();
-
-                                goto try_again;
-                            }
-                        }
+                        //  Walk already reclaimed this block. Safe to recycle its metadata now.
+                        move_metadata_to_soft_deleted_list(head);
+                        return false;
                     }
 
-                    //  We have the head, so get the block pointer
-
-                    auto return_value = head->get_memory_block();
-
-                    move_metadata_to_soft_deleted_list(*head);
-
-                    //  Return the block
-
-                    return return_value;
+                    //  Stale or non-allocatable state (SOFT_DELETED, METADATA_AVAILABLE,
+                    //  LOCKED, IN_USE, INVALID). Discard.
+                    return false;
                 }
+            }
 
-                return nullptr;
+            block_header *search_for_deallocated_block(uint64_t free_block_bin, size_t shard)
+            {
+                //  Scan address bins low-to-high, preferring low-address blocks.
+                //  Outer loop restarts after successful frontier reclamation.
+
+                size_t bin_index = free_block_bin * cpu_shards_ + shard;
+
+                while (true)
+                {
+                    bool restarted = false;
+
+                    for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS && !restarted; ++addr_bin)
+                    {
+                        block_metadata *head = guarded_pop(
+                            free_block_bins_[bin_index].address_bin_heads_[addr_bin],
+                            &block_metadata::next_free_block_index_);
+
+                        if (head == nullptr)
+                        {
+                            continue;
+                        }
+
+                        if (!try_claim_popped_block(*head, free_block_bins_[bin_index].address_bin_heads_[addr_bin]))
+                        {
+                            continue;
+                        }
+
+                        //  CAS AVAILABLE -> LOCKED succeeded — we own the block.
+                        //  If it is the last block and there are others available, reclaim it and restart.
+
+                        if (head->next_free_block_index_ != NULL_INDEX && try_reclaim_last_block(*head))
+                        {
+                            restarted = true;
+                            continue;
+                        }
+
+                        //  Return the block for reuse.
+
+                        auto return_value = head->get_memory_block();
+                        move_metadata_to_soft_deleted_list(*head);
+                        return return_value;
+                    }
+
+                    if (!restarted)
+                    {
+                        return nullptr;
+                    }
+                }
             }
 
             void reclaim_soft_deleted_metadata(size_t shard)
