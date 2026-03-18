@@ -325,6 +325,11 @@ namespace
                 {
                     metadata_available++;
                 }
+                else if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::FRONTIER_RECLAIM_IN_PROGRESS ||
+                         alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::FRONTIER_RECLAIMED)
+                {
+                    // Transient states during frontier reclamation walk — expected under concurrency
+                }
                 else
                 {
                     CHECK(false);
@@ -1337,17 +1342,30 @@ namespace
 
         size_t total_alloc = 0;
         size_t total_dealloc = 0;
+        size_t total_failed = 0;
         for (size_t i = 0; i < NUM_THREADS; ++i)
         {
             total_alloc += thread_args[i].allocations;
             total_dealloc += thread_args[i].deallocations;
+            total_failed += thread_args[i].failed_allocations;
         }
 
-        printf("Soak test completed. Worker Allocs: %zu, Worker Deallocs: %zu, Failed Allocs: %zu\n",
-               total_alloc, total_dealloc, thread_args[0].failed_allocations);
+        printf("Soak test completed. Worker Allocs: %zu, Worker Deallocs: %zu, Failed Allocs: %zu (total across threads)\n",
+               total_alloc, total_dealloc, total_failed);
         printf("Signals delivered: %d, Nested allocs triggered: %d\n", (int)s_intr_signal_count, (int)s_intr_nested_count);
+        printf("Resource: total_allocs=%zu, total_deallocs=%zu, current_bytes=%zu, current_allocated=%zu\n",
+               resource.total_allocations(), resource.total_deallocations(),
+               resource.current_bytes_allocated(), resource.current_allocated());
+        printf("Frontier offset: %zu, Metadata count: %zu\n",
+               resource.debug_frontier_offset(), resource.debug_metadata_count());
+        fflush(stdout);
         
-        // Assert no leaks 
+        // Assert no leaks — breakpoint-friendly trap before CHECK_EQUAL
+        if (resource.current_bytes_allocated() != 0)
+        {
+            printf("*** LEAK DETECTED: current_bytes_allocated = %zu ***\n", resource.current_bytes_allocated());
+            fflush(stdout);  // GDB breakpoint target line
+        }
         CHECK_EQUAL(0, resource.current_bytes_allocated());
         CHECK_EQUAL(total_alloc + s_intr_nested_count, resource.total_allocations());
         CHECK_EQUAL(total_dealloc + s_intr_nested_count, resource.total_deallocations());
