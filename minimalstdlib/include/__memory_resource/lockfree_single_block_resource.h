@@ -108,16 +108,24 @@ namespace MINIMAL_STD_NAMESPACE
 
                 uint64_t hash()
                 {
-                    const uint8_t *data = reinterpret_cast<const uint8_t *>(&next_);
+                    block_metadata *next_val = next_.load(memory_order_relaxed);
+                    uint64_t sdel_val = soft_deleted_at_counter_;
+                    uint64_t rand_val = randomized_value_;
+
                     uint64_t hash_val = 0xcbf29ce484222325;
                     uint64_t prime = 0x100000001b3;
 
-                    // Hash 24 bytes: next_(8B) + soft_deleted_at_counter_(8B) + randomized_value_(8B)
-                    for (int i = 0; i < 24; ++i)
-                    {
-                        hash_val = hash_val ^ data[i];
-                        hash_val *= prime;
-                    }
+                    auto hash_bytes = [&](const uint8_t *data, size_t len) {
+                        for (size_t i = 0; i < len; ++i)
+                        {
+                            hash_val ^= data[i];
+                            hash_val *= prime;
+                        }
+                    };
+
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&next_val), sizeof(next_val));
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&sdel_val), sizeof(sdel_val));
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&rand_val), sizeof(rand_val));
 
                     return hash_val;
                 };
@@ -291,44 +299,52 @@ namespace MINIMAL_STD_NAMESPACE
                 using storage_type = uint64_t;
 
                 static constexpr int PTR_BITS = 48;
-                static constexpr int STATE_BITS = 8;
-                static constexpr int VERSION_BITS = 8;
+                static constexpr int STATE_BITS = 4;
+                static constexpr int VERSION_BITS = 12;
 
                 static constexpr storage_type PTR_MASK = (1ULL << PTR_BITS) - 1;
-                static constexpr storage_type STATE_MASK = 0xFFULL;
-                static constexpr storage_type VERSION_MASK = 0xFFULL;
+                static constexpr storage_type STATE_MASK = (1ULL << STATE_BITS) - 1;
+                static constexpr storage_type VERSION_MASK = (1ULL << VERSION_BITS) - 1;
 
-                static constexpr storage_type pack(pointer ptr, uint8_t state, uint8_t version = 0)
+                static constexpr storage_type pack(pointer ptr, uint8_t state, uint16_t version = 0)
                 {
                     return (static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr)) & PTR_MASK)
-                         | (static_cast<storage_type>(state) << 48)
-                         | (static_cast<storage_type>(version) << 56);
+                         | ((static_cast<storage_type>(state) & STATE_MASK) << PTR_BITS)
+                         | ((static_cast<storage_type>(version) & VERSION_MASK) << (PTR_BITS + STATE_BITS));
                 }
 
                 static constexpr pointer unpack_ptr(storage_type value)
                 {
-                    return reinterpret_cast<pointer>(static_cast<uintptr_t>(value & PTR_MASK));
+                    uintptr_t raw = static_cast<uintptr_t>(value & PTR_MASK);
+                    // Sign-extend from bit 47 for AArch64 canonical addresses
+                    #ifndef __MINIMAL_STD_TEST__
+                    if (raw & (1ULL << 47))
+                    {
+                        raw |= ~PTR_MASK;
+                    }
+                    #endif
+                    return reinterpret_cast<pointer>(raw);
                 }
 
                 static constexpr uint8_t unpack_state(storage_type value)
                 {
-                    return static_cast<uint8_t>((value >> 48) & STATE_MASK);
+                    return static_cast<uint8_t>((value >> PTR_BITS) & STATE_MASK);
                 }
 
-                static constexpr uint8_t unpack_version(storage_type value)
+                static constexpr uint16_t unpack_version(storage_type value)
                 {
-                    return static_cast<uint8_t>((value >> 56) & VERSION_MASK);
+                    return static_cast<uint16_t>((value >> (PTR_BITS + STATE_BITS)) & VERSION_MASK);
                 }
 
                 static constexpr storage_type with_state(storage_type value, uint8_t state)
                 {
-                    return (value & ~(STATE_MASK << 48)) | (static_cast<storage_type>(state) << 48);
+                    return (value & ~(STATE_MASK << PTR_BITS)) | ((static_cast<storage_type>(state) & STATE_MASK) << PTR_BITS);
                 }
 
                 static constexpr storage_type increment_version(storage_type value)
                 {
-                    uint8_t new_version = static_cast<uint8_t>(unpack_version(value) + 1);
-                    return (value & ~(VERSION_MASK << 56)) | (static_cast<storage_type>(new_version) << 56);
+                    uint16_t new_version = static_cast<uint16_t>(unpack_version(value) + 1);
+                    return (value & ~(VERSION_MASK << (PTR_BITS + STATE_BITS))) | ((static_cast<storage_type>(new_version) & VERSION_MASK) << (PTR_BITS + STATE_BITS));
                 }
 
                 static constexpr storage_type with_state_and_increment_version(storage_type value, uint8_t state)
@@ -629,13 +645,21 @@ namespace MINIMAL_STD_NAMESPACE
                             memory_order_release);
 
                         // Push it back to the free_metadata_heads_ stack
-                        uint64_t current_tag = free_metadata_heads_[shard].load(memory_order_acquire);
-                        uint64_t new_tag = 0;
-                        do {
-                            block_metadata *current = metadata_tag::unpack_ptr(current_tag);
-                            metadata->next_free_header_index_ = current ? (metadata_start_ - current) : NULL_INDEX;
-                            new_tag = metadata_tag::pack(metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
-                        } while (!free_metadata_heads_[shard].compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
+                        {
+                            platform::interrupt_guard guard;
+
+                            uint64_t current_tag = free_metadata_heads_[shard].load(memory_order_acquire);
+                            uint64_t new_tag = 0;
+                            size_t retries = 0;
+                            do
+                            {
+                                back_off(retries);
+
+                                block_metadata *current = metadata_tag::unpack_ptr(current_tag);
+                                metadata->next_free_header_index_ = current ? (metadata_start_ - current) : NULL_INDEX;
+                                new_tag = metadata_tag::pack(metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
+                            } while (!free_metadata_heads_[shard].compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
+                        }
 
                         return nullptr;
                     }
@@ -696,44 +720,50 @@ namespace MINIMAL_STD_NAMESPACE
                 //      If the hash of the metadata does not match the hash in the block, then the heap has been corrupted.
 
                 const block_header &header = as_block_header(block);
-                const size_t metadata_index = header.metadata_index_;
-
-                if (metadata_index > current_metadata_record_count_.load(memory_order_acquire))
-                {
-                    return;
-                }
-
-                block_metadata *block_to_deallocate = metadata_start_ - metadata_index;
-
-                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
-                {
-                    if (block_to_deallocate->hash() != header.hash_)
-                    {
-                        return;
-                    }
-                }
-
                 //  Insure the block has not already been deallocated and lock it.
                 //      We must acquire ownership via CAS BEFORE modifying any metadata fields.
                 //      The packed CAS atomically verifies BOTH the pointer AND state, providing
                 //      stronger ABA protection than a state-only CAS.
 
-                uint64_t current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
-                uint8_t current_state = block_state_ptr::unpack_state(current_block_state);
-
-                if (current_state != IN_USE)
+                block_metadata *block_to_deallocate = nullptr;
+                
                 {
-                    return;
-                }
+                    platform::interrupt_guard guard;
+                    
+                    const size_t metadata_index = header.metadata_index_;
+                    
+                    if (metadata_index > current_metadata_record_count_.load(memory_order_acquire))
+                    {
+                        return;
+                    }
+                    
+                    block_to_deallocate = metadata_start_ - metadata_index;
 
-                // Build expected and desired values for CAS
-                // Expected: current pointer + IN_USE + current version
-                // Desired: same pointer + LOCKED + incremented version
-                uint64_t desired_block_state = block_state_ptr::with_state_and_increment_version(current_block_state, LOCKED);
+                    if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
+                    {
+                        if (block_to_deallocate->hash() != header.hash_)
+                        {
+                            return;
+                        }
+                    }
 
-                if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, desired_block_state, memory_order_acq_rel, memory_order_acquire))
-                {
-                    return;
+                    uint64_t current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
+                    uint8_t current_state = block_state_ptr::unpack_state(current_block_state);
+
+                    if (current_state != IN_USE)
+                    {
+                        return;
+                    }
+
+                    // Build expected and desired values for CAS
+                    // Expected: current pointer + IN_USE + current version
+                    // Desired: same pointer + LOCKED + incremented version
+                    uint64_t desired_block_state = block_state_ptr::with_state_and_increment_version(current_block_state, LOCKED);
+
+                    if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, desired_block_state, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        return;
+                    }
                 }
 
                 //  Now we own the block. Set the soft deleted at counter to SIZE_MAX to ensure
@@ -784,7 +814,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Mark the block as available (keep pointer, change state, increment version)
 
-                current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
+                uint64_t current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
                 block_to_deallocate->block_state_.store(
                     block_state_ptr::with_state_and_increment_version(current_block_state, AVAILABLE),
                     memory_order_release);
@@ -899,9 +929,10 @@ namespace MINIMAL_STD_NAMESPACE
                     //  Frontier successfully rolled back. Transition to terminal FRONTIER_RECLAIMED state.
                     //  Lazy removal in search_for_deallocated_block() will recycle the metadata when popped.
                     uint64_t reclaim_expected = meta->block_state_.load(memory_order_acquire);
-                    meta->block_state_.store(
+                    meta->block_state_.compare_exchange_strong(
+                        reclaim_expected,
                         block_state_ptr::with_state_and_increment_version(reclaim_expected, FRONTIER_RECLAIMED),
-                        memory_order_release);
+                        memory_order_acq_rel, memory_order_acquire);
 
                     //  Continue loop to try reclaiming the next predecessor
                 }
@@ -1035,20 +1066,27 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 //  If we are here, there were no metadata records available, so we have to allocate a new one.
-
-                auto next_record_index = current_metadata_record_count_.fetch_add(1, memory_order_acq_rel);
-
-                // Ensure the new metadata record doesnt overwrite a dynamically allocated block
-                uintptr_t new_metadata_end_ptr = (uintptr_t)metadata_start_ - ((next_record_index + 1) * ALLOCATION_METADATA_SIZE);
-                uint64_t current_empty_block_tag = next_empty_memory_block_.load(memory_order_acquire);
-                block_header* empty_block = block_tag::unpack_ptr(current_empty_block_tag);
-                
-                if (empty_block != nullptr && new_metadata_end_ptr <= (uintptr_t)empty_block)
+                size_t current_count = current_metadata_record_count_.load(memory_order_acquire);
+                while (true)
                 {
-                    current_metadata_record_count_.fetch_sub(1, memory_order_acq_rel);
-                    return NULL_INDEX;
+                    // Ensure the new metadata record doesnt overwrite a dynamically allocated block
+                    uintptr_t new_metadata_end_ptr = (uintptr_t)metadata_start_ - ((current_count + 1) * ALLOCATION_METADATA_SIZE);
+                    uint64_t current_empty_block_tag = next_empty_memory_block_.load(memory_order_acquire);
+                    block_header *empty_block = block_tag::unpack_ptr(current_empty_block_tag);
+
+                    if (empty_block != nullptr && new_metadata_end_ptr <= (uintptr_t)empty_block)
+                    {
+                        return NULL_INDEX;
+                    }
+
+                    if (current_metadata_record_count_.compare_exchange_weak(current_count, current_count + 1, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        break;
+                    }
                 }
 
+                // Current_count reflects the value before increment, which is our acquired index
+                auto next_record_index = current_count;
                 block_metadata *metadata = metadata_start_ - next_record_index;
 
                 metadata->next_.store(nullptr, memory_order_release);
@@ -1291,14 +1329,15 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         //  We are somewhere mid-list, so we can remove the current metadata record from the free list
 
-                        previous->next_soft_deleted_index_ = current->next_soft_deleted_index_;
+                        auto next_index = current->next_soft_deleted_index_;
+                        previous->next_soft_deleted_index_ = next_index;
 
                         move_metadata_to_free_metadata_list(*current);
 
                         //  Advance to the next node
 
-                        auto next = index_to_metadata(current->next_soft_deleted_index_);
-                        current->next_soft_deleted_index_ = NULL_INDEX;
+                        auto next = index_to_metadata(next_index);
+                        
                         current = next;
                     }
                 }

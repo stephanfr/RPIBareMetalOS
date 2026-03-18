@@ -1013,7 +1013,7 @@ namespace
         int local_phase = 0;
         int local_cycle_count = 0;
         time_t local_phase_start = time(NULL);
-        time_t local_phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
+        time_t local_phase_duration = 10 + ((int64_t)(rng() % 11) - 5);
 
         while (!args->stop_flag->load(minstd::memory_order_acquire))
         {
@@ -1040,7 +1040,7 @@ namespace
                             local_cycle_count++;
                         }
                         local_phase_start = now;
-                        local_phase_duration = 120 + ((int64_t)(rng() % 121) - 60);
+                        local_phase_duration = 10 + ((int64_t)(rng() % 11) - 5);
 
                         static const char* pnames[] = {"STEADY", "BURSTY", "RECOVERY"};
                         printf("  [Thread %zu] Independent -> %s (duration: %zd secs, live: %zu)\n",
@@ -1056,9 +1056,9 @@ namespace
             if (current_phase == 0) {
                 alloc_pct = 50;                          // STEADY: 50/50
             } else if (current_phase == 1) {
-                alloc_pct = (live_count < 3500) ? 90 : 50;  // BURSTY: ramp to ~3500, then 50/50
+                alloc_pct = (live_count < 2500) ? 90 : 50;  // BURSTY: ramp to ~3500, then 50/50
             } else if (current_phase == 2) {
-                alloc_pct = (live_count > 100) ? 10 : 50;   // RECOVERY: drain to ~100, then 50/50
+                alloc_pct = (live_count > 10) ? 10 : 50;   // RECOVERY: drain to ~100, then 50/50
             } else {
                 alloc_pct = 0;                           // DRAIN: dealloc only
             }
@@ -1165,14 +1165,25 @@ namespace
     {
         const size_t NUM_THREADS = 8;
         
-        size_t SOAK_DURATION_SEC = 2;
+        size_t SOAK_DURATION_SEC = 180;
         const char* soak_duration_env = getenv("ALLOCATOR_SOAK_DURATION");
         if (soak_duration_env)
         {
             SOAK_DURATION_SEC = atoi(soak_duration_env);
         }
-        
-        printf("\nRunning Allocator SoakTest for %zu seconds...\n", SOAK_DURATION_SEC);
+
+        uint64_t base_seed = 987654321ULL;
+        const char* soak_seed_env = getenv("ALLOCATOR_SOAK_SEED");
+        if (soak_seed_env)
+        {
+            base_seed = strtoull(soak_seed_env, nullptr, 10);
+        }
+        else
+        {
+            base_seed += time(nullptr);
+        }
+
+        printf("\nRunning Allocator SoakTest for %zu seconds (Base Seed: %llu)...\n", SOAK_DURATION_SEC, (unsigned long long)base_seed);
 
         lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
         
@@ -1201,7 +1212,7 @@ namespace
             thread_args[i].shared_phase = &shared_phase;
             thread_args[i].use_shared_phase = &use_shared_phase;
             thread_args[i].drained_count = &drained_count;
-            thread_args[i].rng_seed = 987654321ULL + i;
+            thread_args[i].rng_seed = base_seed + i;
             thread_args[i].id = i;
             
             CHECK_EQUAL(0, pthread_create(&workers[i], nullptr, soak_worker_thread, &thread_args[i]));
@@ -1216,12 +1227,12 @@ namespace
         CHECK_EQUAL(0, pthread_create(&bomber, nullptr, soak_bomber_thread, &b_args));
 
         // Main loop: manages phase transitions and reporting
-        minstd::Xoroshiro128PlusPlusRNG main_rng(minstd::Xoroshiro128PlusPlusRNG::Seed(123456789ULL, 987654321ULL));
+        minstd::Xoroshiro128PlusPlusRNG main_rng(minstd::Xoroshiro128PlusPlusRNG::Seed(123456789ULL ^ base_seed, base_seed));
         int main_phase = 0;             // 0=steady, 1=bursty, 2=recovery, 3=drain
         int main_cycle_count = 0;
         bool main_shared_mode = true;
         time_t phase_start = time(NULL);
-        time_t phase_dur = 120 + ((int64_t)(main_rng() % 121) - 60);
+        time_t phase_dur = 10 + ((int64_t)(main_rng() % 11) - 5);
 
         static const char* phase_names[] = {"STEADY", "BURSTY", "RECOVERY", "DRAIN"};
         printf("Phase -> %s [SHARED] (duration: %zd secs)\n", phase_names[main_phase], (ssize_t)phase_dur);
@@ -1260,7 +1271,7 @@ namespace
                         main_phase = 2;
                     } else if (main_phase == 2) {
                         main_cycle_count++;
-                        if (main_cycle_count % 4 == 0) {
+                        if (main_cycle_count % 2 == 0) {
                             main_phase = 3;     // every 4th cycle: drain
                         } else {
                             main_phase = 0;     // start new cycle
@@ -1274,7 +1285,7 @@ namespace
                     }
 
                     phase_start = now;
-                    phase_dur = 120 + ((int64_t)(main_rng() % 121) - 60);
+                    phase_dur = 10 + ((int64_t)(main_rng() % 11) - 5);
 
                     // Drain always uses shared mode
                     if (main_phase == 3) {

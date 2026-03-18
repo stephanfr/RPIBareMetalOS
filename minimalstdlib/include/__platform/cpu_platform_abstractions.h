@@ -15,7 +15,9 @@
 #include "minstdconfig.h"
 #include <stdint.h>
 #if defined(__linux__)
+#include <pthread.h>
 #include <sched.h>
+#include <signal.h>
 #include <unistd.h>
 #endif
 
@@ -312,27 +314,59 @@ namespace MINIMAL_STD_NAMESPACE
 
 #else // PLATFORM_INTERRUPT_GUARD_NOOP
 
+#if defined(__linux__)
+            // Userspace test-mode interrupt guard state.
+            // Guard nesting is per-thread to preserve reentrant semantics.
+            inline thread_local uint32_t userspace_guard_depth = 0;
+            inline thread_local sigset_t userspace_saved_sigmask;
+#endif
+
             /**
-             * @brief No-op version of disable_interrupts for userspace testing.
+             * @brief Userspace test-mode interrupt masking.
              *
              * When PLATFORM_INTERRUPT_GUARD_NOOP is defined (e.g., during unit tests),
-             * interrupt control is disabled since privileged instructions cannot be
-             * executed in userspace.
+             * privileged interrupt control instructions are unavailable. To preserve
+             * allocator re-entrancy expectations in signal-heavy soak tests, block
+             * SIGUSR1 on first nested guard entry and restore on final exit.
              *
-             * @return Always returns 0.
+             * @return A nonzero nesting depth token in userspace mode.
              */
             inline interrupt_state_t disable_interrupts()
             {
+#if defined(__linux__)
+                if (userspace_guard_depth++ == 0)
+                {
+                    sigset_t set;
+                    sigemptyset(&set);
+                    sigaddset(&set, SIGUSR1);
+                    pthread_sigmask(SIG_BLOCK, &set, &userspace_saved_sigmask);
+                }
+
+                return static_cast<interrupt_state_t>(userspace_guard_depth);
+#else
                 return 0;
+#endif
             }
 
             /**
-             * @brief No-op version of restore_interrupts for userspace testing.
+             * @brief Restores userspace signal mask on final guard exit.
              *
-             * @param state Ignored in the no-op implementation.
+             * @param state Ignored; retained for API compatibility.
              */
             inline void restore_interrupts(interrupt_state_t /* state */)
             {
+#if defined(__linux__)
+                if (userspace_guard_depth == 0)
+                {
+                    return;
+                }
+
+                userspace_guard_depth--;
+                if (userspace_guard_depth == 0)
+                {
+                    pthread_sigmask(SIG_SETMASK, &userspace_saved_sigmask, nullptr);
+                }
+#endif
             }
 
 #endif // PLATFORM_INTERRUPT_GUARD_NOOP

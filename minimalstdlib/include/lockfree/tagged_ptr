@@ -41,7 +41,15 @@ namespace MINIMAL_STD_NAMESPACE
 
             static constexpr pointer unpack_ptr(storage_type value)
             {
-                return reinterpret_cast<pointer>(static_cast<uintptr_t>(value & POINTER_MASK));
+                uintptr_t raw = static_cast<uintptr_t>(value & POINTER_MASK);
+                // Sign-extend from bit 47 for AArch64 canonical addresses
+#ifndef __MINIMAL_STD_TEST__
+                if (raw & (1ULL << 47))
+                {
+                    raw |= ~POINTER_MASK;
+                }
+#endif
+                return reinterpret_cast<pointer>(raw);
             }
 
             static constexpr counter_type unpack_counter(storage_type value)

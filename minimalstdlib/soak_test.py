@@ -2,8 +2,8 @@ import subprocess
 import sys
 
 TEST_BINARY = './test/build/cpputest_stdlib_main.exe'
-TEST_GROUP = 'SkiplistTests'
-TEST_NAME = 'InterruptNestedReadSectionDepthCorrectness'
+TEST_GROUP = 'LockfreeSingleBlockMemoryResourceTests'
+TEST_NAME = 'SoakTest'
 
 
 def parse_args(argv):
@@ -26,9 +26,9 @@ def parse_args(argv):
 
 def build_test_command(mode):
     if mode == 'focused':
-        return [TEST_BINARY, '-g', TEST_GROUP, '-n', TEST_NAME]
+        return ['gdb', '-batch', '-ex', 'handle SIGUSR1 noprint nostop pass', '-ex', 'run', '-ex', 'bt', '--args', TEST_BINARY, '-g', TEST_GROUP, '-n', TEST_NAME]
 
-    return [TEST_BINARY, '-g', TEST_GROUP]
+    return ['gdb', '-batch', '-ex', 'handle SIGUSR1 noprint nostop pass', '-ex', 'run', '-ex', 'bt', '--args', TEST_BINARY, '-g', TEST_GROUP]
 
 
 def run_soak_test(iterations, mode, timeout_seconds):
