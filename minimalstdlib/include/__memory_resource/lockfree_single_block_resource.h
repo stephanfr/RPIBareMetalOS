@@ -490,15 +490,12 @@ namespace MINIMAL_STD_NAMESPACE
                 retries++;
             }
 
-            //  Guarded CAS push: atomically prepends `node` to the tagged-ptr list at `head`.
-            //  The `next_index_field` pointer-to-member selects which index field to thread the list through.
-            //  Protected by an interrupt guard to prevent ABA issues during the push operation.
+            //  Unguarded CAS push: atomically prepends `node` to the tagged-ptr list at `head`.
+            //  PRECONDITION: caller holds interrupt_guard_type.
 
-            void guarded_push(atomic<uint64_t> &head, block_metadata &node,
-                              uint32_t block_metadata::*next_index_field)
+            void unguarded_push(atomic<uint64_t> &head, block_metadata &node,
+                                uint32_t block_metadata::*next_index_field)
             {
-                interrupt_guard_type guard;
-
                 uint64_t current_tag = head.load(memory_order_acquire);
                 size_t retries = 0;
 
@@ -513,15 +510,13 @@ namespace MINIMAL_STD_NAMESPACE
                     memory_order_acq_rel, memory_order_acquire));
             }
 
-            //  Guarded CAS pop: atomically removes and returns the head of the tagged-ptr list.
+            //  Unguarded CAS pop: atomically removes and returns the head of the tagged-ptr list.
             //  Returns nullptr if the list is empty.
-            //  Protected by an interrupt guard to prevent ABA issues during the pop operation.
+            //  PRECONDITION: caller holds interrupt_guard_type.
 
-            block_metadata *guarded_pop(atomic<uint64_t> &head,
-                                        uint32_t block_metadata::*next_index_field)
+            block_metadata *unguarded_pop(atomic<uint64_t> &head,
+                                          uint32_t block_metadata::*next_index_field)
             {
-                interrupt_guard_type guard;
-
                 uint64_t current_tag = head.load(memory_order_acquire);
                 size_t retries = 0;
 
@@ -548,6 +543,24 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 return nullptr;
+            }
+
+            //  Guarded CAS push: wraps unguarded_push with an interrupt guard.
+
+            void guarded_push(atomic<uint64_t> &head, block_metadata &node,
+                              uint32_t block_metadata::*next_index_field)
+            {
+                interrupt_guard_type guard;
+                unguarded_push(head, node, next_index_field);
+            }
+
+            //  Guarded CAS pop: wraps unguarded_pop with an interrupt guard.
+
+            block_metadata *guarded_pop(atomic<uint64_t> &head,
+                                        uint32_t block_metadata::*next_index_field)
+            {
+                interrupt_guard_type guard;
+                return unguarded_pop(head, next_index_field);
             }
 
             void move_metadata_to_free_metadata_list(block_metadata &metadata)
@@ -704,17 +717,18 @@ namespace MINIMAL_STD_NAMESPACE
                 //      stronger ABA protection than a state-only CAS.
 
                 block_metadata *block_to_deallocate = nullptr;
-                
+                uint64_t locked_block_state = 0;
+
                 {
                     interrupt_guard_type guard;
-                    
+
                     const size_t metadata_index = header.metadata_index_;
-                    
+
                     if (metadata_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
                         return;
                     }
-                    
+
                     block_to_deallocate = metadata_start_ - metadata_index;
 
                     if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
@@ -736,9 +750,9 @@ namespace MINIMAL_STD_NAMESPACE
                     // Build expected and desired values for CAS
                     // Expected: current pointer + IN_USE + current version
                     // Desired: same pointer + LOCKED + incremented version
-                    uint64_t desired_block_state = block_state_ptr::with_state_and_increment_version(current_block_state, LOCKED);
+                    locked_block_state = block_state_ptr::with_state_and_increment_version(current_block_state, LOCKED);
 
-                    if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, desired_block_state, memory_order_acq_rel, memory_order_acquire))
+                    if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, locked_block_state, memory_order_acq_rel, memory_order_acquire))
                     {
                         return;
                     }
@@ -765,10 +779,10 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 //  Mark the block as available (keep pointer, change state, increment version)
+                //  Use the cached locked_block_state from the CAS above — no need to reload.
 
-                uint64_t current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
                 block_to_deallocate->block_state_.store(
-                    block_state_ptr::with_state_and_increment_version(current_block_state, AVAILABLE),
+                    block_state_ptr::with_state_and_increment_version(locked_block_state, AVAILABLE),
                     memory_order_release);
                 block_to_deallocate->soft_deleted_at_counter_ = platform::get_monotonic_counter() + 1;
 
@@ -949,15 +963,19 @@ namespace MINIMAL_STD_NAMESPACE
                     return metadata_to_index(md);
                 }
 
-                //  Try stealing from other shards.
+                //  Try stealing from other shards under a single guard scope.
 
-                for (size_t offset = 1; offset < cpu_shards_; ++offset)
                 {
-                    size_t other_shard = (shard + offset) % cpu_shards_;
+                    interrupt_guard_type guard;
 
-                    if (auto *md = guarded_pop(free_metadata_heads_[other_shard], &block_metadata::next_free_header_index_))
+                    for (size_t offset = 1; offset < cpu_shards_; ++offset)
                     {
-                        return metadata_to_index(md);
+                        size_t other_shard = (shard + offset) % cpu_shards_;
+
+                        if (auto *md = unguarded_pop(free_metadata_heads_[other_shard], &block_metadata::next_free_header_index_))
+                        {
+                            return metadata_to_index(md);
+                        }
                     }
                 }
 
@@ -1025,11 +1043,18 @@ namespace MINIMAL_STD_NAMESPACE
                 return true;
             }
 
-            //  After popping a block_metadata from a free-block bin, attempt to claim it for reuse.
-            //  Handles the state machine for AVAILABLE, FRONTIER_RECLAIM_IN_PROGRESS, FRONTIER_RECLAIMED,
-            //  and stale states. Returns true if the block was successfully claimed (AVAILABLE -> LOCKED).
+            //  Result of attempting to claim a popped block inside a guarded scope.
+            //  CLAIMED: block ownership acquired (AVAILABLE -> LOCKED).
+            //  RETRY: block was re-pushed due to active frontier reclaim; caller should continue scanning.
+            //  RECLAIM_DEFERRED: block already reclaimed; metadata cleanup deferred to after guard release.
+            //  DISCARD: stale or non-allocatable state; skip this block.
 
-            bool try_claim_popped_block(block_metadata &head, atomic<uint64_t> &bin_head)
+            enum class claim_result { CLAIMED, RETRY, RECLAIM_DEFERRED, DISCARD };
+
+            //  Unguarded variant of try_claim_popped_block for use within an existing guard scope.
+            //  PRECONDITION: caller holds interrupt_guard_type.
+
+            claim_result unguarded_try_claim_popped_block(block_metadata &head, atomic<uint64_t> &bin_head)
             {
                 while (true)
                 {
@@ -1043,7 +1068,7 @@ namespace MINIMAL_STD_NAMESPACE
                                 block_state_ptr::with_state_and_increment_version(head_block_state, LOCKED),
                                 memory_order_acq_rel, memory_order_acquire))
                         {
-                            return true;
+                            return claim_result::CLAIMED;
                         }
 
                         // CAS failed — state or version changed. Re-check in next iteration.
@@ -1053,63 +1078,101 @@ namespace MINIMAL_STD_NAMESPACE
                     if (current_state == FRONTIER_RECLAIM_IN_PROGRESS)
                     {
                         //  Walk is actively reclaiming this block. Re-push it to prevent a free-list leak.
-                        guarded_push(bin_head, head, &block_metadata::next_free_block_index_);
-                        return false;
+                        unguarded_push(bin_head, head, &block_metadata::next_free_block_index_);
+                        return claim_result::RETRY;
                     }
 
                     if (current_state == FRONTIER_RECLAIMED)
                     {
-                        //  Walk already reclaimed this block. Safe to recycle its metadata now.
-                        move_metadata_to_soft_deleted_list(head);
-                        return false;
+                        //  Walk already reclaimed this block. Defer metadata cleanup to after guard release.
+                        return claim_result::RECLAIM_DEFERRED;
                     }
 
                     //  Stale or non-allocatable state (SOFT_DELETED, METADATA_AVAILABLE,
                     //  LOCKED, IN_USE, INVALID). Discard.
-                    return false;
+                    return claim_result::DISCARD;
                 }
+            }
+
+            //  Guarded wrapper for backward compatibility — used by code paths not under an existing guard.
+
+            bool try_claim_popped_block(block_metadata &head, atomic<uint64_t> &bin_head)
+            {
+                interrupt_guard_type guard;
+                auto result = unguarded_try_claim_popped_block(head, bin_head);
+                if (result == claim_result::RECLAIM_DEFERRED)
+                {
+                    //  Handle deferred reclaim while still under guard — use unguarded push.
+                    move_metadata_to_soft_deleted_list(head);
+                }
+                return result == claim_result::CLAIMED;
             }
 
             block_header *search_for_deallocated_block(uint64_t free_block_bin, size_t shard)
             {
                 //  Scan address bins low-to-high, preferring low-address blocks.
                 //  Outer loop restarts after successful frontier reclamation.
+                //  A single interrupt guard covers the entire bin scan + claim, collapsing
+                //  up to NUM_ADDRESS_BINS separate guard scopes into one.
 
                 size_t bin_index = free_block_bin * cpu_shards_ + shard;
 
                 while (true)
                 {
                     bool restarted = false;
+                    block_metadata *claimed_head = nullptr;
+                    block_metadata *deferred_reclaim = nullptr;
 
-                    for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS && !restarted; ++addr_bin)
                     {
-                        block_metadata *head = guarded_pop(
-                            free_block_bins_[bin_index].address_bin_heads_[addr_bin],
-                            &block_metadata::next_free_block_index_);
+                        interrupt_guard_type guard;
 
-                        if (head == nullptr)
+                        for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS && !restarted; ++addr_bin)
                         {
-                            continue;
-                        }
+                            block_metadata *head = unguarded_pop(
+                                free_block_bins_[bin_index].address_bin_heads_[addr_bin],
+                                &block_metadata::next_free_block_index_);
 
-                        if (!try_claim_popped_block(*head, free_block_bins_[bin_index].address_bin_heads_[addr_bin]))
-                        {
-                            continue;
-                        }
+                            if (head == nullptr)
+                            {
+                                continue;
+                            }
 
+                            auto result = unguarded_try_claim_popped_block(
+                                *head, free_block_bins_[bin_index].address_bin_heads_[addr_bin]);
+
+                            if (result == claim_result::CLAIMED)
+                            {
+                                claimed_head = head;
+                                break;
+                            }
+                            if (result == claim_result::RECLAIM_DEFERRED)
+                            {
+                                deferred_reclaim = head;
+                            }
+                            // RETRY and DISCARD: continue scanning
+                        }
+                    }
+                    // Guard released — handle deferred work and claimed block outside the critical section.
+
+                    if (deferred_reclaim)
+                    {
+                        move_metadata_to_soft_deleted_list(*deferred_reclaim);
+                    }
+
+                    if (claimed_head)
+                    {
                         //  CAS AVAILABLE -> LOCKED succeeded — we own the block.
                         //  If it is the last block, attempt immediate frontier release.
 
-                        if (try_reclaim_last_block(*head))
+                        if (try_reclaim_last_block(*claimed_head))
                         {
-                            restarted = true;
-                            continue;
+                            continue;  // Restart outer loop after frontier reclamation.
                         }
 
                         //  Return the block for reuse.
 
-                        auto return_value = head->get_memory_block();
-                        move_metadata_to_soft_deleted_list(*head);
+                        auto return_value = claimed_head->get_memory_block();
+                        move_metadata_to_soft_deleted_list(*claimed_head);
                         return return_value;
                     }
 
