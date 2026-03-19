@@ -16,6 +16,7 @@
 #include "__extensions/hash_check.h"
 #include "__extensions/memory_resource_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
+#include "__platform/interrupt_policy_abstractions.h"
 #include "lockfree/tagged_ptr"
 #include "memory_resource.h"
 
@@ -49,10 +50,12 @@ namespace MINIMAL_STD_NAMESPACE
         //
         //  On destruction, this resource will just dump all the memory it allocated without invoking any destructors
 
-        template <typename... optional_extensions>
-        class lockfree_single_block_resource : public memory_resource, public optional_extensions...
+        template <typename interrupt_policy_type, typename... optional_extensions>
+        class lockfree_single_block_resource_impl : public memory_resource, public optional_extensions...
         {
         private:
+            using interrupt_guard_type = platform::basic_interrupt_guard<interrupt_policy_type>;
+
             //  Internally, all blocks will be aligned on 64-byte boundaries.  This will support alignments
             //      of 2, 4, 8, 16, 32 and 64 bytes.  Generally 16 Bytes is optimal for modern processors.
 
@@ -169,9 +172,9 @@ namespace MINIMAL_STD_NAMESPACE
                 size_t alignment = 0;
             };
 
-            lockfree_single_block_resource() = delete;
+            lockfree_single_block_resource_impl() = delete;
 
-            explicit lockfree_single_block_resource(void *block,
+            explicit lockfree_single_block_resource_impl(void *block,
                                                     size_t block_size,
                                                     size_t cpu_shards = DEFAULT_CPU_SHARDS)
                 : block_(block),
@@ -242,7 +245,7 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            ~lockfree_single_block_resource() = default;
+            ~lockfree_single_block_resource_impl() = default;
 
             // Diagnostic getters for soak test analysis
             size_t debug_frontier_offset() const
@@ -494,12 +497,13 @@ namespace MINIMAL_STD_NAMESPACE
 
             void back_off(size_t &retries)
             {
-                if (retries > 0)
+                // Keep contention backoff bounded so threads cannot disappear into very long spin windows.
+                const size_t bounded_retries = (retries > 256) ? 256 : retries;
+                const size_t spin_count = 32 + (bounded_retries * 32);
+
+                for (size_t i = 0; i < spin_count; ++i)
                 {
-                    for (size_t i = 0; i < 1000 * retries; ++i)
-                    {
-                        __asm__ __volatile__("" ::: "memory");
-                    }
+                    platform::cpu_relax();
                 }
 
                 retries++;
@@ -517,7 +521,7 @@ namespace MINIMAL_STD_NAMESPACE
                 //  Protect with interrupt guard to prevent ABA issues during the push operation.
 
                 {
-                    platform::interrupt_guard guard;
+                    interrupt_guard_type guard;
 
                     auto shard = cpu_shard_index();
 
@@ -571,7 +575,7 @@ namespace MINIMAL_STD_NAMESPACE
                     //  Protect with interrupt guard to prevent ABA issues during the push operation.
 
                     {
-                        platform::interrupt_guard guard;
+                        interrupt_guard_type guard;
 
                         auto shard = cpu_shard_index();
 
@@ -646,7 +650,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         // Push it back to the free_metadata_heads_ stack
                         {
-                            platform::interrupt_guard guard;
+                            interrupt_guard_type guard;
 
                             uint64_t current_tag = free_metadata_heads_[shard].load(memory_order_acquire);
                             uint64_t new_tag = 0;
@@ -678,7 +682,7 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata->total_size_ = static_cast<uint32_t>(free_block->size_including_header_);
                 metadata->alignment_ = static_cast<uint8_t>(alignment);
 
-                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
+                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
                 {
                     metadata->randomized_value_ = id_generator_();
                 }
@@ -701,12 +705,12 @@ namespace MINIMAL_STD_NAMESPACE
                     } while (!metadata_head_.compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
-                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
+                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
                 {
                     free_block->hash_ = metadata->hash();
                 }
 
-                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource>)
+                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
                 {
                     extensions::memory_resource_statistics::allocation_made(bytes);
                 }
@@ -728,18 +732,18 @@ namespace MINIMAL_STD_NAMESPACE
                 block_metadata *block_to_deallocate = nullptr;
                 
                 {
-                    platform::interrupt_guard guard;
+                    interrupt_guard_type guard;
                     
                     const size_t metadata_index = header.metadata_index_;
                     
-                    if (metadata_index > current_metadata_record_count_.load(memory_order_acquire))
+                    if (metadata_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
                         return;
                     }
                     
                     block_to_deallocate = metadata_start_ - metadata_index;
 
-                    if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource>)
+                    if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
                     {
                         if (block_to_deallocate->hash() != header.hash_)
                         {
@@ -774,7 +778,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Track the deallocation.  We know bytes is the correct size as the hash matches.
 
-                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource>)
+                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
                 {
                     extensions::memory_resource_statistics::deallocation_made(bytes);
                 }
@@ -828,7 +832,7 @@ namespace MINIMAL_STD_NAMESPACE
                 auto addr_bin = address_bin_for(block_to_deallocate->get_memory_block());
 
                 {
-                    platform::interrupt_guard guard;
+                    interrupt_guard_type guard;
 
                     size_t bin_index = free_block_bin * cpu_shards_ + shard;
                     uint64_t current_free_tag = free_block_bins_[bin_index].address_bin_heads_[addr_bin].load(memory_order_acquire);
@@ -886,7 +890,7 @@ namespace MINIMAL_STD_NAMESPACE
                     //  Bounds-check metadata index before dereferencing
                     uint32_t meta_index = prev->metadata_index_;
 
-                    if (meta_index == 0 || meta_index > current_metadata_record_count_.load(memory_order_acquire))
+                    if (meta_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
                         return;  // Invalid or out-of-range metadata index
                     }
@@ -960,7 +964,7 @@ namespace MINIMAL_STD_NAMESPACE
                 //  with respect to interrupt handlers that may also allocate memory.
 
                 {
-                    platform::interrupt_guard guard;
+                    interrupt_guard_type guard;
 
                     uint64_t current_tag = next_empty_memory_block_.load(memory_order_acquire);
                     current = block_tag::unpack_ptr(current_tag);
@@ -1013,7 +1017,7 @@ namespace MINIMAL_STD_NAMESPACE
                 //  This section is protected by an interrupt guard to prevent ABA issues.
 
                 {
-                    platform::interrupt_guard guard;
+                    interrupt_guard_type guard;
 
                     auto shard = cpu_shard_index();
 
@@ -1044,7 +1048,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     size_t other_shard = (shard + offset) % cpu_shards_;
                     
-                    platform::interrupt_guard guard;
+                    interrupt_guard_type guard;
 
                     uint64_t other_tag = free_metadata_heads_[other_shard].load(memory_order_acquire);
                     size_t other_retries = 0;
@@ -1109,7 +1113,7 @@ namespace MINIMAL_STD_NAMESPACE
                     bool popped = false;
 
                     {
-                        platform::interrupt_guard guard;
+                        interrupt_guard_type guard;
 
                         head_tag = free_block_bins_[bin_index].address_bin_heads_[addr_bin].load(memory_order_acquire);
 
@@ -1184,7 +1188,7 @@ namespace MINIMAL_STD_NAMESPACE
                                 //  Walk is actively reclaiming this block. Re-push it back into the
                                 //  same bin with unbounded retries to prevent a permanent free-list leak.
 
-                                platform::interrupt_guard guard;
+                                interrupt_guard_type guard;
 
                                 uint64_t current_bin_tag = free_block_bins_[bin_index].address_bin_heads_[addr_bin].load(memory_order_acquire);
 
@@ -1231,9 +1235,9 @@ namespace MINIMAL_STD_NAMESPACE
 
                     //  CAS AVAILABLE -> LOCKED succeeded — we own the block.
 
-                    //  If the head is the last block and there is another block in the list, then fully release the block.
+                    //  If the head is the last block, attempt immediate frontier release.
 
-                    if (is_last_block(*head) && (head->next_free_block_index_ != NULL_INDEX))
+                    if (is_last_block(*head))
                     {
                         //  Calculate where next_empty_memory_block_ MUST be if head is truly the last block.
                         //  Using a calculated expected value (not a fresh load) ensures re-entrancy safety:
@@ -1353,20 +1357,20 @@ namespace MINIMAL_STD_NAMESPACE
                     : resource_(other.resource_),
                       current_(other.current_)
                 {
-                    if (const_cast<lockfree_single_block_resource &>(resource_).number_of_active_iterators_.add_fetch(1, memory_order_acq_rel) == 1)
+                    if (const_cast<lockfree_single_block_resource_impl &>(resource_).number_of_active_iterators_.add_fetch(1, memory_order_acq_rel) == 1)
                     {
                         //  Use the monotonic counter to record the cutoff point for soft-deleted metadata.
                         //  Adding 1 ensures any soft-deletes happening concurrently will be visible.
-                        const_cast<lockfree_single_block_resource &>(resource_).hard_delete_before_counter_cutoff_.store(platform::get_monotonic_counter() + 1, memory_order_release);
+                        const_cast<lockfree_single_block_resource_impl &>(resource_).hard_delete_before_counter_cutoff_.store(platform::get_monotonic_counter() + 1, memory_order_release);
                     }
                 }
 
                 ~const_iterator()
                 {
-                    if (const_cast<lockfree_single_block_resource &>(resource_).number_of_active_iterators_.sub_fetch(1, memory_order_acq_rel) == 0)
+                    if (const_cast<lockfree_single_block_resource_impl &>(resource_).number_of_active_iterators_.sub_fetch(1, memory_order_acq_rel) == 0)
                     {
-                        const_cast<lockfree_single_block_resource &>(resource_).hard_delete_before_counter_cutoff_.store(SIZE_MAX, memory_order_release);
-                        const_cast<lockfree_single_block_resource &>(resource_).reclaim_soft_deleted_metadata(resource_.cpu_shard_index());
+                        const_cast<lockfree_single_block_resource_impl &>(resource_).hard_delete_before_counter_cutoff_.store(SIZE_MAX, memory_order_release);
+                        const_cast<lockfree_single_block_resource_impl &>(resource_).reclaim_soft_deleted_metadata(resource_.cpu_shard_index());
                     }
                 }
 
@@ -1405,24 +1409,24 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
             private:
-                friend class lockfree_single_block_resource;
+                friend class lockfree_single_block_resource_impl;
 
-                explicit const_iterator(const lockfree_single_block_resource &resource,
-                                        const lockfree_single_block_resource::block_metadata *current)
+                explicit const_iterator(const lockfree_single_block_resource_impl &resource,
+                                        const lockfree_single_block_resource_impl::block_metadata *current)
                     : resource_(resource),
                       current_(current)
                 {
                 }
 
-                const lockfree_single_block_resource &resource_;
-                const lockfree_single_block_resource::block_metadata *current_;
+                const lockfree_single_block_resource_impl &resource_;
+                const lockfree_single_block_resource_impl::block_metadata *current_;
             };
 
             const_iterator begin() const
             {
-                if (const_cast<lockfree_single_block_resource &>(*this).number_of_active_iterators_.add_fetch(1, memory_order_acq_rel) == 1)
+                if (const_cast<lockfree_single_block_resource_impl &>(*this).number_of_active_iterators_.add_fetch(1, memory_order_acq_rel) == 1)
                 {
-                    const_cast<lockfree_single_block_resource &>(*this).hard_delete_before_counter_cutoff_.store(platform::get_monotonic_counter() + 1, memory_order_release);
+                    const_cast<lockfree_single_block_resource_impl &>(*this).hard_delete_before_counter_cutoff_.store(platform::get_monotonic_counter() + 1, memory_order_release);
                 }
                 return const_iterator(*this, metadata_tag::unpack_ptr(metadata_head_.load(memory_order_acquire)));
             }
@@ -1435,5 +1439,11 @@ namespace MINIMAL_STD_NAMESPACE
         private:
             const const_iterator itr_end_;
         };
+
+        template <typename... optional_extensions>
+        using lockfree_single_block_resource = lockfree_single_block_resource_impl<platform::default_interrupt_policy, optional_extensions...>;
+
+        template <typename interrupt_policy_type, typename... optional_extensions>
+        using lockfree_single_block_resource_with_interrupt_policy = lockfree_single_block_resource_impl<interrupt_policy_type, optional_extensions...>;
     };
 } //  namespace MINIMAL_STD_NAMESPACE::pmr

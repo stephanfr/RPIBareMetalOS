@@ -26,7 +26,7 @@ def parse_args(argv):
 
 def build_test_command(mode):
     if mode == 'focused':
-        return ['gdb', '-batch', '-ex', 'handle SIGUSR1 noprint nostop pass', '-ex', 'run', '-ex', 'bt', '--args', TEST_BINARY, '-g', TEST_GROUP, '-n', TEST_NAME]
+        return ['gdb', '-batch', '-ex', 'handle SIGUSR1 noprint nostop pass', '-ex', 'run', '--args', TEST_BINARY, '-g', TEST_GROUP, '-n', TEST_NAME]
 
     return ['gdb', '-batch', '-ex', 'handle SIGUSR1 noprint nostop pass', '-ex', 'run', '-ex', 'bt', '--args', TEST_BINARY, '-g', TEST_GROUP]
 
@@ -38,21 +38,17 @@ def run_soak_test(iterations, mode, timeout_seconds):
     print(f"Timeout per run: {timeout_seconds}s")
 
     for i in range(iterations):
-        print(f"Run {i+1}/{iterations}...", end=" ", flush=True)
+        print(f"=== Run {i+1}/{iterations} ===", flush=True)
         try:
             result = subprocess.run(
                 command,
-                capture_output=True,
                 text=True,
                 timeout=timeout_seconds,
             )
             if result.returncode != 0:
                 print(f"FAILED (ret {result.returncode})")
-                print("Output:")
-                print(result.stdout)
-                print(result.stderr)
                 return False
-            print("OK")
+            print("OK", flush=True)
         except subprocess.TimeoutExpired:
             print("TIMEOUT (possible livelock/deadlock)")
             return False

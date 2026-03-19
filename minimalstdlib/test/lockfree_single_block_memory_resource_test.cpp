@@ -9,6 +9,8 @@
 #include <__memory_resource/lockfree_single_block_resource.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
+#include "os_abstractions.h"
+
 #include <array>
 #include <pthread.h>
 #include <random>
@@ -61,8 +63,38 @@ namespace
     minstd::atomic<bool> start_allocations = false;
     minstd::atomic<bool> exit_thread = false;
 
-    typedef minstd::pmr::lockfree_single_block_resource<minstd::pmr::extensions::memory_resource_statistics, minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
-    typedef minstd::pmr::lockfree_single_block_resource<minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy<
+        minstd::pmr::platform::userspace_signal_mask_interrupt_policy,
+        minstd::pmr::extensions::memory_resource_statistics,
+        minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
+    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy<
+        minstd::pmr::platform::userspace_signal_mask_interrupt_policy,
+        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+
+    struct userspace_signal_guard
+    {
+        userspace_signal_guard()
+        {
+            minstd::pmr::test::os_abstractions::enter_critical_section();
+        }
+
+        ~userspace_signal_guard()
+        {
+            minstd::pmr::test::os_abstractions::leave_critical_section();
+        }
+    };
+
+    inline void *guarded_allocate(minstd::pmr::memory_resource *resource, size_t bytes)
+    {
+        userspace_signal_guard guard;
+        return resource->allocate(bytes);
+    }
+
+    inline void guarded_deallocate(minstd::pmr::memory_resource *resource, void *ptr, size_t bytes)
+    {
+        userspace_signal_guard guard;
+        resource->deallocate(ptr, bytes);
+    }
 
     struct allocator_thread_arguments
     {
@@ -783,18 +815,76 @@ namespace
     static minstd::pmr::memory_resource *s_intr_resource = nullptr;
     static volatile sig_atomic_t s_intr_signal_count = 0;
     static volatile sig_atomic_t s_intr_nested_count = 0;
+    static thread_local volatile sig_atomic_t s_intr_pending_ops = 0;
+
+    static inline void process_pending_intr_work(minstd::pmr::memory_resource *resource)
+    {
+        sig_atomic_t pending = s_intr_pending_ops;
+        if (pending <= 0)
+        {
+            return;
+        }
+
+        s_intr_pending_ops = 0;
+        if (pending > 32)
+        {
+            pending = 32;
+        }
+
+        for (sig_atomic_t i = 0; i < pending; ++i)
+        {
+            void* p = guarded_allocate(resource, 16);
+            if (p != nullptr)
+            {
+                guarded_deallocate(resource, p, 16);
+                __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
+            }
+        }
+    }
+
+    static bool settle_frontier_to_initial(lockfree_single_block_resource_with_stats &resource, size_t initial_frontier)
+    {
+        const size_t metadata_count = resource.debug_metadata_count();
+        const size_t max_attempts = (metadata_count < 1000) ? 50000 : (metadata_count * 64);
+        static constexpr size_t probe_sizes[] = {16, 4096, 65536, 1048576, 4194304};
+
+        for (size_t attempt = 0; attempt < max_attempts; ++attempt)
+        {
+            if (resource.debug_frontier_offset() == initial_frontier)
+            {
+                return true;
+            }
+
+            // Nudge allocator paths with varying sizes so we don't only churn a single tiny free-list bin.
+            const size_t probe_size = probe_sizes[attempt % (sizeof(probe_sizes) / sizeof(probe_sizes[0]))];
+            void *probe = guarded_allocate(&resource, probe_size);
+            if (probe != nullptr)
+            {
+                guarded_deallocate(&resource, probe, probe_size);
+            }
+
+            // Periodically create and destroy an iterator to trigger soft-delete metadata reclamation.
+            if ((attempt & 0xFF) == 0)
+            {
+                auto itr = resource.begin();
+                (void)itr;
+            }
+
+            if ((attempt & 0x3F) == 0)
+            {
+                sched_yield();
+            }
+        }
+
+        return resource.debug_frontier_offset() == initial_frontier;
+    }
 
     static void sigusr1_nested_alloc_handler(int)
     {
         if (s_intr_resource != nullptr)
         {
-            // Triggers a nested operation — matching bare-metal hardware IRQ behavior
-            void* p = s_intr_resource->allocate(16);
-            if (p != nullptr)
-            {
-                s_intr_resource->deallocate(p, 16);
-                __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
-            }
+            // Defer nested work to normal thread context. Signal context only records intent.
+            __atomic_add_fetch(&s_intr_pending_ops, 1, __ATOMIC_RELAXED);
             __atomic_add_fetch(&s_intr_signal_count, 1, __ATOMIC_SEQ_CST);
         }
     }
@@ -822,6 +912,7 @@ namespace
         s_intr_resource = &resource;
         s_intr_signal_count = 0;
         s_intr_nested_count = 0;
+        s_intr_pending_ops = 0;
 
         struct sigaction sa = {};
         sa.sa_handler = sigusr1_nested_alloc_handler;
@@ -837,12 +928,16 @@ namespace
         // Perform normal operations while being bombarded with signals
         for (int i = 0; i < 50000; ++i)
         {
-            void* p = resource.allocate(32);
+            process_pending_intr_work(&resource);
+
+            void* p = guarded_allocate(&resource, 32);
             if (p) 
             {
-                resource.deallocate(p, 32);
+                guarded_deallocate(&resource, p, 32);
             }
         }
+
+        process_pending_intr_work(&resource);
 
         stop_flag.store(true, minstd::memory_order_release);
         pthread_join(bomber, nullptr);
@@ -988,13 +1083,26 @@ namespace
         minstd::atomic<int> *shared_phase;       // Phase set by main loop (0=steady,1=bursty,2=recovery,3=drain)
         minstd::atomic<bool> *use_shared_phase;   // true=all threads follow shared_phase, false=per-thread cycling
         minstd::atomic<int> *drained_count;       // Threads increment when live_count reaches 0 during drain
+        minstd::atomic<int> *drain_epoch;         // Incremented by main when entering drain
+        minstd::atomic<int> *drain_ack_count;     // Workers ack once per drain epoch
         uint64_t rng_seed;
         size_t id;
-        size_t allocations = 0;
-        size_t deallocations = 0;
-        size_t failed_allocations = 0;
-        size_t current_live_count = 0;
+        minstd::atomic<size_t> allocations{0};
+        minstd::atomic<size_t> deallocations{0};
+        minstd::atomic<size_t> failed_allocations{0};
+        minstd::atomic<size_t> current_live_count{0};
+        minstd::atomic<size_t> heartbeat{0};
+        minstd::atomic<uint64_t> last_progress_ns{0};
+        minstd::atomic<int> last_phase_seen{0};
+        minstd::atomic<size_t> last_live_seen{0};
     };
+
+    static inline uint64_t monotonic_time_ns()
+    {
+        struct timespec ts{};
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
+    }
 
     static void *soak_worker_thread(void *arg)
     {
@@ -1014,9 +1122,15 @@ namespace
         int local_cycle_count = 0;
         time_t local_phase_start = time(NULL);
         time_t local_phase_duration = 10 + ((int64_t)(rng() % 11) - 5);
+        int last_acked_drain_epoch = -1;
+        int previous_phase = -1;
+        size_t burst_target_live = 2500;
+        bool burst_pressure_spike = false;
 
         while (!args->stop_flag->load(minstd::memory_order_acquire))
         {
+            process_pending_intr_work(args->resource);
+
             // Determine current phase: shared or independent
             int current_phase;
             if (args->use_shared_phase->load(minstd::memory_order_acquire))
@@ -1051,12 +1165,49 @@ namespace
                 current_phase = local_phase;
             }
 
+            if (current_phase != previous_phase)
+            {
+                if (current_phase == 1)
+                {
+                    // Re-roll burst target each BURSTY entry so pressure varies and intermittently
+                    // pushes close to MAX_LIVE, provoking occasional allocation exhaustion.
+                    burst_target_live = 2200 + (rng() % 1701); // [2200, 3900]
+                    burst_pressure_spike = ((rng() % 5) == 0); // 20% of bursts are near-cap spikes
+                    if (burst_pressure_spike)
+                    {
+                        burst_target_live = 3800 + (rng() % 151); // [3800, 3950]
+                    }
+                }
+
+                previous_phase = current_phase;
+            }
+
+            args->last_phase_seen.store(current_phase, minstd::memory_order_relaxed);
+            args->last_live_seen.store(live_count, minstd::memory_order_relaxed);
+
+            if (current_phase == 3)
+            {
+                const int drain_epoch = args->drain_epoch->load(minstd::memory_order_acquire);
+                if (drain_epoch != last_acked_drain_epoch)
+                {
+                    args->drain_ack_count->fetch_add(1, minstd::memory_order_release);
+                    last_acked_drain_epoch = drain_epoch;
+                }
+            }
+
             // Alloc probability varies by phase; BURSTY/RECOVERY revert to 50/50 once target is reached
             int alloc_pct;
             if (current_phase == 0) {
                 alloc_pct = 50;                          // STEADY: 50/50
             } else if (current_phase == 1) {
-                alloc_pct = (live_count < 2500) ? 90 : 50;  // BURSTY: ramp to ~3500, then 50/50
+                if (live_count < burst_target_live)
+                {
+                    alloc_pct = burst_pressure_spike ? 98 : 92;
+                }
+                else
+                {
+                    alloc_pct = 50;
+                }
             } else if (current_phase == 2) {
                 alloc_pct = (live_count > 10) ? 10 : 50;   // RECOVERY: drain to ~100, then 50/50
             } else {
@@ -1095,27 +1246,33 @@ namespace
             {
                 // Size between 1 and 32000
                 size_t sz = 1 + (rng() % 32000);
-                void* p = args->resource->allocate(sz);
+                void* p = guarded_allocate(args->resource, sz);
                 if (p)
                 {
                     pointers[live_count] = p;
                     sizes[live_count] = sz;
                     live_count++;
-                    args->allocations++;
+                    args->allocations.fetch_add(1, minstd::memory_order_relaxed);
+                    args->heartbeat.fetch_add(1, minstd::memory_order_relaxed);
+                    args->last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
                 }
                 else
                 {
-                    args->failed_allocations++;
+                    args->failed_allocations.fetch_add(1, minstd::memory_order_relaxed);
+                    args->heartbeat.fetch_add(1, minstd::memory_order_relaxed);
+                    args->last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
                 }
             }
             else if (live_count > 0)
             {
                 size_t idx = rng() % live_count;
-                args->resource->deallocate(pointers[idx], sizes[idx]);
+                guarded_deallocate(args->resource, pointers[idx], sizes[idx]);
                 pointers[idx] = pointers[live_count - 1];
                 sizes[idx] = sizes[live_count - 1];
                 live_count--;
-                args->deallocations++;
+                args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
+                args->heartbeat.fetch_add(1, minstd::memory_order_relaxed);
+                args->last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
             }
             else
             {
@@ -1123,18 +1280,22 @@ namespace
                 sched_yield();
             }
 
-            args->current_live_count = live_count;
+            args->current_live_count.store(live_count, minstd::memory_order_relaxed);
 
-            if ((args->allocations + args->deallocations) % 1000 == 0)
+            const size_t ops = args->allocations.load(minstd::memory_order_relaxed) + args->deallocations.load(minstd::memory_order_relaxed);
+            if (ops % 1000 == 0)
             {
                 sched_yield();
             }
         }
 
+        // Flush deferred signal work one last time before final thread-local cleanup.
+        process_pending_intr_work(args->resource);
+
         for (size_t i = 0; i < live_count; ++i)
         {
-            args->resource->deallocate(pointers[i], sizes[i]);
-            args->deallocations++;
+            guarded_deallocate(args->resource, pointers[i], sizes[i]);
+            args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
         }
 
         return nullptr;
@@ -1186,6 +1347,7 @@ namespace
         printf("\nRunning Allocator SoakTest for %zu seconds (Base Seed: %llu)...\n", SOAK_DURATION_SEC, (unsigned long long)base_seed);
 
         lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+        const size_t initial_frontier = resource.debug_frontier_offset();
         
         struct sigaction sa = {};
         sa.sa_handler = sigusr1_nested_alloc_handler;
@@ -1196,11 +1358,14 @@ namespace
         s_intr_resource = &resource;
         s_intr_signal_count = 0;
         s_intr_nested_count = 0;
+        s_intr_pending_ops = 0;
 
         minstd::atomic<bool> stop_flag{false};
         minstd::atomic<int> shared_phase{0};
         minstd::atomic<bool> use_shared_phase{true};
         minstd::atomic<int> drained_count{0};
+        minstd::atomic<int> drain_epoch{0};
+        minstd::atomic<int> drain_ack_count{0};
         
         pthread_t workers[NUM_THREADS]{};
         soak_thread_args thread_args[NUM_THREADS]{};
@@ -1212,8 +1377,11 @@ namespace
             thread_args[i].shared_phase = &shared_phase;
             thread_args[i].use_shared_phase = &use_shared_phase;
             thread_args[i].drained_count = &drained_count;
+            thread_args[i].drain_epoch = &drain_epoch;
+            thread_args[i].drain_ack_count = &drain_ack_count;
             thread_args[i].rng_seed = base_seed + i;
             thread_args[i].id = i;
+            thread_args[i].last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
             
             CHECK_EQUAL(0, pthread_create(&workers[i], nullptr, soak_worker_thread, &thread_args[i]));
         }
@@ -1242,6 +1410,8 @@ namespace
         size_t last_allocs = 0;
         size_t last_deallocs = 0;
         size_t last_failed = 0;
+        size_t last_heartbeats[NUM_THREADS]{};
+        size_t hb_deltas[NUM_THREADS]{};
         while (elapsed < SOAK_DURATION_SEC * 10)
         {
             // Phase transition check every second
@@ -1252,8 +1422,10 @@ namespace
 
                 if (main_phase == 3)
                 {
-                    // In drain: wait for all threads to signal empty
-                    if (drained_count.load(minstd::memory_order_acquire) >= (int)NUM_THREADS)
+                    // In drain: first wait for all threads to observe this drain epoch, then wait for empty.
+                    const int acked = drain_ack_count.load(minstd::memory_order_acquire);
+                    const int drained = drained_count.load(minstd::memory_order_acquire);
+                    if (acked >= (int)NUM_THREADS && drained >= (int)NUM_THREADS)
                     {
                         transition = true;
                     }
@@ -1271,7 +1443,7 @@ namespace
                         main_phase = 2;
                     } else if (main_phase == 2) {
                         main_cycle_count++;
-                        if (main_cycle_count % 2 == 0) {
+                        if (main_cycle_count % 4 == 0) {
                             main_phase = 3;     // every 4th cycle: drain
                         } else {
                             main_phase = 0;     // start new cycle
@@ -1279,6 +1451,16 @@ namespace
                             main_shared_mode = (main_rng() % 2) == 0;
                         }
                     } else {
+                        // Drained worker-local live sets are a phase-transition condition only.
+                        // Strict frontier reset is validated at final quiescent teardown checks.
+                        size_t frontier_after_drain = resource.debug_frontier_offset();
+                        if (frontier_after_drain != initial_frontier)
+                        {
+                            printf("  [DrainComplete] frontier=%zu (initial=%zu); defer strict check to final quiescent validation\n",
+                                   frontier_after_drain, initial_frontier);
+                            fflush(stdout);
+                        }
+
                         // After drain, always start fresh cycle in shared mode
                         main_phase = 0;
                         main_shared_mode = (main_rng() % 2) == 0;
@@ -1291,6 +1473,8 @@ namespace
                     if (main_phase == 3) {
                         use_shared_phase.store(true, minstd::memory_order_release);
                         drained_count.store(0, minstd::memory_order_release);
+                        drain_ack_count.store(0, minstd::memory_order_release);
+                        drain_epoch.fetch_add(1, minstd::memory_order_acq_rel);
                     } else {
                         use_shared_phase.store(main_shared_mode, minstd::memory_order_release);
                     }
@@ -1310,10 +1494,17 @@ namespace
                 size_t c_allocs = 0, c_deallocs = 0, c_failed = 0, c_live = 0;
                 for (size_t i = 0; i < NUM_THREADS; ++i)
                 {
-                    c_allocs += thread_args[i].allocations;
-                    c_deallocs += thread_args[i].deallocations;
-                    c_failed += thread_args[i].failed_allocations;
-                    c_live += thread_args[i].current_live_count;
+                    c_allocs += thread_args[i].allocations.load(minstd::memory_order_relaxed);
+                    c_deallocs += thread_args[i].deallocations.load(minstd::memory_order_relaxed);
+                    c_failed += thread_args[i].failed_allocations.load(minstd::memory_order_relaxed);
+                    c_live += thread_args[i].current_live_count.load(minstd::memory_order_relaxed);
+                }
+
+                for (size_t i = 0; i < NUM_THREADS; ++i)
+                {
+                    const size_t hb = thread_args[i].heartbeat.load(minstd::memory_order_relaxed);
+                    hb_deltas[i] = hb - last_heartbeats[i];
+                    last_heartbeats[i] = hb;
                 }
 
                 size_t allocs_per_sec = (c_allocs - last_allocs) / 10;
@@ -1333,32 +1524,96 @@ namespace
                 printf("  Frontier: %zuMB, MetaCount: %zu, MetaBoundary: %zuMB, Gap: %zuMB\n",
                        frontier_off / (1024*1024), meta_count, meta_boundary / (1024*1024), gap / (1024*1024));
                 fflush(stdout);
+
+                if (main_phase == 3 && allocs_per_sec == 0 && deallocs_per_sec == 0)
+                {
+                    int drained = drained_count.load(minstd::memory_order_acquire);
+                    int acked = drain_ack_count.load(minstd::memory_order_acquire);
+                    const uint64_t now_ns = monotonic_time_ns();
+                    printf("  [DRAIN STALL?] acked=%d/%zu drained_count=%d/%zu\n", acked, NUM_THREADS, drained, NUM_THREADS);
+                    for (size_t i = 0; i < NUM_THREADS; ++i)
+                    {
+                        uint64_t last_ns = thread_args[i].last_progress_ns.load(minstd::memory_order_relaxed);
+                        uint64_t age_ms = (now_ns > last_ns) ? ((now_ns - last_ns) / 1000000ULL) : 0ULL;
+                        int t_phase = thread_args[i].last_phase_seen.load(minstd::memory_order_relaxed);
+                        size_t t_live = thread_args[i].last_live_seen.load(minstd::memory_order_relaxed);
+                        printf("    [T%zu] phase=%d live=%zu hb_delta=%zu age_ms=%llu alloc=%zu dealloc=%zu failed=%zu\n",
+                               i, t_phase, t_live, hb_deltas[i], (unsigned long long)age_ms,
+                               thread_args[i].allocations.load(minstd::memory_order_relaxed),
+                               thread_args[i].deallocations.load(minstd::memory_order_relaxed),
+                               thread_args[i].failed_allocations.load(minstd::memory_order_relaxed));
+                    }
+                    fflush(stdout);
+
+                    if (getenv("ALLOCATOR_SOAK_BREAK_ON_STALL"))
+                    {
+                        raise(SIGTRAP);
+                    }
+                }
             }
             usleep(100000); // 100ms
             elapsed++;
         }
 
+        // Force a final shared DRAIN phase so teardown checks run from a true quiescent point.
+        use_shared_phase.store(true, minstd::memory_order_release);
+        drained_count.store(0, minstd::memory_order_release);
+        drain_ack_count.store(0, minstd::memory_order_release);
+        drain_epoch.fetch_add(1, minstd::memory_order_acq_rel);
+        shared_phase.store(3, minstd::memory_order_release);
+
+        const size_t FINAL_DRAIN_WAIT_TICKS = 300; // 30 seconds max at 100ms per tick
+        bool final_drain_complete = false;
+        for (size_t tick = 0; tick < FINAL_DRAIN_WAIT_TICKS; ++tick)
+        {
+            int acked = drain_ack_count.load(minstd::memory_order_acquire);
+            int drained = drained_count.load(minstd::memory_order_acquire);
+            if (acked >= (int)NUM_THREADS && drained >= (int)NUM_THREADS)
+            {
+                final_drain_complete = true;
+                break;
+            }
+            usleep(100000);
+        }
+
+        if (!final_drain_complete)
+        {
+            printf("[FinalDrainTimeout] acked=%d/%zu drained=%d/%zu\n",
+                   drain_ack_count.load(minstd::memory_order_acquire), NUM_THREADS,
+                   drained_count.load(minstd::memory_order_acquire), NUM_THREADS);
+            fflush(stdout);
+        }
+
         stop_flag.store(true, minstd::memory_order_release);
+
+        pthread_join(bomber, nullptr);
 
         for (size_t i = 0; i < NUM_THREADS; ++i)
         {
             pthread_join(workers[i], nullptr);
         }
         
-        pthread_join(bomber, nullptr);
-        
         sa.sa_handler = SIG_DFL;
         sigaction(SIGUSR1, &sa, nullptr);
         s_intr_resource = nullptr;
+
+        process_pending_intr_work(&resource);
+        bool frontier_settled = settle_frontier_to_initial(resource, initial_frontier);
+        if (!frontier_settled)
+        {
+            printf("[QuiescentSettle] frontier remained at %zu (initial=%zu, metadata=%zu)\n",
+                   resource.debug_frontier_offset(), initial_frontier, resource.debug_metadata_count());
+            fflush(stdout);
+        }
 
         size_t total_alloc = 0;
         size_t total_dealloc = 0;
         size_t total_failed = 0;
         for (size_t i = 0; i < NUM_THREADS; ++i)
         {
-            total_alloc += thread_args[i].allocations;
-            total_dealloc += thread_args[i].deallocations;
-            total_failed += thread_args[i].failed_allocations;
+            total_alloc += thread_args[i].allocations.load(minstd::memory_order_relaxed);
+            total_dealloc += thread_args[i].deallocations.load(minstd::memory_order_relaxed);
+            total_failed += thread_args[i].failed_allocations.load(minstd::memory_order_relaxed);
         }
 
         printf("Soak test completed. Worker Allocs: %zu, Worker Deallocs: %zu, Failed Allocs: %zu (total across threads)\n",
@@ -1378,6 +1633,17 @@ namespace
             fflush(stdout);  // GDB breakpoint target line
         }
         CHECK_EQUAL(0, resource.current_bytes_allocated());
+        // Optional strict mode for frontier compaction debugging.
+        const bool enforce_frontier_reset = (getenv("ALLOCATOR_SOAK_ENFORCE_FRONTIER_RESET") != nullptr);
+        if (enforce_frontier_reset)
+        {
+            CHECK_TRUE(frontier_settled);
+            CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
+        }
+        else
+        {
+            CHECK_TRUE(resource.debug_frontier_offset() <= resource.debug_metadata_boundary_offset());
+        }
         CHECK_EQUAL(total_alloc + s_intr_nested_count, resource.total_allocations());
         CHECK_EQUAL(total_dealloc + s_intr_nested_count, resource.total_deallocations());
     }

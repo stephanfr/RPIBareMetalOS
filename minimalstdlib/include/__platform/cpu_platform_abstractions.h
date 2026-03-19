@@ -14,24 +14,11 @@
 
 #include "minstdconfig.h"
 #include <stdint.h>
-#if defined(__linux__)
-#include <pthread.h>
-#include <sched.h>
-#include <signal.h>
-#include <unistd.h>
-#endif
 
 #if defined(__x86_64__) || defined(_M_X64)
 #include <emmintrin.h>
 #elif defined(__aarch64__)
 #include <arm_neon.h>
-#endif
-
-//  When running in userspace (e.g., unit tests), we cannot execute privileged
-//  interrupt control instructions. Define this macro to make interrupt guards
-//  no-ops for testing purposes.
-#if defined(__MINIMAL_STD_TEST__) || defined(PLATFORM_USERSPACE)
-#define PLATFORM_INTERRUPT_GUARD_NOOP
 #endif
 
 namespace MINIMAL_STD_NAMESPACE
@@ -97,9 +84,8 @@ namespace MINIMAL_STD_NAMESPACE
              */
             inline uint32_t get_cpu_id()
             {
-#if defined(__linux__) && (defined(__MINIMAL_STD_TEST__) || defined(PLATFORM_USERSPACE))
-                int cpu = sched_getcpu();
-                return (cpu < 0) ? 0u : static_cast<uint32_t>(cpu);
+#if defined(__MINIMAL_STD_TEST__)
+                return 0u;
 
 #elif defined(__x86_64__) || defined(_M_X64)
                 uint32_t ebx;
@@ -136,9 +122,8 @@ namespace MINIMAL_STD_NAMESPACE
              */
             inline uint32_t get_cpu_count()
             {
-#if defined(__linux__)
-                long count = sysconf(_SC_NPROCESSORS_ONLN);
-                return (count > 0) ? static_cast<uint32_t>(count) : 1u;
+#if defined(__MINIMAL_STD_TEST__)
+                return 1u;
 
 #elif defined(__x86_64__) || defined(_M_X64)
                 uint32_t eax = 0, ebx = 0, ecx = 0, edx = 0;
@@ -230,184 +215,6 @@ namespace MINIMAL_STD_NAMESPACE
                 return (chunk_ptr[0] == ~0ULL) && (chunk_ptr[1] == ~0ULL);
 #endif
             }
-
-            /**
-             * @brief Interrupt state type for save/restore operations.
-             *
-             * On x64: Contains the RFLAGS register value
-             * On ARM64: Contains the DAIF register value
-             */
-            using interrupt_state_t = uint64_t;
-
-#ifndef PLATFORM_INTERRUPT_GUARD_NOOP
-
-            /**
-             * @brief Disables interrupts and returns the previous interrupt state.
-             *
-             * This function disables interrupts on the current CPU and returns the
-             * previous interrupt state, which should be passed to restore_interrupts()
-             * to restore the original state.
-             *
-             * On x64: Clears the IF flag in RFLAGS using CLI
-             * On ARM64: Sets the I bit in DAIF to mask IRQ interrupts
-             *
-             * @return The previous interrupt state for later restoration.
-             */
-            inline interrupt_state_t disable_interrupts()
-            {
-#if defined(__x86_64__) || defined(_M_X64)
-                interrupt_state_t flags;
-                __asm__ volatile(
-                    "pushfq\n\t"
-                    "pop %0\n\t"
-                    "cli"
-                    : "=r"(flags)
-                    :
-                    : "memory");
-                return flags;
-
-#elif defined(__aarch64__)
-                interrupt_state_t daif;
-                __asm__ volatile(
-                    "mrs %0, daif\n\t"
-                    "msr daifset, #2" // Set I bit to mask IRQ
-                    : "=r"(daif)
-                    :
-                    : "memory");
-                return daif;
-
-#else
-#error "Unsupported architecture for disable_interrupts()"
-#endif
-            }
-
-            /**
-             * @brief Restores the interrupt state to a previously saved value.
-             *
-             * This function restores the interrupt state to the value returned by
-             * a previous call to disable_interrupts(). If interrupts were enabled
-             * before disable_interrupts() was called, they will be re-enabled.
-             *
-             * @param state The interrupt state to restore (from disable_interrupts()).
-             */
-            inline void restore_interrupts(interrupt_state_t state)
-            {
-#if defined(__x86_64__) || defined(_M_X64)
-                __asm__ volatile(
-                    "push %0\n\t"
-                    "popfq"
-                    :
-                    : "r"(state)
-                    : "memory", "cc");
-
-#elif defined(__aarch64__)
-                __asm__ volatile(
-                    "msr daif, %0"
-                    :
-                    : "r"(state)
-                    : "memory");
-
-#else
-#error "Unsupported architecture for restore_interrupts()"
-#endif
-            }
-
-#else // PLATFORM_INTERRUPT_GUARD_NOOP
-
-#if defined(__linux__)
-            // Userspace test-mode interrupt guard state.
-            // Guard nesting is per-thread to preserve reentrant semantics.
-            inline thread_local uint32_t userspace_guard_depth = 0;
-            inline thread_local sigset_t userspace_saved_sigmask;
-#endif
-
-            /**
-             * @brief Userspace test-mode interrupt masking.
-             *
-             * When PLATFORM_INTERRUPT_GUARD_NOOP is defined (e.g., during unit tests),
-             * privileged interrupt control instructions are unavailable. To preserve
-             * allocator re-entrancy expectations in signal-heavy soak tests, block
-             * SIGUSR1 on first nested guard entry and restore on final exit.
-             *
-             * @return A nonzero nesting depth token in userspace mode.
-             */
-            inline interrupt_state_t disable_interrupts()
-            {
-#if defined(__linux__)
-                if (userspace_guard_depth++ == 0)
-                {
-                    sigset_t set;
-                    sigemptyset(&set);
-                    sigaddset(&set, SIGUSR1);
-                    pthread_sigmask(SIG_BLOCK, &set, &userspace_saved_sigmask);
-                }
-
-                return static_cast<interrupt_state_t>(userspace_guard_depth);
-#else
-                return 0;
-#endif
-            }
-
-            /**
-             * @brief Restores userspace signal mask on final guard exit.
-             *
-             * @param state Ignored; retained for API compatibility.
-             */
-            inline void restore_interrupts(interrupt_state_t /* state */)
-            {
-#if defined(__linux__)
-                if (userspace_guard_depth == 0)
-                {
-                    return;
-                }
-
-                userspace_guard_depth--;
-                if (userspace_guard_depth == 0)
-                {
-                    pthread_sigmask(SIG_SETMASK, &userspace_saved_sigmask, nullptr);
-                }
-#endif
-            }
-
-#endif // PLATFORM_INTERRUPT_GUARD_NOOP
-
-            /**
-             * @brief RAII guard for interrupt-protected critical sections.
-             *
-             * This class provides exception-safe interrupt protection. Interrupts are
-             * disabled when the guard is constructed and restored to their previous
-             * state when the guard is destroyed.
-             *
-             * When PLATFORM_INTERRUPT_GUARD_NOOP is defined, this becomes a no-op
-             * for userspace testing.
-             *
-             * Usage:
-             *     {
-             *         interrupt_guard guard;
-             *         // Critical section - interrupts are disabled
-             *     } // Interrupts restored here
-             */
-            class interrupt_guard
-            {
-            public:
-                interrupt_guard() : saved_state_(disable_interrupts())
-                {
-                }
-
-                ~interrupt_guard()
-                {
-                    restore_interrupts(saved_state_);
-                }
-
-                // Non-copyable and non-movable
-                interrupt_guard(const interrupt_guard &) = delete;
-                interrupt_guard(interrupt_guard &&) = delete;
-                interrupt_guard &operator=(const interrupt_guard &) = delete;
-                interrupt_guard &operator=(interrupt_guard &&) = delete;
-
-            private:
-                interrupt_state_t saved_state_;
-            };
 
         } // namespace platform
     } // namespace pmr
