@@ -817,12 +817,12 @@ namespace
     static volatile sig_atomic_t s_intr_nested_count = 0;
     static thread_local volatile sig_atomic_t s_intr_pending_ops = 0;
 
-    static inline void process_pending_intr_work(minstd::pmr::memory_resource *resource)
+    static inline bool process_pending_intr_work(minstd::pmr::memory_resource *resource)
     {
         sig_atomic_t pending = s_intr_pending_ops;
         if (pending <= 0)
         {
-            return;
+            return false;
         }
 
         s_intr_pending_ops = 0;
@@ -840,6 +840,13 @@ namespace
                 __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
             }
         }
+
+        return true;
+    }
+
+    static inline void drain_pending_intr_work(minstd::pmr::memory_resource *resource)
+    {
+        while (process_pending_intr_work(resource)) {}
     }
 
     static bool settle_frontier_to_initial(lockfree_single_block_resource_with_stats &resource, size_t initial_frontier)
@@ -937,7 +944,7 @@ namespace
             }
         }
 
-        process_pending_intr_work(&resource);
+        drain_pending_intr_work(&resource);
 
         stop_flag.store(true, minstd::memory_order_release);
         pthread_join(bomber, nullptr);
@@ -1289,8 +1296,8 @@ namespace
             }
         }
 
-        // Flush deferred signal work one last time before final thread-local cleanup.
-        process_pending_intr_work(args->resource);
+        // Drain all deferred signal work before final thread-local cleanup.
+        drain_pending_intr_work(args->resource);
 
         for (size_t i = 0; i < live_count; ++i)
         {
@@ -1597,7 +1604,10 @@ namespace
         sigaction(SIGUSR1, &sa, nullptr);
         s_intr_resource = nullptr;
 
-        process_pending_intr_work(&resource);
+        // Note: worker threads drain their own thread_local s_intr_pending_ops via
+        // drain_pending_intr_work() before exiting.  No main-thread drain needed here
+        // since the bomber only targets worker threads.
+
         bool frontier_settled = settle_frontier_to_initial(resource, initial_frontier);
         if (!frontier_settled)
         {

@@ -1098,9 +1098,9 @@ namespace MINIMAL_STD_NAMESPACE
                         }
 
                         //  CAS AVAILABLE -> LOCKED succeeded — we own the block.
-                        //  If it is the last block and there are others available, reclaim it and restart.
+                        //  If it is the last block, attempt immediate frontier release.
 
-                        if (head->next_free_block_index_ != NULL_INDEX && try_reclaim_last_block(*head))
+                        if (try_reclaim_last_block(*head))
                         {
                             restarted = true;
                             continue;

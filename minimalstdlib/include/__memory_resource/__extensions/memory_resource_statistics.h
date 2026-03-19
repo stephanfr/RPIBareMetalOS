@@ -52,7 +52,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 size_t current_bytes_allocated() const
                 {
-                    return current_bytes_allocated_;
+                    return current_bytes_allocated_.load(memory_order_acquire);
                 }
 
             protected:
