@@ -21,23 +21,23 @@ namespace
     {};
 #pragma GCC diagnostic pop
 
-    class TestElement
+    class test_element
     {
     public:
-        TestElement()
+        test_element()
             : value1_(0),
               value2_(0)
         {
         }
 
-        explicit TestElement(uint32_t value1,
+        explicit test_element(uint32_t value1,
                              uint32_t value2)
             : value1_(value1),
               value2_(value2)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value1() const
         {
@@ -66,14 +66,14 @@ namespace
 
     TEST(ReferenceWrapperTests, ClassInstance)
     {
-        TestElement test_element(1, 2);
+        test_element test_elem(1, 2);
 
-        minstd::reference_wrapper<TestElement> test_ref_wrapper(minstd::move(test_element));
+        minstd::reference_wrapper<test_element> test_ref_wrapper(test_elem);
 
         CHECK(test_ref_wrapper.get().value1() == 1);
         CHECK(test_ref_wrapper.get().value2() == 2);
 
-        minstd::optional<minstd::reference_wrapper<TestElement>> test_optional_ref_wrapper(minstd::move(test_element));
+        minstd::optional<minstd::reference_wrapper<test_element>> test_optional_ref_wrapper(test_elem);
 
         CHECK(test_optional_ref_wrapper.has_value());
         CHECK(test_optional_ref_wrapper->get().value1() == 1);

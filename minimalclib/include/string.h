@@ -14,6 +14,7 @@ extern "C"
     void *memcpy(void *destination, const void *source, size_t num_bytes);
     void *memmem (const void *haystack, size_t hs_len, const void *needle, size_t ne_len);
     void *memmove(void *, const void *, size_t );
+    void *memset (void *m, int c, size_t n);
 
     char *strchr(const char *str, int ch);
     char *strrchr(const char *str, int ch);

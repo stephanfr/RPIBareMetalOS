@@ -1,0 +1,110 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minimalcstdlib.h"
+#include "minstdconfig.h"
+
+#include <array>
+#include <atomic>
+#include <stddef.h>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <size_t CACHE_LINE_SIZE = 64>
+    class token_dispenser
+    {
+    public:
+        class token
+        {
+        public:
+            token() = delete;
+
+            token(const token &) = delete;
+            token(token &&) = delete;
+
+            ~token()
+            {
+                dispenser_.release_token(*this);
+            }
+
+            token &operator=(const token &) = delete;
+            token &operator=(token &&) = delete;
+
+            size_t value() const
+            {
+                return token_index_;
+            }
+
+        private:
+            friend class token_dispenser;
+
+            token(token_dispenser &dispenser, const size_t token_index)
+                : dispenser_(dispenser), token_index_(token_index)
+            {
+            }
+
+            token_dispenser &dispenser_;
+            const size_t token_index_;
+        };
+
+        token_dispenser(size_t number_of_tokens)
+            : number_of_tokens_(number_of_tokens),
+              token_counter_(0)
+        {
+            assert(number_of_tokens <= 64);
+
+            tokens_ = 0;
+        }
+
+        token_dispenser(const token_dispenser &) = delete;
+        token_dispenser(token_dispenser &&) = delete;
+
+        ~token_dispenser()
+        {
+        }
+
+        token_dispenser &operator=(const token_dispenser &) = delete;
+        token_dispenser &operator=(token_dispenser &&) = delete;
+
+        token get_token()
+        {
+            uint64_t expected_value = 0;
+            uint64_t new_value = 0;
+
+            while (true)
+            {
+                size_t token_index = token_counter_.fetch_add(1, memory_order::seq_cst) % number_of_tokens_;
+
+                expected_value = tokens_.load(memory_order::seq_cst);
+
+                if ((expected_value & (1 << token_index)) != 0)
+                {
+                    continue;
+                }
+
+                new_value = expected_value | (1 << token_index);
+
+                if (tokens_.compare_exchange_strong(expected_value, new_value, memory_order::seq_cst))
+                {
+                    return token(*this, token_index);
+                }
+            }
+        }
+
+        void release_token(const token &token)
+        {
+            tokens_.and_fetch(~(1 << token.token_index_));
+        }
+
+    private:
+        uint32_t number_of_tokens_;
+
+        alignas(CACHE_LINE_SIZE) minstd::atomic<uint64_t> tokens_;
+
+        alignas(CACHE_LINE_SIZE) minstd::atomic<size_t> token_counter_;
+    };
+
+} // namespace MINIMAL_STD_NAMESPACE

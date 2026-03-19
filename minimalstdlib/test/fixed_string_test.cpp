@@ -344,4 +344,14 @@ namespace
         CHECK(test_string.size() == 5);
         CHECK(test_string == "01234");
     }
+
+    TEST(FixedStringTests, Literals)
+    {
+        using namespace minstd::literals::string_literals;
+
+        minstd::fixed_string<256> test_string = "0123456789abcdefghij"s;
+
+        CHECK(test_string.size() == 20);
+        CHECK(test_string == "0123456789abcdefghij");
+    }
 }

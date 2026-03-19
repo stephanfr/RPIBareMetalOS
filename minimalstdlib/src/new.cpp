@@ -14,3 +14,17 @@ void *operator new(size_t size, void *ptr)
 {
     return ptr;
 }
+
+#ifndef __MINIMAL_STD_TEST__
+void* operator new(size_t size, std::align_val_t al) { return operator new(size); }
+void operator delete(void* ptr, std::align_val_t al) { operator delete(ptr); }
+void operator delete(void* ptr, size_t size, std::align_val_t al) { operator delete(ptr); }
+void operator delete[](void* ptr, std::align_val_t al) { operator delete(ptr); }
+void operator delete[](void* ptr, size_t size, std::align_val_t al) { operator delete(ptr); }
+void* operator new(size_t size) { return nullptr; }
+void operator delete(void* ptr) {}
+void* operator new[](size_t size) { return nullptr; }
+void operator delete[](void* ptr) {}
+void operator delete(void* ptr, size_t size) {}
+void operator delete[](void* ptr, size_t size) {}
+#endif

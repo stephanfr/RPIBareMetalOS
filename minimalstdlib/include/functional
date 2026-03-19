@@ -6,75 +6,16 @@
 
 #include "minstdconfig.h"
 
-#include <stddef.h>
-
-#include "utility"
+#include "__functional/binary_function.h"
+#include "__functional/hash.h"
+#include "__functional/reference_wrapper.h"
+#include "__functional/unary_function.h"
+#include "__functional/weak_result_type.h"
 
 #include "type_traits"
 
 namespace MINIMAL_STD_NAMESPACE
 {
-
-    template <class T>
-    class reference_wrapper
-    {
-    public:
-        constexpr reference_wrapper(T &&reference_to_wrap) noexcept
-            : value_(&reference_to_wrap)
-        {
-        }
-
-        constexpr reference_wrapper(const reference_wrapper &wrapper_to_copy) noexcept
-            : value_(wrapper_to_copy.value_)
-        {
-        }
-
-        constexpr operator T &() const noexcept
-        {
-            return *value_;
-        }
-
-        constexpr T &get() const noexcept
-        {
-            return *value_;
-        }
-
-    private:
-        T *value_ = nullptr;
-    };
-
-    template <typename T>
-    bool operator<(const minstd::reference_wrapper<T> &lhs, const minstd::reference_wrapper<T> &rhs)
-    {
-        return lhs.get() < rhs.get();
-    }
-
-    template <typename T>
-    bool operator>(const minstd::reference_wrapper<T> &lhs, const minstd::reference_wrapper<T> &rhs)
-    {
-        return lhs.get() > rhs.get();
-    }
-
-    template <typename T>
-    bool operator==(const minstd::reference_wrapper<T> &lhs, const minstd::reference_wrapper<T> &rhs)
-    {
-        return lhs.get() == rhs.get();
-    }
-
-    template <typename T>
-    inline reference_wrapper<T>
-    ref(T &element) noexcept
-    {
-        return reference_wrapper<T>(minstd::move(element));
-    }
-
-    template <typename T>
-    inline reference_wrapper<const T>
-    cref(const T &element) noexcept
-    {
-        return reference_wrapper<const T>(minstd::move(element));
-    }
-
     template <typename T, size_t MAX_FUNCTOR_SIZE = 256>
     class function;
 

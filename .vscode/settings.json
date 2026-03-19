@@ -13,9 +13,11 @@
         "character_io": "cpp",
         "iostream": "cpp",
         "format": "cpp",
+        "initializer_list": "cpp",
         "memory": "cpp",
         "function": "cpp",
         "format_arg": "cpp",
+        "format_formatters": "cpp",
         "array": "cpp",
         "deque": "cpp",
         "forward_list": "cpp",
@@ -55,7 +57,20 @@
         "scanf.h": "c",
         "ctype.h": "c",
         "utility": "cpp",
-        "format_formatters": "cpp"
+        "cpu_context.h": "c",
+        "atomic": "cpp",
+        "spsc_queue": "cpp",
+        "ticket_dispener": "cpp",
+        "token_dispenser": "cpp",
+        "linked_list": "cpp",
+        "ratio": "cpp",
+        "chrono": "cpp",
+        "limits": "cpp",
+        "tuple": "cpp",
+        "skiplist": "cpp",
+        "locking_bitset": "cpp",
+        "binary_semaphore_array": "cpp",
+        "elimination_array": "cpp"
     },
     "C_Cpp.codeAnalysis.clangTidy.enabled": true,
     "C_Cpp.errorSquiggles": "disabled",
@@ -70,5 +85,14 @@
     "C_Cpp.codeAnalysis.clangTidy.checks.disabled": [
         "clang-diagnostic-vla-cxx-extension"
     ],
-    "C_Cpp.default.compilerPath": ""
+    "C_Cpp.default.compilerPath": "",
+    "cpputestTestAdapter.debugLaunchConfigurationName": "(gdb) Launch",
+    "chat.tools.terminal.autoApprove": {
+        "make": true,
+        "./minimalstdlib/test/build/cpputest_stdlib_main.exe": true,
+        "seq": true,
+        "timeout": true,
+        "java": true
+    },
+    "python-envs.defaultEnvManager": "ms-python.python:system"
 }

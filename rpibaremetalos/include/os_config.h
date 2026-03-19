@@ -4,6 +4,13 @@
 
 #pragma once
 
+#define MAX_CORES 16
+#define S_MAX_KERNEL_COMMAND_LINE_LENGTH 2048
+#define S_FULL_CPU_STATE_FRAME_SIZE 288 		        //  Space needed on stack to save all the registers during ISR - must match size of 'FullCPUState'
+
+
+#ifdef __cplusplus
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -15,6 +22,17 @@
 #define PACKED __attribute__ ((packed))
 
 //
+//  Some conversion values
+//
+
+constexpr uint64_t BYTES_1K = 1024;
+constexpr uint64_t BYTES_4K = 4 * BYTES_1K;
+constexpr uint64_t BYTES_16K = 16 * BYTES_1K;
+constexpr uint64_t BYTES_1M = BYTES_1K * BYTES_1K;
+constexpr uint64_t BYTES_4M = 4 * BYTES_1M;
+constexpr uint64_t BYTES_1G = BYTES_1K * BYTES_1M;
+
+//
 //  Some timing symbols
 //
 
@@ -24,10 +42,16 @@ constexpr uint32_t FREQUENCY_250MHZ = 250000000;
 constexpr uint32_t FREQUENCY_4MHZ = 4000000;
 
 //
+//  Structre sizes shared with assembly code
+//
+
+constexpr uint32_t FULL_CPU_STATE_FRAME_SIZE = S_FULL_CPU_STATE_FRAME_SIZE;
+
+//
 //  Init Sequence limits
 //
 
-constexpr size_t MAX_KERNEL_COMMAND_LINE_LENGTH = 2048;
+constexpr size_t MAX_KERNEL_COMMAND_LINE_LENGTH = S_MAX_KERNEL_COMMAND_LINE_LENGTH;
 constexpr size_t MAX_KERNEL_COMMAND_LINE_KEY = 64;
 constexpr size_t MAX_KERNEL_COMMAND_LINE_VALUE = 64;
 
@@ -42,7 +66,10 @@ constexpr uint32_t DEFAULT_SERIAL_CONSOLE_BAUD_RATE = 115200;
 //  OS Entity Limits
 //
 
-constexpr size_t MAX_OS_ENTITY_NAME_LENGTH = 255;
+constexpr size_t MAX_OS_ENTITY_NAME_LENGTH = 64;
+
+constexpr size_t MAX_TASK_NAME_LENGTH = 64;
+constexpr size_t MAX_ACTIVE_TASKS_PER_CORE = 1024;
 
 //
 //  Filesystem limits
@@ -57,3 +84,5 @@ constexpr size_t MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE = 4;     //  Standard Mas
 constexpr size_t DEFAULT_DIRECTORY_CACHE_SIZE = 4096;
 
 constexpr size_t MAX_FAT32_SHORT_FILENAME_SEARCH_TABLE_SIZE = 100;
+
+#endif

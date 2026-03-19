@@ -1,0 +1,31 @@
+#pragma once
+
+#include <cstddef>
+#include <minstdconfig.h>
+
+#include "slot_policy"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename NodeType>
+    using cpu_slot_state = cpu_slot_policy_state<NodeType, 100, 10>;
+
+    template <typename ObjectType>
+    struct epoch_read_section_guard
+    {
+        explicit epoch_read_section_guard(const ObjectType *obj) : obj_(obj)
+        {
+            cpu_slot_ = obj_->enter_read_section();
+        }
+
+        ~epoch_read_section_guard()
+        {
+            obj_->exit_read_section(cpu_slot_);
+        }
+
+        const ObjectType *obj_;
+        size_t cpu_slot_ = 0;
+    };
+
+} // namespace MINIMAL_STD_NAMESPACE

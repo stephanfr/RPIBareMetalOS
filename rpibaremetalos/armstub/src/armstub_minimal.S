@@ -14,12 +14,10 @@ _start:
 	ldr w4, kernel_entry32
 	ldr w0, dtb_ptr32
 
-boot_kernel:
 	mov x1, #0
 	mov x2, #0
 	mov x3, #0
 	br x4
-
 
 .ltorg
 

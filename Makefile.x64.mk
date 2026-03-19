@@ -7,22 +7,22 @@ THIRD_PARTY := ${HOME}/dev/third-party
 
 # Variables for AArch64 builds follow
 
-CC := gcc
-LD := g++
+CC := gcc-13
+LD := g++-13
 AR := ar
 CPREPROCESSOR := cpp
-C_FLAGS := -Wall -nostdinc -nostdlib -fno-exceptions -fno-unwind-tables
+C_FLAGS := -Wall -fno-exceptions -fno-unwind-tables
 CPP_FLAGS := $(C_FLAGS) -std=c++20 -fno-rtti
-OPTIMIZATION_FLAGS := -O2
+OPTIMIZATION_FLAGS := -O3
 LDFLAGS := 
 
 #	Base Include paths
 
 INCLUDE_DIRS := -I/usr/include \
-				-I/usr/lib/gcc/x86_64-linux-gnu/11/include \
+				-I/usr/lib/gcc/x86_64-linux-gnu/13/include \
 				-I/usr/include/x86_64-linux-gnu \
-				-I/usr/include/c++/11 \
-				-I/usr/include/x86_64-linux-gnu/c++/11 
+				-I/usr/include/c++/13 \
+				-I/usr/include/x86_64-linux-gnu/c++/13 
 
 #	Variables for test and coverage follow
 
@@ -30,9 +30,10 @@ CPPUTEST_PATH := $(THIRD_PARTY)/cpputest
 
 TEST_CFLAGS := -g -DCPPUTEST_USE_STD_CPP_LIB=0 -DCPPUTEST_USE_STD_C_LIB=0 -DCHAR_BIT=8 -DCPPUTEST_HAVE_LONG_LONG_INT=0 -DCPPUTEST_USE_MEM_LEAK_DETECTION=0 -DINCLUDE_TEST_HELPERS
 TEST_CPP_FLAGS := $(TEST_CFLAGS)
-TEST_OPTIMIZATION_FLAGS := -O0
+TEST_OPTIMIZATION_FLAGS := -O3
+TEST_LDFLAGS := 
 
 COVERAGE_CFLAGS := $(TEST_CFLAGS) -fprofile-arcs -ftest-coverage
 COVERAGE_CPP_FLAGS := $(COVERAGE_CFLAGS)
-COVERAGE_OPTIMIZATION_FLAGS := -O0
+COVERAGE_OPTIMIZATION_FLAGS := -Og
 

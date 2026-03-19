@@ -1,0 +1,127 @@
+// Copyright 2026 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    namespace lockfree
+    {
+        enum class adopt_ref_tag
+        {
+            adopt
+        };
+
+        inline constexpr adopt_ref_tag ADOPT_REF = adopt_ref_tag::adopt;
+
+        template <typename T>
+        class intrusive_payload_handle
+        {
+        public:
+            intrusive_payload_handle() = default;
+
+            explicit intrusive_payload_handle(T *ptr)
+                : ptr_(ptr)
+            {
+                retain();
+            }
+
+            intrusive_payload_handle(T *ptr, adopt_ref_tag)
+                : ptr_(ptr)
+            {
+            }
+
+            intrusive_payload_handle(const intrusive_payload_handle &other)
+                : ptr_(other.ptr_)
+            {
+                retain();
+            }
+
+            intrusive_payload_handle &operator=(const intrusive_payload_handle &other)
+            {
+                if (this != &other)
+                {
+                    release();
+                    ptr_ = other.ptr_;
+                    retain();
+                }
+
+                return *this;
+            }
+
+            intrusive_payload_handle(intrusive_payload_handle &&other) noexcept
+                : ptr_(other.ptr_)
+            {
+                other.ptr_ = nullptr;
+            }
+
+            intrusive_payload_handle &operator=(intrusive_payload_handle &&other) noexcept
+            {
+                if (this != &other)
+                {
+                    release();
+                    ptr_ = other.ptr_;
+                    other.ptr_ = nullptr;
+                }
+
+                return *this;
+            }
+
+            ~intrusive_payload_handle()
+            {
+                release();
+            }
+
+            T *get() const
+            {
+                return ptr_;
+            }
+
+            T *operator->() const
+            {
+                return ptr_;
+            }
+
+            T &operator*() const
+            {
+                return *ptr_;
+            }
+
+            explicit operator bool() const
+            {
+                return ptr_ != nullptr;
+            }
+
+            bool operator==(const intrusive_payload_handle &other) const
+            {
+                return ptr_ == other.ptr_;
+            }
+
+            bool operator!=(const intrusive_payload_handle &other) const
+            {
+                return ptr_ != other.ptr_;
+            }
+
+        private:
+            void retain()
+            {
+                if (ptr_ != nullptr)
+                {
+                    ptr_->add_ref();
+                }
+            }
+
+            void release()
+            {
+                if (ptr_ != nullptr)
+                {
+                    ptr_->release_ref();
+                    ptr_ = nullptr;
+                }
+            }
+
+            T *ptr_ = nullptr;
+        };
+    }
+}

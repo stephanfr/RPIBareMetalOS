@@ -7,6 +7,8 @@
 #include "os_config.h"
 #include <stdint.h>
 
+#include <format_formatters>
+
 class UUID
 {
 public:
@@ -16,6 +18,13 @@ public:
         RANDOM = 4 //  RFC 4122
     } Versions;
 
+
+    UUID()
+        : low_64_bits_(0),
+          high_64_bits_(0)
+    {
+    }
+    
     UUID(const UUID &uuid_to_copy)
         : low_64_bits_(uuid_to_copy.low_64_bits_),
           high_64_bits_(uuid_to_copy.high_64_bits_)
@@ -34,6 +43,10 @@ public:
 
     static const UUID NIL;
     static const UUID MAX;
+    static const size_t UUID_STRING_LENGTH = 36;
+    static const size_t UUID_STRING_BUFFER_SIZE = UUID_STRING_LENGTH + 2;   //  Pad a bit for the trailing null
+
+    typedef char ToStringBuffer[UUID_STRING_BUFFER_SIZE];
 
     Versions Version() const noexcept
     {
@@ -63,6 +76,14 @@ public:
         }
 
         return high_64_bits_ > uuid2.high_64_bits_;
+    }
+    bool operator<=(const UUID &uuid2) const
+    {
+        return !(*this > uuid2);
+    }
+    bool operator>=(const UUID &uuid2) const
+    {
+        return !(*this < uuid2);
     }
 
     char *ToString(char buffer[36]) const;
@@ -109,3 +130,18 @@ private:
 
     } PACKED;
 };
+
+namespace FMT_FORMATTERS_NAMESPACE
+{
+    DECLARE_TYPE_FORMATTER(const UUID&, UUIDFormatter, DEFAULT_STRING_FORMAT)
+}
+
+#include <limits>
+
+namespace std {
+    template <>
+    struct numeric_limits<UUID> {
+        static UUID min() { return UUID::NIL; }
+        static UUID max() { return UUID::MAX; }
+    };
+}

@@ -73,6 +73,11 @@ namespace MINIMAL_STD_NAMESPACE
             return *this;
         }
 
+        operator bool() const
+        {
+            return wrapped_pointer_ != nullptr;
+        }
+
         T &operator*()
         {
             return *wrapped_pointer_;

@@ -1,7 +1,7 @@
 #!/bin/bash -eu
 
-ARM_TOOLCHAIN_VERSION=12.3.rel1
-ARM_TOOLCHAIN_NAME=arm-gnu-toolchain-$ARM_TOOLCHAIN_VERSION-x86_64-aarch64-none-elf
+ARM_TOOLCHAIN_VERSION=13.3.rel1
+ARM_TOOLCHAIN_NAME=arm-gnu-toolchain-$ARM_TOOLCHAIN_VERSION-aarch64-aarch64-none-elf
 
 mkdir ~/dev_tools
 
@@ -15,13 +15,12 @@ cp -r ~/dev_tools/$ARM_TOOLCHAIN_NAME/lib/gcc ~/dev/gcc-cross/aarch64-none-elf/l
 
 mkdir -p ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/bits
 
-cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/12.3.1/cstdarg ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/.
-cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/12.3.1/cstddef ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/.
+cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/13.3.1/cstdarg ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/.
+cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/13.3.1/cstddef ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/.
 
-cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/12.3.1/aarch64-none-elf/bits/c++config.h ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/bits/.
-cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/12.3.1/aarch64-none-elf/bits/cpu_defines.h ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/bits/.
-cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/12.3.1/aarch64-none-elf/bits/os_defines.h ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/bits/.
-
+cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/13.3.1/aarch64-none-elf/bits/c++config.h ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/bits/.
+cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/13.3.1/aarch64-none-elf/bits/cpu_defines.h ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/bits/.
+cp ~/dev_tools/$ARM_TOOLCHAIN_NAME/aarch64-none-elf/include/c++/13.3.1/aarch64-none-elf/bits/os_defines.h ~/dev/gcc-cross/aarch64-none-elf/aarch64-none-elf/include/bits/.
 #   Install Catch2 for Unit Testing
 
 mkdir ~/dev_tools/Catch2

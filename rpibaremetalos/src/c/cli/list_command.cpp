@@ -4,9 +4,12 @@
 
 #include "cli/list_command.h"
 
+#include <string.h>
+
 #include "os_entity.h"
 
 #include "filesystem/filesystems.h"
+#include "task/tasks.h"
 
 #include <format>
 #include <list>
@@ -18,6 +21,7 @@ namespace cli::commands
 
     const CLIListDirectoryCommand CLIListDirectoryCommand::instance;
     const CLIListFilesystemsCommand CLIListFilesystemsCommand::instance;
+    const CLIListTasksCommand CLIListTasksCommand::instance;
 
     //  Now for the parent command
 
@@ -122,4 +126,62 @@ namespace cli::commands
         }
     }
 
+    //  Command to list tasks
+
+    void CLIListTasksCommand::ProcessToken(CommandParser &parser,
+                                           CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+        char uuid_buffer[UUID::UUID_STRING_BUFFER_SIZE];
+
+        //  Check for extra arguments
+
+        bool print_uuids = false;
+        bool include_zombies = true;
+
+        const char *next_token = parser.NextToken();
+
+        while (next_token != nullptr)
+        {
+            if (strncmp(next_token, "-uuid", 16) == 0)
+            {
+                print_uuids = true;
+            }
+            else if (strncmp(next_token, "-nz", 16) == 0)
+            {
+                include_zombies = false;
+            }
+            else
+            {
+                context.output_stream_ << "Unknown argument: " << next_token << "\n";
+            }
+
+            next_token = parser.NextToken();
+        }
+
+        //  List all the tasks with the visitor callback
+
+        context.output_stream_ << "Tasks:\n";
+
+        auto callback = [&](const task::Task &task) -> task::TaskListVisitorCallbackStatus
+        {
+            if (!include_zombies && (task.State() == task::Task::ExecutionState::ZOMBIE))
+            {
+                return task::TaskListVisitorCallbackStatus::NEXT;
+            }
+
+            if (print_uuids)
+            {
+                context.output_stream_ << minstd::format(buffer, "{} {:<32} {} {} {} {}\n", task.ID().ToString(uuid_buffer), task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime().count() / 1000UL, ToString(task.State()));
+            }
+            else
+            {
+                context.output_stream_ << minstd::format(buffer, "{:<32} {} {} {} {}\n", task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime().count() / 1000UL, ToString(task.State()));
+            }
+
+            return task::TaskListVisitorCallbackStatus::NEXT;
+        };
+
+        context.task_manager_.VisitTaskList(callback);
+    }
 } // namespace cli

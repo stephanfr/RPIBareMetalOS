@@ -1,0 +1,185 @@
+// Copyright 2025 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minimalcstdlib.h"
+#include "minstdconfig.h"
+
+#include <array>
+#include <atomic>
+#include <stddef.h>
+
+#include "random"
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T, size_t NUM_ELEMENTS = 16, size_t TIMING_ITERATIONS = 500>
+    class elimination_array
+    {
+    public:
+        elimination_array(uint64_t random_seed) : randomized_value_{random_seed}
+        {
+            for (auto &slot : elimination_array_)
+            {
+                slot.state_.store(EMPTY);
+                slot.element_.store(nullptr);
+            }
+        }
+
+        // Attempt to put an element into the elimination array
+        // Returns true if the element was successfully eliminated with a waiting get_element call
+        // Returns false if no elimination occurred
+        bool put_element(T *new_element)
+        {
+            if (new_element == nullptr)
+                return false;
+
+            minstd::fast_single_threaded_low_quality_rng local_rng(randomized_value_.load(memory_order_relaxed));
+
+            randomized_value_.store(local_rng(), memory_order_relaxed);
+
+            size_t index = NUM_ELEMENTS + 1;
+
+            // Try a few random slots until we get either WAITING state
+            for (size_t attempts = 0; attempts < 3; ++attempts)
+            {
+                index = local_rng() % NUM_ELEMENTS;
+                auto &slot = elimination_array_[index];
+
+                uint64_t expected_state = EMPTY;
+                if (slot.state_.compare_exchange_strong(expected_state, PUT_SETUP, memory_order_acq_rel, memory_order_acquire))
+                {
+                    //  If we are here then we have the element locked
+
+                    slot.element_.store(new_element, memory_order_release);
+                    slot.state_.store(WAITING_GET, memory_order_release);
+
+                    for (size_t i = 0; i < TIMING_ITERATIONS; ++i)
+                    {
+                        __asm__ volatile("" ::: "memory");
+                    }
+
+                    //  If we are still waiting on a GET, then elimination has failed so return false.
+
+                    expected_state = WAITING_GET;
+                    if (slot.state_.compare_exchange_strong(expected_state, EMPTY, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        return false;
+                    }
+
+                    //  The slot state will either be ELIMINATING_GET or ELIMINATED, wait until it is ELIMINATED and
+                    //      set the slot to EMPTY and return success.
+
+                    while (true)
+                    {
+                        expected_state = ELIMINATED;
+                        if (slot.state_.compare_exchange_strong(expected_state, EMPTY, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            for (int i = 0; i < 100; i++)
+                            {
+                                __asm__ volatile("" ::: "memory");
+                            }
+
+                            return true;
+                        }
+                    }
+                }
+
+                expected_state = WAITING_PUT;
+                if (slot.state_.compare_exchange_strong(expected_state, ELIMINATING_PUT, memory_order_acq_rel, memory_order_acquire))
+                {
+                    slot.element_.store(new_element, memory_order_release);
+                    slot.state_.store(ELIMINATED, memory_order_release);
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        // Attempt to get an element from the elimination array
+        // Returns true if an element was successfully obtained through elimination
+        // Returns false if no elimination occurred
+        bool
+        get_element(T *&element)
+        {
+            minstd::fast_single_threaded_low_quality_rng local_rng(randomized_value_.load(memory_order_relaxed));
+
+            randomized_value_.store(local_rng(), memory_order_relaxed);
+
+            size_t index = NUM_ELEMENTS + 1;
+
+            // Try a few random slots
+            for (size_t attempts = 0; attempts < 3; ++attempts)
+            {
+                index = local_rng() % NUM_ELEMENTS;
+                auto &slot = elimination_array_[index];
+
+                uint64_t expected_state = EMPTY;
+                if (slot.state_.compare_exchange_weak(expected_state, WAITING_PUT, memory_order_acq_rel, memory_order_acquire))
+                {
+                    for (size_t i = 0; i < TIMING_ITERATIONS; ++i)
+                    {
+                        __asm__ volatile("" ::: "memory");
+                    }
+
+                    expected_state = WAITING_PUT;
+                    if (slot.state_.compare_exchange_strong(expected_state, EMPTY, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        return false;
+                    }
+
+                    while (true)
+                    {
+                        expected_state = ELIMINATED;
+                        if (slot.state_.compare_exchange_strong(expected_state, GET_CLEANUP, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            element = slot.element_.load(memory_order_acquire);
+                            slot.element_.store(nullptr, memory_order_release);
+                            slot.state_.store(EMPTY, memory_order_release);
+                            return true;
+                        }
+                    }
+                }
+
+                expected_state = WAITING_GET;
+                if (slot.state_.compare_exchange_weak(expected_state, ELIMINATING_GET, memory_order_acq_rel, memory_order_acquire))
+                {
+                    element = slot.element_.load(memory_order_acquire);
+                    slot.element_.store(nullptr, memory_order_release);
+                    slot.state_.store(ELIMINATED, memory_order_release);
+                    return true;
+                }
+            }
+
+            element = nullptr;
+            return false;
+        }
+
+    private:
+        enum elimination_state : uint64_t
+        {
+            EMPTY = 0,
+            PUT_SETUP,
+            WAITING_PUT,
+            ELIMINATING_PUT,
+            WAITING_GET,
+            ELIMINATING_GET,
+            GET_CLEANUP,
+            ELIMINATED
+        };
+
+        struct alignas(64) block_elimination_info
+        {
+            atomic<uint64_t> state_ = EMPTY;
+            atomic<T *> element_ = nullptr;
+        };
+
+        atomic<uint64_t> randomized_value_;
+
+        array<block_elimination_info, NUM_ELEMENTS> elimination_array_;
+    };
+
+} // namespace MINIMAL_STD_NAMESPACE

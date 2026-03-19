@@ -20,14 +20,14 @@ namespace filesystems::fat32
     {
         if (isalpha(current_char))
         {
-            return minstd::make_pair((char)toupper(current_char), false);
+            return minstd::pair((char)toupper(current_char), false);
         }
         else if (isspace(current_char) || (current_char == '.'))
         {
             //  Document says strip all leading and embedded spaces - so I assume embedded includes trailing.
             //      Similarly, doc says strip leading periods but also do not copy any periods in the long filename
 
-            return minstd::make_pair((char)0, false);
+            return minstd::pair((char)0, false);
         }
         else if ((FORBIDDEN_8_3_FILENAME_CHARACTERS.find(current_char) == minstd::string::npos) &&
                  (current_char > 31) &&
@@ -35,12 +35,12 @@ namespace filesystems::fat32
         {
             //  The current character is a permissible 8.3 filename character, so add it to the short filename
 
-            return minstd::make_pair(current_char, false);
+            return minstd::pair(current_char, false);
         }
 
         //  The current character is impermissible, so replace it with an underscore and return true to indicate a lossy conversion
 
-        return minstd::make_pair('_', true);
+        return minstd::pair('_', true);
     }
 
     void FAT32ShortFilename::DetectNumericTail()
@@ -268,7 +268,7 @@ namespace filesystems::fat32
 
             //  If the compliant char is zero, then it is character we should skip and set the lossy conversion flag
 
-            if (compliant_char.first() == 0)
+            if (minstd::get<0>(compliant_char) == 0)
             {
                 short_filename.lossy_conversion_ = true;
                 continue;
@@ -276,11 +276,11 @@ namespace filesystems::fat32
 
             //  Append the compliant char
 
-            short_filename.name_.push_back(compliant_char.first());
+            short_filename.name_.push_back(minstd::get<0>(compliant_char));
 
             //  If we got an underscore back and the character was not originally an underscore, then we have a lossy conversion
 
-            short_filename.lossy_conversion_ = short_filename.lossy_conversion_ | compliant_char.second();
+            short_filename.lossy_conversion_ = short_filename.lossy_conversion_ | minstd::get<1>(compliant_char);
         }
 
         //  We should have an uppercase 8 character filename without leading periods and no spaces
@@ -295,7 +295,7 @@ namespace filesystems::fat32
 
                 //  If the compliant char is zero, then it is character we should skip and set the lossy conversion flag
 
-                if (compliant_char.first() == 0)
+                if (minstd::get<0>(compliant_char) == 0)
                 {
                     short_filename.lossy_conversion_ = true;
                     continue;
@@ -303,11 +303,11 @@ namespace filesystems::fat32
 
                 //  Append the compliant char
 
-                short_filename.extension_.push_back(compliant_char.first());
+                short_filename.extension_.push_back(minstd::get<0>(compliant_char));
 
                 //  If we got an underscore back and the character was not originally an underscore, then we have a lossy conversion
 
-                short_filename.lossy_conversion_ = short_filename.lossy_conversion_ | compliant_char.second();
+                short_filename.lossy_conversion_ = short_filename.lossy_conversion_ | minstd::get<1>(compliant_char);
             }
         }
 

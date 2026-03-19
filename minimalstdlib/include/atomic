@@ -1,0 +1,189 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <stddef.h>
+#include <type_traits>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    enum class memory_order : int
+    {
+        relaxed,
+        consume,
+        acquire,
+        release,
+        acq_rel,
+        seq_cst
+    };
+
+    inline constexpr memory_order memory_order_relaxed = memory_order::relaxed;
+    inline constexpr memory_order memory_order_consume = memory_order::consume;
+    inline constexpr memory_order memory_order_acquire = memory_order::acquire;
+    inline constexpr memory_order memory_order_release = memory_order::release;
+    inline constexpr memory_order memory_order_acq_rel = memory_order::acq_rel;
+    inline constexpr memory_order memory_order_seq_cst = memory_order::seq_cst;
+
+    template <typename T>
+    class atomic
+    {
+        static_assert(is_integral_v<T> || is_pointer_v<T>, "atomic<T> requires T to be an integral type or a pointer type");
+
+    public:
+        static constexpr bool is_always_lock_free = __atomic_always_lock_free(sizeof(T), nullptr);
+
+        atomic() = default;
+
+        atomic(const T value)
+            : value_(value)
+        {
+        }
+
+        atomic(const atomic &) = delete;
+        atomic(atomic &&) = delete;
+
+        ~atomic() = default;
+
+        atomic &operator=(const atomic &) = delete;
+        atomic &operator=(atomic &&) = delete;
+
+        T operator=(T new_value) noexcept
+        {
+            __atomic_store_n(&value_, new_value, __ATOMIC_SEQ_CST);
+
+            return new_value;
+        }
+
+        bool is_lock_free() const noexcept
+        {
+            return __atomic_is_lock_free(sizeof(T), &value_);
+        }
+
+        void store(T new_value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            __atomic_store_n(&value_, new_value, static_cast<int>(order));
+        }
+
+        T load(memory_order order = memory_order_seq_cst) const noexcept
+        {
+            return __atomic_load_n(&value_, static_cast<int>(order));
+        }
+
+        operator T() const noexcept
+        {
+            return load();
+        }
+
+        T operator++() noexcept
+        {
+            return add_fetch(1);
+        }
+
+        T operator++(int) noexcept
+        {
+            return fetch_add(1);
+        }
+
+        T operator--() noexcept
+        {
+            return sub_fetch(1);
+        }
+
+        T operator--(int) noexcept
+        {
+            return fetch_sub(1);
+        }
+
+        T operator+=(T value) noexcept
+        {
+            return add_fetch(value);
+        }
+
+        T operator-=(T value) noexcept
+        {
+            return sub_fetch(value);
+        }
+
+        T exchange(T new_value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_exchange_n(&value_, new_value, static_cast<int>(order));
+        }
+
+        bool compare_exchange_weak(T &expected,
+                                   T new_value,
+                                   memory_order success_order,
+                                   memory_order failure_order) noexcept
+        {
+            return __atomic_compare_exchange_n(&value_, &expected, new_value, true, static_cast<int>(success_order), static_cast<int>(failure_order));
+        }
+
+        bool compare_exchange_weak(T &expected,
+                                   T new_value,
+                                   memory_order order) noexcept
+        {
+            return __atomic_compare_exchange_n(&value_, &expected, new_value, true, static_cast<int>(order), static_cast<int>(order));
+        }
+
+        bool compare_exchange_strong(T &expected,
+                                     T new_value,
+                                     memory_order success_order,
+                                     memory_order failure_order) noexcept
+        {
+            return __atomic_compare_exchange_n(&value_, &expected, new_value, false, static_cast<int>(success_order), static_cast<int>(failure_order));
+        }
+
+        bool compare_exchange_strong(T &expected,
+                                     T new_value,
+                                     memory_order order) noexcept
+        {
+            return __atomic_compare_exchange_n(&value_, &expected, new_value, false, static_cast<int>(order), static_cast<int>(order));
+        }
+
+        T fetch_add(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_fetch_add(&value_, value, static_cast<int>(order));
+        }
+
+        T add_fetch(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_add_fetch(&value_, value, static_cast<int>(order));
+        }
+
+        T and_fetch(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_and_fetch(&value_, value, static_cast<int>(order));
+        }
+
+        T sub_fetch(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_sub_fetch(&value_, value, static_cast<int>(order));
+        }
+
+        T fetch_sub(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_fetch_sub(&value_, value, static_cast<int>(order));
+        }
+
+        T fetch_or(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_fetch_or(&value_, value, static_cast<int>(order));
+        }
+
+        T or_fetch(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_or_fetch(&value_, value, static_cast<int>(order));
+        }
+
+        T fetch_and(T value, memory_order order = memory_order_seq_cst) noexcept
+        {
+            return __atomic_fetch_and(&value_, value, static_cast<int>(order));
+        }
+
+    private:
+        T value_;
+    };
+}

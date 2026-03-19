@@ -7,17 +7,19 @@
 
 #include <fixed_string>
 #include <memory>
+#include <minimalstdio.h>
 
-#include "platform/exception_manager.h"
 #include "platform/platform_info.h"
-
-#include "platform/rpi3/rpi3_platform_info.h"
-#include "platform/rpi4/rpi4_platform_info.h"
+#include "platform/exception_manager.h"
+#include "platform/memory_manager.h"
+#include "platform/platform_sw_rngs.h"
+#include "platform/kernel_command_line.h"
 
 #include "platform/rpi3/rpi3_exception_manager.h"
 #include "platform/rpi4/rpi4_exception_manager.h"
 
-#include "os_entity.h"
+#include "platform/rpi3/rpi3_platform_info.h"
+#include "platform/rpi4/rpi4_platform_info.h"
 
 #include "devices/rpi3/rpi3_hw_rng.h"
 #include "devices/rpi4/rpi4_hw_rng.h"
@@ -26,25 +28,20 @@
 #include "devices/uart0.h"
 #include "devices/uart1.h"
 
-#include "platform/kernel_command_line.h"
-#include "platform/platform_sw_rngs.h"
+#include "platform/mmu_manager.h"
+
 #include "services/xoroshiro128plusplus.h"
 
-#include "asm_globals.h"
-
-//  Forward declare the assembly language function which returns the board type
-
-extern "C" uint32_t IdentifyBoardType();
-extern "C" void ParkCore();
 
 //  Global flag to indicate if the platform has been initialized
 
 bool __platform_initialized = false;
 
-//  Globals for platform info and exception manager
+//  Globals for platform info, exception manager and memory manager
 
 static const PlatformInfo *__platform_info = nullptr;
 static ExceptionManager *__exception_manager = nullptr;
+static MemoryManager *__memory_manager = nullptr;
 
 //  Global for HW RNG generator
 
@@ -144,13 +141,23 @@ bool SetupSerialConsole()
 }
 
 //  Function to setup platform specific code
+//      Declare it as 'extern "C"' so that it is not mangled and we can call it from the startup assembly code.
+
+extern "C" void InitializePlatform() __attribute__((used));
 
 void InitializePlatform()
 {
+    //  TODO - figure out how to signal error messages
+
     if (__platform_initialized)
     {
         return;
     }
+
+    //  First thing, initialize the MMU manager
+    //      The GPU Mailbox assumes that the MMU is enabled, so we need to do this first.
+
+    MMUManager::Initialize();
 
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
@@ -184,16 +191,33 @@ void InitializePlatform()
                                        Xoroshiro128PlusPlusRNG::Seed(__hw_random_number_generator->Next64BitValue(),
                                                                      __hw_random_number_generator->Next64BitValue()));
 
-    //  Get the kernel command line
-
-    KernelCommandLine::LoadCommandLine(__platform_info->GetMMIOBase()); //  TODO handle error condition
-
     //  Setup the serial console
 
     if (!SetupSerialConsole())
     {
         ParkCore();
     }
+
+    //  Insure that the number of cores available is less than the max and that they match the number according to the platform
+
+    //    if ((__number_of_cores_available > MAX_CORES) ||
+    //        (__number_of_cores_available != __platform_info->GetNumberOfCores()))
+    //    {
+    //        ParkCore();
+    //    }
+
+    //  Initialize the memory manager
+
+    auto memory_manager = make_static_unique<MemoryManager>(__platform_info->GetMemorySizeInBytes(),
+                                                            __platform_info->GetMMIOBase());
+
+    __memory_manager = memory_manager.get();
+
+    GetOSEntityRegistry().AddEntity(memory_manager);
+
+    //  Initialize the exception manager
+
+    GetExceptionManager().Initialize();
 
     //  Mark the platform as initialized
 
@@ -212,6 +236,11 @@ const PlatformInfo &GetPlatformInfo()
 ExceptionManager &GetExceptionManager()
 {
     return *__exception_manager;
+}
+
+MemoryManager &GetMemoryManager()
+{
+    return *__memory_manager;
 }
 
 RandomNumberGeneratorBase &GetHWRandomNumberGenerator()

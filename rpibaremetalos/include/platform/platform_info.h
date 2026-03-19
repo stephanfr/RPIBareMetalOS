@@ -4,7 +4,7 @@
 
 #pragma once
 
-#include <stdint.h>
+#include "os_stdinclude.h"
 
 #include <array>
 #include <fixed_string>
@@ -25,11 +25,13 @@ public:
     {
     }
 
-    virtual const RPIBoardType GetBoardType() const = 0;
+    virtual RPIBoardType GetBoardType() const = 0;
     virtual const char *GetBoardTypeName() const = 0;
+    virtual uint8_t *GetARMLocalBase() const = 0;
     virtual uint8_t *GetMMIOBase() const = 0;
     virtual uint8_t *GetEMMCBase() const = 0;
-    virtual const uint32_t GetGPUClockRate() const = 0;
+    virtual uint32_t GetGPUClockRate() const = 0;
+    virtual uint32_t GetNumberOfCores() const = 0;
 
     bool IsRPI3() const
     {
@@ -66,10 +68,10 @@ public:
         return memory_base_address_;
     }
 
-//    uint32_t GetMemorySizeInBytes() const
-//    {
-//        return memory_size_in_bytes_;
-//    }
+    uint64_t GetMemorySizeInBytes() const
+    {
+        return memory_size_in_bytes_;
+    }
 
     void DecodeBoardRevision(minstd::string &buffer) const;
 
@@ -82,7 +84,7 @@ private:
     uint64_t board_serial_number_;
     minstd::array<uint8_t, 6> board_mac_address_;
     uint32_t memory_base_address_;
-    //    uint32_t memory_size_in_bytes_;
+    uint64_t memory_size_in_bytes_;
 };
 
 const PlatformInfo &GetPlatformInfo();

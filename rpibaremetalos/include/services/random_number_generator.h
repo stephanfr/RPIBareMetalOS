@@ -5,8 +5,10 @@
 #pragma once
 
 #include <stdint.h>
+#include <minimalcstdlib.h>
 
-#include <minimalstdio.h>
+#include "heaps.h"
+#include "synchronization.h"
 
 typedef enum class RandomNumberGeneratorTypes
 {
@@ -16,12 +18,12 @@ typedef enum class RandomNumberGeneratorTypes
 
 class RandomNumberGeneratorBase
 {
-    public :
-
+public:
     RandomNumberGeneratorBase() = default;
 
     virtual ~RandomNumberGeneratorBase()
-    {}
+    {
+    }
 
     virtual RandomNumberGeneratorTypes Type() const noexcept = 0;
 
@@ -29,29 +31,18 @@ class RandomNumberGeneratorBase
     virtual uint64_t Next64BitValue() = 0;
 };
 
+template <typename T, bool SINGLE_THREADED>
 class RandomNumberGenerator : public RandomNumberGeneratorBase
 {
-    public :
-
+public:
     RandomNumberGenerator() = delete;
 
-    explicit RandomNumberGenerator( RandomNumberGeneratorBase&  rng )
-        : rng_( rng )
-        {}
-
-    explicit RandomNumberGenerator( RandomNumberGenerator&  rng_proxy )
-        : rng_( rng_proxy.rng_ )
-        {}
-
+    explicit RandomNumberGenerator(T &rng)
+        : rng_(rng)
+    {
+    }
 
     ~RandomNumberGenerator() {}
-
-    RandomNumberGenerator &operator=( RandomNumberGenerator&  rng_proxy )
-    {
-        rng_ = rng_proxy.rng_;
-
-        return *this;
-    }
 
     RandomNumberGeneratorTypes Type() const noexcept override
     {
@@ -68,11 +59,148 @@ class RandomNumberGenerator : public RandomNumberGeneratorBase
         return rng_.Next64BitValue();
     }
 
-    private :
-
-        RandomNumberGeneratorBase   &rng_;
+private:
+    T rng_;
 };
 
+template <>
+class RandomNumberGenerator<RandomNumberGeneratorBase, false> : public RandomNumberGeneratorBase
+{
+public:
+    RandomNumberGenerator() = delete;
 
+    explicit RandomNumberGenerator(RandomNumberGeneratorBase &rng)
+        : rng_(rng)
+    {
+    }
 
-RandomNumberGenerator GetRandomNumberGenerator( RandomNumberGeneratorTypes     type );
+    ~RandomNumberGenerator() {}
+
+    RandomNumberGeneratorTypes Type() const noexcept override
+    {
+        return rng_.Type();
+    }
+
+    uint32_t Next32BitValue() override
+    {
+        return rng_.Next32BitValue();
+    }
+
+    uint64_t Next64BitValue() override
+    {
+        return rng_.Next64BitValue();
+    }
+
+private:
+    RandomNumberGeneratorBase &rng_;
+};
+
+template <>
+class RandomNumberGenerator<RandomNumberGeneratorBase, true> : public RandomNumberGeneratorBase
+{
+public:
+
+    RandomNumberGenerator() = delete;
+
+    explicit RandomNumberGenerator(RandomNumberGeneratorBase &rng)
+        : rng_(rng)
+    {
+        assert(false);      //  This specialization is illegal
+    }
+
+    ~RandomNumberGenerator() {}
+
+    RandomNumberGeneratorTypes Type() const noexcept override
+    {
+        return rng_.Type();
+    }
+
+    uint32_t Next32BitValue() override
+    {
+        return rng_.Next32BitValue();
+    }
+
+    uint64_t Next64BitValue() override
+    {
+        return rng_.Next64BitValue();
+    }
+
+private:
+    RandomNumberGeneratorBase &rng_;
+};
+
+template <>
+class RandomNumberGenerator<minstd::unique_ptr<RandomNumberGeneratorBase>, false> : public RandomNumberGeneratorBase
+{
+public:
+    RandomNumberGenerator() = delete;
+
+    explicit RandomNumberGenerator(minstd::unique_ptr<RandomNumberGeneratorBase> rng)
+        : rng_(rng)
+    {
+    }
+
+    ~RandomNumberGenerator() {}
+
+    RandomNumberGeneratorTypes Type() const noexcept override
+    {
+        return rng_->Type();
+    }
+
+    uint32_t Next32BitValue() override
+    {
+        return rng_->Next32BitValue();
+    }
+
+    uint64_t Next64BitValue() override
+    {
+        return rng_->Next64BitValue();
+    }
+
+private:
+    minstd::unique_ptr<RandomNumberGeneratorBase> rng_;
+};
+
+template <>
+class RandomNumberGenerator<minstd::unique_ptr<RandomNumberGeneratorBase>, true> : public RandomNumberGeneratorBase
+{
+public:
+    RandomNumberGenerator() = delete;
+
+    explicit RandomNumberGenerator(minstd::unique_ptr<RandomNumberGeneratorBase> rng)
+        : rng_(rng)
+    {
+    }
+
+    ~RandomNumberGenerator() {}
+
+    RandomNumberGeneratorTypes Type() const noexcept override
+    {
+        return rng_->Type();
+    }
+
+    uint32_t Next32BitValue() override
+    {
+        LockGuard single_thread(lock_);
+
+        return rng_->Next32BitValue();
+    }
+
+    uint64_t Next64BitValue() override
+    {
+        LockGuard single_thread(lock_);
+
+        return rng_->Next64BitValue();
+    }
+
+private:
+    minstd::unique_ptr<RandomNumberGeneratorBase> rng_;
+    SpinLock lock_;
+};
+
+RandomNumberGenerator<RandomNumberGeneratorBase &, false> GetRandomNumberGenerator(RandomNumberGeneratorTypes type);
+
+minstd::unique_ptr<RandomNumberGeneratorBase> NewRandomNumberGenerator(minstd::memory_heap &heap = __os_dynamic_heap);
+
+using RandomNumberGeneratorSingleThreaded = RandomNumberGenerator<minstd::unique_ptr<RandomNumberGeneratorBase>, true>;
+using RandomNumberGeneratorThreadUnsafe = RandomNumberGenerator<minstd::unique_ptr<RandomNumberGeneratorBase>, false>;

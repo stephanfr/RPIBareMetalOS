@@ -10,14 +10,29 @@
 #include <memory>
 
 #include "heaps.h"
+#include "processor_cores.h"
 
 #include "isr/isr.h"
 
+typedef enum class InterprocessorInterrupts : uint32_t
+{
+    NO_SUCH_IPI = 0,
+    HALT = 1,
+    CORE_TASK_SWITCH = 2
+} InterprocessorInterrupts;
+
+
 class ExceptionManager
 {
-
 public:
-    virtual bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr) = 0;
+    virtual bool Initialize() = 0;
+
+    virtual bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) = 0;
+    virtual bool DisableInterrupt(Interrupts interrupt_to_disable, CoreList on_cores) = 0;
+
+    virtual bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) = 0;
+
+    virtual bool AddInterruptServiceRoutine(InterruptServiceRoutine *isr, CoreList on_cores) = 0;
 
     virtual void HandleInterrupt() = 0;
 
@@ -37,17 +52,15 @@ protected:
 
     ExceptionManager()
     {
-        asm volatile("msr    daifclr, #2");     //  Enables interrupts on the processor
+        asm volatile("msr    daifclr, #2"); //  Enables interrupts on the processor
     }
 
     ~ExceptionManager()
     {
-        asm volatile("msr	daifset, #2");     //  Disables interrupts on the processor
+        asm volatile("msr	daifset, #2"); //  Disables interrupts on the processor
     }
 
-    virtual bool EnableInterrupt(Interrupts interrupt_to_enable) = 0;
-
-    bool AddISR(InterruptServiceRoutine *isr);
+    bool AddISR(InterruptServiceRoutine *isr, CoreList on_cores);
 
     ISRPointerList *GetISRs(Interrupts interrupt_raised)
     {
@@ -58,7 +71,22 @@ protected:
             return nullptr;
         }
 
-        return map_itr->second();
+        return minstd::get<1>(*map_itr);
+    }
+
+    Interrupts AsInterrupt(InterprocessorInterrupts ipi)
+    {
+        switch (ipi)
+        {
+        case InterprocessorInterrupts::HALT:
+            return Interrupts::CORE_HALT;
+        case InterprocessorInterrupts::CORE_TASK_SWITCH:
+            return Interrupts::SWITCH_TASK;
+        default:
+            return Interrupts::NO_SUCH_INTERRUPT;
+        }
+
+        return Interrupts::NO_SUCH_INTERRUPT;
     }
 };
 

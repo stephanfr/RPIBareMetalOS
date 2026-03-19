@@ -1,0 +1,18 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <__concepts/arithmetic.h>
+#include <__concepts/assignable.h>
+#include <__concepts/boolean_testable.h>
+#include <__concepts/destructible.h>
+#include <__concepts/class_or_enum.h>
+#include <__concepts/common_reference_with.h>
+#include <__concepts/common_with.h>
+#include <__concepts/constructible.h>
+#include "__concepts/convertible_to.h"
+#include <__concepts/equality_comparable.h>
+#include "__concepts/same_as.h"
+#include <__concepts/totally_ordered.h>

@@ -11,12 +11,12 @@
 #include "heaps.h"
 
 #include "cli/change_command.h"
-#include "cli/halt_reboot_commands.h"
-#include "cli/list_command.h"
-#include "cli/show_command.h"
 #include "cli/create_command.h"
 #include "cli/delete_command.h"
+#include "cli/halt_reboot_commands.h"
+#include "cli/list_command.h"
 #include "cli/rename_command.h"
+#include "cli/show_command.h"
 
 namespace cli
 {
@@ -63,15 +63,18 @@ namespace cli
     //
 
     ReferenceResult<CLIResultCodes, CommandLineInterface>
-    StartCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
-                              UUID filesystem_id,
-                              const minstd::string &current_directory_path)
+    InitializeCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                                   UUID filesystem_id,
+                                   const minstd::string &current_directory_path)
     {
         using Result = ReferenceResult<CLIResultCodes, CommandLineInterface>;
 
         //  Create a CLI instance and register it as an OS Entity
 
-        auto cli_instance = make_dynamic_unique<CommandLineInterface>(io_device, filesystem_id, current_directory_path);
+        auto cli_instance = make_dynamic_unique<CommandLineInterface>(io_device,
+                                                                      task::GetTaskManager(),
+                                                                      filesystem_id,
+                                                                      current_directory_path);
 
         if (GetOSEntityRegistry().AddEntity(cli_instance) != OSEntityRegistryResultCodes::SUCCESS)
         {

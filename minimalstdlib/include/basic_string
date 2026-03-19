@@ -6,7 +6,9 @@
 
 #include "minstdconfig.h"
 
-#include <string.h>
+// Use the project string.h so strlcpy/strnlen are available and avoid
+// conflicting toolchain prototypes during aarch64 builds.
+#include "string.h"
 
 #include "algorithm"
 #include "allocator"
@@ -314,7 +316,7 @@ namespace MINIMAL_STD_NAMESPACE
             length_ = minstd::min(strlcpy(buffer_, value, buffer_size_), max_size_);
         }
 
-        explicit basic_string(T *buffer, size_t buffer_size, size_t max_size, const T *value, size_t length)
+        explicit constexpr basic_string(T *buffer, size_t buffer_size, size_t max_size, const T *value, size_t length)
             : buffer_(buffer),
               buffer_size_(buffer_size),
               max_size_(max_size)

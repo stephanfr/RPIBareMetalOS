@@ -4,398 +4,361 @@
 
 #include <stdint.h>
 
-#include <fixed_string>
-#include <functional>
-#include <list>
-#include <stack_allocator>
+#include "heaps.h"
 
-#include "minimalstdio.h"
-
-#include "platform/exception_manager.h"
-#include "platform/platform.h"
+#include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
+#include "platform/platform_sw_rngs.h"
 
 #include "devices/character_io.h"
-#include "devices/log.h"
-#include "devices/physical_timer.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
 #include "devices/system_timer.h"
 
+#include "isr/core_task_switch_isr.h"
+#include "isr/halt_core_isr.h"
 #include "isr/system_timer_reschedule_isr.h"
 #include "isr/task_switch_isr.h"
+#include "platform/exception_manager.h"
 
-#include "asm_globals.h"
-#include "asm_utility.h"
+#include "task/tasks.h"
 
-#include "utility/dump_diagnostics.h"
-
-#include "devices/emmc.h"
-
-#include "services/random_number_generator.h"
-
-#include "filesystem/fat32_filesystem.h"
-
-#include "devices/uart0.h"
-#include "devices/uart1.h"
-
-#include "platform/kernel_command_line.h"
-
-#include "devices/mailbox_messages.h"
-
-#include "utility/regex.h"
+#include "filesystem/filesystems.h"
 
 #include "cli/cli.h"
 
-#include <scanf.h>
+#include "userspace_api/io.h"
+#include "userspace_api/task.h"
 
-extern "C" void kernel_main()
+#include "minimalstdio.h"
+
+#include "asm_utility.h"
+
+#include "task/task_manager_impl.h"
+
+class Counter : public Runnable
 {
-    //  Call InitializePlatform() first
+public:
+    Counter(const char *array)
+        : array_(array)
+    {
+    }
 
-    InitializePlatform();
+    void Run()
+    {
+        printf("In process: %s\n", array_.c_str());
 
-    const PlatformInfo &platformInfo = GetPlatformInfo();
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
 
-    SetLogLevel(LogLevel::ERROR);
+        //        user::io::Write(format_buffer.c_str());
 
-    printf("SEF RPI Bare Metal OS V0.01\n");
+        const UUID task_id = task::Task::GetTask().ID();
 
-    printf("Running on RPI Version: %s\n", platformInfo.GetBoardTypeName());
+        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
 
-    DumpDiagnostics();
-
-    //  Mount the filesystems on the SD card
-
-    filesystems::MountSDCardFilesystems();
-
-    /*
-        minstd::stack_allocator<minstd::list<UUID>::node_type, 24> uuid_list_stack_allocator;
-        minstd::list<UUID> all_filesystems(uuid_list_stack_allocator);
-
-        GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, all_filesystems);
-
-        filesystems::Filesystem *boot_filesystem = nullptr;
-
-        for (auto itr = all_filesystems.begin(); itr != all_filesystems.end(); itr++)
+        char buf[2] = {0};
+        while (1)
         {
-            auto get_entity_result = GetOSEntityRegistry().GetEntityById(*itr);
-
-            if (get_entity_result.Failed())
+            for (int i = 0; i < strnlen(array_, 127); i++)
             {
-                printf("Failed to get OS Entity by ID\n");
-                PowerManager().Halt();
+                buf[0] = array_.data()[i];
+                user::io::Write(buf);
+                CPUTicksDelay(((uint64_t)990 + random_generator.Next32BitValue() % 20) * 100000);
             }
 
-            if (static_cast<filesystems::Filesystem &>(get_entity_result).IsBoot())
+            if (task_id != task::Task::GetTask().ID())
             {
-                boot_filesystem = &(static_cast<filesystems::Filesystem &>(get_entity_result));
+                printf("Task context changed!!\n");
                 break;
             }
         }
+    }
 
-        if (boot_filesystem == nullptr)
+private:
+    const minstd::fixed_string<128> array_;
+};
+
+class UserShortLivedProcess : public Runnable
+{
+public:
+    UserShortLivedProcess(uint32_t id)
+        : id_(id)
+    {
+    }
+
+    void Run()
+    {
+        printf("In User Short Live Process: %d\n", id_);
+
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+
+        //        user::io::Write(format_buffer.c_str());
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+
+        PhysicalTimer::Wait(microseconds(500 + (random_generator.Next32BitValue() % 20)) * 1000);
+
+        if (task_id != task::Task::GetTask().ID())
         {
-            printf("Failed to get boot filesystem\n");
-            PowerManager().Halt();
+            printf("Task context changed!!\n");
         }
 
-        printf("Found boot filesystem\n");
+        printf("Leaving User Short Lived Task: %d\n", id_);
+    }
 
+private:
+    const uint32_t id_;
+};
 
+class ImmediateExitProcess : public Runnable
+{
+public:
+    ImmediateExitProcess()
+        : id_(0)
+    {
+    }
+
+    void SetId(uint32_t id)
+    {
+        id_ = id;
+    }
+
+    void Run()
+    {
+        printf("In ImmediateExitProcess Process: %d\n", id_);
+    }
+
+private:
+    uint32_t id_;
+};
+
+class KernelCounter : public Runnable
+{
+public:
+    KernelCounter() = default;
+
+    void Run()
+    {
+        const char *array = "Kernel Counter";
+        printf("In Kernel process: %s\n", array);
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+
+        //        printf(format_buffer.c_str());
+
+        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+
+        char buf[2] = {0};
+        while (1)
+        {
+            for (size_t i = 0; i < strnlen(array, 128); i++)
             {
-
-                auto result = boot_filesystem->GetDirectory(minstd::fixed_string<>("/"));
-
-                if (result.Successful())
-                {
-                    printf("Root directory listing\n");
-
-                    auto callback = [](const filesystems::FilesystemDirectoryEntry &directory_entry) -> filesystems::FilesystemDirectoryVisitorCallbackStatus
-                    {
-                        printf("%s %-9u %s %s\n", directory_entry.AttributesString(), directory_entry.Size(), directory_entry.Name().c_str(), directory_entry.Extension().c_str());
-                        return filesystems::FilesystemDirectoryVisitorCallbackStatus::NEXT;
-                    };
-
-                    auto visit_directory_result = result->VisitDirectory(callback);
-
-                    if (visit_directory_result != filesystems::FilesystemResultCodes::SUCCESS)
-                    {
-                        printf("Error visiting directory listing for root directory.\n");
-                    }
-                }
-                else
-                {
-                    printf("Error getting directory listing for root directory on boot filesystem.\n");
-                }
-
-                printf("\n\n");
-
-                result = minstd::move(boot_filesystem->GetDirectory(minstd::fixed_string<>("/subdir 1_1/subdir 2_1")));
-
-                if (result.Successful())
-                {
-                    auto callback = [](const filesystems::FilesystemDirectoryEntry &directory_entry) -> filesystems::FilesystemDirectoryVisitorCallbackStatus
-                    {
-                        printf("%s %-9u %s %s\n", directory_entry.AttributesString(), directory_entry.Size(), directory_entry.Name().c_str(), directory_entry.Extension().c_str());
-                        return filesystems::FilesystemDirectoryVisitorCallbackStatus::NEXT;
-                    };
-
-                    auto visit_directory_result = result->VisitDirectory(callback);
-
-                    if (visit_directory_result != filesystems::FilesystemResultCodes::SUCCESS)
-                    {
-                        printf("Error visiting directory listing for root directory.\n");
-                    }
-                }
-
-                {
-                    auto result = boot_filesystem->GetDirectory(minstd::fixed_string<>("/"));
-
-                    if (result.Successful())
-                    {
-                        uint32_t count = 0;
-
-                        auto callback = [count](const filesystems::FilesystemDirectoryEntry &directory_entry) mutable -> filesystems::FilesystemDirectoryVisitorCallbackStatus
-                        {
-                            printf("%s %-9u %s %s\n", directory_entry.AttributesString(), directory_entry.Size(), directory_entry.Name().c_str(), directory_entry.Extension().c_str());
-
-                            count++;
-
-                            return count < 5 ? filesystems::FilesystemDirectoryVisitorCallbackStatus::NEXT : filesystems::FilesystemDirectoryVisitorCallbackStatus::FINISHED;
-                        };
-
-                        auto visit_directory_result = result->VisitDirectory(callback);
-
-                        if (visit_directory_result != filesystems::FilesystemResultCodes::SUCCESS)
-                        {
-                            printf("Error visiting directory listing for root directory.\n");
-                        }
-                    }
-                }
-
-                {
-                    auto get_root_directory_result = boot_filesystem->GetDirectory(minstd::fixed_string<>("/"));
-
-                    if (get_root_directory_result.Successful())
-                    {
-                        auto open_file_result = get_root_directory_result->OpenFile(minstd::fixed_string<>("test.txt"), filesystems::FileModes::READ);
-
-                        printf("Opened file: %s with size: %u\n", open_file_result->Filename()->c_str(), *(open_file_result->Size()));
-
-                        StackBuffer file_buffer(alloca(35), 35);
-
-                        do
-                        {
-                            file_buffer.Clear();
-                            open_file_result->Read(file_buffer);
-
-                            printf("%.*s", (int)file_buffer.Size(), (const char *)file_buffer.Data());
-                        } while (file_buffer.Size() == 35);
-
-                        printf("\n");
-                    }
-                    else
-                    {
-                        printf("Error getting directory listing for root directory.\n");
-                    }
-                }
-
-                {
-                    auto get_root_directory_result = boot_filesystem->GetDirectory(minstd::fixed_string<>("/"));
-
-                    if (get_root_directory_result.Successful())
-                    {
-                        auto open_file_result = get_root_directory_result->OpenFile(minstd::fixed_string<>("test_append.txt"), filesystems::FileModes::READ_WRITE_APPEND);
-
-                        if (open_file_result.Failed())
-                        {
-                            printf("Failed to open file: %s\n", "/test_append.txt");
-                            PowerManager().Halt();
-                        }
-
-                        printf("Opened file: %s for append with size: %u\n", open_file_result->Filename()->c_str(), *(open_file_result->Size()));
-
-                        StackBuffer append_buffer(alloca(12000), 12000);
-
-                        open_file_result->Read(append_buffer);
-
-                        printf("\n\n\nRead %lu bytes from file\n\n\n", append_buffer.Size());
-                        printf("%.*s\n\n\n", (int)append_buffer.Size(), (char *)append_buffer.Data());
-
-                        auto append_file_result = open_file_result->Append(append_buffer);
-
-                        if (append_file_result != filesystems::FilesystemResultCodes::SUCCESS)
-                        {
-                            printf("Failed to append to file with result code: %u : %s\n", (uint32_t)append_file_result, ErrorMessage(append_file_result));
-                        }
-
-                        printf("After append\n");
-                    }
-                    else
-                    {
-                        printf("Error getting directory listing for root directory.\n");
-                    }
-                }
-
-                {
-                    auto get_root_directory_result = boot_filesystem->GetDirectory(minstd::fixed_string<>("/"));
-
-                    if (get_root_directory_result.Successful())
-                    {
-                        auto open_file_result = get_root_directory_result->OpenFile(minstd::fixed_string<>("file_to_create.text"), filesystems::FileModes(filesystems::FileModes::CREATE | filesystems::FileModes::READ_WRITE_APPEND));
-
-                        if (open_file_result.Successful())
-                        {
-                            printf("Created new file\n");
-                        }
-                        else
-                        {
-                            printf("Failed to open new file\n");
-                        }
-
-                        //  Append to it
-
-                        char buffer[1024];
-                        StackBuffer buffer_to_append = StackBuffer(buffer, 1024);
-
-                        buffer_to_append.Append((void *)"This is content for the new File\n", 33);
-
-                        if (open_file_result->Append(buffer_to_append) == filesystems::FilesystemResultCodes::SUCCESS)
-                        {
-                            printf("Append to new file succeeded\n");
-                        }
-                        else
-                        {
-                            printf("Append to new file failed\n");
-                        }
-
-                        get_root_directory_result->RenameFile(minstd::fixed_string<>("file_to_create.text"), minstd::fixed_string<>("renamed_file.text"));
-
-                        open_file_result = get_root_directory_result->OpenFile(minstd::fixed_string<>("file_to_create.text"), filesystems::FileModes(filesystems::FileModes::READ_WRITE_APPEND));
-
-                        if (open_file_result.ResultCode() == filesystems::FilesystemResultCodes::FILE_NOT_FOUND)
-                        {
-                            printf("Renamed File not found by original name\n");
-                        }
-                        else
-                        {
-                            printf("File rename failed\n");
-                        }
-
-                        open_file_result = get_root_directory_result->OpenFile(minstd::fixed_string<>("renamed_file.text"), filesystems::FileModes(filesystems::FileModes::READ_WRITE_APPEND));
-
-                        if (open_file_result.ResultCode() == filesystems::FilesystemResultCodes::SUCCESS)
-                        {
-                            printf("File renamed\n");
-                        }
-                        else
-                        {
-                            printf("File rename failed\n");
-                        }
-
-                        get_root_directory_result->DeleteFile(minstd::fixed_string<>("file_to_create.text"));
-
-                        open_file_result = get_root_directory_result->OpenFile(minstd::fixed_string<>("file_to_create.text"), filesystems::FileModes(filesystems::FileModes::READ_WRITE_APPEND));
-
-                        if (open_file_result.ResultCode() == filesystems::FilesystemResultCodes::FILE_NOT_FOUND)
-                        {
-                            printf("File deleted\n");
-                        }
-                        else
-                        {
-                            printf("File delete failed\n");
-                        }
-
-                    }
-                }
+                buf[0] = array[i];
+                printf("%c", buf[0]);
+                PhysicalTimer::Wait(milliseconds(990 + random_generator.Next32BitValue() % 20));
             }
 
+            if (task_id != task::Task::GetTask().ID())
             {
-                auto get_root_directory_result = boot_filesystem->GetDirectory(minstd::fixed_string<>("/"));
-
-                if (get_root_directory_result.Successful())
-                {
-                    auto create_directory_result = get_root_directory_result->CreateDirectory(minstd::fixed_string<>("newdirectory"));
-
-                    if (create_directory_result.Successful())
-                    {
-                        printf("Created new directory\n");
-                    }
-                    else
-                    {
-                        printf("Failed to create new directory\n");
-                    }
-
-                    for (int i = 0; i < 300; i++)
-                    {
-                        char buffer[16];
-
-                        memset(buffer, 0, 15);
-
-                        itoa(i, buffer, 10);
-
-                        minstd::fixed_string<MAX_FILENAME_LENGTH> subdir_name("newsubdirectory");
-                        subdir_name += buffer;
-
-                        auto create_subdir_result = create_directory_result->CreateDirectory(subdir_name);
-
-                        if (create_subdir_result.Successful())
-                        {
-                            printf("Created new subdirectory\n");
-                        }
-                        else
-                        {
-                            printf("Failed to create new subdirectory\n");
-                        }
-                    }
-
-                    for (int i = 0; i < 300; i++)
-                    {
-                        char buffer[16];
-
-                        memset(buffer, 0, 15);
-
-                        itoa(i, buffer, 10);
-
-                        minstd::fixed_string<MAX_FILENAME_LENGTH> subdir_name("newsubdirectory");
-                        subdir_name += buffer;
-
-                        auto get_subdir = create_directory_result->GetDirectory(subdir_name);
-
-                        auto delete_subdir_result = get_subdir->RemoveDirectory();
-
-                        if ( delete_subdir_result == filesystems::FilesystemResultCodes::SUCCESS)
-                        {
-                            printf("Removed subdirectory\n");
-                        }
-                        else
-                        {
-                            printf("Failed to remove subdirectory\n");
-                        }
-                    }
-
-                    if (create_directory_result->RemoveDirectory() == filesystems::FilesystemResultCodes::SUCCESS)
-                    {
-                        printf("Removed directory\n");
-                    }
-                    else
-                    {
-                        printf("Failed to remove directory\n");
-                    }
-                }
+                printf("Kernel Task context changed!!\n");
+                break;
             }
-            */
+        }
+    }
+};
+
+class ShortLivedKernelProcess : public Runnable
+{
+public:
+    ShortLivedKernelProcess() = default;
+
+    void Run()
+    {
+        printf("In ShortLivedKernelProcess\n");
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        //        minstd::fixed_string<128> format_buffer;
+        //        minstd::format(format_buffer, "Task UUID: {}\n", task::Task::GetTask().ID());
+
+        //        printf(format_buffer.c_str());
+
+        RandomNumberGenerator random_generator = GetRandomNumberGenerator(RandomNumberGeneratorTypes::XOROSHIRO128_PLUS_PLUS);
+
+        PhysicalTimer::Wait(microseconds(100 + (random_generator.Next32BitValue() % 20)) * 10);
+
+        if (task_id != task::Task::GetTask().ID())
+        {
+            printf("Kernel Task context changed!!\n");
+        }
+
+        printf("Leaving ShortLivedKernelProcess\n");
+    }
+};
+
+class ShortLivedKernelTaskForkingTask : public Runnable
+{
+public:
+    ShortLivedKernelTaskForkingTask() = default;
+
+    void Run()
+    {
+        minstd::array<ShortLivedKernelProcess, 512> short_lived_kernel_processes;
+        minstd::array<UUID, 512> short_lived_kernel_process_ids;
+
+        const UUID task_id = task::Task::GetTask().ID();
+
+        char uuid_buffer[128];
+
+        RandomNumberGeneratorThreadUnsafe random_generator(NewRandomNumberGenerator());
+
+        for (int i = 0; i < 512; i++)
+        {
+            auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_processes[i], "Short Lived Kernel Process");
+            if (new_short_lived_kernel_process.Failed())
+            {
+                printf("error while starting short lived kernel process");
+                return;
+            }
+
+            short_lived_kernel_process_ids[i] = new_short_lived_kernel_process.Value();
+
+            PhysicalTimer::Wait(microseconds(50 + (random_generator.Next32BitValue() % 20)) * 1000);
+
+            if (task_id != task::Task::GetTask().ID())
+            {
+                printf("Kernel Task context changed!!\n");
+            }
+        }
+
+        for (int i = 0; i < 512; i++)
+        {
+            short_lived_kernel_process_ids[i].ToString(uuid_buffer);
+
+            auto tsk = task::GetTaskManager().FindTask(short_lived_kernel_process_ids[i]);
+
+            if (!tsk.has_value())
+            {
+                printf("Task not found: %s\n", uuid_buffer);
+                continue;
+            }
+
+            tsk.value().get().Join();
+        }
+
+        printf("Leaving ShortLivedKernelTaskForkingTask\n");
+    }
+};
+
+class UserProcess : public Runnable
+{
+public:
+    UserProcess() = default;
+
+    void Run()
+    {
+        minstd::fixed_string<128> test = "User process started\n\r";
+        user::io::Write(const_cast<char *>(test.data()));
+
+        printf("User Process Task Context: %p\n", GetTaskContext());
+
+        minstd::unique_ptr<Runnable> user_process1 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, Counter>("56789"));
+
+        printf("Forking Task 1\n");
+
+        auto new_task1 = user::task::ForkTask("Counting Process 1", user_process1);
+
+        minstd::unique_ptr<Runnable> user_process2 = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, Counter>("vwxyz"));
+
+        printf("Forking Task 2\n");
+
+        auto new_task2 = user::task::ForkTask("Counting Process 2", user_process2);
+        /*
+                minstd::unique_ptr<Runnable> short_lived_processes[100];
+                minstd::unique_ptr<Runnable> immediate_exit_processes[100];
+
+                minstd::fixed_string<128> format_buffer;
+
+                for (int i = 0; i < 100; i++)
+                {
+                    short_lived_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, UserShortLivedProcess>(i));
+
+                    minstd::format(format_buffer, "Short Lived Process: {}", i);
+
+                    auto new_task = user::task::ForkTask(format_buffer, short_lived_processes[i]);
+
+                    immediate_exit_processes[i] = minstd::unique_ptr<Runnable>(dynamic_new<Runnable, ImmediateExitProcess>(i));
+
+                    minstd::format(format_buffer, "Immediate Exit Process: {}", i);
+
+                    auto new_immediate_exit_task = user::task::ForkTask(format_buffer, immediate_exit_processes[i]);
+                }
+        */
+        PhysicalTimer::Wait(milliseconds(1));
+
+        printf("Leaving User Task\n");
+    }
+};
+
+class ExceptionGeneratingProcess : public Runnable
+{
+public:
+    ExceptionGeneratingProcess() = default;
+
+    void Run()
+    {
+        printf("In ExceptionGeneratingProcess\n");
+
+        task::Task *bad_address = nullptr;
+
+        printf("Dereferencing nullptr: %s\n", bad_address->Name().c_str());
+    }
+};
+
+extern "C" void kernel_main()
+{
+    printf("\n\nSEF RPI Bare Metal OS V0.01\n");
+
+    printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
+
+    printf("Memory Model: %s\n", ToString(MMUManager::Instance().MemoryModel()));
+
+    SetLogLevel(LogLevel::WARNING);
+
+    EnableIRQs();
 
     //  Setup the ISRs
 
     SystemTimerRescheduleISR timerRescheduleISR;
     TaskSwitchISR taskSwitchISR;
+    HaltCoreISR haltCoreISR;
+    CoreTaskSwitchISR coreTaskSwitchISR;
 
-    GetExceptionManager().AddInterruptServiceRoutine(&taskSwitchISR);
-    GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR);
+    GetExceptionManager().AddInterruptServiceRoutine(&taskSwitchISR, CoreList(CoreList::CoreID::CORE0));
+    GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR, CoreList(CoreList::CoreID::CORE0));
+    GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR, CoreList(CoreList::CoreID::ALL_CORES));
+    GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR, CoreList(CoreList::CoreID::ALL_CORES));
 
-    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, 400000);
+    //  Initialize the task manager
+
+    task::TaskManagerImpl::Instance().Initialize();
+
+    //    DumpDiagnostics();
+
+    //  Mount the filesystems on the SD card
+
+    filesystems::MountSDCardFilesystems();
+
+    printf("Starting recurring interrupt\n");
+
+    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, milliseconds{50});
 
     printf("Interrupts enabled\n");
 
@@ -411,7 +374,7 @@ extern "C" void kernel_main()
         PowerManager().Halt();
     }
 
-    auto start_cli_result = cli::StartCommandLineInterface(echoing_stdin, boot_filesystem->Id(), minstd::fixed_string<>("/"));
+    auto start_cli_result = cli::InitializeCommandLineInterface(echoing_stdin, boot_filesystem->Id(), minstd::fixed_string<>("/"));
 
     if (start_cli_result.Failed())
     {
@@ -421,44 +384,162 @@ extern "C" void kernel_main()
 
     cli::CommandLineInterface &cli = *start_cli_result;
 
-    printf("CLI started\n");
+    //  Fork the CLI as a kernel task
 
-    cli.Run();
+    printf("Forking CLI\n");
 
-    printf("\nHalting\n");
-    PhysicalTimer().WaitMsec(50);
+    auto new_kernel_process = task::GetTaskManager().ForkKernelTask(&cli, "CLI");
+    if (new_kernel_process.Failed())
+    {
+        printf("error while starting cli");
+        return;
+    }
 
-    PowerManager().Halt();
+    printf("Starting kernel counter process\n");
 
-    /*
-        printf("In console.  'd' for diagnostic info, 'r' to Reboot or 'h' to Halt\n\n");
+    KernelCounter kernel_counter;
 
-        // echo everything back
+    auto new_kernel_counter = task::GetTaskManager().ForkKernelTask(&kernel_counter, "Kernel Counter");
+    if (new_kernel_counter.Failed())
+    {
+        printf("error while starting kernel counter");
+        return;
+    }
 
-        while (1)
+    Counter counter1("1234567890");
+
+    auto new_counter1 = task::GetTaskManager().ForkKernelTask(&counter1, "Counter1");
+    if (new_counter1.Failed())
+    {
+        printf("error while starting counter 1");
+        return;
+    }
+
+    Counter counter2("vwxyz");
+
+    auto new_counter2 = task::GetTaskManager().ForkKernelTask(&counter2, "Counter2");
+    if (new_counter2.Failed())
+    {
+        printf("error while starting counter 2");
+        return;
+    }
+
+    Counter counter3("!@#$%^&*()");
+
+    auto new_counter3 = task::GetTaskManager().ForkKernelTask(&counter3, "Counter3");
+    if (new_counter3.Failed())
+    {
+        printf("error while starting counter 3");
+        return;
+    }
+
+    Counter counter4("ABCDEFGHIJ");
+
+    auto new_counter4 = task::GetTaskManager().ForkKernelTask(&counter4, "Counter4");
+    if (new_counter4.Failed())
+    {
+        printf("error while starting counter4");
+        return;
+    }
+
+    printf("Starting short lived kernel process\n");
+
+    ShortLivedKernelProcess short_lived_kernel_process;
+
+    auto new_short_lived_kernel_process = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process, "Short Lived Kernel Process");
+    if (new_short_lived_kernel_process.Failed())
+    {
+        printf("error while starting short lived kernel process");
+        return;
+    }
+
+    printf("Starting short lived kernel process forking processes\n");
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process;
+
+    auto new_short_lived_kernel_process_forking_process = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process, "Short Lived Kernel Process Forking Process");
+    if (new_short_lived_kernel_process_forking_process.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process2;
+
+    auto new_short_lived_kernel_process_forking_process2 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process2, "SLKProcess Forking Process");
+    if (new_short_lived_kernel_process_forking_process2.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process3;
+
+    auto new_short_lived_kernel_process_forking_process3 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process3, "SLKProcess Forking Process");
+    if (new_short_lived_kernel_process_forking_process3.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
+    ShortLivedKernelTaskForkingTask short_lived_kernel_process_forking_process4;
+
+    auto new_short_lived_kernel_process_forking_process4 = task::GetTaskManager().ForkKernelTask(&short_lived_kernel_process_forking_process4, "SLKProcess Forking Process");
+    if (new_short_lived_kernel_process_forking_process4.Failed())
+    {
+        printf("error while starting short lived kernel process forking process");
+        return;
+    }
+
+    ImmediateExitProcess immediate_exit_process[100];
+
+    for (int i = 0; i < 100; i++)
+    {
+        immediate_exit_process[i].SetId(i);
+
+        auto new_immediate_exit_process = task::GetTaskManager().ForkKernelTask(&immediate_exit_process[i], "Immediate Exit Process");
+        if (new_immediate_exit_process.Failed())
         {
-            char currentChar = stdin->getc();
+            printf("error while starting immediate exit process");
+            return;
+        }
+    }
+    /*
+        printf("Starting user processes\n");
 
-            stdout->putc(currentChar);
+        UserProcess user_process;
 
-            if (currentChar == 'd')
-            {
-                DumpDiagnostics();
-            }
-            else if (currentChar == 'h')
-            {
-                printf("\nHalting\n");
-                PhysicalTimer().WaitMsec(50);
-
-                PowerManager().Halt();
-            }
-            else if (currentChar == 'r')
-            {
-                printf("\nRebooting\n");
-                PhysicalTimer().WaitMsec(50);
-
-                PowerManager().Reboot();
-            }
+        auto new_user_process_wrapper = task::GetTaskManager().ForkUserTask("User Task Forking Task", &user_process);
+        if (new_user_process_wrapper.Failed())
+        {
+            printf("error while starting user processes");
+            return;
         }
     */
+
+    printf("Cores active: %d, %d, %d, %d\n", __core_state[0].load(), __core_state[1].load(), __core_state[2].load(), __core_state[3].load());
+
+    //        printf("Starting exception generating process\n");
+
+    //        ExceptionGeneratingProcess ex_process;
+
+    //        auto exception_generating_process_wrapper = task::GetTaskManager().ForkKernelTask(&ex_process, "Exception Generating Task" );
+    //        if (exception_generating_process_wrapper.Failed())
+    //        {
+    //            printf("error while starting exception generating process");
+    //            return;
+    //        }
+
+    //        printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+
+    //  Keep the scheduler running
+
+    //    WAIT_FOR_INTERRUPT;
+
+    while (1)
+    {
+        CPUTicksDelay(1000);
+
+        task::Task::GetTask().Yield();
+    }
 }

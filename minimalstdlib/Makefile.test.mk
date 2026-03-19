@@ -27,9 +27,19 @@ LDLIBS := -L../minimalclib/lib/x64 -lminimalclib
 TEST_LIB := -L$(CPPUTEST_PATH)/lib -lCppUTest -lCppUTestExt
 
 
-test : clean clean_test lib $(TEST_EXE)
+.PHONY: test test-incremental test-coverage clean_test
 
-test-coverage : clean_test $(COVERAGE_EXE)
+
+test:
+	$(MAKE) -f Makefile.test.mk clean
+	$(MAKE) -f Makefile.test.mk clean_test
+	$(MAKE) -f Makefile.test.mk test-incremental
+
+test-incremental : lib $(TEST_EXE)
+
+test-coverage:
+	$(MAKE) -f Makefile.test.mk clean_test
+	$(MAKE) -f Makefile.test.mk $(COVERAGE_EXE)
 	cd $(COVERAGE_TEST_OBJ_DIR)
 	gcov ../cpputest_main.cpp --object-directory .
 	lcov --capture --directory . --output-file $(COVERAGE_TEST_OBJ_DIR)/test_coverage.info
@@ -37,8 +47,8 @@ test-coverage : clean_test $(COVERAGE_EXE)
 	genhtml $(COVERAGE_TEST_OBJ_DIR)/test_coverage_filtered.info --output-directory $(COVERAGE_TEST_OBJ_DIR)/coverage_report
 
 $(TEST_EXE) : $(OBJ) $(TEST_OBJ)
-	$(LD) $(OBJ) $(TEST_OBJ) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
-	-./$(TEST_EXE)
+	$(LD) $(TEST_LDFLAGS) $(OBJ) $(TEST_OBJ) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
+#	-./$(TEST_EXE)
 
 $(TEST_OBJ_DIR)/%.o: $(CPP_TEST_SRC_DIR)/%.cpp
 	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(TEST_OPTIMIZATION_FLAGS) $(TEST_CPP_FLAGS) $(CDEFINES) -c $< -o $@
@@ -61,6 +71,8 @@ clean_test:
 	/bin/rm -rf $(COVERAGE_TEST_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(TEST_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(COVERAGE_TEST_OBJ_DIR) > /dev/null 2> /dev/null || true
+	/bin/mkdir -p build/x64 > /dev/null 2> /dev/null || true
+	/bin/mkdir -p lib/x64 > /dev/null 2> /dev/null || true
 
 echo:
 	@echo "Build Directories:      			" $(TEST_BUILD_DIRS)

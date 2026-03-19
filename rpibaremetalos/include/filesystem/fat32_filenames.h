@@ -436,14 +436,14 @@ namespace filesystems::fat32
             {
                 minstd::pair<char, bool> current_char = GetPermissibleCharacter(name[i]);
 
-                if (current_char.first() != 0)
+                if (minstd::get<0>(current_char) != 0)
                 {
 
-                    name_.push_back(current_char.first());
+                    name_.push_back(minstd::get<0>(current_char));
                     short_name_length++;
                 }
 
-                lossy_conversion_ |= current_char.second();
+                lossy_conversion_ |= minstd::get<1>(current_char);
             }
         }
 
@@ -461,13 +461,13 @@ namespace filesystems::fat32
             {
                 minstd::pair<char, bool> current_char = GetPermissibleCharacter(extension[i]);
 
-                if (current_char.first() != 0)
+                if (minstd::get<0>(current_char) != 0)
                 {
-                    extension_.push_back(current_char.first());
+                    extension_.push_back(minstd::get<0>(current_char));
                     short_extension_length++;
                 }
 
-                lossy_conversion_ |= current_char.second();
+                lossy_conversion_ |= minstd::get<1>(current_char);
             }
         }
 

@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <fixed_string>
+#include <utility>
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -17,7 +18,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         if (argument_format.empty())
         {
-            return minstd::make_pair(true, minstd::optional<uint32_t>());
+            return minstd::pair(true, minstd::optional<uint32_t>());
         }
 
         //  Search for the colon - if it is not the first character or there is no colon at all,
@@ -31,7 +32,7 @@ namespace MINIMAL_STD_NAMESPACE
         {
             //  No id
 
-            return minstd::make_pair(true, minstd::optional<uint32_t>());
+            return minstd::pair(true, minstd::optional<uint32_t>());
         }
 
         //  If the colon is not the first character, then we have a id argument, so extract it
@@ -44,7 +45,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 //  Invalid id argument
 
-                return minstd::make_pair(false, minstd::optional<uint32_t>());
+                return minstd::pair(false, minstd::optional<uint32_t>());
             }
 
             position = position * 10 + (argument_format[i] - '0');
@@ -52,7 +53,7 @@ namespace MINIMAL_STD_NAMESPACE
 
         //  We have successfully extracted the id
 
-        return minstd::make_pair(true, minstd::optional<uint32_t>(position));
+        return minstd::pair(true, minstd::optional<uint32_t>(position));
     }
 
     void ParseTypeSpecifier(const char character, arg_format_options &format_options)
@@ -383,7 +384,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             auto arg_position = ParseArgId(argument_format);
 
-            if (!arg_position.first())
+            if (!minstd::get<0>(arg_position))
             {
                 //  Invalid format string
 
@@ -395,7 +396,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             //  Insert the argument.  If this is not a positional argument, we need to advance to the next argument.
 
-            const uint32_t position = arg_position.second().has_value() ? arg_position.second().value() : format_placeholder_index++;
+            const uint32_t position = minstd::get<1>(arg_position).has_value() ? minstd::get<1>(arg_position).value() : format_placeholder_index++;
 
             if (position < num_args)
             {

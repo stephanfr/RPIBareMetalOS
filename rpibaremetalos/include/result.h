@@ -320,7 +320,7 @@ private:
     ReferenceResult(ResultCodeType result_code,
                     T &return_value)
         : result_code_(result_code),
-          optional_return_reference_(minstd::reference_wrapper<T>(minstd::move(return_value)))
+          optional_return_reference_(minstd::reference_wrapper<T>(return_value))
     {
     }
 

@@ -9,7 +9,7 @@ RPI3PlatformInfo::RPI3PlatformInfo()
     GetPlatformDetails(GetMMIOBase());
 }
 
-const RPIBoardType RPI3PlatformInfo::GetBoardType() const
+RPIBoardType RPI3PlatformInfo::GetBoardType() const
 {
     return RPIBoardType::RPI3;
 }
@@ -17,6 +17,11 @@ const RPIBoardType RPI3PlatformInfo::GetBoardType() const
 const char *RPI3PlatformInfo::GetBoardTypeName() const
 {
     return "Raspberry Pi 3B";
+}
+
+uint8_t *RPI3PlatformInfo::GetARMLocalBase() const
+{
+    return const_cast<uint8_t *>(ARM_LOCAL_BASE);
 }
 
 uint8_t *RPI3PlatformInfo::GetMMIOBase() const
@@ -29,7 +34,12 @@ uint8_t *RPI3PlatformInfo::GetEMMCBase() const
     return const_cast<uint8_t *>(BCM2837_EMMC_BASE);
 }
 
-const uint32_t RPI3PlatformInfo::GetGPUClockRate() const
+uint32_t RPI3PlatformInfo::GetGPUClockRate() const
 {
     return BCM2837_SYSTEM_CLOCK;
+}
+
+uint32_t RPI3PlatformInfo::GetNumberOfCores() const
+{
+    return 4;
 }

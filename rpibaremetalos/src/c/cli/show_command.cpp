@@ -16,9 +16,6 @@
 #include "heaps.h"
 
 #include <format>
-#include <minimalstdio.h>
-
-extern "C" uint32_t GetExceptionLevel();
 
 extern CharacterIODevice *stdout;
 
@@ -66,18 +63,16 @@ namespace cli::commands
         context.output_stream_ << minstd::format(format_buffer, "Static Heap Reserved Space Start: {}\n", (void *)&__static_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Static Heap Reserved Space End: {}\n", (void *)&__static_heap_end);
         context.output_stream_ << minstd::format(format_buffer, "Static Heap Reserved Space Size: {}\n", (uint32_t *)&__static_heap_size_in_bytes);
-        context.output_stream_ << minstd::format(format_buffer, "Static Heap Start: {}\n", __os_static_heap.heap_start());
-        context.output_stream_ << minstd::format(format_buffer, "Static Heap End: {}\n", __os_static_heap.current_end());
+        context.output_stream_ << minstd::format(format_buffer, "Static Heap Start: {}\n", (void *)&__static_heap_start);
+        context.output_stream_ << minstd::format(format_buffer, "Static Heap End: {}\n", (void *)((uint8_t *)&__static_heap_start + __os_static_heap.bytes_reserved()));
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space Start: {}\n", (void *)&__dynamic_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space End: {}\n", (void *)&__dynamic_heap_end);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space Size: {}\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
-        context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Start: {}\n", __os_dynamic_heap.heap_start());
-        context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap End: {}\n", __os_dynamic_heap.current_end());
-        context.output_stream_ << minstd::format(format_buffer, "EL1 Stack Top: {}\n", (void *)&__el1_stack_top);
-        context.output_stream_ << minstd::format(format_buffer, "EL1 Stack Bottom: {}\n", (void *)&__el1_stack_bottom);
-        context.output_stream_ << minstd::format(format_buffer, "EL0 Stack Top: {}\n", (void *)&__el0_stack_top);
-        context.output_stream_ << minstd::format(format_buffer, "EL0 Stack Bottom: {}\n", (void *)&__el0_stack_bottom);
-        context.output_stream_ << minstd::format(format_buffer, "Current Stack Location: {}\n", (void *)get_stack_pointer());
+        context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Start: {}\n", (void *)&__dynamic_heap_start);
+        context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap End: {}\n", (void *)((uint8_t *)&__dynamic_heap_start + __os_dynamic_heap.bytes_reserved()));
+        context.output_stream_ << minstd::format(format_buffer, "Core Initialization Stack Top: {}\n", (void *)&__per_core_initialization_stack_top);
+        context.output_stream_ << minstd::format(format_buffer, "Core Initialization Stack Bottom: {}\n", (void *)&__per_core_initialization_stack_bottom);
+        context.output_stream_ << minstd::format(format_buffer, "Current Stack Location: {}\n", (void *)GetStackPointer());
 
         context.output_stream_ << "\nKernal Command Line: " << KernelCommandLine::RawCommandLine() << "\n";
 

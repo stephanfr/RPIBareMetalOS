@@ -8,8 +8,6 @@
 
 #include "asm_utility.h"
 
-#include <minimalstdio.h>
-
 typedef enum class GPIORegister : uint32_t
 {
     GPFSEL0 = 0x00200000,
@@ -86,13 +84,6 @@ public:
 
     void EnablePin(uint8_t pin)
     {
-        //        REGS_GPIO->pupd_enable = 0;
-        //        delay(150);
-        //        REGS_GPIO->pupd_enable_clocks[pinNumber / 32] = 1 << (pinNumber % 32);
-        //        delay(150);
-        //        REGS_GPIO->pupd_enable = 0;
-        //        REGS_GPIO->pupd_enable_clocks[pinNumber / 32] = 0;
-
         *((volatile uint32_t *)(mmio_base_ + (uint32_t)GPIORegister::GPPUD)) = 0;
         CPUTicksDelay(150);
 

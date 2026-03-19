@@ -27,15 +27,15 @@ namespace
 
     static char buffer[TEST_BUFFER_SIZE];
 
-    class TestElement
+    class test_element
     {
     public:
-        explicit TestElement(uint32_t value)
+        explicit test_element(uint32_t value)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value() const
         {
@@ -47,23 +47,23 @@ namespace
         char text_[20];
     };
 
-    using Uint32tVector = minstd::vector<uint32_t, 0, 6>;
+    using uint32t_vector = minstd::vector<uint32_t, 0, 6>;
 
-    using Uint32tVectorAllocator = minstd::allocator<Uint32tVector::element_type>;
-    using Uint32tVectorStaticHeapAllocator = minstd::heap_allocator<Uint32tVector::element_type>;
-    using Uint32tVectorStackAllocator = minstd::stack_allocator<Uint32tVector::element_type, 24>;
+    using uint32t_vectorAllocator = minstd::allocator<uint32t_vector::element_type>;
+    using uint32t_vectorStaticHeapAllocator = minstd::heap_allocator<uint32t_vector::element_type>;
+    using uint32t_vectorStackAllocator = minstd::stack_allocator<uint32t_vector::element_type, 24>;
 
-    using TestElementVector = minstd::vector<TestElement, 0, 6>;
+    using test_element_vector = minstd::vector<test_element, 0, 6>;
 
-    using TestElementVectorAllocator = minstd::allocator<TestElementVector::element_type>;
-    using TestElementVectorStaticHeapAllocator = minstd::heap_allocator<TestElementVector::element_type>;
-    using TestElementVectorStackAllocator = minstd::stack_allocator<TestElementVector::element_type, 24>;
+    using test_element_vectorAllocator = minstd::allocator<test_element_vector::element_type>;
+    using test_element_vectorStaticHeapAllocator = minstd::heap_allocator<test_element_vector::element_type>;
+    using test_element_vectorStackAllocator = minstd::stack_allocator<test_element_vector::element_type, 24>;
 
 
-    void iteratorInvariantsTest(Uint32tVectorAllocator &allocator)
+    void iteratorInvariantsTest(uint32t_vectorAllocator &allocator)
     {
         {
-            Uint32tVector test_vector(allocator);
+            uint32t_vector test_vector(allocator);
 
             CHECK(test_vector.empty());
             CHECK(test_vector.size() == 0);
@@ -82,7 +82,7 @@ namespace
         }
 
         {
-            const Uint32tVector test_vector(allocator);
+            const uint32t_vector test_vector(allocator);
 
             CHECK(test_vector.empty());
             CHECK(test_vector.size() == 0);
@@ -90,7 +90,7 @@ namespace
 
             CHECK(test_vector.begin() == test_vector.end());
 
-            const_cast<Uint32tVector &>(test_vector).push_back(1);
+            const_cast<uint32t_vector &>(test_vector).push_back(1);
 
             CHECK(test_vector.begin() != test_vector.end());
             CHECK(*test_vector.begin() == 1);
@@ -101,9 +101,9 @@ namespace
         }
     }
 
-    void pushPopUintTest(Uint32tVectorAllocator &allocator)
+    void pushPopUintTest(uint32t_vectorAllocator &allocator)
     {
-        Uint32tVector test_vector(allocator);
+        uint32t_vector test_vector(allocator);
 
         CHECK(test_vector.empty());
         CHECK(test_vector.size() == 0);
@@ -153,15 +153,15 @@ namespace
         CHECK(test_vector.size() == 2);
     }
 
-    void pushPopTestElementTest(TestElementVectorAllocator &allocator)
+    void pushPopTestElementTest(test_element_vectorAllocator &allocator)
     {
-        TestElementVector test_vector(allocator);
+        test_element_vector test_vector(allocator);
 
         CHECK(test_vector.empty());
         CHECK(test_vector.size() == 0);
         CHECK(test_vector.max_size() == 6);
 
-        test_vector.push_back(TestElement(1));
+        test_vector.push_back(test_element(1));
 
         CHECK(test_vector.front().value() == 1);
         CHECK(test_vector.back().value() == 1);
@@ -184,7 +184,7 @@ namespace
         CHECK(!test_vector.empty());
         CHECK(test_vector.size() == 2);
 
-        TestElement &last_value = test_vector.emplace_back(3);
+        test_element &last_value = test_vector.emplace_back(3);
 
         CHECK(test_vector.front().value() == 1);
         CHECK(test_vector.back().value() == 3);
@@ -205,9 +205,9 @@ namespace
         CHECK(test_vector.size() == 2);
     }
 
-    void basicUintTest(Uint32tVectorAllocator &allocator)
+    void basicUintTest(uint32t_vectorAllocator &allocator)
     {
-        Uint32tVector test_vector(allocator);
+        uint32t_vector test_vector(allocator);
 
         test_vector.push_back(5);
         test_vector.insert(--test_vector.end(), 4);
@@ -251,12 +251,12 @@ namespace
         CHECK(test_vector[6] == 77);
     }
 
-    void basicTestElementTest(TestElementVectorAllocator &allocator)
+    void basicTestElementTest(test_element_vectorAllocator &allocator)
     {
-        TestElementVector test_vector(allocator);
+        test_element_vector test_vector(allocator);
 
-        test_vector.push_back(TestElement(5));
-        test_vector.insert(--test_vector.end(), TestElement(4));
+        test_vector.push_back(test_element(5));
+        test_vector.insert(--test_vector.end(), test_element(4));
 
         auto itr = test_vector.end();
 
@@ -265,14 +265,14 @@ namespace
 
         CHECK( test_vector.emplace(itr, 3)->value() == 3 );
         CHECK( test_vector.emplace(test_vector.end(), 6)->value() == 6 );
-        CHECK( test_vector.insert(test_vector.end(), TestElement(7))->value() == 7 );
-        test_vector.insert(test_vector.begin(), TestElement(1));
+        CHECK( test_vector.insert(test_vector.end(), test_element(7))->value() == 7 );
+        test_vector.insert(test_vector.begin(), test_element(1));
 
         itr = test_vector.begin();
 
         itr++;
 
-        test_vector.insert(itr, TestElement(2));
+        test_vector.insert(itr, test_element(2));
 
         CHECK(test_vector.size() == 7);
 
@@ -284,9 +284,9 @@ namespace
         CHECK(test_vector[5].value() == 6);
         CHECK(test_vector[6].value() == 7);
 
-        test_vector[0] = TestElement(11);
-        test_vector[2] = TestElement(33);
-        test_vector[5] = TestElement(66);
+        test_vector[0] = test_element(11);
+        test_vector[2] = test_element(33);
+        test_vector[5] = test_element(66);
 
         CHECK(test_vector[0].value() == 11);
         CHECK(test_vector[1].value() == 2);
@@ -299,11 +299,11 @@ namespace
     TEST(VectorTests, IteratorInvariants)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        Uint32tVectorStaticHeapAllocator heap_allocator(test_heap);
+        uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
 
         iteratorInvariantsTest(heap_allocator);
 
-        Uint32tVectorStackAllocator stack_allocator;
+        uint32t_vectorStackAllocator stack_allocator;
 
         iteratorInvariantsTest(stack_allocator);
     }
@@ -312,22 +312,22 @@ namespace
     {
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            Uint32tVectorStaticHeapAllocator heap_allocator(test_heap);
+            uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
 
             pushPopUintTest(heap_allocator);
 
-            Uint32tVectorStackAllocator stack_allocator;
+            uint32t_vectorStackAllocator stack_allocator;
 
             pushPopUintTest(stack_allocator);
         }
 
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            TestElementVectorStaticHeapAllocator heap_allocator(test_heap);
+            test_element_vectorStaticHeapAllocator heap_allocator(test_heap);
 
             pushPopTestElementTest(heap_allocator);
 
-            TestElementVectorStackAllocator stack_allocator;
+            test_element_vectorStackAllocator stack_allocator;
 
             pushPopTestElementTest(stack_allocator);
         }
@@ -337,24 +337,66 @@ namespace
     {
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            Uint32tVectorStaticHeapAllocator heap_allocator(test_heap);
+            uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
 
             basicUintTest(heap_allocator);
 
-            Uint32tVectorStackAllocator stack_allocator;
+            uint32t_vectorStackAllocator stack_allocator;
 
             basicUintTest(stack_allocator);
         }
 
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            TestElementVectorStaticHeapAllocator heap_allocator(test_heap);
+            test_element_vectorStaticHeapAllocator heap_allocator(test_heap);
 
             basicTestElementTest(heap_allocator);
 
-            TestElementVectorStackAllocator stack_allocator;
+            test_element_vectorStackAllocator stack_allocator;
 
             basicTestElementTest(stack_allocator);
         }
+    }
+
+    TEST(VectorTests, Assignment)
+    {
+        minstd::single_block_memory_heap test_heap(buffer, 4096);
+        uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
+
+        uint32t_vector   vec1(heap_allocator);
+        uint32t_vector   vec2(heap_allocator);
+
+        for(uint32_t i = 0; i < 6; i++)
+        {
+            vec1.push_back(i);
+        }
+
+        for(uint32_t i = 6; i < 12; i++)
+        {
+            vec2.push_back(i);
+        }
+
+        CHECK(vec1 != vec2);
+
+        vec2 = vec1;
+
+        CHECK(vec1 == vec2);
+    }
+
+    TEST(VectorTests, BraceInitialization)
+    {
+        minstd::single_block_memory_heap test_heap(buffer, 4096);
+        uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
+
+        uint32t_vector   vec1({0, 1, 2, 3, 4, 5}, heap_allocator);
+
+        CHECK(vec1.size() == 6);
+
+        CHECK(vec1[0] == 0);
+        CHECK(vec1[1] == 1);
+        CHECK(vec1[2] == 2);
+        CHECK(vec1[3] == 3);
+        CHECK(vec1[4] == 4);
+        CHECK(vec1[5] == 5);
     }
 }

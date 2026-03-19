@@ -12,7 +12,7 @@
 
 #include "devices/gpio.h"
 #include "devices/log.h"
-#include "devices/mailbox_messages.h"
+#include "platform/gpu_mailbox_messages.h"
 #include "devices/physical_timer.h"
 
 #include "devices/emmc.h"
@@ -182,7 +182,7 @@ namespace EmmcImpl
                     return true;
                 }
 
-                PhysicalTimer().WaitMsec(1);
+                PhysicalTimer::Wait(milliseconds(1));
             }
 
             return false;
@@ -276,8 +276,6 @@ namespace EmmcImpl
     {
         using Result = ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t>;
 
-        PhysicalTimer timer;
-
         //  The union nonsense below is to avoid the type punning dereferencing warning from gcc when
         //      getting the command_reg from the command.
 
@@ -300,7 +298,7 @@ namespace EmmcImpl
         registers_->arg1 = arg;
         registers_->cmd_xfer_mode = command_reg;
 
-        timer.WaitMsec(10);
+        PhysicalTimer::Wait(milliseconds(10));
 
         uint32_t times = 0;
 
@@ -318,7 +316,7 @@ namespace EmmcImpl
 
             //  Wait for a millsecond and try again
 
-            timer.WaitMsec(1);
+            PhysicalTimer::Wait(milliseconds(1));
             times++;
         }
 
@@ -410,7 +408,7 @@ namespace EmmcImpl
                 return BlockIOResultCodes::SUCCESS;
             }
 
-            PhysicalTimer().WaitMsec(1);
+            PhysicalTimer::Wait(milliseconds(1));
         }
 
         return BlockIOResultCodes::EMMC_COMMAND_LINE_FAILED_TO_RESET_CORRECTLY;
@@ -548,7 +546,7 @@ namespace EmmcImpl
             else
             {
                 LogDebug1("Sleeping for 500msec after response: %X\n", last_response_[0]);
-                PhysicalTimer().WaitMsec(500);
+                PhysicalTimer::Wait(milliseconds(500));
             }
         }
 
@@ -685,8 +683,6 @@ namespace EmmcImpl
 
     BlockIOResultCodes SDCardController::ResetCard()
     {
-        PhysicalTimer timer;
-
         registers_->control[1] = ControlReg1ResetHost;
 
         if (!WaitForInterrupt(registers_->control[1], ControlReg1ResetAll, false, 2000))
@@ -702,16 +698,16 @@ namespace EmmcImpl
             c0 |= 0x0F << 8;
             registers_->control[0] = c0;
 
-            timer.WaitMsec(3);
+            PhysicalTimer::Wait(milliseconds(3));
         }
 
         //  Get the current EMMC clock rate from the mailbox service
 
-        Mailbox mbox(GetPlatformInfo().GetMMIOBase());
+        GPUMailbox mbox(GetPlatformInfo().GetMMIOBase());
 
         GetClockRateTag getEMMCClockRateTag(MailboxClockIdentifiers(1));
 
-        MailboxPropertyMessage getEMMCClockRateMessage(getEMMCClockRateTag);
+        GPUMailboxPropertyMessage getEMMCClockRateMessage(getEMMCClockRateTag);
 
         mbox.sendMessage(getEMMCClockRateMessage);
 
@@ -729,7 +725,7 @@ namespace EmmcImpl
         registers_->int_flags = 0xFFFFFFFF;
         registers_->int_mask = 0xFFFFFFFF;
 
-        timer.WaitMsec(203);
+        PhysicalTimer::Wait(milliseconds(203));
 
         transfer_blocks_ = 0;
         block_size_ = 0;
@@ -786,7 +782,7 @@ namespace EmmcImpl
                 break;
             }
 
-            PhysicalTimer().WaitMsec(100);
+            PhysicalTimer::Wait(milliseconds(100));
             LogWarning("EMMC_WARN: Failed to reset card, trying again...\n");
         }
 
@@ -873,8 +869,6 @@ namespace EmmcImpl
     {
         LogDebug1("Switching to Target Rate of: %u\n with Base Clock of: %u\n", target_rate, base_clock);
 
-        PhysicalTimer timer;
-
         uint32_t divider = GetClockDivider(base_clock, target_rate);
 
         const uint32_t max_retries = 1000;
@@ -883,7 +877,7 @@ namespace EmmcImpl
         while (((registers_->status & (StatusRegCommandInhibit | StatusRegDataInhibit)) != 0) &&
                (retries < max_retries))
         {
-            timer.WaitMsec(1);
+            PhysicalTimer::Wait(milliseconds(1));
             retries++;
         }
 
@@ -896,15 +890,15 @@ namespace EmmcImpl
 
         registers_->control[1] = c1;
 
-        timer.WaitMsec(5);
+        PhysicalTimer::Wait(milliseconds(5));
 
         registers_->control[1] = (c1 & 0xffff003f) | divider;
 
-        timer.WaitMsec(5);
+        PhysicalTimer::Wait(milliseconds(5));
 
         registers_->control[1] = c1 | ControlReg1ClockEnable;
 
-        timer.WaitMsec(20); //  Wait a little longer before returning
+        PhysicalTimer::Wait(milliseconds(20)); //  Wait a little longer before returning
 
         return BlockIOResultCodes::SUCCESS;
     }
@@ -928,13 +922,13 @@ namespace EmmcImpl
             return BlockIOResultCodes::EMMC_CLOCK_IS_NOT_STABLE;
         }
 
-        PhysicalTimer().WaitMsec(30);
+        PhysicalTimer::Wait(milliseconds(30));
 
         //  Enable the clock
 
         registers_->control[1] |= 4;
 
-        PhysicalTimer().WaitMsec(30);
+        PhysicalTimer::Wait(milliseconds(30));
 
         return BlockIOResultCodes::SUCCESS;
     }

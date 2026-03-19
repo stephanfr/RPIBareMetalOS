@@ -1,0 +1,1956 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <__platform/cpu_platform_abstractions.h>
+#include <allocator>
+#include <array>
+#include <atomic>
+#include <limits>
+#include <random>
+#include <utility>
+
+#include "__extensions/skiplist_statistics.h"
+#include "epoch_policy"
+#include "epoch_reclaimer_core"
+#define DEFAULT_MAX_LEVELS 16
+
+#ifndef MINIMAL_STD_SKIPLIST_MAX_SLOTS
+// Default to 1M slots (was 16M) to reduce static memory footprint.
+#define MINIMAL_STD_SKIPLIST_MAX_SLOTS (1u << 20)
+#endif
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    namespace skiplist_internal
+    {
+        //  Embedded atomic forward link: packs pointer handle + tombstone flag.
+        //  into a single 64-bit atomic word, eliminating heap allocation and spin
+        //  locks from the CAS path.
+        //
+        //  Layout (64 bits):
+        //    Bit  63       : tombstone flag
+        //    Bits 62-32    : 31-bit slot generation
+        //    Bits 31-0     : 32-bit slot table index (safe on all ARM64 configurations)
+
+        template <typename T, uint32_t SlotsPerBlockShift = 14, typename SlotStatistics = skiplist_extensions::null_skiplist_slot_statistics>
+        struct atomic_forward_link
+        {
+        public:
+            static constexpr uint32_t SLOTS_PER_BLOCK_SHIFT = SlotsPerBlockShift;
+            static constexpr uint32_t SLOTS_PER_BLOCK = 1u << SLOTS_PER_BLOCK_SHIFT; // 16384 default
+            static constexpr uint32_t BLOCK_MASK = SLOTS_PER_BLOCK - 1;
+
+            static constexpr uint32_t MAX_BLOCKS = (MINIMAL_STD_SKIPLIST_MAX_SLOTS + SLOTS_PER_BLOCK - 1) / SLOTS_PER_BLOCK;
+            static constexpr uint32_t MAX_SLOTS = MAX_BLOCKS * SLOTS_PER_BLOCK;
+
+            struct slot_handle
+            {
+                uint32_t slot = 0;
+                uint32_t generation = 0;
+            };
+
+            static inline SlotStatistics slot_stats_;
+
+            struct alignas(64) slot_block
+            {
+                array<atomic<T *>, SLOTS_PER_BLOCK> slot_table_{};
+                array<atomic<uint32_t>, SLOTS_PER_BLOCK> free_next_slot_{};
+                array<atomic<uint32_t>, SLOTS_PER_BLOCK> slot_generation_{};
+                atomic<uint32_t> free_list_head_{0};
+                atomic<uint32_t> active_slots_{0};
+
+                slot_block *retired_next{nullptr};
+                uint64_t retired_epoch_{0};
+
+                slot_block()
+                {
+                    slot_stats_.block_allocated();
+                }
+
+                ~slot_block()
+                {
+                    slot_stats_.block_freed();
+                }
+            };
+
+            static inline atomic<uint32_t> next_free_slot_{1};
+            static inline atomic<uint32_t> high_water_slot_{0};
+            static inline atomic<uint32_t> high_water_block_{0};
+            static inline array<atomic<slot_block *>, MAX_BLOCKS> blocks_{};
+            static inline atomic<uint64_t> partially_free_blocks_{0};
+            static inline atomic<slot_block *> unlinked_blocks_{nullptr};
+
+            static void retire_block(slot_block *block, uint32_t block_idx)
+            {
+                uint32_t expected = 0;
+                if (block->active_slots_.compare_exchange_strong(expected, UINT32_MAX, memory_order_acq_rel, memory_order_acquire))
+                {
+                    partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
+
+                    slot_block *expected_block = block;
+                    if (blocks_[block_idx].compare_exchange_strong(expected_block, nullptr, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        slot_block *old_unlinked = unlinked_blocks_.load(memory_order_relaxed);
+                        do
+                        {
+                            block->retired_next = old_unlinked;
+                        } while (!unlinked_blocks_.compare_exchange_weak(old_unlinked, block, memory_order_release, memory_order_relaxed));
+                    }
+                }
+            }
+
+            static slot_block *extract_unlinked_blocks()
+            {
+                return unlinked_blocks_.exchange(nullptr, memory_order_acq_rel);
+            }
+
+            static uint32_t slot_to_block_index(uint32_t slot)
+            {
+                return slot >> SLOTS_PER_BLOCK_SHIFT;
+            }
+
+            static uint32_t slot_to_block_offset(uint32_t slot)
+            {
+                return slot & BLOCK_MASK;
+            }
+
+            static void update_high_water_slot(uint32_t slot)
+            {
+                uint32_t observed = high_water_slot_.load(memory_order_relaxed);
+
+                while (observed < slot)
+                {
+                    if (high_water_slot_.compare_exchange_weak(observed, slot, memory_order_relaxed, memory_order_relaxed))
+                    {
+                        break;
+                    }
+                }
+            }
+
+            static slot_block *ensure_block_installed(uint32_t block_index)
+            {
+                slot_block *current_block = blocks_[block_index].load(memory_order_acquire);
+                if (current_block != nullptr)
+                {
+                    return current_block;
+                }
+
+                slot_block *new_block = new slot_block();
+
+                if (blocks_[block_index].compare_exchange_strong(current_block, new_block, memory_order_release, memory_order_acquire))
+                {
+                    uint32_t observed_hw = high_water_block_.load(memory_order_relaxed);
+                    while (observed_hw < block_index &&
+                           !high_water_block_.compare_exchange_weak(observed_hw, block_index, memory_order_relaxed, memory_order_relaxed))
+                    {
+                    }
+                    return new_block;
+                }
+                else
+                {
+                    delete new_block;
+                    return current_block;
+                }
+            }
+
+            static slot_handle allocate_slot(T *ptr)
+            {
+                uint64_t available_blocks = partially_free_blocks_.load(memory_order_acquire);
+
+                while (available_blocks != 0)
+                {
+                    uint32_t block_idx = __builtin_ctzll(available_blocks);
+
+                    slot_block *block = blocks_[block_idx].load(memory_order_acquire);
+                    if (block != nullptr)
+                    {
+                        uint32_t active = block->active_slots_.load(memory_order_acquire);
+                        while (active != UINT32_MAX)
+                        {
+                            if (block->active_slots_.compare_exchange_weak(active, active + 1, memory_order_acquire))
+                            {
+                                break;
+                            }
+                        }
+
+                        if (active == UINT32_MAX)
+                        {
+                            partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
+                            available_blocks &= ~(1ULL << (block_idx & 63));
+                            continue;
+                        }
+
+                        uint32_t head = block->free_list_head_.load(memory_order_acquire);
+                        while (head != 0)
+                        {
+                            uint32_t offset = slot_to_block_offset(head);
+                            const uint32_t next = block->free_next_slot_[offset].load(memory_order_acquire);
+
+                            if (block->free_list_head_.compare_exchange_weak(head, next, memory_order_acq_rel))
+                            {
+                                if (next == 0)
+                                {
+                                    partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
+                                }
+
+                                update_high_water_slot(head);
+
+                                uint32_t generation = block->slot_generation_[offset].load(memory_order_relaxed);
+                                generation = (generation + 1u) & GENERATION_MASK;
+                                if (generation == 0)
+                                {
+                                    generation = 1;
+                                }
+
+                                block->slot_generation_[offset].store(generation, memory_order_release);
+                                block->slot_table_[offset].store(ptr, memory_order_release);
+                                return {head, generation};
+                            }
+                        }
+
+                        if (block->active_slots_.fetch_sub(1, memory_order_release) == 1)
+                        {
+                            retire_block(block, block_idx);
+                        }
+
+                        partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
+                    }
+                    else
+                    {
+                        partially_free_blocks_.fetch_and(~(1ULL << (block_idx & 63)), memory_order_release);
+                    }
+
+                    available_blocks = partially_free_blocks_.load(memory_order_acquire);
+                }
+
+                uint32_t idx = next_free_slot_.fetch_add(1, memory_order_acq_rel);
+                if (idx < MAX_SLOTS)
+                {
+                    uint32_t block_idx = slot_to_block_index(idx);
+                    uint32_t offset = slot_to_block_offset(idx);
+
+                    slot_block *block = ensure_block_installed(block_idx);
+
+                    block->active_slots_.fetch_add(1, memory_order_relaxed);
+
+                    update_high_water_slot(idx);
+
+                    const uint32_t generation = 1;
+                    block->slot_generation_[offset].store(generation, memory_order_release);
+                    block->slot_table_[offset].store(ptr, memory_order_release);
+                    block->free_next_slot_[offset].store(0, memory_order_relaxed);
+                    return {idx, generation};
+                }
+
+                return {0, 0};
+            }
+
+            static void free_slot(uint32_t slot)
+            {
+                if ((slot == 0) || (slot >= MAX_SLOTS))
+                    return;
+
+                uint32_t block_idx = slot_to_block_index(slot);
+                uint32_t offset = slot_to_block_offset(slot);
+                slot_block *block = blocks_[block_idx].load(memory_order_acquire);
+                if (block == nullptr)
+                    return; // Should not happen for a valid allocated slot
+
+                uint32_t head = block->free_list_head_.load(memory_order_acquire);
+                while (true)
+                {
+                    // Never store freelist metadata in slot_table_. Readers of
+                    // unpack_ptr() must only ever observe real node pointers or nullptr.
+                    block->slot_table_[offset].store(nullptr, memory_order_release);
+                    block->free_next_slot_[offset].store(head, memory_order_release);
+
+                    if (block->free_list_head_.compare_exchange_weak(head, slot, memory_order_acq_rel))
+                    {
+                        partially_free_blocks_.fetch_or(1ULL << (block_idx & 63), memory_order_release);
+                        if (block->active_slots_.fetch_sub(1, memory_order_release) == 1)
+                        {
+                            retire_block(block, block_idx);
+                        }
+                        break;
+                    }
+                }
+            }
+
+        private:
+            static constexpr uint64_t TOMBSTONE_BIT = uint64_t{1} << 63;
+            static constexpr int GENERATION_SHIFT = 32;
+            static constexpr uint32_t GENERATION_MASK = 0x7FFFFFFFu;
+            static constexpr uint64_t SLOT_MASK = (uint64_t{1} << 32) - 1;
+
+            static uint32_t pointer_slot_or_zero(T *ptr)
+            {
+                if (ptr == nullptr)
+                {
+                    return 0;
+                }
+
+                const uint32_t slot = ptr->internal_slot_;
+                if ((slot == 0) || (slot >= MAX_SLOTS))
+                {
+                    return 0;
+                }
+
+                return slot;
+            }
+
+            static uint32_t pointer_generation_or_zero(T *ptr)
+            {
+                if (ptr == nullptr)
+                {
+                    return 0;
+                }
+
+                const uint32_t slot = pointer_slot_or_zero(ptr);
+                if (slot == 0)
+                {
+                    return 0;
+                }
+
+                const uint32_t generation = (ptr->internal_generation_ & GENERATION_MASK);
+                if (generation == 0)
+                {
+                    return 0;
+                }
+
+                return generation;
+            }
+
+            public:
+            static uint64_t pack_slot_generation(uint32_t slot, uint32_t generation, bool tombstoned)
+            {
+                uint64_t v = static_cast<uint64_t>(slot) & SLOT_MASK;
+                v |= static_cast<uint64_t>(generation & GENERATION_MASK) << GENERATION_SHIFT;
+                if (tombstoned)
+                    v |= TOMBSTONE_BIT;
+                return v;
+            }
+
+            static uint64_t pack(T *ptr, bool tombstoned)
+            {
+                return pack_slot_generation(pointer_slot_or_zero(ptr), pointer_generation_or_zero(ptr), tombstoned);
+            }
+
+            static T *unpack_ptr(uint64_t v)
+            {
+                uint32_t slot = static_cast<uint32_t>(v & SLOT_MASK);
+                if ((slot == 0) || (slot >= MAX_SLOTS))
+                    return nullptr;
+
+                const uint32_t handle_generation = unpack_generation(v);
+
+                uint32_t block_idx = slot_to_block_index(slot);
+                uint32_t offset = slot_to_block_offset(slot);
+                slot_block *block = blocks_[block_idx].load(memory_order_acquire);
+                if (block == nullptr)
+                    return nullptr;
+
+                const uint32_t table_generation = block->slot_generation_[offset].load(memory_order_acquire);
+                if ((handle_generation == 0) || (table_generation != handle_generation))
+                {
+                    return nullptr;
+                }
+
+                return block->slot_table_[offset].load(memory_order_acquire);
+            }
+
+            static constexpr bool is_tombstoned_val(uint64_t v)
+            {
+                return (v & TOMBSTONE_BIT) != 0;
+            }
+
+            static constexpr uint32_t unpack_generation(uint64_t v)
+            {
+                return static_cast<uint32_t>((v >> GENERATION_SHIFT) & GENERATION_MASK);
+            }
+
+        public:
+            static uint32_t slot_high_water_mark()
+            {
+                return high_water_slot_.load(memory_order_relaxed);
+            }
+
+            static void reset_slot_high_water_mark()
+            {
+                high_water_slot_.store(0, memory_order_relaxed);
+            }
+            atomic_forward_link(const atomic_forward_link &) = delete;
+            atomic_forward_link &operator=(const atomic_forward_link &) = delete;
+            atomic_forward_link(atomic_forward_link &&) = delete;
+            atomic_forward_link &operator=(atomic_forward_link &&) = delete;
+
+            atomic_forward_link()
+            {
+                packed_.store(0, memory_order_relaxed);
+            }
+
+            ~atomic_forward_link() = default;
+
+            //  Store a pointer (only for nodes not yet visible to other threads)
+
+            void set(T *ptr)
+            {
+                packed_.store(pack(ptr, false), memory_order_release);
+            }
+
+            //  Load just the pointer
+
+            T *get_reference() const
+            {
+                return unpack_ptr(packed_.load(memory_order_acquire));
+            }
+
+            //  Atomic snapshot of pointer and tombstone state
+
+            T *get(bool &is_tombstoned) const
+            {
+                const uint64_t v = packed_.load(memory_order_acquire);
+                is_tombstoned = is_tombstoned_val(v);
+                return unpack_ptr(v);
+            }
+
+            //  Mark this link as tombstoned (CAS loop, preserves pointer)
+            //
+            //  We manipulate the raw bits directly, preserving slot-index and
+            //  generation while only toggling the tombstone bit.
+
+            void soft_delete()
+            {
+                while (true)
+                {
+                    uint64_t current = packed_.load(memory_order_acquire);
+
+                    if (is_tombstoned_val(current))
+                    {
+                        return;
+                    }
+
+                    const uint64_t desired = current | TOMBSTONE_BIT;
+
+                    if (packed_.compare_exchange_strong(current, desired, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        return;
+                    }
+                }
+            }
+
+            //  CAS: succeeds only if current pointer == expected_value and link is
+            //  not tombstoned.  On success, atomically sets the pointer to new_value
+            //  and optionally marks the link tombstoned (mark_tombstoned == true).
+            //
+            //  We compare handle identity (slot + generation) directly from the
+            //  packed value and expected pointer metadata. This guarantees stale
+            //  slot reuse does not falsely match expected_value.
+
+            bool compare_exchange_strong(T *expected_value, T *new_value, bool mark_tombstoned = false)
+            {
+                uint64_t current = packed_.load(memory_order_acquire);
+
+                const uint32_t expected_slot = pointer_slot_or_zero(expected_value);
+                const uint32_t expected_generation = pointer_generation_or_zero(expected_value);
+
+                if (((current & SLOT_MASK) != static_cast<uint64_t>(expected_slot)) ||
+                    (unpack_generation(current) != expected_generation) ||
+                    is_tombstoned_val(current))
+                {
+                    return false;
+                }
+
+                const uint64_t desired = pack(new_value, mark_tombstoned);
+
+                return packed_.compare_exchange_strong(current, desired, memory_order_acq_rel, memory_order_acquire);
+            }
+
+        private:
+            atomic<uint64_t> packed_;
+        };
+
+        template <typename KeyType, typename ValueType, size_t NumCPUs, int32_t MAX_LEVELS = DEFAULT_MAX_LEVELS, uint32_t SlotsPerBlockShift = 14, typename Statistics = skiplist_extensions::null_skiplist_statistics> //  NumCPUs: CPU slot array size (mandatory — sizes cpu_slots_); MAX_LEVELS must be signed as we iterate down to and include index 0
+        class skip_list : public Statistics
+        {
+        private:
+            using slot_statistics_type = typename Statistics::slot_statistics_type;
+            struct skip_node;
+            using forward_link_type = atomic_forward_link<skip_node, SlotsPerBlockShift, slot_statistics_type>;
+
+        private:
+            static constexpr uint32_t MAX_INSERT_LEVEL0_RETRIES = 1024;
+            static constexpr uint32_t MAX_INSERT_UPPER_LEVEL_RETRIES = 256;
+            static constexpr uint32_t MAX_REMOVE_MARK_RETRIES_PER_LEVEL = 256;
+            static constexpr uint32_t MAX_REMOVE_BOTTOM_RETRIES = 1024;
+            static constexpr uint32_t MAX_INSERT_LOCAL_ASSIST_FAILURES = 8;
+            static constexpr uint32_t MAX_REMOVE_LOCAL_ASSIST_FAILURES = 8;
+            static constexpr uint32_t BACKOFF_MAX_RELAX_SPINS = 32;
+            static constexpr uint64_t EPOCH_RECLAIM_LAG = 2;
+            static constexpr uint32_t EPOCH_RECLAIM_THROTTLE_INITIAL = 16;
+            static constexpr uint32_t EPOCH_RECLAIM_THROTTLE_MIN = 4;
+            static constexpr uint32_t DEBUG_MAX_VALIDATION_STEPS = 1000000;
+
+            enum class unlink_state : uint8_t
+            {
+                ACTIVE,
+                FULLY_UNLINKED
+            };
+
+            struct alignas(64) skip_node
+            {
+                // Constructor for standard nodes
+                skip_node(const KeyType k, const ValueType &v, const int next_node_size) : key(k), value(v), top_level(next_node_size)
+                {
+                    const auto slot = forward_link_type::allocate_slot(this);
+                    internal_slot_ = slot.slot;
+                    internal_generation_ = slot.generation;
+                    if (internal_slot_ != 0)
+                    {
+                        intialize_next_nodes(next_node_size, nullptr);
+                    }
+                }
+
+                // Constructor for sentinel nodes head and NIL
+                skip_node(const KeyType k, const int next_node_size, skip_node *next_node_target) : key(k), top_level(next_node_size)
+                {
+                    const auto slot = forward_link_type::allocate_slot(this);
+                    internal_slot_ = slot.slot;
+                    internal_generation_ = slot.generation;
+                    intialize_next_nodes(next_node_size, next_node_target);
+                }
+
+                ~skip_node()
+                {
+                    forward_link_type::free_slot(internal_slot_);
+                }
+
+                skip_node(const skip_node &) = delete;
+                skip_node &operator=(const skip_node &) = delete;
+                skip_node(skip_node &&) = delete;
+                skip_node &operator=(skip_node &&) = delete;
+
+                void intialize_next_nodes(const int next_node_size, skip_node *next_node_target)
+                {
+                    for (auto i = 0; i != next_node_size; ++i)
+                    {
+                        next_node[i].set(next_node_target);
+                    }
+                }
+
+                // Hot metadata: checked by every traversing thread — placed first
+                // so they share the first cache line with key/value.
+                atomic<int32_t> upper_levels_remaining_{0};
+                atomic<uint8_t> unlink_state_{static_cast<uint8_t>(unlink_state::ACTIVE)};
+                atomic<bool> retirement_enqueued_{false};
+
+                uint32_t internal_slot_;
+                uint32_t internal_generation_;
+                KeyType key;
+                ValueType value;
+                int top_level;
+
+                skip_node *retired_next = nullptr;
+                uint64_t retired_epoch_ = 0;
+
+                // Forward links: each packs slot generation + slot index + tombstone in 64 bits.
+                // Placed after hot metadata to avoid polluting the first cache line.
+                array<forward_link_type, MAX_LEVELS + 1> next_node;
+            };
+
+            using slot_policy_type = bare_metal_cpu_slot_policy<skip_node, NumCPUs, EPOCH_RECLAIM_THROTTLE_INITIAL, EPOCH_RECLAIM_THROTTLE_MIN>;
+            using epoch_reclaimer_type = epoch_reclaimer_core<slot_policy_type, NumCPUs, EPOCH_RECLAIM_LAG>;
+
+        public:
+            using key_type = KeyType;
+            using value_type = ValueType;
+
+            using allocator_type = allocator<value_type>;
+
+            class iterator
+            {
+            public:
+                using value_type = minstd::pair<const KeyType, ValueType>;
+                using pointer = value_type*;
+                using reference = value_type&;
+
+            private:
+                skip_list* list_;
+                uint32_t current_slot_;
+                uint32_t current_generation_;
+                alignas(value_type) unsigned char cached_kv_storage_[sizeof(value_type)];
+                bool has_value_;
+
+                value_type* cached_kv() { return reinterpret_cast<value_type*>(cached_kv_storage_); }
+                const value_type* cached_kv() const { return reinterpret_cast<const value_type*>(cached_kv_storage_); }
+
+                void update_cache(const KeyType& k, const ValueType& v)
+                {
+                    if (has_value_)
+                    {
+                        cached_kv()->~value_type();
+                    }
+                    new (cached_kv_storage_) value_type(k, v);
+                    has_value_ = true;
+                }
+
+                void clear_cache()
+                {
+                    if (has_value_)
+                    {
+                        cached_kv()->~value_type();
+                        has_value_ = false;
+                    }
+                }
+
+                void attach_to_node(skip_node* node)
+                {
+                    if (node != nullptr && node != list_->NIL_)
+                    {
+                        current_slot_ = node->internal_slot_;
+                        current_generation_ = node->internal_generation_;
+                        update_cache(node->key, node->value);
+                    }
+                    else
+                    {
+                        current_slot_ = 0;
+                        current_generation_ = 0;
+                        clear_cache();
+                    }
+                }
+
+            public:
+                iterator() : list_(nullptr), current_slot_(0), current_generation_(0), has_value_(false) {}
+
+                iterator(skip_list* list, skip_node* start_node)
+                    : list_(list), current_slot_(0), current_generation_(0), has_value_(false)
+                {
+                    attach_to_node(start_node);
+                }
+
+                iterator(const iterator& other)
+                    : list_(other.list_), current_slot_(other.current_slot_), current_generation_(other.current_generation_), has_value_(false)
+                {
+                    if (other.has_value_)
+                    {
+                        update_cache(other.cached_kv()->first, other.cached_kv()->second);
+                    }
+                }
+
+                iterator& operator=(const iterator& other)
+                {
+                    if (this != &other)
+                    {
+                        list_ = other.list_;
+                        current_slot_ = other.current_slot_;
+                        current_generation_ = other.current_generation_;
+                        if (other.has_value_)
+                        {
+                            update_cache(other.cached_kv()->first, other.cached_kv()->second);
+                        }
+                        else
+                        {
+                            clear_cache();
+                        }
+                    }
+                    return *this;
+                }
+
+                ~iterator()
+                {
+                    clear_cache();
+                }
+
+                reference operator*()  { return *cached_kv(); }
+                pointer operator->()  { return cached_kv(); }
+
+                iterator& operator++()
+                {
+                    if (!has_value_) return *this;
+
+                    epoch_read_section_guard read_guard(list_);
+
+                    uint64_t packed_link = forward_link_type::pack_slot_generation(current_slot_, current_generation_, false);
+                    skip_node* curr_node = forward_link_type::unpack_ptr(packed_link);
+                    bool is_tombstoned = false;
+
+                    if (curr_node != nullptr)
+                    {
+                        // Node is alive, find next
+                        skip_node* next_n = curr_node->next_node[0].get_reference();
+                        while (next_n != nullptr && next_n != list_->NIL_)
+                        {
+                            next_n->next_node[0].get(is_tombstoned);
+                            if (!is_tombstoned && next_n->key > cached_kv()->first)
+                            {
+                                attach_to_node(next_n);
+                                return *this;
+                            }
+                            next_n = next_n->next_node[0].get_reference();
+                        }
+                        attach_to_node(nullptr);
+                        return *this;
+                    }
+                    else
+                    {
+                        // Node was reclaimed, leapfrog!
+                        skip_node* next_n = list_->find_lower_bound_after(cached_kv()->first);
+                        attach_to_node(next_n);
+                        return *this;
+                    }
+                }
+
+                iterator operator++(int)
+                {
+                    iterator tmp = *this;
+                    ++(*this);
+                    return tmp;
+                }
+
+                bool operator==(const iterator& other) const
+                {
+                    return list_ == other.list_ && current_slot_ == other.current_slot_ && current_generation_ == other.current_generation_;
+                }
+
+                bool operator!=(const iterator& other) const
+                {
+                    return !(*this == other);
+                }
+            };
+
+            class const_iterator
+            {
+            public:
+                using value_type = minstd::pair<const KeyType, ValueType>;
+                using pointer = const value_type*;
+                using reference = const value_type&;
+
+            private:
+                const skip_list* list_;
+                uint32_t current_slot_;
+                uint32_t current_generation_;
+                alignas(value_type) unsigned char cached_kv_storage_[sizeof(value_type)];
+                bool has_value_;
+
+                value_type* cached_kv() { return reinterpret_cast<value_type*>(cached_kv_storage_); }
+                const value_type* cached_kv() const { return reinterpret_cast<const value_type*>(cached_kv_storage_); }
+
+                void update_cache(const KeyType& k, const ValueType& v)
+                {
+                    if (has_value_)
+                    {
+                        cached_kv()->~value_type();
+                    }
+                    new (cached_kv_storage_) value_type(k, v);
+                    has_value_ = true;
+                }
+
+                void clear_cache()
+                {
+                    if (has_value_)
+                    {
+                        cached_kv()->~value_type();
+                        has_value_ = false;
+                    }
+                }
+
+                void attach_to_node(skip_node* node)
+                {
+                    if (node != nullptr && node != list_->NIL_)
+                    {
+                        current_slot_ = node->internal_slot_;
+                        current_generation_ = node->internal_generation_;
+                        update_cache(node->key, node->value);
+                    }
+                    else
+                    {
+                        current_slot_ = 0;
+                        current_generation_ = 0;
+                        clear_cache();
+                    }
+                }
+
+            public:
+                const_iterator() : list_(nullptr), current_slot_(0), current_generation_(0), has_value_(false) {}
+
+                const_iterator(const skip_list* list, skip_node* start_node)
+                    : list_(list), current_slot_(0), current_generation_(0), has_value_(false)
+                {
+                    attach_to_node(start_node);
+                }
+
+                const_iterator(const const_iterator& other)
+                    : list_(other.list_), current_slot_(other.current_slot_), current_generation_(other.current_generation_), has_value_(false)
+                {
+                    if (other.has_value_)
+                    {
+                        update_cache(other.cached_kv()->first, other.cached_kv()->second);
+                    }
+                }
+
+                const_iterator& operator=(const const_iterator& other)
+                {
+                    if (this != &other)
+                    {
+                        list_ = other.list_;
+                        current_slot_ = other.current_slot_;
+                        current_generation_ = other.current_generation_;
+                        if (other.has_value_)
+                        {
+                            update_cache(other.cached_kv()->first, other.cached_kv()->second);
+                        }
+                        else
+                        {
+                            clear_cache();
+                        }
+                    }
+                    return *this;
+                }
+
+                ~const_iterator()
+                {
+                    clear_cache();
+                }
+
+                reference operator*() const { return *cached_kv(); }
+                pointer operator->() const { return cached_kv(); }
+
+                const_iterator& operator++()
+                {
+                    if (!has_value_) return *this;
+
+                    epoch_read_section_guard read_guard(list_);
+
+                    uint64_t packed_link = forward_link_type::pack_slot_generation(current_slot_, current_generation_, false);
+                    skip_node* curr_node = forward_link_type::unpack_ptr(packed_link);
+                    bool is_tombstoned = false;
+
+                    if (curr_node != nullptr)
+                    {
+                        // Node is alive, find next
+                        skip_node* next_n = curr_node->next_node[0].get_reference();
+                        while (next_n != nullptr && next_n != list_->NIL_)
+                        {
+                            next_n->next_node[0].get(is_tombstoned);
+                            if (!is_tombstoned && next_n->key > cached_kv()->first)
+                            {
+                                attach_to_node(next_n);
+                                return *this;
+                            }
+                            next_n = next_n->next_node[0].get_reference();
+                        }
+                        attach_to_node(nullptr);
+                        return *this;
+                    }
+                    else
+                    {
+                        // Node was reclaimed, leapfrog!
+                        skip_node* next_n = list_->find_lower_bound_after(cached_kv()->first);
+                        attach_to_node(next_n);
+                        return *this;
+                    }
+                }
+
+                const_iterator operator++(int)
+                {
+                    const_iterator tmp = *this;
+                    ++(*this);
+                    return tmp;
+                }
+
+                bool operator==(const const_iterator& other) const
+                {
+                    return list_ == other.list_ && current_slot_ == other.current_slot_ && current_generation_ == other.current_generation_;
+                }
+
+                bool operator!=(const const_iterator& other) const
+                {
+                    return !(*this == other);
+                }
+            };
+
+            iterator begin()
+            {
+                epoch_read_section_guard read_guard(this);
+                skip_node* next_n = head_->next_node[0].get_reference();
+                bool is_tombstoned = false;
+
+                while (next_n != nullptr && next_n != NIL_)
+                {
+                    next_n->next_node[0].get(is_tombstoned);
+                    if (!is_tombstoned)
+                    {
+                        return iterator(this, next_n);
+                    }
+                    next_n = next_n->next_node[0].get_reference();
+                }
+                return iterator(this, nullptr);
+            }
+
+            iterator end()
+            {
+                return iterator(this, nullptr);
+            }
+
+            const_iterator begin() const
+            {
+                epoch_read_section_guard read_guard(this);
+                skip_node* next_n = head_->next_node[0].get_reference();
+                bool is_tombstoned = false;
+
+                while (next_n != nullptr && next_n != NIL_)
+                {
+                    next_n->next_node[0].get(is_tombstoned);
+                    if (!is_tombstoned)
+                    {
+                        return const_iterator(this, next_n);
+                    }
+                    next_n = next_n->next_node[0].get_reference();
+                }
+                return const_iterator(this, nullptr);
+            }
+
+            const_iterator end() const
+            {
+                return const_iterator(this, nullptr);
+            }
+
+
+            skip_list()
+                : epoch_reclaimer_(slot_policy_)
+            {
+                NIL_ = new skip_node(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
+                head_ = new skip_node(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL_);
+            }
+
+            ~skip_list()
+            {
+                skip_node *current_node = head_->next_node[0].get_reference();
+
+                while (current_node != NIL_)
+                {
+                    skip_node *next_node = current_node->next_node[0].get_reference();
+
+                    if (!current_node->retirement_enqueued_.load(memory_order_acquire))
+                    {
+                        delete current_node;
+                    }
+
+                    current_node = next_node;
+                }
+
+                reclaim_all_retired_nodes();
+
+                delete head_;
+                delete NIL_;
+            };
+
+            iterator find(const KeyType search_key)
+            {
+                epoch_read_section_guard read_guard(this);
+
+                bool is_tombstoned = false;
+                skip_node *pred = head_, *curr = nullptr, *succ = nullptr;
+
+                // traverse from top of head
+                for (int level = MAX_LEVELS; level >= 0; --level)
+                {
+                    curr = pred->next_node[level].get_reference();
+
+                    while (true)
+                    {
+                        if (curr == nullptr)
+                        {
+                            curr = NIL_;
+                            break;
+                        }
+
+                        succ = curr->next_node[level].get(is_tombstoned);
+
+                        while (is_tombstoned)
+                        {
+                            skip_node *tombstoned_node = curr;
+                            curr = succ;
+
+                            if (curr == nullptr)
+                            {
+                                curr = NIL_;
+                                is_tombstoned = false;
+                                break;
+                            }
+
+                            succ = curr->next_node[level].get(is_tombstoned);
+                            if (level > 0)
+                            {
+                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr))
+                                {
+                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_release);
+                                }
+                            }
+                            else
+                            {
+                                if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
+                                {
+                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
+                                    {
+                                        tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
+                                        retire_node(tombstoned_node, read_guard.cpu_slot_);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (curr->key < search_key)
+                        {
+                            pred = curr;
+                            curr = succ;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if ((curr != nullptr) && (curr->key == search_key))
+                {
+                    return iterator(this, curr);
+                }
+                return end();
+            }
+
+            const_iterator find(const KeyType search_key) const
+            {
+                epoch_read_section_guard read_guard(this);
+
+                bool is_tombstoned = false;
+                skip_node *pred = head_, *curr = nullptr, *succ = nullptr;
+
+                for (int level = MAX_LEVELS; level >= 0; --level)
+                {
+                    curr = pred->next_node[level].get_reference();
+                    while (true)
+                    {
+                        if (curr == nullptr)
+                        {
+                            curr = NIL_;
+                            break;
+                        }
+                        succ = curr->next_node[level].get(is_tombstoned);
+                        while (is_tombstoned)
+                        {
+                            skip_node *tombstoned_node = curr;
+                            curr = succ;
+                            if (curr == nullptr)
+                            {
+                                curr = NIL_;
+                                is_tombstoned = false;
+                                break;
+                            }
+                            succ = curr->next_node[level].get(is_tombstoned);
+                            if (level > 0)
+                            {
+                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr))
+                                {
+                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_release);
+                                }
+                            }
+                            else
+                            {
+                                if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
+                                {
+                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
+                                    {
+                                        tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
+                                        // cannot retire here in const gracefully without mutable state, but this is a lock-free structure so const methods often do cleanup or we can just skip cleanup in const methods.
+                                        // Wait, the structure itself might have mutable members. Actually retire_node might be const if it uses mutable. Let's just cast away constness for the list to allow cleanup, since it's an internal optimization.
+                                        const_cast<skip_list*>(this)->retire_node(tombstoned_node, read_guard.cpu_slot_);
+                                    }
+                                }
+                            }
+                        }
+                        if (curr->key < search_key)
+                        {
+                            pred = curr;
+                            curr = succ;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+
+                if ((curr != nullptr) && (curr->key == search_key))
+                {
+                    return const_iterator(this, curr);
+                }
+                return end();
+            }
+
+            bool insert(const KeyType key, const ValueType &value)
+            {
+                epoch_read_section_guard read_guard(this);
+
+                uint32_t insert_level0_retry_count = 0;
+                uint32_t insert_level0_backoff = 0;
+                uint32_t insert_upper_level_backoff = 0;
+
+                int top_level = random_level();
+
+                skip_node *preds[MAX_LEVELS + 1];
+                skip_node *succs[MAX_LEVELS + 1];
+
+                skip_node *new_node = nullptr;
+
+            RETRY_INSERT:
+                while (true)
+                {
+                    find_result found = find_with_nodelists(key, preds, succs, read_guard.cpu_slot_);
+
+                    if (found == find_result::FOUND)
+                    {
+                        delete new_node;
+                        return false;
+                    }
+                    else
+                    {
+                        if (new_node == nullptr)
+                        {
+                            new_node = new skip_node(key, value, top_level);
+                            if (new_node->internal_slot_ == 0)
+                            {
+                                delete new_node;
+                                return false;
+                            }
+                        }
+
+                        for (auto level = 1; level < top_level; ++level)
+                        {
+                            auto succ = succs[level];
+                            new_node->next_node[level].set(succ);
+                        }
+
+                        auto pred = preds[0];
+                        auto succ = succs[0];
+
+                        new_node->next_node[0].set(succ);
+
+                        while (true)
+                        {
+                            if (pred->next_node[0].compare_exchange_strong(succ, new_node))
+                            {
+                                insert_level0_backoff = 0;
+                                break;
+                            }
+
+                            ++insert_level0_retry_count;
+
+                            if (insert_level0_retry_count >= MAX_INSERT_LEVEL0_RETRIES)
+                            {
+                                delete new_node;
+                                return false;
+                            }
+
+                            backoff(insert_level0_backoff, read_guard.cpu_slot_);
+
+                            // Rightward traversal on level 0 upon CAS failure
+                            bool is_tombstoned = false;
+
+                            pred->next_node[0].get(is_tombstoned);
+                            if (is_tombstoned)
+                            {
+                                goto RETRY_INSERT;
+                            }
+
+                            bool soft_deleted = false;
+                            uint32_t local_assist_failures = 0;
+
+                            skip_node *curr = pred->next_node[0].get_reference();
+
+                            while (true)
+                            {
+                                if (curr == nullptr)
+                                {
+                                    // Stale handle observed during retry traversal.
+                                    // Restart to refresh preds/succs from a clean search.
+                                    goto RETRY_INSERT;
+                                }
+
+                                succ = curr->next_node[0].get(is_tombstoned);
+
+                                while (is_tombstoned)
+                                {
+                                    skip_node *tombstoned_node = curr;
+
+                                    if (curr->key == key)
+                                    {
+                                        soft_deleted = true;
+                                    }
+
+                                    curr = succ;
+
+                                    if (curr == nullptr)
+                                    {
+                                        // Stale handle observed while helping tombstone unlink.
+                                        goto RETRY_INSERT;
+                                    }
+
+                                    succ = curr->next_node[0].get(is_tombstoned);
+
+                                    if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
+                                    {
+                                        if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
+                                        {
+                                            tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
+                                            retire_node(tombstoned_node, read_guard.cpu_slot_);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        ++local_assist_failures;
+
+                                        if (local_assist_failures >= MAX_INSERT_LOCAL_ASSIST_FAILURES)
+                                        {
+                                            goto RETRY_INSERT;
+                                        }
+
+                                        backoff(insert_level0_backoff, read_guard.cpu_slot_);
+                                    }
+                                }
+
+                                if (curr->key < key)
+                                {
+                                    pred = curr;
+                                    curr = succ;
+                                }
+                                else
+                                {
+                                    break;
+                                }
+                            }
+
+                            if ((curr->key == key) || soft_deleted)
+                            {
+                                delete new_node;
+                                return false;
+                            }
+
+                            preds[0] = pred;
+                            succs[0] = curr;
+                            succ = curr; // New expected reference for CAS failure retry
+                            new_node->next_node[0].set(succ);
+                        }
+
+                        for (auto level = 1; level < top_level; ++level)
+                        {
+                            uint32_t upper_level_retry_count = 0;
+
+                            while (true)
+                            {
+                                pred = preds[level];
+                                succ = succs[level];
+
+                                if (pred->next_node[level].compare_exchange_strong(succ, new_node))
+                                {
+                                    new_node->upper_levels_remaining_.fetch_add(1, memory_order_release);
+                                    insert_upper_level_backoff = 0;
+                                    break;
+                                }
+
+                                ++upper_level_retry_count;
+
+                                if (upper_level_retry_count >= MAX_INSERT_UPPER_LEVEL_RETRIES)
+                                {
+                                    break;
+                                }
+
+                                backoff(insert_upper_level_backoff, read_guard.cpu_slot_);
+
+                                find_with_nodelists(key, preds, succs, read_guard.cpu_slot_); // CAS failed for upper level, search node to update preds and succs
+                            }
+                        }
+
+                        return true;
+                    }
+                }
+            }
+
+            bool remove(const KeyType key)
+            {
+                epoch_read_section_guard read_guard(this);
+
+                skip_node *preds[MAX_LEVELS + 1];
+                skip_node *succs[MAX_LEVELS + 1];
+                skip_node *succ;
+
+            RETRY_REMOVE:
+                while (true)
+                {
+                    find_result found = find_with_nodelists(key, preds, succs, read_guard.cpu_slot_);
+
+                    if (found != find_result::FOUND)
+                    {
+                        return false; // nothing to delete
+                    }
+                    else
+                    {
+                        auto node_to_remove = succs[0];
+
+                        //  Mark as deleted on higher levels
+
+                        bool is_tombstoned = false;
+
+                        for (auto level = node_to_remove->top_level - 1; level >= 1; --level)
+                        {
+                            succ = node_to_remove->next_node[level].get(is_tombstoned);
+                            uint32_t mark_retry_count = 0;
+                            uint32_t mark_retry_backoff = 0;
+
+                            while (!is_tombstoned)
+                            {
+                                node_to_remove->next_node[level].soft_delete();
+                                succ = node_to_remove->next_node[level].get(is_tombstoned);
+
+                                ++mark_retry_count;
+
+                                if (mark_retry_count >= MAX_REMOVE_MARK_RETRIES_PER_LEVEL)
+                                {
+                                    goto RETRY_REMOVE;
+                                }
+
+                                backoff(mark_retry_backoff, read_guard.cpu_slot_);
+                            }
+                        }
+
+                        //  Bottom level
+
+                        is_tombstoned = false;
+                        succ = node_to_remove->next_node[0].get(is_tombstoned);
+                        uint32_t bottom_retry_count = 0;
+                        uint32_t bottom_retry_backoff = 0;
+
+                        auto pred = preds[0];
+
+                        while (true)
+                        {
+                            bool success = node_to_remove->next_node[0].compare_exchange_strong(succ, succ, true);
+                            succ = node_to_remove->next_node[0].get(is_tombstoned);
+
+                            if (success)
+                            {
+                                // this thread soft deleted the node
+
+                                if (node_to_remove->upper_levels_remaining_.load(memory_order_acquire) <= 0)
+                                {
+                                    if (pred->next_node[0].compare_exchange_strong(node_to_remove, succ))
+                                    {
+                                        node_to_remove->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
+                                        retire_node(node_to_remove, read_guard.cpu_slot_);
+                                    }
+                                }
+
+                                auto &slot_state = slot_policy_.slot(read_guard.cpu_slot_);
+
+                                slot_state.increment_reclaim_throttle();
+
+                                if (slot_state.reclaim_throttle_triggered())
+                                {
+                                    auto [nodes_freed, epoch_advanced] = advance_and_reclaim(read_guard.cpu_slot_);
+                                    slot_state.adapt_reclaim_throttle(nodes_freed, epoch_advanced);
+                                }
+
+                                return true;
+                            }
+                            else if (is_tombstoned)
+                            {
+                                // another thread already soft deleted the node
+
+                                return false;
+                            }
+
+                            ++bottom_retry_count;
+
+                            if (bottom_retry_count >= MAX_REMOVE_BOTTOM_RETRIES)
+                            {
+                                // Avoid livelock under heavy contention on the same key.
+                                // A future operation can retry from a fresh call boundary.
+                                return false;
+                            }
+
+                            backoff(bottom_retry_backoff, read_guard.cpu_slot_);
+
+                            bool soft_deleted = false;
+                            uint32_t local_assist_failures = 0;
+                            skip_node *curr = pred->next_node[0].get_reference();
+
+                            while (true)
+                            {
+                                succ = curr->next_node[0].get(is_tombstoned);
+
+                                while (is_tombstoned)
+                                {
+                                    skip_node *tombstoned_node = curr;
+                                    if (curr->key == key)
+                                    {
+                                        soft_deleted = true;
+                                    }
+                                    curr = succ;
+                                    succ = curr->next_node[0].get(is_tombstoned);
+
+                                    if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
+                                    {
+                                        if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
+                                        {
+                                            tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
+                                            retire_node(tombstoned_node, read_guard.cpu_slot_);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        ++local_assist_failures;
+
+                                        if (local_assist_failures >= MAX_REMOVE_LOCAL_ASSIST_FAILURES)
+                                        {
+                                            // Avoid spinning forever in local assist when
+                                            // upper-level progress does not converge.
+                                            return false;
+                                        }
+
+                                        backoff(bottom_retry_backoff, read_guard.cpu_slot_);
+                                    }
+                                }
+                                if (curr->key < key)
+                                {
+                                    pred = curr;
+                                    curr = succ;
+                                }
+                                else
+                                {
+                                    break;
+                                }
+                            }
+                            if (soft_deleted || curr->key != key)
+                            {
+                                return false;
+                            }
+                            node_to_remove = curr;
+                            succ = curr->next_node[0].get(is_tombstoned);
+                        }
+                    }
+                }
+            }
+
+            uint32_t size() const
+            {
+                epoch_read_section_guard read_guard(this);
+
+                auto current_node = head_->next_node[0].get_reference();
+
+                uint32_t size = 0;
+                bool node_is_tombstoned = false;
+
+                while (current_node->key != std::numeric_limits<KeyType>::max())
+                {
+                    current_node->next_node[0].get(node_is_tombstoned);
+
+                    if (!node_is_tombstoned)
+                    {
+                        ++size;
+                    }
+
+                    current_node = current_node->next_node[0].get_reference();
+                }
+
+                return size;
+            }
+
+            static uint32_t slot_high_water_mark()
+            {
+                return forward_link_type::slot_high_water_mark();
+            }
+
+            static void reset_slot_high_water_mark()
+            {
+                forward_link_type::reset_slot_high_water_mark();
+            }
+
+            static uint32_t active_blocks()
+            {
+                return forward_link_type::slot_stats_.active_blocks();
+            }
+
+            static uint32_t blocks_allocated()
+            {
+                return forward_link_type::slot_stats_.blocks_allocated();
+            }
+
+            static uint32_t blocks_freed()
+            {
+                return forward_link_type::slot_stats_.blocks_freed();
+            }
+
+            bool validate_ordering() const
+            {
+                epoch_read_section_guard read_guard(this);
+
+                for (int level = MAX_LEVELS; level >= 0; --level)
+                {
+                    skip_node *current_node = head_;
+                    KeyType last_key = current_node->key;
+                    uint32_t visited_steps = 0;
+
+                    while (true)
+                    {
+                        bool is_tombstoned = false;
+                        skip_node *next = current_node->next_node[level].get(is_tombstoned);
+
+                        while ((next != NIL_) && is_tombstoned)
+                        {
+                            if (++visited_steps > DEBUG_MAX_VALIDATION_STEPS)
+                            {
+                                return false;
+                            }
+
+                            current_node = next;
+                            next = current_node->next_node[level].get(is_tombstoned);
+                        }
+
+                        if (next == NIL_)
+                        {
+                            break;
+                        }
+
+                        if (++visited_steps > DEBUG_MAX_VALIDATION_STEPS)
+                        {
+                            return false;
+                        }
+
+                        if (next->key < last_key)
+                        {
+                            return false;
+                        }
+
+                        last_key = next->key;
+                        current_node = next;
+                    }
+
+                    if (NIL_->key < last_key)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+        private:
+            skip_node *head_;
+            skip_node *NIL_;
+            mutable slot_policy_type slot_policy_{};
+            mutable epoch_reclaimer_type epoch_reclaimer_;
+            mutable array<atomic<typename forward_link_type::slot_block *>, NumCPUs> cpu_retired_blocks_{};
+
+            int random_level()
+            {
+                const size_t slot = current_cpu_slot();
+                uint64_t state = slot_policy_.slot(slot).load_rng_state();
+
+                int new_level = 1;
+
+                while (true)
+                {
+                    state ^= (state << 13);
+                    state ^= (state >> 7);
+                    state ^= (state << 17);
+
+                    if ((state & 1ull) != 0ull)
+                    {
+                        break;
+                    }
+
+                    ++new_level;
+
+                    if (new_level >= MAX_LEVELS)
+                    {
+                        break;
+                    }
+                }
+
+                slot_policy_.slot(slot).store_rng_state(state);
+
+                return new_level;
+            }
+
+            enum class find_result
+            {
+                FOUND,
+                NOT_FOUND
+            };
+
+            void backoff(uint32_t &backoff_state, size_t cpu_slot)
+            {
+                uint64_t state = slot_policy_.slot(cpu_slot).load_rng_state();
+
+                state ^= (state << 13);
+                state ^= (state >> 7);
+                state ^= (state << 17);
+
+                slot_policy_.slot(cpu_slot).store_rng_state(state);
+
+                const uint32_t base_spins = (backoff_state < BACKOFF_MAX_RELAX_SPINS) ? backoff_state : BACKOFF_MAX_RELAX_SPINS;
+                const uint32_t jitter_spins = static_cast<uint32_t>(state & 0x3u);
+                const uint32_t relax_spins = ((base_spins + jitter_spins) < BACKOFF_MAX_RELAX_SPINS) ? (base_spins + jitter_spins) : BACKOFF_MAX_RELAX_SPINS;
+
+                for (uint32_t spin = 0; spin < relax_spins; ++spin)
+                {
+                    pmr::platform::cpu_relax();
+                }
+
+                if (backoff_state < BACKOFF_MAX_RELAX_SPINS)
+                {
+                    ++backoff_state;
+                }
+            }
+
+            void retire_node(skip_node *node, size_t cpu_slot)
+            {
+                bool expected_not_enqueued = false;
+
+                if (!node->retirement_enqueued_.compare_exchange_strong(expected_not_enqueued, true, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return;
+                }
+
+                node->retired_epoch_ = epoch_reclaimer_.current_epoch();
+
+                // Push to per-CPU retired list. Using a CAS loop for correctness on
+                // test/Linux environments where thread migration can cause two logical
+                // threads to share the same CPU slot briefly. On bare-metal (one thread
+                // per CPU), the CAS succeeds first-try with zero contention.
+                auto &slot = slot_policy_.slot(cpu_slot);
+                skip_node *old_head = slot.local_retired_head_.load(memory_order_relaxed);
+                do
+                {
+                    node->retired_next = old_head;
+                } while (!slot.local_retired_head_.compare_exchange_weak(old_head, node, memory_order_release, memory_order_relaxed));
+            }
+
+            size_t current_cpu_slot() const
+            {
+                return slot_policy_.acquire_slot();
+            }
+
+        public:
+            size_t enter_read_section() const
+            {
+                return epoch_reclaimer_.enter_read_section();
+            }
+
+            void exit_read_section(size_t slot) const
+            {
+                epoch_reclaimer_.exit_read_section(slot);
+            }
+
+            bool try_advance_epoch(size_t exempt_slot)
+            {
+                return epoch_reclaimer_.try_advance_epoch(exempt_slot);
+            }
+
+            uint32_t reclaim_detached_retired_list(size_t cpu_slot, skip_node *current, uint64_t reclaim_epoch)
+            {
+                auto &slot = slot_policy_.slot(cpu_slot);
+
+                uint32_t nodes_freed = 0;
+                skip_node *retained_head = nullptr;
+
+                while (current != nullptr)
+                {
+                    skip_node *next = current->retired_next;
+                    const bool fully_unlinked = (current->unlink_state_.load(memory_order_acquire) == static_cast<uint8_t>(unlink_state::FULLY_UNLINKED));
+
+                    if (fully_unlinked && (current->retired_epoch_ <= reclaim_epoch))
+                    {
+                        delete current;
+                        ++nodes_freed;
+                        Statistics::node_reclaimed();
+                    }
+                    else
+                    {
+                        current->retired_next = retained_head;
+                        retained_head = current;
+                    }
+
+                    current = next;
+                }
+
+                // Put retained nodes back at the front of this CPU's retired list.
+                if (retained_head != nullptr)
+                {
+                    skip_node *tail = retained_head;
+                    while (tail->retired_next != nullptr)
+                    {
+                        tail = tail->retired_next;
+                    }
+
+                    skip_node *current_head = slot.local_retired_head_.load(memory_order_relaxed);
+                    do
+                    {
+                        tail->retired_next = current_head;
+                    } while (!slot.local_retired_head_.compare_exchange_weak(current_head, retained_head, memory_order_release, memory_order_relaxed));
+                }
+
+                return nodes_freed;
+            }
+
+            pair<uint32_t, bool> advance_and_reclaim(size_t cpu_slot)
+            {
+                using slot_block = typename forward_link_type::slot_block;
+                slot_block *unlinked = forward_link_type::extract_unlinked_blocks();
+                if (unlinked != nullptr)
+                {
+                    uint64_t current_epoch = epoch_reclaimer_.current_epoch();
+
+                    slot_block *tail = unlinked;
+                    tail->retired_epoch_ = current_epoch;
+                    while (tail->retired_next != nullptr)
+                    {
+                        tail = tail->retired_next;
+                        tail->retired_epoch_ = current_epoch;
+                    }
+
+                    slot_block *old_head = cpu_retired_blocks_[cpu_slot].load(memory_order_relaxed);
+                    do
+                    {
+                        tail->retired_next = old_head;
+                    } while (!cpu_retired_blocks_[cpu_slot].compare_exchange_weak(old_head, unlinked, memory_order_release, memory_order_relaxed));
+                }
+
+                auto result = epoch_reclaimer_.advance_and_reclaim(
+                    cpu_slot,
+                    [this](size_t reclaim_slot)
+                    {
+                        return slot_policy_.slot(reclaim_slot).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+                    },
+                    [this](size_t reclaim_slot, skip_node *detached_head, uint64_t reclaim_epoch)
+                    {
+                        using slot_block = typename forward_link_type::slot_block;
+                        slot_block *b_head = cpu_retired_blocks_[reclaim_slot].exchange(nullptr, memory_order_acq_rel);
+                        slot_block *b_retained = nullptr;
+
+                        while (b_head != nullptr)
+                        {
+                            slot_block *b_next = b_head->retired_next;
+                            if (b_head->retired_epoch_ <= reclaim_epoch)
+                            {
+                                delete b_head;
+                                Statistics::block_reclaimed();
+                            }
+                            else
+                            {
+                                b_head->retired_next = b_retained;
+                                b_retained = b_head;
+                            }
+                            b_head = b_next;
+                        }
+
+                        if (b_retained != nullptr)
+                        {
+                            slot_block *b_tail = b_retained;
+                            while (b_tail->retired_next != nullptr)
+                                b_tail = b_tail->retired_next;
+
+                            slot_block *b_old = cpu_retired_blocks_[reclaim_slot].load(memory_order_relaxed);
+                            do
+                            {
+                                b_tail->retired_next = b_old;
+                            } while (!cpu_retired_blocks_[reclaim_slot].compare_exchange_weak(b_old, b_retained, memory_order_release, memory_order_relaxed));
+                        }
+
+                        return reclaim_detached_retired_list(reclaim_slot, detached_head, reclaim_epoch);
+                    });
+
+                if (result.second)
+                {
+                    Statistics::epoch_advanced();
+                }
+
+                return result;
+            }
+
+            void reclaim_all_retired_nodes()
+            {
+                using slot_block = typename forward_link_type::slot_block;
+                slot_block *unlinked = forward_link_type::extract_unlinked_blocks();
+                while (unlinked != nullptr)
+                {
+                    slot_block *next = unlinked->retired_next;
+                    delete unlinked;
+                    unlinked = next;
+                }
+
+                for (size_t i = 0; i < NumCPUs; ++i)
+                {
+                    skip_node *node = slot_policy_.slot(i).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+
+                    while (node != nullptr)
+                    {
+                        skip_node *next = node->retired_next;
+                        delete node;
+                        node = next;
+                    }
+
+                    slot_block *b_node = cpu_retired_blocks_[i].exchange(nullptr, memory_order_acq_rel);
+                    while (b_node != nullptr)
+                    {
+                        slot_block *next = b_node->retired_next;
+                        delete b_node;
+                        b_node = next;
+                    }
+                }
+            }
+
+            
+        private:
+            skip_node *find_lower_bound_after(const KeyType current_key) const
+            {
+                bool is_tombstoned = false;
+                skip_node *pred = head_, *curr = nullptr, *succ = nullptr;
+
+                for (int level = MAX_LEVELS; level >= 0; --level)
+                {
+                    curr = pred->next_node[level].get_reference();
+
+                    while (true)
+                    {
+                        if (curr == nullptr || curr == NIL_)
+                        {
+                            curr = NIL_;
+                            break;
+                        }
+
+                        succ = curr->next_node[level].get(is_tombstoned);
+
+                        while (is_tombstoned)
+                        {
+                            curr = succ;
+
+                            if (curr == nullptr || curr == NIL_)
+                            {
+                                curr = NIL_;
+                                is_tombstoned = false;
+                                break;
+                            }
+
+                            succ = curr->next_node[level].get(is_tombstoned);
+                        }
+
+                        if (curr != NIL_ && curr->key <= current_key)
+                        {
+                            pred = curr;
+                            curr = succ;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                }
+                
+                while (curr != nullptr && curr != NIL_)
+                {
+                    curr->next_node[0].get(is_tombstoned);
+                    if (!is_tombstoned && curr->key > current_key)
+                    {
+                        break;
+                    }
+                    curr = curr->next_node[0].get_reference();
+                }
+                
+                return curr;
+            }
+
+
+            find_result find_with_nodelists(const KeyType search_key, skip_node **preds, skip_node **succs, size_t cpu_slot)
+            {
+                bool is_tombstoned = false;
+
+                skip_node *pred, *curr, *succ;
+
+                pred = head_;
+                for (auto level = MAX_LEVELS; level >= 0; --level)
+                {
+                    curr = pred->next_node[level].get_reference();
+                    while (true)
+                    {
+                        if (curr == nullptr)
+                        {
+                            // Corrupted/null link observed; treat as end-of-list sentinel.
+                            curr = NIL_;
+                            break;
+                        }
+
+                        //  Skip over soft deleted nodes
+
+                        succ = curr->next_node[level].get(is_tombstoned);
+
+                        while (is_tombstoned)
+                        {
+                            skip_node *tombstoned_node = curr;
+
+                            curr = succ;
+
+                            if (curr == nullptr)
+                            {
+                                curr = NIL_;
+                                is_tombstoned = false;
+                                break;
+                            }
+
+                            succ = curr->next_node[level].get(is_tombstoned);
+
+                            if (level > 0)
+                            {
+                                if (pred->next_node[level].compare_exchange_strong(tombstoned_node, curr))
+                                {
+                                    tombstoned_node->upper_levels_remaining_.fetch_sub(1, memory_order_release);
+                                }
+                            }
+                            else
+                            {
+                                if (tombstoned_node->upper_levels_remaining_.load(memory_order_acquire) <= 0)
+                                {
+                                    if (pred->next_node[0].compare_exchange_strong(tombstoned_node, curr))
+                                    {
+                                        tombstoned_node->unlink_state_.store(static_cast<uint8_t>(unlink_state::FULLY_UNLINKED), memory_order_release);
+                                        retire_node(tombstoned_node, cpu_slot);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (curr->key < search_key)
+                        {
+                            pred = curr;
+                            curr = succ;
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+
+                    preds[level] = pred;
+                    succs[level] = curr;
+                }
+
+                return ((curr != nullptr) && (curr->key == search_key)) ? find_result::FOUND : find_result::NOT_FOUND;
+            }
+        };
+    }
+
+    using skiplist_internal::skip_list;
+
+} // namespace MINIMAL_STD_NAMESPACE

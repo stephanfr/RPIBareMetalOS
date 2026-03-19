@@ -1,0 +1,258 @@
+#pragma once
+
+#include <__platform/cpu_platform_abstractions.h>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <stdint.h>
+#include <limits>
+#include <minstdconfig.h>
+
+#ifdef __MINIMAL_STD_TEST__
+#include <sys/types.h>
+#include <unistd.h>
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
+#endif
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename NodeType, uint32_t THROTTLE_INITIAL = 100, uint32_t THROTTLE_MIN = 10>
+    struct alignas(64) cpu_slot_policy_state
+    {
+        atomic<uint32_t> reclaim_throttle_counter_{0};
+        uint32_t reclaim_throttle_period_ = THROTTLE_INITIAL;
+        atomic<NodeType *> local_retired_head_{nullptr};
+        atomic<uint64_t> rng_state_{0};
+        uint8_t cl1_padding_[40]{};
+
+        atomic<uint64_t> reader_epoch_{0};
+        atomic<uint32_t> reader_depth_{0};
+        atomic<uint32_t> assigned_cpu_id_{0};
+        uint8_t cl2_padding_[48]{};
+
+        void initialize(uint32_t unassigned_cpu_id, uint64_t rng_seed)
+        {
+            reclaim_throttle_counter_.store(0, memory_order_relaxed);
+            reclaim_throttle_period_ = THROTTLE_INITIAL;
+            local_retired_head_.store(nullptr, memory_order_relaxed);
+            rng_state_.store(rng_seed, memory_order_relaxed);
+            reader_epoch_.store(0, memory_order_relaxed);
+            reader_depth_.store(0, memory_order_relaxed);
+            assigned_cpu_id_.store(unassigned_cpu_id, memory_order_relaxed);
+        }
+
+        bool try_claim_cpu_id(uint32_t cpu_id, uint32_t unassigned_cpu_id)
+        {
+            uint32_t expected_unassigned = unassigned_cpu_id;
+            return assigned_cpu_id_.compare_exchange_strong(expected_unassigned, cpu_id, memory_order_acq_rel, memory_order_acquire);
+        }
+
+        bool is_owned_by_cpu_id(uint32_t cpu_id) const
+        {
+            return assigned_cpu_id_.load(memory_order_acquire) == cpu_id;
+        }
+
+        uint32_t begin_read_section(uint64_t current_epoch)
+        {
+            const uint32_t previous_depth = reader_depth_.fetch_add(1, memory_order_acq_rel);
+
+            if (previous_depth == 0)
+            {
+                reader_epoch_.store(current_epoch, memory_order_release);
+            }
+
+            return previous_depth;
+        }
+
+        void end_read_section()
+        {
+            uint32_t current_depth = reader_depth_.load(memory_order_acquire);
+
+            while (true)
+            {
+                if (current_depth == 0)
+                {
+                    return;
+                }
+
+                const uint32_t next_depth = current_depth - 1;
+
+                if (reader_depth_.compare_exchange_strong(current_depth, next_depth, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return;
+                }
+            }
+        }
+
+        bool reader_is_active() const
+        {
+            return reader_depth_.load(memory_order_acquire) > 0;
+        }
+
+        uint64_t reader_snapshot_epoch() const
+        {
+            return reader_epoch_.load(memory_order_acquire);
+        }
+
+        void increment_reclaim_throttle()
+        {
+            reclaim_throttle_counter_.fetch_add(1, memory_order_relaxed);
+        }
+
+        bool reclaim_throttle_triggered() const
+        {
+            return reclaim_throttle_counter_.load(memory_order_relaxed) >= reclaim_throttle_period_;
+        }
+
+        void adapt_reclaim_throttle(uint32_t nodes_freed, bool epoch_advanced)
+        {
+            reclaim_throttle_counter_.store(0, memory_order_relaxed);
+
+            if (nodes_freed > 0 && epoch_advanced)
+            {
+                if (reclaim_throttle_period_ > THROTTLE_MIN)
+                {
+                    --reclaim_throttle_period_;
+                }
+            }
+            else if (reclaim_throttle_period_ < THROTTLE_INITIAL)
+            {
+                ++reclaim_throttle_period_;
+            }
+        }
+
+        uint64_t load_rng_state() const
+        {
+            return rng_state_.load(memory_order_relaxed);
+        }
+
+        void store_rng_state(uint64_t state)
+        {
+            rng_state_.store(state, memory_order_relaxed);
+        }
+    };
+
+    template <typename NodeType, size_t NUM_SLOTS, uint32_t THROTTLE_INITIAL = 100, uint32_t THROTTLE_MIN = 10>
+    class bare_metal_cpu_slot_policy
+    {
+    private:
+        static constexpr uint32_t INVALID_CPU_ID = std::numeric_limits<uint32_t>::max();
+
+    public:
+        using node_type = NodeType;
+        using slot_state_type = cpu_slot_policy_state<NodeType, THROTTLE_INITIAL, THROTTLE_MIN>;
+
+        bare_metal_cpu_slot_policy()
+        {
+            for (size_t i = 0; i < NUM_SLOTS; ++i)
+            {
+                slots_[i].initialize(INVALID_CPU_ID, 0x9e3779b97f4a7c15ull ^ (static_cast<uint64_t>(i) * 0xbf58476d1ce4e5b9ull));
+            }
+        }
+
+        size_t acquire_slot() const
+        {
+            const uint32_t cpu_id = pmr::platform::get_cpu_id();
+            const size_t initial_slot = static_cast<size_t>(cpu_id) % NUM_SLOTS;
+
+            for (size_t probe = 0; probe < NUM_SLOTS; ++probe)
+            {
+                const size_t slot = (initial_slot + probe) % NUM_SLOTS;
+
+                if (slots_[slot].try_claim_cpu_id(cpu_id, INVALID_CPU_ID))
+                {
+                    return slot;
+                }
+
+                if (slots_[slot].is_owned_by_cpu_id(cpu_id))
+                {
+                    return slot;
+                }
+            }
+
+            return initial_slot;
+        }
+
+        slot_state_type &slot(size_t slot_index)
+        {
+            return slots_[slot_index];
+        }
+
+        const slot_state_type &slot(size_t slot_index) const
+        {
+            return slots_[slot_index];
+        }
+
+        const array<slot_state_type, NUM_SLOTS> &slots() const
+        {
+            return slots_;
+        }
+
+        array<slot_state_type, NUM_SLOTS> &slots()
+        {
+            return slots_;
+        }
+
+    private:
+        mutable array<slot_state_type, NUM_SLOTS> slots_{};
+    };
+
+#ifdef __MINIMAL_STD_TEST__
+    template <typename NodeType, size_t NUM_SLOTS, uint32_t THROTTLE_INITIAL = 100, uint32_t THROTTLE_MIN = 10>
+    class linux_thread_local_slot_policy
+    {
+    private:
+        static constexpr uint32_t INVALID_SLOT_OWNER = std::numeric_limits<uint32_t>::max();
+
+    public:
+        using node_type = NodeType;
+        using slot_state_type = cpu_slot_policy_state<NodeType, THROTTLE_INITIAL, THROTTLE_MIN>;
+
+        linux_thread_local_slot_policy()
+        {
+            for (size_t i = 0; i < NUM_SLOTS; ++i)
+            {
+                slots_[i].initialize(INVALID_SLOT_OWNER, 0x9e3779b97f4a7c15ull ^ (static_cast<uint64_t>(i) * 0xbf58476d1ce4e5b9ull));
+            }
+        }
+
+        size_t acquire_slot() const
+        {
+            uint64_t thread_id = static_cast<uint64_t>(pmr::platform::get_cpu_id());
+
+#ifdef __linux__
+            thread_id = static_cast<uint64_t>(::syscall(SYS_gettid));
+#endif
+
+            return static_cast<size_t>(thread_id % NUM_SLOTS);
+        }
+
+        slot_state_type &slot(size_t slot_index)
+        {
+            return slots_[slot_index];
+        }
+
+        const slot_state_type &slot(size_t slot_index) const
+        {
+            return slots_[slot_index];
+        }
+
+        const array<slot_state_type, NUM_SLOTS> &slots() const
+        {
+            return slots_;
+        }
+
+        array<slot_state_type, NUM_SLOTS> &slots()
+        {
+            return slots_;
+        }
+
+    private:
+        mutable array<slot_state_type, NUM_SLOTS> slots_{};
+    };
+#endif
+
+} // namespace MINIMAL_STD_NAMESPACE

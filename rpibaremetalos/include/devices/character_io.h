@@ -81,6 +81,16 @@ public:
     {
         return OSEntityTypes::CHARACTER_DEVICE;
     }
+
+    CharacterIODevice &operator <<(const char *str)
+    {
+        while (*str)
+        {
+            putc(*str++);
+        }
+
+        return *this;
+    } 
 };
 
 class EchoingCharacterIODevice : public minstd::character_io_interface<unsigned int>

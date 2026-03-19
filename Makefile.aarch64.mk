@@ -9,8 +9,8 @@ THIRD_PARTY := ${HOME}/dev/third-party
 
 GCC_CROSS_DIRECTORY := ${HOME}/dev/gcc-cross
 
-GCC_AARCH64_BARE_METAL_VERSION := 12.3.1
-GCC_AARCH64_BARE_METAL_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-elf/bin/
+GCC_AARCH64_BARE_METAL_VERSION := 13.3.1
+GCC_AARCH64_BARE_METAL_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-aarch64-aarch64-none-elf/bin/
 GCC_AARCH64_BARE_METAL_INCLUDE := $(GCC_CROSS_DIRECTORY)/aarch64-none-elf
 
 CC := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-gcc
@@ -19,11 +19,11 @@ AR := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-ar
 OBJCOPY := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-objcopy
 CPREPROCESSOR := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-cpp
 
-ASM_FLAGS := -Wall -O2 -ffreestanding -mcpu=cortex-a53 -mstrict-align
-C_CPP_SHARED_FLAGS := -Wall -ffreestanding -fno-stack-protector -nostdinc -nostdlib -nostartfiles -fno-exceptions -fno-unwind-tables -mcpu=cortex-a53 -mstrict-align
+ASM_FLAGS := -Wall -Og -ffreestanding -mcpu=cortex-a53 -mstrict-align
+C_CPP_SHARED_FLAGS := -Wall -ffreestanding -fno-stack-protector -nostdinc -nostdlib -nostartfiles -fno-exceptions -fno-unwind-tables -mcpu=cortex-a53 -mstrict-align -fno-threadsafe-statics -mno-outline-atomics
 C_FLAGS := -std=c17 $(C_CPP_SHARED_FLAGS)
 CPP_FLAGS := -std=c++20 -fno-rtti $(C_CPP_SHARED_FLAGS)
-OPTIMIZATION_FLAGS := -Os
+OPTIMIZATION_FLAGS := -Og
 LD_FLAGS := -nostartfiles -nodefaultlibs -nostdlib -static
 
 INCLUDE_DIRS := -I$(GCC_AARCH64_BARE_METAL_INCLUDE)/lib/gcc/aarch64-none-elf/$(GCC_AARCH64_BARE_METAL_VERSION)/include \
@@ -31,5 +31,5 @@ INCLUDE_DIRS := -I$(GCC_AARCH64_BARE_METAL_INCLUDE)/lib/gcc/aarch64-none-elf/$(G
 				-I$(GCC_AARCH64_BARE_METAL_INCLUDE)/aarch64-none-elf/include 
 
 
-docs :
-	@doxygen
+#docs :
+	#@doxygen

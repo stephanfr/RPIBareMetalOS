@@ -16,9 +16,9 @@
 
 #include "devices/character_io.h"
 
-#include "heaps.h"
+#include "platform/memory_manager.h"
 
-extern "C" uint32_t GetExceptionLevel();
+#include "heaps.h"
 
 extern CharacterIODevice *stdout;
 
@@ -41,7 +41,7 @@ void DumpDiagnostics()
     printf("Current Exception Level: %u\n", GetExceptionLevel());
         
     printf("\nMemory Info:\n");
-//    printf("Memory Size in bytes 0x%08x\n", platformInfo.GetMemorySizeInBytes());
+    printf("Memory Size in bytes 0x%08lx\n", platformInfo.GetMemorySizeInBytes());
     printf("Memory Base Address 0x%08x\n", platformInfo.GetMemoryBaseAddress());
     printf("Code Start: %p\n", (uint8_t *)&__start);
     printf("BSS Start: %p\n", (uint8_t *)&__bss_start);
@@ -51,23 +51,29 @@ void DumpDiagnostics()
     printf("Static Heap Reserved Space Start: %p\n", (uint8_t *)&__static_heap_start);
     printf("Static Heap Reserved Space End: %p\n", (uint8_t *)&__static_heap_end);
     printf("Static Heap Reserved Space Size: %p\n", (uint32_t *)&__static_heap_size_in_bytes);
-    printf("Static Heap Start: %p\n", __os_static_heap.heap_start());
-    printf("Static Heap End: %p\n", __os_static_heap.current_end());
+    printf("Static Heap Start: %p\n", (void *)&__static_heap_start);
+    printf("Static Heap End: %p\n", (void *)((uint8_t *)&__static_heap_start + __os_static_heap.bytes_reserved()));
     printf("Dynamic Heap Reserved Space Start: %p\n", (uint8_t *)&__dynamic_heap_start);
     printf("Dynamic Heap Reserved Space End: %p\n", (uint8_t *)&__dynamic_heap_end);
     printf("Dynamic Heap Reserved Space Size: %p\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
-    printf("Dynamic Heap Start: %p\n", __os_dynamic_heap.heap_start());
-    printf("Dynamic Heap End: %p\n", __os_dynamic_heap.current_end());
-    printf("EL1 Stack Top: %p\n", (uint8_t *)&__el1_stack_top);
-    printf("EL1 Stack Bottom: %p\n", (uint8_t *)&__el1_stack_bottom);
-    printf("EL0 Stack Top: %p\n", (uint8_t *)&__el0_stack_top);
-    printf("EL0 Stack Bottom: %p\n", (uint8_t *)&__el0_stack_bottom);
-    printf("Current Stack Location: %p\n", (uint8_t *)get_stack_pointer());
+    printf("Dynamic Heap Start: %p\n", (void *)&__dynamic_heap_start);
+    printf("Dynamic Heap End: %p\n", (void *)((uint8_t *)&__dynamic_heap_start + __os_dynamic_heap.bytes_reserved()));
+    printf("Core Initialization Stack Top: %p\n", (uint8_t *)&__per_core_initialization_stack_top);
+    printf("Core Initialization Stack Bottom: %p\n", (uint8_t *)&__per_core_initialization_stack_bottom);
+    printf("Current Stack Location: %p\n", (uint8_t *)GetStackPointer());
+    printf("OS Process Start: %p\n", (uint8_t *)&__os_process_start);
+
+    printf("\nHardware Info:\n");
+    printf("MMIOBase: %p\n", platformInfo.GetMMIOBase());
 
     printf("\nKernal Command Line: %s\n", KernelCommandLine::RawCommandLine().c_str());
     
     printf("\nIO Mapping:\n");
     printf("STDOUT mapped to: %s\n", (const char*)stdout->Name());
+
+    printf("\nMemory Manager Info:\n");
+    printf("Page Size: %lu\n", GetMemoryManager().PageSize());
+    printf("Number of Pages: %lu\n", GetMemoryManager().NumberOfPages());
 
     printf("\n\n");
 }

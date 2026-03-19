@@ -9,11 +9,11 @@
 #include <lru_cache>
 
 #include "os_config.h"
-#include "platform/mutex.h"
 #include "platform/platform_sw_rngs.h"
 #include "services/murmur_hash.h"
 
 #include "heaps.h"
+#include "synchronization.h"
 
 #include "filesystem/fat32_directory.h"
 
@@ -212,7 +212,7 @@ namespace filesystems::fat32
 
             hits_++;
 
-            return minstd::optional<minstd::reference_wrapper<FAT32DirectoryCacheEntry>>(minstd::reference_wrapper<FAT32DirectoryCacheEntry>(minstd::move(*(entry->get()))));
+            return minstd::optional<minstd::reference_wrapper<FAT32DirectoryCacheEntry>>(minstd::reference_wrapper<FAT32DirectoryCacheEntry>(*(entry->get())));
         }
 
         minstd::optional<FAT32ClusterIndex> FindFirstClusterIndex(const minstd::string &path)
@@ -230,7 +230,7 @@ namespace filesystems::fat32
 
             //  Insure paths match so we do not get a false match due to a hash collision
 
-            auto entry = cache_.find(itr->second());
+            auto entry = cache_.find(minstd::get<1>(*itr));
 
             if (entry->get()->AbsolutePath() != path)
             {
@@ -241,7 +241,7 @@ namespace filesystems::fat32
 
             hits_++;
 
-            return minstd::optional<FAT32ClusterIndex>(itr->second());
+            return minstd::optional<FAT32ClusterIndex>(minstd::get<1>(*itr));
         }
 
         minstd::optional<minstd::reference_wrapper<FAT32DirectoryCacheEntry>> FindEntry(const minstd::string &path)
@@ -259,7 +259,7 @@ namespace filesystems::fat32
 
             //  Insure paths match so we do not get a false match due to a hash collision
 
-            auto entry = cache_.find(itr->second());
+            auto entry = cache_.find(minstd::get<1>(*itr));
 
             if (entry->get()->AbsolutePath() != path)
             {
@@ -272,7 +272,7 @@ namespace filesystems::fat32
 
             hits_++;
 
-            return minstd::optional<minstd::reference_wrapper<FAT32DirectoryCacheEntry>>(minstd::reference_wrapper<FAT32DirectoryCacheEntry>(minstd::move(*(entry->get()))));
+            return minstd::optional<minstd::reference_wrapper<FAT32DirectoryCacheEntry>>(minstd::reference_wrapper<FAT32DirectoryCacheEntry>(*(entry->get())));
         }
 
     private:

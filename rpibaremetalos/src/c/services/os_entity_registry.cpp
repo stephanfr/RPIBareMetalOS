@@ -128,15 +128,15 @@ OSEntityRegistryResultCodes OSEntityRegistryImpl::AddEntityInternal(minstd::uniq
 
     auto insert_entity_result = entity_by_id_.insert(new_entity->Id(), minstd::move(new_entity));
 
-    if (!insert_entity_result.second())
+    if (!minstd::get<1>(insert_entity_result))
     {
         return OSEntityRegistryResultCodes::ERROR_SAVING_ENTITY_BY_UUID;
     }
 
     //  Insert the device id into the map indexed by name and also by alias
 
-    entity_id_by_name_hash_.insert(insert_entity_result.first()->second()->NameHash(), insert_entity_result.first()->second()->Id());
-    entity_id_by_alias_hash_.insert(insert_entity_result.first()->second()->AliasHash(), insert_entity_result.first()->second()->Id());
+    entity_id_by_name_hash_.insert(minstd::get<1>(*minstd::get<0>(insert_entity_result))->NameHash(), minstd::get<1>(*minstd::get<0>(insert_entity_result))->Id());
+    entity_id_by_alias_hash_.insert(minstd::get<1>(*minstd::get<0>(insert_entity_result))->AliasHash(), minstd::get<1>(*minstd::get<0>(insert_entity_result))->Id());
 
     //  Success
 
@@ -145,7 +145,7 @@ OSEntityRegistryResultCodes OSEntityRegistryImpl::AddEntityInternal(minstd::uniq
 
 OSEntityRegistryResultCodes OSEntityRegistryImpl::RemoveEntityByIdInternal(const UUID &id)
 {
-    char buffer[64];
+    UUID::ToStringBuffer buffer;
 
     LogDebug1("Removing Entity with ID: %s\n", id.ToString(buffer));
 
@@ -160,8 +160,8 @@ OSEntityRegistryResultCodes OSEntityRegistryImpl::RemoveEntityByIdInternal(const
 
     //  Start removing the entity from the various internal maps in reverse order of how they were entered
 
-    entity_id_by_alias_hash_.erase(entity_id_by_alias_hash_.find(itr->second()->AliasHash()));
-    entity_id_by_name_hash_.erase(entity_id_by_name_hash_.find(itr->second()->NameHash()));
+    entity_id_by_alias_hash_.erase(entity_id_by_alias_hash_.find(minstd::get<1>(*itr)->AliasHash()));
+    entity_id_by_name_hash_.erase(entity_id_by_name_hash_.find(minstd::get<1>(*itr)->NameHash()));
 
     entity_by_id_.erase(id);
 
@@ -186,7 +186,7 @@ ReferenceResult<OSEntityRegistryResultCodes, OSEntity> OSEntityRegistryImpl::Get
         return Result::Failure(OSEntityRegistryResultCodes::NO_SUCH_ENTITY);
     }
 
-    return Result::Success(*(entity_itr->second()));
+    return Result::Success(*(minstd::get<1>(*entity_itr)));
 }
 
 inline ReferenceResult<OSEntityRegistryResultCodes, OSEntity> OSEntityRegistryImpl::GetEntityByNameHash(uint64_t name_hash)
@@ -200,14 +200,14 @@ inline ReferenceResult<OSEntityRegistryResultCodes, OSEntity> OSEntityRegistryIm
         return Result::Failure(OSEntityRegistryResultCodes::NO_SUCH_ENTITY);
     }
 
-    auto entity_itr = entity_by_id_.find(id_itr->second());
+    auto entity_itr = entity_by_id_.find(minstd::get<1>(*id_itr));
 
     if (entity_itr == entity_by_id_.end())
     {
         return Result::Failure(OSEntityRegistryResultCodes::NO_SUCH_ENTITY);
     }
 
-    return Result::Success(*(entity_itr->second()));
+    return Result::Success(*(minstd::get<1>(*entity_itr)));
 }
 
 inline ReferenceResult<OSEntityRegistryResultCodes, OSEntity> OSEntityRegistryImpl::GetEntityByAliasHash(uint64_t alias_hash)
@@ -221,14 +221,14 @@ inline ReferenceResult<OSEntityRegistryResultCodes, OSEntity> OSEntityRegistryIm
         return Result::Failure(OSEntityRegistryResultCodes::NO_SUCH_ENTITY);
     }
 
-    auto entity_itr = entity_by_id_.find(id_itr->second());
+    auto entity_itr = entity_by_id_.find(minstd::get<1>(*id_itr));
 
     if (entity_itr == entity_by_id_.end())
     {
         return Result::Failure(OSEntityRegistryResultCodes::NO_SUCH_ENTITY);
     }
 
-    return Result::Success(*(entity_itr->second()));
+    return Result::Success(*(minstd::get<1>(*entity_itr)));
 }
 
 void OSEntityRegistryImpl::FindEntitiesByType(OSEntityTypes type, minstd::list<UUID> &entity_ids)
@@ -237,9 +237,9 @@ void OSEntityRegistryImpl::FindEntitiesByType(OSEntityTypes type, minstd::list<U
 
     for (auto itr = entity_by_id_.begin(); itr != entity_by_id_.end(); itr++)
     {
-        if (itr->second()->OSEntityType() == type)
+        if (minstd::get<1>(*itr)->OSEntityType() == type)
         {
-            entity_ids.push_back(itr->first());
+            entity_ids.push_back(minstd::get<0>(*itr));
         }
     }
 }

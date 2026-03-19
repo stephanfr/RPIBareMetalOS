@@ -38,22 +38,22 @@ namespace
     };
 #pragma GCC diagnostic pop
 
-    class TestElement
+    class test_element
     {
     public:
-        explicit TestElement(uint32_t value)
+        explicit test_element(uint32_t value)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value() const
         {
             return value_;
         }
 
-        bool operator<(const TestElement &other) const
+        bool operator<(const test_element &other) const
         {
             return value_ < other.value_;
         }
@@ -63,24 +63,24 @@ namespace
         char empty_space_[18];
     };
 
-    using TestElementAllocator = minstd::heap_allocator<TestElement>;
+    using test_element_allocator = minstd::heap_allocator<test_element>;
 
-    using LRUCacheWithElements = minstd::lru_cache<uint32_t, TestElement>;
-    using LRUCacheWithElementsEntryHeapAllocator = minstd::heap_allocator<LRUCacheWithElements::list_entry_type>;
-    using LRUCacheWithElementsMapHeapAllocator = minstd::heap_allocator<LRUCacheWithElements::map_entry_type>;
+    using lru_cache_with_elements = minstd::lru_cache<uint32_t, test_element>;
+    using lru_cache_with_elementsEntryHeapAllocator = minstd::heap_allocator<lru_cache_with_elements::list_entry_type>;
+    using lru_cache_with_elementsMapHeapAllocator = minstd::heap_allocator<lru_cache_with_elements::map_entry_type>;
 
-    using LRUCacheWithPointers = minstd::lru_cache<uint32_t, minstd::unique_ptr<TestElement>>;
-    using LRUCacheWithPointersEntryHeapAllocator = minstd::heap_allocator<LRUCacheWithPointers::list_entry_type>;
-    using LRUCacheWithPointersMapHeapAllocator = minstd::heap_allocator<LRUCacheWithPointers::map_entry_type>;
+    using lru_cache_with_pointers = minstd::lru_cache<uint32_t, minstd::unique_ptr<test_element>>;
+    using lru_cache_with_pointersEntryHeapAllocator = minstd::heap_allocator<lru_cache_with_pointers::list_entry_type>;
+    using lru_cache_with_pointersMapHeapAllocator = minstd::heap_allocator<lru_cache_with_pointers::map_entry_type>;
 
-    LRUCacheWithElementsEntryHeapAllocator cache_entry_allocator(test_heap);
-    LRUCacheWithElementsMapHeapAllocator map_entry_allocator(test_heap);
-    LRUCacheWithPointersEntryHeapAllocator cache_pointer_entry_allocator(test_heap);
-    LRUCacheWithPointersMapHeapAllocator map_pointer_entry_allocator(test_heap);
+    lru_cache_with_elementsEntryHeapAllocator cache_entry_allocator(test_heap);
+    lru_cache_with_elementsMapHeapAllocator map_entry_allocator(test_heap);
+    lru_cache_with_pointersEntryHeapAllocator cache_pointer_entry_allocator(test_heap);
+    lru_cache_with_pointersMapHeapAllocator map_pointer_entry_allocator(test_heap);
 
     TEST(LRUCacheTests, BasicTests)
     {
-        LRUCacheWithElements test_cache(12, cache_entry_allocator, map_entry_allocator);
+        lru_cache_with_elements test_cache(12, cache_entry_allocator, map_entry_allocator);
 
         CHECK(test_cache.max_size() == 12);
         CHECK(test_cache.empty());
@@ -88,7 +88,7 @@ namespace
 
         for (size_t i = 1; i <= 6; ++i)
         {
-            CHECK(test_cache.add(i, TestElement(i)));
+            CHECK(test_cache.add(i, test_element(i)));
         }
 
         CHECK(!test_cache.empty());
@@ -104,16 +104,16 @@ namespace
 
         for (size_t i = 7; i <= 14; ++i)
         {
-            const TestElement const_element(i);
+            const test_element const_element(i);
             CHECK(test_cache.add(i, const_element));
         }
 
-        CHECK(!test_cache.add(14, TestElement(14)));
+        CHECK(!test_cache.add(14, test_element(14)));
 
         {
             //  Braces to control the scope of the const_element
 
-            const TestElement const_element(14);
+            const test_element const_element(14);
             CHECK(!test_cache.add(14, const_element));
         }
 
@@ -121,7 +121,7 @@ namespace
         CHECK(!test_cache.find(2).has_value());
         CHECK(test_cache.find(3).has_value());
 
-        auto const_itr = const_cast<const LRUCacheWithElements &>(test_cache).begin();
+        auto const_itr = const_cast<const lru_cache_with_elements &>(test_cache).begin();
 
         CHECK_EQUAL(3, (const_itr++)->value().value());
         CHECK_EQUAL(14, (const_itr++)->value().value());
@@ -135,7 +135,7 @@ namespace
         CHECK_EQUAL(6, (const_itr++)->value().value());
         CHECK_EQUAL(5, (const_itr++)->value().value());
         CHECK_EQUAL(4, (const_itr++)->value().value());
-        CHECK(const_itr == const_cast<const LRUCacheWithElements &>(test_cache).end());
+        CHECK(const_itr == const_cast<const lru_cache_with_elements &>(test_cache).end());
 
         CHECK(test_cache.find(10).has_value());
 
@@ -213,7 +213,7 @@ namespace
 
         for (size_t i = 1; i <= 6; ++i)
         {
-            CHECK(test_cache.add(i, TestElement(i)));
+            CHECK(test_cache.add(i, test_element(i)));
         }
 
         CHECK(!test_cache.empty());
@@ -222,14 +222,14 @@ namespace
 
     TEST(LRUCacheTests, BasicPointerElementTests)
     {
-        LRUCacheWithPointers test_cache(12, cache_pointer_entry_allocator, map_pointer_entry_allocator);
+        lru_cache_with_pointers test_cache(12, cache_pointer_entry_allocator, map_pointer_entry_allocator);
 
         CHECK(test_cache.empty());
         CHECK_EQUAL(0, test_cache.size());
 
         for (size_t i = 1; i <= 6; ++i)
         {
-            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<TestElement>(new (test_heap.allocate_block<TestElement>(1)) TestElement(i), test_heap))));
+            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(i), test_heap))));
         }
 
         CHECK(!test_cache.empty());
@@ -245,10 +245,10 @@ namespace
 
         for (size_t i = 7; i <= 14; ++i)
         {
-            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<TestElement>(new (test_heap.allocate_block<TestElement>(1)) TestElement(i), test_heap))));
+            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(i), test_heap))));
         }
 
-        CHECK(!test_cache.add(14, minstd::move(minstd::unique_ptr<TestElement>(new (test_heap.allocate_block<TestElement>(1)) TestElement(14), test_heap))));
+        CHECK(!test_cache.add(14, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(14), test_heap))));
 
         CHECK(!test_cache.find(1).has_value());
         CHECK(!test_cache.find(2).has_value());
@@ -346,7 +346,7 @@ namespace
 
         for (size_t i = 1; i <= 6; ++i)
         {
-            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<TestElement>(new (test_heap.allocate_block<TestElement>(1)) TestElement(i), test_heap))));
+            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(i), test_heap))));
         }
 
         CHECK(!test_cache.empty());

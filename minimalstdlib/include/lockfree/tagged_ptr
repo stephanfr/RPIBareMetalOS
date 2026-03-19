@@ -1,0 +1,72 @@
+// Copyright 2026 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include <stdint.h>
+#include <limits>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    namespace lockfree
+    {
+        template <typename T, typename CounterT = uint16_t>
+        struct tagged_ptr
+        {
+            using pointer = T *;
+            using counter_type = CounterT;
+            using storage_type = uint64_t;
+
+            static constexpr int COUNTER_BITS = static_cast<int>(sizeof(counter_type) * 8);
+            static constexpr int POINTER_BITS = 64 - COUNTER_BITS;
+
+            static_assert(COUNTER_BITS > 0, "counter_type must be at least 1 bit");
+            static_assert(COUNTER_BITS < 64, "counter_type must be smaller than 64 bits");
+            static_assert(sizeof(storage_type) == 8, "storage_type must be 64 bits");
+
+            static constexpr storage_type COUNTER_MASK = (storage_type{1} << COUNTER_BITS) - 1;
+            static constexpr storage_type POINTER_MASK = POINTER_BITS == 64 ? ~storage_type{0} : ((storage_type{1} << POINTER_BITS) - 1);
+
+            static constexpr storage_type make(pointer ptr, counter_type counter = 0)
+            {
+                return pack(ptr, counter);
+            }
+
+            static constexpr storage_type pack(pointer ptr, counter_type counter)
+            {
+                storage_type p = static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr));
+                return (static_cast<storage_type>(counter) << POINTER_BITS) | (p & POINTER_MASK);
+            }
+
+            static constexpr pointer unpack_ptr(storage_type value)
+            {
+                uintptr_t raw = static_cast<uintptr_t>(value & POINTER_MASK);
+                // Sign-extend from bit 47 for AArch64 canonical addresses
+#ifndef __MINIMAL_STD_TEST__
+                if (raw & (1ULL << 47))
+                {
+                    raw |= ~POINTER_MASK;
+                }
+#endif
+                return reinterpret_cast<pointer>(raw);
+            }
+
+            static constexpr counter_type unpack_counter(storage_type value)
+            {
+                return static_cast<counter_type>((value >> POINTER_BITS) & COUNTER_MASK);
+            }
+
+            static constexpr storage_type with_ptr(storage_type value, pointer ptr)
+            {
+                storage_type p = static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr));
+                return (value & ~POINTER_MASK) | (p & POINTER_MASK);
+            }
+
+            static constexpr storage_type increment_counter(storage_type value)
+            {
+                return pack(unpack_ptr(value), static_cast<counter_type>(unpack_counter(value) + 1));
+            }
+        };
+    }
+}

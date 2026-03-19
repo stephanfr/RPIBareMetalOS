@@ -1,0 +1,181 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <minimalcstdlib.h>
+
+#include <allocator>
+#include <functional>
+#include <new>
+#include <optional>
+#include <stddef.h>
+#include <type_traits>
+#include <utility>
+
+#include <atomic>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    template <typename T>
+    class spsc_queue
+    {
+
+    public:
+        using value_type = T;
+        using allocator_type = allocator<value_type>;
+
+        explicit spsc_queue(allocator_type &allocator,
+                            size_t capacity)
+            : allocator_(allocator),
+              size_(capacity),
+              elements_(allocator_.allocate(size_)),
+              read_index_(0),
+              write_index_(0)
+        {
+        }
+
+        spsc_queue(const spsc_queue &) = delete;
+        spsc_queue(spsc_queue &&) = delete;
+
+        ~spsc_queue()
+        {
+            allocator_.deallocate(elements_, size_); //
+        }
+
+        spsc_queue &operator=(const spsc_queue &) = delete;
+        spsc_queue &operator=(spsc_queue &&) = delete;
+
+        size_t capacity() const
+        {
+            return size_ - 1;
+        }
+
+        bool empty() const
+        {
+            return read_index_.load(memory_order_acquire) == write_index_.load(memory_order_acquire);
+        }
+
+        bool full() const
+        {
+            auto next = write_index_.load(memory_order_acquire) + 1;
+
+            if (next == size_)
+            {
+                next = 0;
+            }
+
+            if (next != read_index_.load(memory_order_acquire))
+            {
+                return false;
+            }
+
+            //  Queue is full
+
+            return true;
+        }
+
+        size_t size_estimate() const
+        {
+            int guess = write_index_.load(memory_order_acquire) - read_index_.load(memory_order_acquire);
+
+            if (guess < 0)
+            {
+                guess += size_;
+            }
+
+            return guess;
+        }
+
+        template <class... Args>
+        bool push_back(Args &&...args)
+        {
+            auto const current = write_index_.load(memory_order_relaxed);
+
+            auto next = current + 1;
+
+            if (next == size_)
+            {
+                next = 0;
+            }
+
+            if (next != read_index_.load(memory_order_acquire))
+            {
+                new (&elements_[current]) T(forward<Args>(args)...);
+                write_index_.store(next, memory_order_release);
+
+                return true;
+            }
+
+            //  Queue is full
+
+            return false;
+        }
+
+        bool pop_front(T &front)
+        {
+            auto const current = read_index_.load(memory_order_relaxed);
+
+            if (current == write_index_.load(memory_order_acquire))
+            {
+                //  Queue is empty
+                return false;
+            }
+
+            auto next = current + 1;
+
+            if (next == size_)
+            {
+                next = 0;
+            }
+
+            front = minstd::move(elements_[current]);
+            elements_[current].~T();
+            read_index_.store(next, memory_order_release);
+
+            return true;
+        }
+
+        optional<reference_wrapper<T>> front()
+        {
+            auto const current = read_index_.load(memory_order_relaxed);
+
+            if (current == write_index_.load(memory_order_acquire))
+            {
+                //  Queue is empty
+                return optional<reference_wrapper<T>>();
+            }
+
+            return optional<reference_wrapper<T>>(elements_[current]);
+        }
+
+        void popFront()
+        {
+            auto const current = read_index_.load(memory_order_relaxed);
+            //            assert(current != write_index_.load(memory_order_acquire));
+
+            auto next = current + 1;
+
+            if (next == size_)
+            {
+                next = 0;
+            }
+
+            elements_[current].~T();
+            read_index_.store(next, memory_order_release);
+        }
+
+    private:
+        allocator_type &allocator_;
+
+        const size_t size_;
+
+        value_type *elements_;
+
+        minstd::atomic<uint32_t> read_index_;
+        minstd::atomic<uint32_t> write_index_;
+    };
+}

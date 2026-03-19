@@ -2,7 +2,6 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-
 #include "sysregs.h"
 #include "cpu_part_nums.h"
 
@@ -16,24 +15,23 @@
 .global IdentifyBoardType
 
 IdentifyBoardType :
-    mrs x0, midr_el1
-    ldr x1, =MIDR_EL1_PARTNUM_MASK
-    and x0, x0, x1
-    ldr x1, =MIDR_EL1_PARTNUM_CORTEX_A53
-    cmp x0, x1
-    b.eq ibt_cortex_a53
-    ldr x1, =MIDR_EL1_PARTNUM_CORTEX_A72
-    cmp x0, x1
-    b.eq ibt_cortex_a72
-    ldr x0, =RPI_BOARD_ENUM_UNKNOWN
+    mrs     x9, midr_el1
+    ldr     x10, =MIDR_EL1_PARTNUM_MASK
+    and     x9, x9, x10
+    ldr     x10, =MIDR_EL1_PARTNUM_CORTEX_A53
+    cmp     x9, x10
+    b.eq    is_cortex_a53
+    ldr     x10, =MIDR_EL1_PARTNUM_CORTEX_A72
+    cmp     x9, x10
+    b.eq    is_cortex_a72
+    ldr     x9, =RPI_BOARD_ENUM_UNKNOWN
     ret
 
-ibt_cortex_a53 :
+is_cortex_a53 :
     ldr x0, =RPI_BOARD_ENUM_RPI3
     ret
     
-ibt_cortex_a72 :
+is_cortex_a72 :
     ldr x0, =RPI_BOARD_ENUM_RPI4
     ret
-
 

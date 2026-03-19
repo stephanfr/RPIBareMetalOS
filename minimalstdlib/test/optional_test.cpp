@@ -19,23 +19,23 @@ namespace
     {};
 #pragma GCC diagnostic pop
 
-    class TestElement
+    class test_element
     {
     public:
-        TestElement()
+        test_element()
             : value1_(0),
               value2_(0)
         {
         }
 
-        explicit TestElement(uint32_t value1,
+        explicit test_element(uint32_t value1,
                              uint32_t value2)
             : value1_(value1),
               value2_(value2)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value1() const
         {
@@ -78,11 +78,11 @@ namespace
     {
         //  Constructor tests
 
-        minstd::optional<TestElement> test_elem1;
+        minstd::optional<test_element> test_elem1;
 
         CHECK(test_elem1.has_value() == false);
 
-        minstd::optional<TestElement> test_elem2( TestElement(9,10) );
+        minstd::optional<test_element> test_elem2( test_element(9,10) );
 
         CHECK(test_elem2.has_value() == true);
         CHECK(test_elem2.value().value1() == 9);
@@ -90,7 +90,7 @@ namespace
         CHECK((*test_elem2).value1() == 9);
         CHECK((*test_elem2).value2() == 10);
 
-        minstd::optional<TestElement> test_elem3( TestElement(11, 12) );
+        minstd::optional<test_element> test_elem3( test_element(11, 12) );
 
         CHECK(test_elem3.has_value() == true);
         CHECK(test_elem3.value().value1() == 11);
@@ -98,9 +98,9 @@ namespace
         CHECK(test_elem3->value1() == 11);
         CHECK(test_elem3->value2() == 12);
 
-        TestElement te4(13, 14);
+        test_element te4(13, 14);
 
-        minstd::optional<TestElement> test_elem4( te4 );
+        minstd::optional<test_element> test_elem4( te4 );
 
         CHECK(test_elem4.has_value() == true);
         CHECK(test_elem4.value().value1() == 13);
@@ -108,9 +108,9 @@ namespace
         CHECK(test_elem4->value1() == 13);
         CHECK(test_elem4->value2() == 14);
 
-        const TestElement te5(15, 16);
+        const test_element te5(15, 16);
 
-        minstd::optional<TestElement> test_elem5( te5 );
+        minstd::optional<test_element> test_elem5( te5 );
 
         CHECK(test_elem5.has_value() == true);
         CHECK(test_elem5.value().value1() == 15);
@@ -120,11 +120,11 @@ namespace
 
         //  Copy constructor test
 
-        minstd::optional<TestElement> test_elem1_copy( test_elem1 );
+        minstd::optional<test_element> test_elem1_copy( test_elem1 );
 
         CHECK(test_elem1_copy.has_value() == false);
 
-        minstd::optional<TestElement> test_elem2_copy( test_elem2 );
+        minstd::optional<test_element> test_elem2_copy( test_elem2 );
 
         CHECK(test_elem2_copy.has_value() == true);
         CHECK(test_elem2_copy.value().value1() == 9);
@@ -134,11 +134,11 @@ namespace
 
         //  Const copy constructor test
 
-        minstd::optional<TestElement> test_elem1_copy2( (const minstd::optional<TestElement>&)test_elem1 );
+        minstd::optional<test_element> test_elem1_copy2( (const minstd::optional<test_element>&)test_elem1 );
 
         CHECK(test_elem1_copy2.has_value() == false);
 
-        minstd::optional<TestElement> test_elem2_copy2( (const minstd::optional<TestElement>&)test_elem2 );
+        minstd::optional<test_element> test_elem2_copy2( (const minstd::optional<test_element>&)test_elem2 );
 
         CHECK(test_elem2_copy2.has_value() == true);
         CHECK(test_elem2_copy2.value().value1() == 9);
@@ -148,11 +148,11 @@ namespace
 
         //  Move constructor const const operator test
 
-        minstd::optional<TestElement> test_elem1_copy3( minstd::move(test_elem1) );
+        minstd::optional<test_element> test_elem1_copy3( minstd::move(test_elem1) );
 
         CHECK(test_elem1_copy3.has_value() == false);
 
-        const minstd::optional<TestElement> test_elem2_copy3( minstd::move(test_elem2) );
+        const minstd::optional<test_element> test_elem2_copy3( minstd::move(test_elem2) );
 
         CHECK(test_elem2_copy3.has_value() == true);
         CHECK(test_elem2_copy3.value().value1() == 9);
@@ -165,11 +165,11 @@ namespace
     {
         //  Assignment tests
 
-        minstd::optional<TestElement> test_elem1;
+        minstd::optional<test_element> test_elem1;
 
         CHECK(test_elem1.has_value() == false);
 
-        test_elem1 = TestElement(9,10);
+        test_elem1 = test_element(9,10);
 
         CHECK(test_elem1.has_value() == true);
         CHECK(test_elem1.value().value1() == 9);
@@ -181,7 +181,7 @@ namespace
 
         CHECK(test_elem1.has_value() == false);
 
-        const TestElement   const_te(11,12);
+        const test_element   const_te(11,12);
 
         test_elem1 = const_te;
 
@@ -191,7 +191,7 @@ namespace
         CHECK((*test_elem1).value1() == 11);
         CHECK((*test_elem1).value2() == 12);
 
-        minstd::optional<TestElement> test_elem2;
+        minstd::optional<test_element> test_elem2;
 
         test_elem2 = test_elem1;
 

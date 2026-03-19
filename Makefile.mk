@@ -6,9 +6,9 @@
 TOOLS := ${HOME}/dev_tools
 GCC_CROSS_DIRECTORY := ${HOME}/dev/gcc-cross
 
-GCC_VERSION := 12.3.1
+GCC_VERSION := 13.3.1
 
-GCC_CROSS_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-12.3.rel1-x86_64-aarch64-none-elf/bin/
+GCC_CROSS_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-elf/bin/
 
 GCC_CROSS_INCLUDE := $(GCC_CROSS_DIRECTORY)/aarch64-none-elf
 

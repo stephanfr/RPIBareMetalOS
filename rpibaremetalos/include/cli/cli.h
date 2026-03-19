@@ -5,11 +5,12 @@
 #pragma once
 
 #include <fixed_string>
-#include <minimalstdio.h>
 
 #include "result.h"
 
 #include "os_entity.h"
+#include "task/runnable.h"
+#include "task/tasks.h"
 
 #include "cli/cli_errors.h"
 #include "cli/command_dispatcher.h"
@@ -18,7 +19,7 @@
 
 namespace cli
 {
-    class CommandLineInterface : public OSEntity
+    class CommandLineInterface : public OSEntity, public Runnable
     {
     public:
         CommandLineInterface() = delete;
@@ -26,13 +27,14 @@ namespace cli
         CommandLineInterface(CommandLineInterface &&) = delete;
 
         CommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                             task::TaskManager &task_manager,
                              UUID filesystem_id,
                              const minstd::string &current_directory_path)
             : OSEntity(true, "CLI", "Command Line Interface"),
               input_stream_(io_device),
               output_stream_(io_device),
               command_parser_(input_stream_),
-              session_context_(input_stream_, output_stream_, filesystem_id, current_directory_path)
+              session_context_(input_stream_, output_stream_, task_manager, filesystem_id, current_directory_path)
         {
         }
 
@@ -48,7 +50,7 @@ namespace cli
             return OSEntityTypes::USER_INTERFACE;
         }
 
-        void Run();
+        void Run() override;
 
     private:
         minstd::character_istream<char, unsigned int, minstd::stream_traits<char>::ascii_terminal, minstd::stream_traits<char>::append_trailing_null> input_stream_;
@@ -63,8 +65,8 @@ namespace cli
     //  Factory method for the CLI
     //
 
-    ReferenceResult<CLIResultCodes, CommandLineInterface> StartCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
-                                                                                    UUID filesystem_id_,
-                                                                                    const minstd::string &current_directory_path);
+    ReferenceResult<CLIResultCodes, CommandLineInterface> InitializeCommandLineInterface(minstd::character_io_interface<unsigned int> &io_device,
+                                                                                         UUID filesystem_id_,
+                                                                                         const minstd::string &current_directory_path);
 
 } // namespace cli

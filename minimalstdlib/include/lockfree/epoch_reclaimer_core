@@ -1,0 +1,126 @@
+#pragma once
+
+#include <atomic>
+#include <cstddef>
+#include <stdint.h>
+#include <utility>
+
+#include <minstdconfig.h>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+
+    template <typename SlotPolicyType, size_t NUM_SLOTS, uint64_t EPOCH_RECLAIM_LAG = 2>
+    class epoch_reclaimer_core
+    {
+    public:
+        explicit epoch_reclaimer_core(SlotPolicyType &slot_policy)
+            : slot_policy_(slot_policy)
+        {
+        }
+
+        uint64_t current_epoch() const
+        {
+            return global_epoch_.load(memory_order_acquire);
+        }
+
+        size_t enter_read_section() const
+        {
+            const size_t slot = slot_policy_.acquire_slot();
+            const uint64_t epoch = global_epoch_.load(memory_order_acquire);
+            slot_policy_.slot(slot).begin_read_section(epoch);
+            return slot;
+        }
+
+        void exit_read_section(size_t slot) const
+        {
+            slot_policy_.slot(slot).end_read_section();
+        }
+
+        bool try_advance_epoch(size_t exempt_slot) const
+        {
+            uint64_t epoch = global_epoch_.load(memory_order_acquire);
+
+            for (size_t i = 0; i < NUM_SLOTS; ++i)
+            {
+                const auto &slot_state = slot_policy_.slot(i);
+
+                if (i == exempt_slot && slot_state.reader_depth_.load(memory_order_acquire) <= 1)
+                {
+                    continue;
+                }
+
+                if (!slot_state.reader_is_active())
+                {
+                    continue;
+                }
+
+                if (slot_state.reader_snapshot_epoch() < epoch)
+                {
+                    return false;
+                }
+            }
+
+            return global_epoch_.compare_exchange_strong(epoch, epoch + 1, memory_order_acq_rel, memory_order_acquire);
+        }
+
+        template <typename ExchangeRetiredListFunction, typename ReclaimDetachedListFunction>
+        pair<uint32_t, bool> advance_and_reclaim(
+            size_t exempt_slot,
+            ExchangeRetiredListFunction exchange_retired_list_fn,
+            ReclaimDetachedListFunction reclaim_detached_list_fn) const
+        {
+            const bool epoch_advanced = try_advance_epoch(exempt_slot);
+            const uint32_t nodes_freed = try_reclaim(
+                exempt_slot,
+                exchange_retired_list_fn,
+                reclaim_detached_list_fn);
+            return {nodes_freed, epoch_advanced};
+        }
+
+    private:
+        template <typename ExchangeRetiredListFunction, typename ReclaimDetachedListFunction>
+        uint32_t try_reclaim(
+            size_t exempt_slot,
+            ExchangeRetiredListFunction exchange_retired_list_fn,
+            ReclaimDetachedListFunction reclaim_detached_list_fn) const
+        {
+            const uint64_t current_epoch = global_epoch_.load(memory_order_acquire);
+
+            if (current_epoch <= EPOCH_RECLAIM_LAG)
+            {
+                return 0;
+            }
+
+            const uint64_t reclaim_epoch = current_epoch - EPOCH_RECLAIM_LAG;
+
+            for (size_t i = 0; i < NUM_SLOTS; ++i)
+            {
+                const auto &slot_state = slot_policy_.slot(i);
+
+                // Self-exempt only when this thread is the sole reader on the slot.
+                if (i == exempt_slot && slot_state.reader_depth_.load(memory_order_acquire) <= 1)
+                {
+                    continue;
+                }
+
+                if (!slot_state.reader_is_active())
+                {
+                    continue;
+                }
+
+                if (slot_state.reader_snapshot_epoch() <= reclaim_epoch)
+                {
+                    return 0;
+                }
+            }
+
+            auto detached_list_head = exchange_retired_list_fn(exempt_slot);
+            return reclaim_detached_list_fn(exempt_slot, detached_list_head, reclaim_epoch);
+        }
+
+        SlotPolicyType &slot_policy_;
+        mutable atomic<uint64_t> global_epoch_{1};
+    };
+
+} // namespace MINIMAL_STD_NAMESPACE

@@ -14,10 +14,10 @@ namespace MINIMAL_STD_NAMESPACE
 {
     //  These two template structs exist to support zero length arrays - which are required by the standard
 
-    template <typename T, size_t N> //  Non-zero length flavor
+    template <typename T, size_t NUM_ELEMENTS> //  Non-zero length flavor
     struct ElementType
     {
-        using Type = T[N];
+        using Type = T[NUM_ELEMENTS];
     };
 
     template <typename T> //  Zero length flavor
@@ -30,7 +30,7 @@ namespace MINIMAL_STD_NAMESPACE
         };
     };
 
-    template <typename T, size_t N>
+    template <typename T, size_t NUM_ELEMENTS>
     struct array
     {
         typedef T value_type;
@@ -43,10 +43,23 @@ namespace MINIMAL_STD_NAMESPACE
 
         void fill(const value_type &value)
         {
-            for (size_t i = 0; i < N; i++)
+            for (size_t i = 0; i < NUM_ELEMENTS; i++)
             {
                 elements_[i] = value;
             }
+        }
+
+        bool operator==(const array &rhs) const
+        {     
+            for (size_t i = 0; i < NUM_ELEMENTS; i++)
+            {
+                if (elements_[i] != rhs.elements_[i])
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         iterator begin() noexcept
@@ -61,12 +74,12 @@ namespace MINIMAL_STD_NAMESPACE
 
         iterator end() noexcept
         {
-            return iterator(data() + N);
+            return iterator(data() + NUM_ELEMENTS);
         }
 
-        const iterator end() const noexcept
+        const_iterator end() const noexcept
         {
-            return const_iterator(data() + N);
+            return const_iterator(data() + NUM_ELEMENTS);
         }
 
         const_iterator cbegin() const noexcept
@@ -76,17 +89,17 @@ namespace MINIMAL_STD_NAMESPACE
 
         const_iterator cend() const noexcept
         {
-            return const_iterator(data() + N);
+            return const_iterator(data() + NUM_ELEMENTS);
         }
 
         constexpr size_t size() const noexcept
         {
-            return N;
+            return NUM_ELEMENTS;
         }
 
         constexpr size_t max_size() const noexcept
         {
-            return N;
+            return NUM_ELEMENTS;
         }
 
         bool empty() const noexcept
@@ -126,12 +139,12 @@ namespace MINIMAL_STD_NAMESPACE
 
         reference back() noexcept
         {
-            return elements_[N - 1];
+            return elements_[NUM_ELEMENTS - 1];
         }
 
         constexpr const_reference back() const noexcept
         {
-            return elements_[N - 1];
+            return elements_[NUM_ELEMENTS - 1];
         }
 
         pointer data() noexcept
@@ -144,13 +157,13 @@ namespace MINIMAL_STD_NAMESPACE
             return static_cast<const_pointer>(elements_);
         }
 
-        //  A bit of template type deducation below.  The case of N == 0 results in the 'Zero length flavor'
+        //  A bit of template type deducation below.  The case of NUM_ELEMENTS == 0 results in the 'Zero length flavor'
         //      of ElementType being used.  The zero length version essentially returns a nullptr for the array.
         //
         //  The reason for the complexity of the zero length flavor is that std::array (or in this case minstd::array)
         //      is supposed to be a drop-in replacement for C arrays, therefore zero length should consume no memory.
 
-        typename ElementType<T, N>::Type elements_;
+        typename ElementType<T, NUM_ELEMENTS>::Type elements_;
     };
 
     //  Template deduction guide for the array class

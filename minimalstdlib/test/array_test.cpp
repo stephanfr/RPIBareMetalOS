@@ -20,20 +20,20 @@ namespace
     };
 #pragma GCC diagnostic pop
 
-    class TestElement
+    class test_element
     {
     public:
-        TestElement()
+        test_element()
             : value_(0)
         {
         }
 
-        explicit TestElement(uint32_t value)
+        explicit test_element(uint32_t value)
             : value_(value)
         {
         }
 
-        TestElement(const TestElement &) = default;
+        test_element(const test_element &) = default;
 
         uint32_t value() const
         {
@@ -93,7 +93,7 @@ namespace
 
         size_t value = 10;
 
-        for (minstd::array<uint32_t, 10>::iterator itr = test_array.begin(); itr != test_array.end(); itr++, value++)
+        for (auto itr = test_array.begin(); itr != test_array.end(); itr++, value++)
         {
             CHECK_EQUAL(*itr, value);
         }
@@ -101,13 +101,13 @@ namespace
 
     TEST(ArrayTests, TestArrayWithClass)
     {
-        minstd::array<TestElement, 5> test_array;
+        minstd::array<test_element, 5> test_array;
 
-        test_array[0] = TestElement(110);
-        test_array[1] = TestElement(111);
-        test_array[2] = TestElement(112);
-        test_array[3] = TestElement(113);
-        test_array[4] = TestElement(114);
+        test_array[0] = test_element(110);
+        test_array[1] = test_element(111);
+        test_array[2] = test_element(112);
+        test_array[3] = test_element(113);
+        test_array[4] = test_element(114);
 
         CHECK_EQUAL(test_array.front().value(), 110);
         CHECK_EQUAL(test_array.back().value(), 114);
@@ -123,7 +123,7 @@ namespace
 
         size_t value = 110;
 
-        for (minstd::array<TestElement, 5>::iterator itr = test_array.begin(); itr != test_array.end(); itr++, value++)
+        for (auto itr = test_array.begin(); itr != test_array.end(); itr++, value++)
         {
             CHECK_EQUAL(itr->value(), value);
         }
@@ -131,9 +131,9 @@ namespace
 
     TEST(ArrayTests, TestArrayFillWithClass)
     {
-        minstd::array<TestElement, 5> test_array;
+        minstd::array<test_element, 5> test_array;
 
-        test_array.fill(TestElement(200));
+        test_array.fill(test_element(200));
 
         test_array[0].value() += 0;
         test_array[1].value() += 1;
@@ -155,7 +155,7 @@ namespace
 
         size_t value = 200;
 
-        for (minstd::array<TestElement, 5>::iterator itr = test_array.begin(); itr != test_array.end(); itr++, value++)
+        for (auto itr = test_array.begin(); itr != test_array.end(); itr++, value++)
         {
             CHECK_EQUAL(itr->value(), value);
         }

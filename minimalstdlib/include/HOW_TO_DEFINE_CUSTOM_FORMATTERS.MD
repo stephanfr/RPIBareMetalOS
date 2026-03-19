@@ -18,7 +18,7 @@ a custom format options type -or- a completely custom instance can be created si
 the 'fmt_arg' virtual method.
 
 It *should* be possible to define a formatter for just about any type with the ability to define a fully
-custom formattin option specification - with the exception that the formatting option MUST begin with
+custom formatting option specification - with the exception that the formatting option MUST begin with
 a position specifier or simply a colon.
 
 It is probably best to simply retain a reference to whatever the format argument may be, the supplied classes

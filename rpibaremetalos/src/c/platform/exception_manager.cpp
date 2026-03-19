@@ -7,6 +7,8 @@
 #include "platform/rpi3/rpi3_exception_manager.h"
 #include "platform/rpi4/rpi4_exception_manager.h"
 
+#include "asm_utility.h"
+
 const char *entry_error_messages[] = {
     "SYNC_INVALID_EL1t",
     "IRQ_INVALID_EL1t",
@@ -32,12 +34,12 @@ const char *entry_error_messages[] = {
 //  C linkage entry points for exceptions and interrupts
 //
 
-extern "C" void show_invalid_entry_message(unsigned int type, unsigned long esr, unsigned long address)
+extern "C" void ShowInvalidExceptionTableEntryMessage(unsigned int type, unsigned long esr, unsigned long address)
 {
     GetExceptionManager().HandleException(type, esr, address);
 }
 
-extern "C" void handle_irq()
+extern "C" void HandleIRQ()
 {
     GetExceptionManager().HandleInterrupt();
 }
@@ -48,11 +50,13 @@ extern "C" void handle_irq()
 
 void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address)
 {
-    printf("%s, ESR: %x, address: %x\r\n", entry_error_messages[type], (unsigned int)esr, (unsigned int)address);
+    LogError("%s, Core: %d ESR: %x, address: %x\r\n", entry_error_messages[type], GetCoreID(), (unsigned int)esr, (unsigned int)address);
 }
 
-bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)
+bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
 {
+    LogEntryAndExit( "Adding ISR: %s on core: %d", isr->Name(), on_cores.Cores());
+
     ISRMap::iterator map_itr = isrs_.find(isr->InterruptType());
 
     //  If we do not already have an ISR for the Interrupt, then we must add an entry to the map
@@ -64,14 +68,14 @@ bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)
     {
         auto insert_result = isrs_.insert(ISRMap::value_type(isr->InterruptType(), static_new<ISRPointerList>(list_allocator_)));
 
-        if (!insert_result.second())
+        if (!minstd::get<1>(insert_result))
         {
             return false;
         }
 
-        map_itr = insert_result.first();
+        map_itr = minstd::get<0>(insert_result);
 
-        if (!EnableInterrupt(isr->InterruptType()))
+        if (!EnableInterrupt(isr->InterruptType(), on_cores))
         {
             isrs_.erase(map_itr);
 
@@ -83,7 +87,7 @@ bool ExceptionManager::AddISR(InterruptServiceRoutine *isr)
 
     //  TODO - add a priority to ISRs
 
-    map_itr->second()->push_front(isr);
+    minstd::get<1>(*map_itr)->push_front(isr);
 
     return true;
 }

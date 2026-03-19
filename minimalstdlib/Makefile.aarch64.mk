@@ -14,7 +14,7 @@ CPP_SRC := $(wildcard $(CPP_SRC_DIR)/*.cpp)
 CPP_OBJ := $(CPP_SRC:$(CPP_SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
 C_DEFINES := 
-INCLUDE_DIRS += -I../minimalclib/include -Iinclude
+INCLUDE_DIRS := -I../minimalclib/include -Iinclude $(INCLUDE_DIRS)
 
 
 $(LIB) : $(CPP_OBJ)
@@ -24,7 +24,7 @@ $(OBJ_DIR)/%.o: $(CPP_SRC_DIR)/%.cpp
 	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(OPTIMIZATION_FLAGS) -c $< -o $@
 
 
-lib: clean $(LIB)
+lib: $(LIB)
 
 clean:
 	/bin/rm $(LIB_DIR)/*.* $(OBJ_DIR)/*.o > /dev/null 2> /dev/null || true

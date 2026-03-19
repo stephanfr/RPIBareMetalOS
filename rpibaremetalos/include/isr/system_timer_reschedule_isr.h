@@ -14,6 +14,11 @@ public:
         return Interrupts::SYSTEM_TIMER_1;
     }
 
+    constexpr InterruptServiceRoutineType ISRType() const noexcept override
+    {
+        return InterruptServiceRoutineType::SYSTEM_TIMER_RESCHEDULE;
+    }
+
     const char* Name() const noexcept override
     {
         return "Timer Reschedule ISR";

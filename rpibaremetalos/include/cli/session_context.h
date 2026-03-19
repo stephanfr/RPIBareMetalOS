@@ -10,6 +10,7 @@
 #include <iostream>
 
 #include "services/uuid.h"
+#include "task/tasks.h"
 
 namespace cli
 {
@@ -21,10 +22,12 @@ namespace cli
 
         CLISessionContext(minstd::istream<char> &input_stream,
                           minstd::ostream<char> &output_stream,
+                          task::TaskManager &task_manager,
                           UUID filesystem_id,
                           const minstd::string &current_directory_path)
             : input_stream_(input_stream),
               output_stream_(output_stream),
+              task_manager_(task_manager),
               current_filesystem_id_(filesystem_id),
               current_directory_path_(current_directory_path)
         {
@@ -51,6 +54,8 @@ namespace cli
 
         minstd::istream<char> &input_stream_;
         minstd::ostream<char> &output_stream_;
+
+        task::TaskManager &task_manager_;
 
         UUID current_filesystem_id_;
         minstd::fixed_string<MAX_FILESYSTEM_PATH_LENGTH> current_directory_path_;

@@ -14,7 +14,7 @@ C_SRC := $(wildcard $(C_SRC_DIR)/*.c)
 C_OBJ := $(C_SRC:$(C_SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 C_DEFINES := 
-INCLUDE_DIRS += -I../minimalclib/include -Iinclude
+INCLUDE_DIRS := -I../minimalclib/include -Iinclude $(INCLUDE_DIRS)
 
 
 $(LIB) : $(C_OBJ)

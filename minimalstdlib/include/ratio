@@ -1,0 +1,172 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include <type_traits>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    //  Greatest common divisor
+
+    template <int64_t R1, int64_t R2>
+    struct __static_gcd
+    {
+        static const int64_t value = __static_gcd<R2, R1 % R2>::value;
+    };
+
+    template <int64_t R1>
+    struct __static_gcd<R1, 0>
+    {
+        static const int64_t value = R1;
+    };
+
+    template <>
+    struct __static_gcd<0, 0>
+    {
+        static const int64_t value = 1;
+    };
+
+    //  Least common multiple
+
+    template <int64_t R1, int64_t R2>
+    struct __static_lcm
+    {
+        static const intmax_t value = R1 / __static_gcd<R1, R2>::value * R2;
+    };
+
+    //  Absolute value
+
+    template <int64_t R1>
+    struct __static_abs
+    {
+        static const intmax_t value = R1 < 0 ? -R1 : R1;
+    };
+
+    //  Sign
+
+    template <int64_t R1>
+    struct __static_sign
+    {
+        static const intmax_t value = R1 == 0 ? 0 : (R1 < 0 ? -1 : 1);
+    };
+
+    template <int64_t Num, int64_t Denom = 1>
+    class ratio
+    {
+        static_assert(__static_abs<Num>::value >= 0, "ratio numerator is out of range");
+        static_assert(Denom != 0, "ratio divide by 0");
+        static_assert(__static_abs<Denom>::value > 0, "ratio denominator is out of range");
+        static const intmax_t __na = __static_abs<Num>::value;
+        static const intmax_t __da = __static_abs<Denom>::value;
+        static const intmax_t __s = __static_sign<Num>::value * __static_sign<Denom>::value;
+        static const intmax_t __gcd = __static_gcd<__na, __da>::value;
+
+    public:
+        static constexpr int64_t num = __s * __na / __gcd;
+        static constexpr int64_t den = __da / __gcd;
+
+        using type = ratio<num, den>;
+    };
+
+    template <typename R1, typename R2>
+    struct ratio_equal
+    {
+        static constexpr bool value = (R1::num == R2::num) && (R1::den == R2::den);
+    };
+
+    template <typename R1, typename R2>
+    struct ratio_not_equal
+    {
+        static constexpr bool value = !ratio_equal<R1, R2>::value;
+    };
+
+    template <typename R1, typename R2>
+    struct ratio_less
+    {
+        static constexpr bool value = (R1::num * R2::den) < (R2::num * R1::den);
+    };
+
+    template <typename R1, typename R2>
+    struct ratio_less_equal
+    {
+        static constexpr bool value = ratio_less<R1, R2>::value || ratio_equal<R1, R2>::value;
+    };
+
+    template <typename R1, typename R2>
+    struct ratio_greater
+    {
+        static constexpr bool value = !ratio_less_equal<R1, R2>::value;
+    };
+
+    template <typename R1, typename R2>
+    struct ratio_greater_equal
+    {
+        static constexpr bool value = !ratio_less<R1, R2>::value;
+    };
+
+    template <typename R1, typename R2>
+    struct ratio_add
+    {
+        static constexpr int64_t num = R1::num * R2::den + R2::num * R1::den;
+        static constexpr int64_t den = R1::den * R2::den;
+
+        using type = ratio<num, den>;
+     };
+
+    template <typename R1, typename R2>
+    struct ratio_subtract
+    {
+        static constexpr int64_t num = R1::num * R2::den - R2::num * R1::den;
+        static constexpr int64_t den = R1::den * R2::den;
+
+        using type = ratio<num, den>;
+     };
+
+    template <typename R1, typename R2>
+    struct ratio_multiply
+    {
+        static constexpr int64_t num = R1::num * R2::num;
+        static constexpr int64_t den = R1::den * R2::den;
+
+        using type = ratio<num, den>;
+     };
+
+    template <typename R1, typename R2>
+    struct ratio_divide
+    {
+        static constexpr int64_t num = R1::num * R2::den;
+        static constexpr int64_t den = R1::den * R2::num;
+
+        using type = ratio<num, den>;
+    };
+
+    template <class _Tp>
+    struct __is_ratio : false_type
+    {
+    };
+
+    template <int64_t _Num, int64_t _Den>
+    struct __is_ratio<ratio<_Num, _Den>> : true_type
+    {
+    };
+
+    typedef ratio<1, 1000000000000000> femto;
+    typedef ratio<1, 1000000000000> pico;
+    typedef ratio<1, 1000000000> nano;
+    typedef ratio<1, 1000000> micro;
+    typedef ratio<1, 1000> milli;
+    typedef ratio<1, 100> centi;
+    typedef ratio<1, 10> deci;
+    typedef ratio<10, 1> deca;
+    typedef ratio<100, 1> hecto;
+    typedef ratio<1000, 1> kilo;
+    typedef ratio<1000000, 1> mega;
+    typedef ratio<1000000000, 1> giga;
+    typedef ratio<1000000000000, 1> tera;
+    typedef ratio<1000000000000000, 1> peta;
+
+} // namespace MINIMAL_STD_NAMESPACE

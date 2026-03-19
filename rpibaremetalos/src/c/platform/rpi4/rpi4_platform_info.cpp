@@ -9,7 +9,7 @@ RPI4PlatformInfo::RPI4PlatformInfo()
     GetPlatformDetails(GetMMIOBase());
 }
 
-const RPIBoardType RPI4PlatformInfo::GetBoardType() const
+RPIBoardType RPI4PlatformInfo::GetBoardType() const
 {
     return RPIBoardType::RPI4;
 }
@@ -17,6 +17,11 @@ const RPIBoardType RPI4PlatformInfo::GetBoardType() const
 const char *RPI4PlatformInfo::GetBoardTypeName() const
 {
     return "Raspberry Pi 4B";
+}
+
+uint8_t *RPI4PlatformInfo::GetARMLocalBase() const
+{
+    return const_cast<uint8_t *>(ARM_LOCAL_BASE);
 }
 
 uint8_t *RPI4PlatformInfo::GetMMIOBase() const
@@ -29,7 +34,12 @@ uint8_t *RPI4PlatformInfo::GetEMMCBase() const
     return const_cast<uint8_t *>(BCM2711_EMMC_BASE);
 }
 
-const uint32_t RPI4PlatformInfo::GetGPUClockRate() const
+uint32_t RPI4PlatformInfo::GetGPUClockRate() const
 {
     return BCM2711_SYSTEM_CLOCK;
+}
+
+uint32_t RPI4PlatformInfo::GetNumberOfCores() const
+{
+    return 4;
 }

@@ -6,13 +6,14 @@
 
 #include "minstdconfig.h"
 
-#include <stddef.h>
 #include <string.h>
 
+#include "algorithm"
 #include "utility" //  For std::forward
+#include "initializer_list"
 
-#include "type_traits"
 #include "allocator"
+#include "type_traits"
 
 #define DEFAULT_INITIAL_SIZE 12
 
@@ -36,12 +37,32 @@ namespace MINIMAL_STD_NAMESPACE
         class const_iterator;
         friend class const_iterator;
 
-        vector(allocator_type &allocator)
+        vector(allocator_type &allocator,
+               size_t initial_size = INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)
             : allocator_(allocator),
-              begin_(allocator_.allocate(INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)),
+              begin_(allocator_.allocate(initial_size)),
               end_(begin_),
-              current_allocated_size_(INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)
+              current_allocated_size_(initial_size)
         {
+        }
+
+        vector(const ::std::initializer_list<T>&  initial_values,
+               allocator_type &allocator,
+               size_t initial_size = INITIAL_SIZE > 0 ? INITIAL_SIZE : DEFAULT_INITIAL_SIZE)
+            : allocator_(allocator),
+              begin_(allocator_.allocate(initial_size)),
+              end_(begin_),
+              current_allocated_size_(initial_size)
+        {
+            for (const T& element : initial_values)
+            {
+                emplace_back(element);
+
+                if(size() == current_allocated_size_)
+                {
+                    break;
+                }
+            }
         }
 
         ~vector()
@@ -54,7 +75,56 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            allocator_.deallocate(begin_, current_allocated_size_ );
+            allocator_.deallocate(begin_, current_allocated_size_);
+        }
+
+        vector& operator=(const vector& other)
+        {
+            if (this == &other)
+            {
+                return *this;
+            }
+
+            clear();
+
+            if ((current_allocated_size_ < other.size()) &&
+               (current_allocated_size_ < MAX_SIZE))
+            {
+                allocator_.deallocate(begin_, current_allocated_size_);
+
+                begin_ = allocator_.allocate(minstd::min( other.size(), MAX_SIZE));
+                current_allocated_size_ = minstd::min( other.size(), MAX_SIZE);
+            }
+
+            for (const T& element : other)
+            {
+                emplace_back(element);
+
+                if(size() == current_allocated_size_)
+                {
+                    break;
+                }
+            }
+
+            return *this;
+        }
+
+        [[nodiscard]] bool operator==(const vector& other) const
+        {
+            if(size() != other.size())
+            {
+                return false;
+            }
+
+            for(size_t index = 0; index < size(); index++)
+            {
+                if(at(index) != other.at(index))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         [[nodiscard]] constexpr bool empty() const noexcept

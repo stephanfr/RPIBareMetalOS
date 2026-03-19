@@ -1,0 +1,9 @@
+# TLC temporary files
+.tlc_tmp/
+states/
+
+# TLC tool jar
+/tla2tools.jar
+
+# OS files
+.DS_Store

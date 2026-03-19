@@ -33,7 +33,7 @@ namespace
     };
 
     // a class with data members:
-    struct MyValue
+    struct my_value
     {
         int value;
         int fifth() { return value / 5; }
@@ -63,10 +63,10 @@ namespace
         CHECK_EQUAL( fn5(60), -60 );
 
         //  Class instance with members:
-        minstd::function<int(MyValue &)> value = [](MyValue &value){ return value.value; }; // lambda to return data member
-        minstd::function<int(MyValue &)> fifth = [](MyValue &value){ return value.fifth(); }; // lambda to call member function
+        minstd::function<int(my_value &)> value = [](my_value &value){ return value.value; }; // lambda to return data member
+        minstd::function<int(my_value &)> fifth = [](my_value &value){ return value.fifth(); }; // lambda to call member function
 
-        MyValue sixty{60};
+        my_value sixty{60};
 
         CHECK_EQUAL( value(sixty), 60 );
         CHECK_EQUAL( fifth(sixty), 12 );

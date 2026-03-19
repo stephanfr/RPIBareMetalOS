@@ -21,21 +21,21 @@ namespace
     };
     #pragma GCC diagnostic pop
 
-    class TestClass
+    class test_class
     {
     public:
-        TestClass()
+        test_class()
         {
         }
 
-        ~TestClass()
+        ~test_class()
         {
-            TestClass::destructor_called_count_++;
+            test_class::destructor_called_count_++;
         }
 
         static uint32_t destructor_called_count()
         {
-            return TestClass::destructor_called_count_;
+            return test_class::destructor_called_count_;
         }
 
     private:
@@ -44,23 +44,23 @@ namespace
         double test_double_;
     };
 
-    uint32_t TestClass::destructor_called_count_ = 0;
+    uint32_t test_class::destructor_called_count_ = 0;
 
-    class TestStruct
+    class test_struct
     {
     public:
-        TestStruct()
+        test_struct()
         {
         }
 
-        ~TestStruct()
+        ~test_struct()
         {
-            TestStruct::destructor_called_count_++;
+            test_struct::destructor_called_count_++;
         }
 
         static uint32_t destructor_called_count()
         {
-            return TestStruct::destructor_called_count_;
+            return test_struct::destructor_called_count_;
         }
 
     private:
@@ -69,18 +69,18 @@ namespace
         double test_double_[4];
     };
 
-    uint32_t TestStruct::destructor_called_count_ = 0;
+    uint32_t test_struct::destructor_called_count_ = 0;
 
-    class alignas(64) TestClassWithTweakedAlignment
+    class alignas(64) test_class_with_tweaked_alignment
     {
     public:
-        TestClassWithTweakedAlignment()
+        test_class_with_tweaked_alignment()
         {
         }
 
     private:
-        char test_string[21];
-        double test_double;
+        char test_string_[21];
+        double test_double_;
     };
 
     TEST(StaticHeapTests, Static_heapWithAlignmentof16)
@@ -172,7 +172,7 @@ namespace
 
         //  Create a class and allocate heap elements for it
 
-        TestClass *fifth_block = test_heap.allocate_block<TestClass>(11);
+        test_class *fifth_block = test_heap.allocate_block<test_class>(11);
 
         constexpr uint32_t BLOCK_5_SIZE = 384; //  Should be 384 bytes (32 for header and 352 for the 11 TestClasses)
 
@@ -192,7 +192,7 @@ namespace
 
         //  Allocate heap elements for a class with tweaked alignment
 
-        TestClassWithTweakedAlignment *sixth_block = test_heap.allocate_block<TestClassWithTweakedAlignment>(11);
+        test_class_with_tweaked_alignment *sixth_block = test_heap.allocate_block<test_class_with_tweaked_alignment>(11);
 
         CHECK(((reinterpret_cast<uint64_t>(sixth_block) / 16) * 16) == reinterpret_cast<uint64_t>(sixth_block)); //  Block should start on a 16 byte alignment
 
@@ -210,7 +210,7 @@ namespace
 
         //  Allocate heap elements for a class with tweaked alignment
 
-        TestStruct *seventh_block = test_heap.allocate_block<TestStruct>(5);
+        test_struct *seventh_block = test_heap.allocate_block<test_struct>(5);
 
         CHECK(((reinterpret_cast<uint64_t>(seventh_block) / 16) * 16) == reinterpret_cast<uint64_t>(seventh_block)); //  Block should start on a 16 byte alignment
 
@@ -251,7 +251,7 @@ namespace
         CHECK(test_heap.bytes_in_use() == test_heap.bytes_reserved() - (BLOCK_2_SIZE + BLOCK_5_SIZE));
 
         CHECK(static_test_heap.blocks_allocated_but_unused() == 2);
-        CHECK(TestClass::destructor_called_count() == 11);
+        CHECK(test_class::destructor_called_count() == 11);
 
         //  Test deallocate of a struct, the destructor should be called
 
@@ -263,18 +263,18 @@ namespace
         CHECK(test_heap.bytes_in_use() == test_heap.bytes_reserved() - (BLOCK_2_SIZE + BLOCK_5_SIZE + BLOCK_7_SIZE));
 
         CHECK(static_test_heap.blocks_allocated_but_unused() == 3);
-        CHECK(TestStruct::destructor_called_count() == 5);
+        CHECK(test_struct::destructor_called_count() == 5);
 
         //  Keep allocating TestClasses until we run out of space
         //      One unused block should be re-used.
 
-        TestClass *current_block = nullptr;
-        TestClass *last_block = nullptr;
+        test_class *current_block = nullptr;
+        test_class *last_block = nullptr;
 
         do
         {
             last_block = current_block;
-            current_block = test_heap.allocate_block<TestClass>(10);
+            current_block = test_heap.allocate_block<test_class>(10);
         } while (current_block != nullptr);
 
         CHECK(TEST_BUFFER_SIZE - test_heap.bytes_reserved() <= 320);

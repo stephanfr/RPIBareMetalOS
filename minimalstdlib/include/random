@@ -1,0 +1,9 @@
+// Copyright 2024 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "__random/xoroshiro128PlusPlus.h"
+#include "__random/fast_lockfree_low_quality_rng.h"
+#include "__random/fast_single_threaded_low_quality_rng.h"

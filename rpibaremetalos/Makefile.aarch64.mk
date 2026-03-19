@@ -21,11 +21,39 @@ $(BUILD_ROOT)/c/devices/rpi4 \
 $(BUILD_ROOT)/c/isr \
 $(BUILD_ROOT)/c/filesystem \
 $(BUILD_ROOT)/c/services \
+$(BUILD_ROOT)/c/task \
+$(BUILD_ROOT)/c/userspace_api \
 $(BUILD_ROOT)/c/cli
 
 ASM_DIRS   := asm
-C_DIRS     := c c/utility c/platform c/platform/rpi3 c/platform/rpi4 c/devices c/devices/rpi3 c/devices/rpi4 c/isr c/filesystem c/services c/cli
-CPP_DIRS   := c c/utility c/platform c/platform/rpi3 c/platform/rpi4 c/devices c/devices/rpi3 c/devices/rpi4 c/isr c/filesystem c/services c/cli
+C_DIRS     := c \
+			  c/utility \
+			  c/platform \
+			  c/platform/rpi3 \
+			  c/platform/rpi4 \
+			  c/devices \
+			  c/devices/rpi3 \
+			  c/devices/rpi4 \
+			  c/isr \
+			  c/filesystem \
+			  c/services \
+			  c/task \
+			  c/userspace_api \
+			  c/cli
+CPP_DIRS   := c \
+			  c/utility \
+			  c/platform \
+			  c/platform/rpi3 \
+			  c/platform/rpi4 \
+			  c/devices \
+			  c/devices/rpi3 \
+			  c/devices/rpi4 \
+			  c/isr \
+			  c/filesystem \
+			  c/services \
+			  c/task \
+			  c/userspace_api \
+			  c/cli
 
 ASM_SRC_DIRS := $(addprefix $(SRC_ROOT)/,$(ASM_DIRS))
 C_SRC_DIRS   := $(addprefix $(SRC_ROOT)/,$(C_DIRS))
@@ -33,6 +61,7 @@ CPP_SRC_DIRS := $(addprefix $(SRC_ROOT)/,$(CPP_DIRS))
 
 ELF := $(BUILD_ROOT)/kernel8.elf
 IMG := $(IMAGE_DIR)/kernel8.img
+SYM := $(IMAGE_DIR)/kernel8.sym
 
 ASM_SRC := $(foreach sdir,$(ASM_SRC_DIRS),$(wildcard $(sdir)/*.S))
 C_SRC   := $(foreach sdir,$(C_SRC_DIRS),$(wildcard $(sdir)/*.c))
@@ -40,7 +69,7 @@ CPP_SRC := $(foreach sdir,$(CPP_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
 OBJ := $(patsubst $(SRC_ROOT)/asm/%.S,$(BUILD_ROOT)/asm/%.o,$(ASM_SRC)) $(patsubst $(SRC_ROOT)/c/%.c,$(BUILD_ROOT)/c/%.o,$(C_SRC)) $(patsubst $(SRC_ROOT)/c/%.cpp,$(BUILD_ROOT)/c/%.o,$(CPP_SRC))
 
-INCLUDE_DIRS += -Iinclude -I../minimalstdio/include -I../minimalclib/include -I../minimalstdlib/include
+INCLUDE_DIRS := -I../minimalclib/include -I../minimalstdio/include -I../minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
 LDFLAGS += -L../minimalclib/lib/aarch64 -L../minimalstdio/lib/aarch64 -L../minimalstdlib/lib/aarch64 
 LDLIBS = -lminimalstdio -lminimalclib -lminimalstdlib
 
@@ -48,35 +77,37 @@ LINKER_SCRIPT_TEMPLATE=link.template.ld
 LINKER_SCRIPT=$(BUILD_ROOT)/link.ld
 
 
-all: clean checkdirs $(IMG)
+all: checkdirs $(IMG)
 
+all_clean: clean all
 
 $(IMG): $(ELF)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
+	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
 	/bin/cp armstub/image/armstub_minimal.bin image/.
 	/bin/cp resources/*.txt image/.
 	/bin/cp resources/sd.img image/.
 
 $(ELF): $(OBJ) $(LINKER_SCRIPT)
-	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -T $(LINKER_SCRIPT) -o $(ELF)
+	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -g -T $(LINKER_SCRIPT) -o $(ELF)
 
 $(LINKER_SCRIPT): 
 	$(CPREPROCESSOR) -Iinclude  $(LINKER_SCRIPT_TEMPLATE) -o $(LINKER_SCRIPT)
 
 define make-asm-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.S
-	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -g -c $$< -o $$@
 endef
 
 define make-c-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.c
-	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -g $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 define make-cpp-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.cpp
-	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -g $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 
@@ -114,12 +145,12 @@ ARMSTUB_ROOT := armstub
 ARMSTUB_DIRS := $(ARMSTUB_ROOT)/build $(ARMSTUB_ROOT)/image
 
 
-armstub_all : armstub_clean armstub_checkdirs armstub
+armstub : armstub_clean armstub_checkdirs armstub_bin
 
 armstub/build/armstub_minimal.o: armstub/src/armstub_minimal.S
 	$(CC) $(ASMFLAGS) -c $< -o $@
 
-armstub: armstub/build/armstub_minimal.o
+armstub_bin: armstub/build/armstub_minimal.o
 	$(LD) -nostdlib --section-start=.text=0 -o armstub/build/armstub_minimal.elf armstub/build/armstub_minimal.o
 	$(OBJCOPY) -O binary armstub/build/armstub_minimal.elf armstub/image/armstub_minimal.bin
 

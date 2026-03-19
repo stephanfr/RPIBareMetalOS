@@ -38,9 +38,24 @@ namespace cli::commands
                           CLISessionContext &context) const override;
     };
 
+    class CLIListTasksCommand : public CLICommandExecutor
+    {
+    public:
+
+        static const CLIListTasksCommand instance;
+
+        CLIListTasksCommand()
+            : CLICommandExecutor("tasks")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
+
     //  Create the top-level list command
 
-    class CLIListCommand : public CLIParentCommand<2>
+    class CLIListCommand : public CLIParentCommand<3>
     {
     public:
 
@@ -48,7 +63,8 @@ namespace cli::commands
 
         CLIListCommand()
             : CLIParentCommand("list", {CLIListFilesystemsCommand::instance,
-                                        CLIListDirectoryCommand::instance})
+                                        CLIListDirectoryCommand::instance,
+                                        CLIListTasksCommand::instance})
         {
         }
     };

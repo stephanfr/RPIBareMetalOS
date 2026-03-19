@@ -6,20 +6,40 @@
 
 #include <stdint.h>
 
-typedef enum class Interrupts : int32_t
+typedef enum class Interrupts : uint32_t
 {
-    NO_SUCH_INTERRUPT = -1,
+    NO_SUCH_INTERRUPT = 0,
 
-    SYSTEM_TIMER_0 = 0,
-    SYSTEM_TIMER_1 = 1,
-    SYSTEM_TIMER_2 = 2,
-    SYSTEM_TIMER_3 = 3
+    CORE_HALT = 1,
+    SWITCH_TASK = 2,
+    CORE_MAILBOX_0 = 3,
+    CORE_MAILBOX_1 = 4,
+    CORE_MAILBOX_2 = 5,
+    CORE_MAILBOX_3 = 6,
+    SYSTEM_TIMER_0 = 64,
+    SYSTEM_TIMER_1 = 65,
+    SYSTEM_TIMER_2 = 66,
+    SYSTEM_TIMER_3 = 67,
 } Interrupts;
+
+const char *ToString(Interrupts interrupt);
+
+typedef enum InterruptServiceRoutineType : uint32_t
+{
+    UNIDENTIFIED = 0,
+
+    HALT_CORE = 1,
+    IMPERATIVE_CORE_TASK_SWITCH = 2,
+    SYSTEM_TIMER_RESCHEDULE = 3,
+    TASK_SCHEDULER = 4
+} InterruptServiceRoutineType;
 
 class InterruptServiceRoutine
 {
 public:
     virtual constexpr Interrupts InterruptType() const noexcept = 0;
+
+    virtual constexpr InterruptServiceRoutineType ISRType() const noexcept = 0;
 
     virtual const char *Name() const noexcept = 0;
 
