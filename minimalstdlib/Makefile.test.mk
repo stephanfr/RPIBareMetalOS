@@ -9,6 +9,7 @@ include Makefile.x64.mk
 # ---------------------------------------------------------------------------
 CORRECTNESS_SRC_DIR := test/correctness
 PERFORMANCE_SRC_DIR := test/performance
+HOST_PERF_SRC_DIR   := test/performance_host
 SOAK_SRC_DIR        := test/soak
 SHARED_SRC_DIR      := test/shared
 
@@ -17,6 +18,7 @@ SHARED_SRC_DIR      := test/shared
 # ---------------------------------------------------------------------------
 CORRECTNESS_OBJ_DIR := test/build/correctness
 PERFORMANCE_OBJ_DIR := test/build/performance
+HOST_PERF_OBJ_DIR   := test/build/performance_host
 SOAK_OBJ_DIR        := test/build/soak
 LIB_OBJ_DIR         := test/build/lib
 COVERAGE_OBJ_DIR    := test/coverage/correctness
@@ -27,6 +29,7 @@ COVERAGE_LIB_OBJ_DIR := test/coverage/lib
 # ---------------------------------------------------------------------------
 CORRECTNESS_EXE := $(CORRECTNESS_OBJ_DIR)/cpputest_correctness.exe
 PERFORMANCE_EXE := $(PERFORMANCE_OBJ_DIR)/cpputest_performance.exe
+HOST_PERF_EXE   := $(HOST_PERF_OBJ_DIR)/std_containers_perf.exe
 SOAK_EXE        := $(SOAK_OBJ_DIR)/cpputest_soak.exe
 COVERAGE_EXE    := $(COVERAGE_OBJ_DIR)/cpputest_correctness_coverage.exe
 
@@ -46,6 +49,7 @@ SHARED_SRC      := $(wildcard $(SHARED_SRC_DIR)/*.cpp)
 CORRECTNESS_SRC := $(wildcard $(CORRECTNESS_SRC_DIR)/*.cpp) $(SHARED_SRC)
 PERFORMANCE_SRC := $(wildcard $(PERFORMANCE_SRC_DIR)/*.cpp) $(SHARED_SRC)
 SOAK_SRC        := $(wildcard $(SOAK_SRC_DIR)/*.cpp) $(SHARED_SRC)
+HOST_PERF_SRC   := $(wildcard $(HOST_PERF_SRC_DIR)/*.cpp)
 
 # Library sources (compiled into every test binary)
 LIB_SRC := $(CPP_SRC)
@@ -66,6 +70,7 @@ SOAK_OBJ        := $(patsubst $(SOAK_SRC_DIR)/%.cpp,$(SOAK_OBJ_DIR)/%.o,\
                       $(wildcard $(SOAK_SRC_DIR)/*.cpp)) \
                    $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(SOAK_OBJ_DIR)/shared_%.o,\
                       $(SHARED_SRC))
+HOST_PERF_OBJ   := $(patsubst $(HOST_PERF_SRC_DIR)/%.cpp,$(HOST_PERF_OBJ_DIR)/%.o,$(HOST_PERF_SRC))
 
 LIB_OBJ         := $(patsubst $(CPP_SRC_DIR)/%.cpp,$(LIB_OBJ_DIR)/%.o,$(LIB_SRC))
 
@@ -78,7 +83,7 @@ COVERAGE_LIB_OBJ := $(patsubst $(CPP_SRC_DIR)/%.cpp,$(COVERAGE_LIB_OBJ_DIR)/%.o,
 # ---------------------------------------------------------------------------
 # Phony targets
 # ---------------------------------------------------------------------------
-.PHONY: test test-correctness test-performance test-soak test-coverage clean_test
+.PHONY: test test-correctness test-performance test-performance-host-std test-soak test-coverage clean_test
 
 # ---------------------------------------------------------------------------
 # Aggregate targets
@@ -90,6 +95,9 @@ test-correctness: lib $(CORRECTNESS_EXE)
 
 test-performance: lib $(PERFORMANCE_EXE)
 	./$(PERFORMANCE_EXE)
+
+test-performance-host-std: $(HOST_PERF_EXE)
+	./$(HOST_PERF_EXE)
 
 test-soak: lib $(SOAK_EXE)
 	./$(SOAK_EXE)
@@ -115,6 +123,9 @@ $(PERFORMANCE_EXE): $(LIB_OBJ) $(PERFORMANCE_OBJ)
 
 $(SOAK_EXE): $(LIB_OBJ) $(SOAK_OBJ)
 	$(LD) $(TEST_LDFLAGS) $(LIB_OBJ) $(SOAK_OBJ) $(LDLIBS) $(TEST_LIB) -o $@
+
+$(HOST_PERF_EXE): $(HOST_PERF_OBJ)
+	$(LD) $(TEST_LDFLAGS) $(HOST_PERF_OBJ) -lpthread -o $@
 
 $(COVERAGE_EXE): $(COVERAGE_LIB_OBJ) $(COVERAGE_OBJ)
 	$(LD) $(COVERAGE_LIB_OBJ) $(COVERAGE_OBJ) $(LDLIBS) $(TEST_LIB) -lgcov -o $@
@@ -148,6 +159,15 @@ $(SOAK_OBJ_DIR)/shared_%.o: $(SHARED_SRC_DIR)/%.cpp
 	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) $(TEST_OPTIMIZATION_FLAGS) $(TEST_CPP_FLAGS) $(CDEFINES) -c $< -o $@
 
 # ---------------------------------------------------------------------------
+# Compile rules — host-only std performance
+# Avoid -Iinclude and -I../minimalclib/include to keep host STL independent
+# from minimalstdlib header overlays.
+# ---------------------------------------------------------------------------
+$(HOST_PERF_OBJ_DIR)/%.o: $(HOST_PERF_SRC_DIR)/%.cpp
+	@/bin/mkdir -p $(HOST_PERF_OBJ_DIR)
+	$(CC) -I. $(CPP_FLAGS) $(TEST_OPTIMIZATION_FLAGS) $(TEST_CPP_FLAGS) -c $< -o $@
+
+# ---------------------------------------------------------------------------
 # Compile rules — library (shared across all test binaries)
 # ---------------------------------------------------------------------------
 $(LIB_OBJ_DIR)/%.o: $(CPP_SRC_DIR)/%.cpp
@@ -172,6 +192,7 @@ clean_test:
 	/bin/rm -rf test/build test/coverage > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(CORRECTNESS_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(PERFORMANCE_OBJ_DIR) > /dev/null 2> /dev/null || true
+	/bin/mkdir -p $(HOST_PERF_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(SOAK_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(LIB_OBJ_DIR) > /dev/null 2> /dev/null || true
 	/bin/mkdir -p $(COVERAGE_OBJ_DIR) > /dev/null 2> /dev/null || true

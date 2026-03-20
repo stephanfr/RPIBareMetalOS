@@ -550,9 +550,10 @@ namespace
         }
     };
 
+    template <typename map_type>
     struct rwlock_map_write_load_thread_args
     {
-        rwlock_hash_map *map_ = nullptr;
+        map_type *map_ = nullptr;
         minstd::pmr::memory_resource *memory_resource_ = nullptr;
         minstd::atomic<bool> *start_ = nullptr;
         minstd::atomic<size_t> *ready_count_ = nullptr;
@@ -569,9 +570,10 @@ namespace
         uint64_t rng_seed_ = 0;
     };
 
+    template <typename map_type>
     void *rwlock_map_write_load_worker(void *arg)
     {
-        auto *args = static_cast<rwlock_map_write_load_thread_args *>(arg);
+        auto *args = static_cast<rwlock_map_write_load_thread_args<map_type> *>(arg);
 
         args->ready_count_->fetch_add(1, minstd::memory_order_release);
 

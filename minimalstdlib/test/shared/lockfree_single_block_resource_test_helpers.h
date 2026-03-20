@@ -30,6 +30,21 @@ extern "C" double exp(double);
 
 namespace
 {
+    struct test_userspace_signal_mask_interrupt_policy
+    {
+        using interrupt_state_t = uint64_t;
+
+        static inline interrupt_state_t disable_interrupts()
+        {
+            return minstd::pmr::test::os_abstractions::enter_critical_section();
+        }
+
+        static inline void restore_interrupts(interrupt_state_t /* state */)
+        {
+            minstd::pmr::test::os_abstractions::leave_critical_section();
+        }
+    };
+
     constexpr size_t DEFAULT_ALIGNMENT = alignof(max_align_t);
 
     constexpr size_t NUM_ALLOCATIONS_PER_THREAD = 5000;
@@ -60,11 +75,11 @@ namespace
     minstd::atomic<bool> correctness_allocation_failed = false;
 
     typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy<
-        minstd::pmr::platform::userspace_signal_mask_interrupt_policy,
+        test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::extensions::memory_resource_statistics,
         minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
     typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy<
-        minstd::pmr::platform::userspace_signal_mask_interrupt_policy,
+        test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
 
     struct userspace_signal_guard
