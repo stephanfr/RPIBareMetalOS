@@ -1,0 +1,4 @@
+# Performance report files are generated at test runtime — do not commit.
+*.md
+# But do track the directory itself (kept by this file).
+!.gitignore

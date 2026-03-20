@@ -6,11 +6,6 @@
 
 #include <stdint.h>
 
-#if defined(__linux__)
-#include <pthread.h>
-#include <signal.h>
-#endif
-
 namespace MINIMAL_STD_NAMESPACE
 {
     namespace pmr
@@ -19,37 +14,6 @@ namespace MINIMAL_STD_NAMESPACE
         {
             namespace os_interrupt_abstractions
             {
-#if defined(__linux__)
-                inline thread_local uint32_t userspace_guard_depth = 0;
-                inline thread_local sigset_t userspace_saved_sigmask;
-
-                inline uint32_t enter_critical_section()
-                {
-                    if (userspace_guard_depth++ == 0)
-                    {
-                        sigset_t set;
-                        sigemptyset(&set);
-                        sigaddset(&set, SIGUSR1);
-                        pthread_sigmask(SIG_BLOCK, &set, &userspace_saved_sigmask);
-                    }
-
-                    return userspace_guard_depth;
-                }
-
-                inline void leave_critical_section()
-                {
-                    if (userspace_guard_depth == 0)
-                    {
-                        return;
-                    }
-
-                    userspace_guard_depth--;
-                    if (userspace_guard_depth == 0)
-                    {
-                        pthread_sigmask(SIG_SETMASK, &userspace_saved_sigmask, nullptr);
-                    }
-                }
-#else
                 inline uint32_t enter_critical_section()
                 {
                     return 1u;
@@ -58,7 +22,6 @@ namespace MINIMAL_STD_NAMESPACE
                 inline void leave_critical_section()
                 {
                 }
-#endif
             }
         }
     }

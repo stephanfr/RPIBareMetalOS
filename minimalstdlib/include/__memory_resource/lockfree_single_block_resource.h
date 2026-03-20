@@ -50,7 +50,11 @@ namespace MINIMAL_STD_NAMESPACE
         //
         //  On destruction, this resource will just dump all the memory it allocated without invoking any destructors
 
-        template <typename interrupt_policy_type, typename... optional_extensions>
+          template <typename interrupt_policy_type,
+              typename platform_provider_type = platform::default_platform_provider,
+              size_t max_bin_bytes = 32 * 1024 * 1024,
+              size_t max_waste_percent = 5,
+              typename... optional_extensions>
         class lockfree_single_block_resource_impl : public memory_resource, public optional_extensions...
         {
         private:
@@ -369,29 +373,114 @@ namespace MINIMAL_STD_NAMESPACE
             inline static fast_lockfree_low_quality_rng id_generator_;
 
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
-            static constexpr size_t NUM_FREE_BLOCK_BINS = 257;
+            static_assert(max_waste_percent > 0 && max_waste_percent <= 25,
+                          "max_waste_percent must be in the range [1, 25]");
+            static_assert(max_bin_bytes >= 1024,
+                          "max_bin_bytes must be at least 1024 bytes");
 
-            static constexpr array<const size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES =
-                {64, 64 * 2, 64 * 3, 64 * 4, 64 * 5, 64 * 6, 64 * 7, 64 * 8, 64 * 9, 64 * 10, 64 * 11, 64 * 12, 64 * 13, 64 * 14, 64 * 15,
-                 1024, 1024 + 128, 1024 + (128 * 2), 1024 + (128 * 3), 1024 + (128 * 4), 1024 + (128 * 5), 1024 + (128 * 6), 1024 + (128 * 7), 1024 + (128 * 8), 1024 + (128 * 9), 1024 + (128 * 10), 1024 + (128 * 11), 1024 + (128 * 12), 1024 + (128 * 13), 1024 + (128 * 14), 1024 + (128 * 15),
-                 3072, 3072 + 256, 3072 + (256 * 2), 3072 + (256 * 3), 3072 + (256 * 4), 3072 + (256 * 5), 3072 + (256 * 6), 3072 + (256 * 7), 3072 + (256 * 8), 3072 + (256 * 9), 3072 + (256 * 10), 3072 + (256 * 11), 3072 + (256 * 12), 3072 + (256 * 13), 3072 + (256 * 14), 3072 + (256 * 15),
-                 7168, 7168 + 512, 7168 + (512 * 2), 7168 + (512 * 3), 7168 + (512 * 4), 7168 + (512 * 5), 7168 + (512 * 6), 7168 + (512 * 7), 7168 + (512 * 8), 7168 + (512 * 9), 7168 + (512 * 10), 7168 + (512 * 11), 7168 + (512 * 12), 7168 + (512 * 13), 7168 + (512 * 14), 7168 + (512 * 15),
-                 15360, 15360 + 1024, 15360 + (1024 * 2), 15360 + (1024 * 3), 15360 + (1024 * 4), 15360 + (1024 * 5), 15360 + (1024 * 6), 15360 + (1024 * 7), 15360 + (1024 * 8), 15360 + (1024 * 9), 15360 + (1024 * 10), 15360 + (1024 * 11), 15360 + (1024 * 12), 15360 + (1024 * 13), 15360 + (1024 * 14), 15360 + (1024 * 15),
-                 31744, 31744 + 2048, 31744 + (2048 * 2), 31744 + (2048 * 3), 31744 + (2048 * 4), 31744 + (2048 * 5), 31744 + (2048 * 6), 31744 + (2048 * 7), 31744 + (2048 * 8), 31744 + (2048 * 9), 31744 + (2048 * 10), 31744 + (2048 * 11), 31744 + (2048 * 12), 31744 + (2048 * 13), 31744 + (2048 * 14), 31744 + (2048 * 15),
-                 64512, 64512 + 4096, 64512 + (4096 * 2), 64512 + (4096 * 3), 64512 + (4096 * 4), 64512 + (4096 * 5), 64512 + (4096 * 6), 64512 + (4096 * 7), 64512 + (4096 * 8), 64512 + (4096 * 9), 64512 + (4096 * 10), 64512 + (4096 * 11), 64512 + (4096 * 12), 64512 + (4096 * 13), 64512 + (4096 * 14), 64512 + (4096 * 15),
-                 130048, 130048 + 8192, 130048 + (8192 * 2), 130048 + (8192 * 3), 130048 + (8192 * 4), 130048 + (8192 * 5), 130048 + (8192 * 6), 130048 + (8192 * 7), 130048 + (8192 * 8), 130048 + (8192 * 9), 130048 + (8192 * 10), 130048 + (8192 * 11), 130048 + (8192 * 12), 130048 + (8192 * 13), 130048 + (8192 * 14), 130048 + (8192 * 15),
-                 261120, 261120 + 16384, 261120 + (16384 * 2), 261120 + (16384 * 3), 261120 + (16384 * 4), 261120 + (16384 * 5), 261120 + (16384 * 6), 261120 + (16384 * 7), 261120 + (16384 * 8), 261120 + (16384 * 9), 261120 + (16384 * 10), 261120 + (16384 * 11), 261120 + (16384 * 12), 261120 + (16384 * 13), 261120 + (16384 * 14), 261120 + (16384 * 15),
-                 523264, 523264 + 32768, 523264 + (32768 * 2), 523264 + (32768 * 3), 523264 + (32768 * 4), 523264 + (32768 * 5), 523264 + (32768 * 6), 523264 + (32768 * 7), 523264 + (32768 * 8), 523264 + (32768 * 9), 523264 + (32768 * 10), 523264 + (32768 * 11), 523264 + (32768 * 12), 523264 + (32768 * 13), 523264 + (32768 * 14), 523264 + (32768 * 15),
-                 1047552, 1047552 + 65536, 1047552 + (65536 * 2), 1047552 + (65536 * 3), 1047552 + (65536 * 4), 1047552 + (65536 * 5), 1047552 + (65536 * 6), 1047552 + (65536 * 7), 1047552 + (65536 * 8), 1047552 + (65536 * 9), 1047552 + (65536 * 10), 1047552 + (65536 * 11), 1047552 + (65536 * 12), 1047552 + (65536 * 13), 1047552 + (65536 * 14), 1047552 + (65536 * 15),
-                 2096128, 2096128 + 131072, 2096128 + (131072 * 2), 2096128 + (131072 * 3), 2096128 + (131072 * 4), 2096128 + (131072 * 5), 2096128 + (131072 * 6), 2096128 + (131072 * 7), 2096128 + (131072 * 8), 2096128 + (131072 * 9), 2096128 + (131072 * 10), 2096128 + (131072 * 11), 2096128 + (131072 * 12), 2096128 + (131072 * 13), 2096128 + (131072 * 14), 2096128 + (131072 * 15),
-                 4193280, 4193280 + 262144, 4193280 + (262144 * 2), 4193280 + (262144 * 3), 4193280 + (262144 * 4), 4193280 + (262144 * 5), 4193280 + (262144 * 6), 4193280 + (262144 * 7), 4193280 + (262144 * 8), 4193280 + (262144 * 9), 4193280 + (262144 * 10), 4193280 + (262144 * 11), 4193280 + (262144 * 12), 4193280 + (262144 * 13), 4193280 + (262144 * 14), 4193280 + (262144 * 15),
-                 8387584, 8387584 + 524288, 8387584 + (524288 * 2), 8387584 + (524288 * 3), 8387584 + (524288 * 4), 8387584 + (524288 * 5), 8387584 + (524288 * 6), 8387584 + (524288 * 7), 8387584 + (524288 * 8), 8387584 + (524288 * 9), 8387584 + (524288 * 10), 8387584 + (524288 * 11), 8387584 + (524288 * 12), 8387584 + (524288 * 13), 8387584 + (524288 * 14), 8387584 + (524288 * 15),
-                 16776192, 16776192 + 1048576, 16776192 + (1048576 * 2), 16776192 + (1048576 * 3), 16776192 + (1048576 * 4), 16776192 + (1048576 * 5), 16776192 + (1048576 * 6), 16776192 + (1048576 * 7), 16776192 + (1048576 * 8), 16776192 + (1048576 * 9), 16776192 + (1048576 * 10), 16776192 + (1048576 * 11), 16776192 + (1048576 * 12), 16776192 + (1048576 * 13), 16776192 + (1048576 * 14), 16776192 + (1048576 * 15),
-                 33554432, 33554432 + 2097152, 33554432 + (2097152 * 2), 33554432 + (2097152 * 3), 33554432 + (2097152 * 4), 33554432 + (2097152 * 5), 33554432 + (2097152 * 6), 33554432 + (2097152 * 7), 33554432 + (2097152 * 8), 33554432 + (2097152 * 9), 33554432 + (2097152 * 10), 33554432 + (2097152 * 11), 33554432 + (2097152 * 12), 33554432 + (2097152 * 13), 33554432 + (2097152 * 14), 33554432 + (2097152 * 15),
-                 UINT64_MAX};
+            static constexpr size_t MIN_BIN_BYTES = DEFAULT_ALIGNMENT;
+            static constexpr size_t MAX_BIN_BYTES = max_bin_bytes;
+            static constexpr size_t MAX_WASTE_PERCENT = max_waste_percent;
+
+            static constexpr size_t align_up_bin_size(size_t size)
+            {
+                return internal::lockfree_aligned_size(size, DEFAULT_ALIGNMENT);
+            }
+
+            static constexpr size_t ceil_div(size_t numerator, size_t denominator)
+            {
+                return (numerator + denominator - 1) / denominator;
+            }
+
+            static constexpr size_t max_bin_bytes_aligned()
+            {
+                return align_up_bin_size(MAX_BIN_BYTES);
+            }
+
+            static constexpr size_t next_bin_size(size_t current)
+            {
+                const size_t grown = ceil_div(current * (100 + MAX_WASTE_PERCENT), 100);
+                size_t candidate = align_up_bin_size(grown);
+
+                if (candidate <= current)
+                {
+                    candidate = current + DEFAULT_ALIGNMENT;
+                }
+
+                const size_t max_aligned = max_bin_bytes_aligned();
+                return (candidate > max_aligned) ? max_aligned : candidate;
+            }
+
+            static constexpr size_t compute_non_sentinel_bin_count()
+            {
+                size_t count = 1;
+                size_t current = MIN_BIN_BYTES;
+                const size_t max_aligned = max_bin_bytes_aligned();
+
+                while (current < max_aligned)
+                {
+                    current = next_bin_size(current);
+                    ++count;
+                }
+
+                return count;
+            }
+
+            static constexpr size_t NUM_NON_SENTINEL_FREE_BLOCK_BINS = compute_non_sentinel_bin_count();
+            static constexpr size_t NUM_FREE_BLOCK_BINS = NUM_NON_SENTINEL_FREE_BLOCK_BINS + 1;
+
+            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> build_free_block_bin_sizes()
+            {
+                array<size_t, NUM_FREE_BLOCK_BINS> bins{};
+
+                size_t current = MIN_BIN_BYTES;
+                bins[0] = current;
+
+                for (size_t i = 1; i < NUM_NON_SENTINEL_FREE_BLOCK_BINS; ++i)
+                {
+                    current = next_bin_size(current);
+                    bins[i] = current;
+                }
+
+                bins[NUM_FREE_BLOCK_BINS - 1] = UINT64_MAX;
+                return bins;
+            }
+
+            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
+
+            static constexpr size_t BIN_LOOKUP_SHIFT = 13; // 8 KiB buckets
+            static constexpr size_t BIN_LOOKUP_BUCKETS = (MAX_ALLOCATION_SIZE >> BIN_LOOKUP_SHIFT) + 1;
+
+            static constexpr array<size_t, BIN_LOOKUP_BUCKETS> build_bin_index_hints()
+            {
+                array<size_t, BIN_LOOKUP_BUCKETS> hints{};
+
+                size_t bin = 0;
+                for (size_t bucket = 0; bucket < BIN_LOOKUP_BUCKETS; ++bucket)
+                {
+                    const size_t bucket_upper_bound_exclusive = (bucket + 1) << BIN_LOOKUP_SHIFT;
+
+                    while ((bin + 1) < NUM_NON_SENTINEL_FREE_BLOCK_BINS &&
+                           FREE_BLOCK_BIN_SIZES[bin] < bucket_upper_bound_exclusive)
+                    {
+                        ++bin;
+                    }
+
+                    hints[bucket] = bin;
+                }
+
+                return hints;
+            }
+
+            static constexpr array<size_t, BIN_LOOKUP_BUCKETS> BIN_INDEX_HINTS = build_bin_index_hints();
+
+            static_assert(NUM_NON_SENTINEL_FREE_BLOCK_BINS >= 2,
+                          "Uniform bin policy must generate at least two non-sentinel bins");
+            static_assert(FREE_BLOCK_BIN_SIZES[NUM_NON_SENTINEL_FREE_BLOCK_BINS - 1] <= max_bin_bytes_aligned(),
+                          "Largest generated bin exceeds aligned max_bin_bytes");
 
         public:
-            static constexpr size_t MAX_ALLOCATION_SIZE = FREE_BLOCK_BIN_SIZES[NUM_FREE_BLOCK_BINS - 2];
+            static constexpr size_t MAX_ALLOCATION_SIZE = FREE_BLOCK_BIN_SIZES[NUM_NON_SENTINEL_FREE_BLOCK_BINS - 1];
 
         private:
             const void *const block_;
@@ -417,7 +506,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             size_t cpu_shard_index() const
             {
-                return static_cast<size_t>(platform::get_cpu_id()) % cpu_shards_;
+                return static_cast<size_t>(platform_provider_type::get_cpu_id()) % cpu_shards_;
             }
 
             const block_header &as_block_header(void *block) const
@@ -456,24 +545,30 @@ namespace MINIMAL_STD_NAMESPACE
 
             uint64_t free_block_bin_index(size_t bytes) const
             {
-                size_t lo = 0;
-                size_t hi = NUM_FREE_BLOCK_BINS - 1;
-
-                while (lo < hi)
+                if (bytes > MAX_ALLOCATION_SIZE)
                 {
-                    size_t mid = lo + (hi - lo) / 2;
-
-                    if (FREE_BLOCK_BIN_SIZES[mid] < bytes)
-                    {
-                        lo = mid + 1;
-                    }
-                    else
-                    {
-                        hi = mid;
-                    }
+                    return NUM_FREE_BLOCK_BINS - 1;
                 }
 
-                return lo;
+                size_t bucket = (bytes - 1) >> BIN_LOOKUP_SHIFT;
+                if (bucket >= BIN_LOOKUP_BUCKETS)
+                {
+                    bucket = BIN_LOOKUP_BUCKETS - 1;
+                }
+
+                size_t index = BIN_INDEX_HINTS[bucket];
+
+                while (index > 0 && FREE_BLOCK_BIN_SIZES[index - 1] >= bytes)
+                {
+                    --index;
+                }
+
+                while (index < (NUM_FREE_BLOCK_BINS - 1) && FREE_BLOCK_BIN_SIZES[index] < bytes)
+                {
+                    ++index;
+                }
+
+                return index;
             }
 
             void back_off(size_t &retries)
@@ -484,7 +579,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 for (size_t i = 0; i < spin_count; ++i)
                 {
-                    platform::cpu_relax();
+                    platform_provider_type::cpu_relax();
                 }
 
                 retries++;
@@ -501,13 +596,18 @@ namespace MINIMAL_STD_NAMESPACE
 
                 do
                 {
-                    back_off(retries);
-
                     node.*next_index_field = metadata_to_index(metadata_tag::unpack_ptr(current_tag));
-                } while (!head.compare_exchange_strong(
-                    current_tag,
-                    metadata_tag::pack(&node, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1)),
-                    memory_order_acq_rel, memory_order_acquire));
+
+                    if (head.compare_exchange_strong(
+                            current_tag,
+                            metadata_tag::pack(&node, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1)),
+                            memory_order_acq_rel, memory_order_acquire))
+                    {
+                        break;
+                    }
+
+                    back_off(retries);
+                } while (true);
             }
 
             //  Unguarded CAS pop: atomically removes and returns the head of the tagged-ptr list.
@@ -522,8 +622,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                 while (metadata_tag::unpack_ptr(current_tag) != nullptr)
                 {
-                    back_off(retries);
-
                     block_metadata *current = metadata_tag::unpack_ptr(current_tag);
 
                     if (current == nullptr)
@@ -540,6 +638,8 @@ namespace MINIMAL_STD_NAMESPACE
                         current->*next_index_field = NULL_INDEX;
                         return current;
                     }
+
+                    back_off(retries);
                 }
 
                 return nullptr;
@@ -595,7 +695,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     //  Use the monotonic counter to record when this block was soft-deleted.
                     //  Adding 1 ensures the value is strictly after the current counter reading.
-                    metadata.soft_deleted_at_counter_ = platform::get_monotonic_counter() + 1;
+                    metadata.soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
 
                     // Set state to SOFT_DELETED (pointer already nullptr), increment version
                     current = metadata.block_state_.load(memory_order_acquire);
@@ -784,7 +884,7 @@ namespace MINIMAL_STD_NAMESPACE
                 block_to_deallocate->block_state_.store(
                     block_state_ptr::with_state_and_increment_version(locked_block_state, AVAILABLE),
                     memory_order_release);
-                block_to_deallocate->soft_deleted_at_counter_ = platform::get_monotonic_counter() + 1;
+                block_to_deallocate->soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
 
                 //  Put the block into the correct free block bin
 
@@ -917,8 +1017,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                     do
                     {
-                        back_off(retries);
-
                         current = block_tag::unpack_ptr(current_tag);
                         next = reinterpret_cast<block_header *>(internal::align_pointer(reinterpret_cast<uint8_t *>(current) + allocation_size, DEFAULT_ALIGNMENT));
 
@@ -934,7 +1032,14 @@ namespace MINIMAL_STD_NAMESPACE
                         next->previous_block_ = current;
 
                         new_tag = block_tag::pack(next, static_cast<uint16_t>(block_tag::unpack_counter(current_tag) + 1));
-                    } while (!next_empty_memory_block_.compare_exchange_strong(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
+
+                        if (next_empty_memory_block_.compare_exchange_strong(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
+                        {
+                            break;
+                        }
+
+                        back_off(retries);
+                    } while (true);
                 }
                 current->size_including_header_ = reinterpret_cast<uintptr_t>(next) - reinterpret_cast<uintptr_t>(current);
 
@@ -1262,7 +1367,7 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         //  Use the monotonic counter to record the cutoff point for soft-deleted metadata.
                         //  Adding 1 ensures any soft-deletes happening concurrently will be visible.
-                        const_cast<lockfree_single_block_resource_impl &>(resource_).hard_delete_before_counter_cutoff_.store(platform::get_monotonic_counter() + 1, memory_order_release);
+                        const_cast<lockfree_single_block_resource_impl &>(resource_).hard_delete_before_counter_cutoff_.store(platform_provider_type::get_monotonic_counter() + 1, memory_order_release);
                     }
                 }
 
@@ -1327,7 +1432,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 if (const_cast<lockfree_single_block_resource_impl &>(*this).number_of_active_iterators_.add_fetch(1, memory_order_acq_rel) == 1)
                 {
-                    const_cast<lockfree_single_block_resource_impl &>(*this).hard_delete_before_counter_cutoff_.store(platform::get_monotonic_counter() + 1, memory_order_release);
+                    const_cast<lockfree_single_block_resource_impl &>(*this).hard_delete_before_counter_cutoff_.store(platform_provider_type::get_monotonic_counter() + 1, memory_order_release);
                 }
                 return const_iterator(*this, metadata_tag::unpack_ptr(metadata_head_.load(memory_order_acquire)));
             }
@@ -1342,9 +1447,35 @@ namespace MINIMAL_STD_NAMESPACE
         };
 
         template <typename... optional_extensions>
-        using lockfree_single_block_resource = lockfree_single_block_resource_impl<platform::default_interrupt_policy, optional_extensions...>;
+        using lockfree_single_block_resource = lockfree_single_block_resource_impl<platform::default_interrupt_policy,
+                                                                                    platform::default_platform_provider,
+                                                                                    32 * 1024 * 1024,
+                                                                                    5,
+                                                                                    optional_extensions...>;
 
         template <typename interrupt_policy_type, typename... optional_extensions>
-        using lockfree_single_block_resource_with_interrupt_policy = lockfree_single_block_resource_impl<interrupt_policy_type, optional_extensions...>;
+        using lockfree_single_block_resource_with_interrupt_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
+                                                                                                          platform::default_platform_provider,
+                                                                                                          32 * 1024 * 1024,
+                                                                                                          5,
+                                                                                                          optional_extensions...>;
+
+        template <typename interrupt_policy_type, typename platform_provider_type, typename... optional_extensions>
+        using lockfree_single_block_resource_with_interrupt_policy_and_platform_provider = lockfree_single_block_resource_impl<interrupt_policy_type,
+                                                                                                                                platform_provider_type,
+                                                                                                                                32 * 1024 * 1024,
+                                                                                                                                5,
+                                                                                                                                optional_extensions...>;
+
+        template <typename interrupt_policy_type,
+                  typename platform_provider_type,
+                  size_t max_bin_bytes,
+                  size_t max_waste_percent,
+                  typename... optional_extensions>
+        using lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
+                                                                                                                                  platform_provider_type,
+                                                                                                                                  max_bin_bytes,
+                                                                                                                                  max_waste_percent,
+                                                                                                                                  optional_extensions...>;
     };
 } //  namespace MINIMAL_STD_NAMESPACE::pmr

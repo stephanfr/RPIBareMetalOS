@@ -27,6 +27,21 @@ namespace MINIMAL_STD_NAMESPACE
     {
         namespace platform
         {
+#if defined(__MINIMAL_STD_TEST__)
+            using test_cpu_id_provider_type = uint32_t (*)();
+            inline test_cpu_id_provider_type test_cpu_id_provider_ = nullptr;
+
+            inline void set_test_cpu_id_provider(test_cpu_id_provider_type provider)
+            {
+                test_cpu_id_provider_ = provider;
+            }
+
+            inline void clear_test_cpu_id_provider()
+            {
+                test_cpu_id_provider_ = nullptr;
+            }
+#endif
+
 #if defined(__x86_64__) || defined(_M_X64)
             inline void cpuid(uint32_t leaf, uint32_t subleaf, uint32_t &eax, uint32_t &ebx, uint32_t &ecx, uint32_t &edx)
             {
@@ -85,7 +100,13 @@ namespace MINIMAL_STD_NAMESPACE
             inline uint32_t get_cpu_id()
             {
 #if defined(__MINIMAL_STD_TEST__)
-                return 0u;
+                if (test_cpu_id_provider_ == nullptr)
+                {
+                    MINIMAL_STD_FAIL(test_cpu_id_provider_not_set_for_test_mode);
+                    return 0u;
+                }
+
+                return test_cpu_id_provider_();
 
 #elif defined(__x86_64__) || defined(_M_X64)
                 uint32_t ebx;
@@ -215,6 +236,24 @@ namespace MINIMAL_STD_NAMESPACE
                 return (chunk_ptr[0] == ~0ULL) && (chunk_ptr[1] == ~0ULL);
 #endif
             }
+
+            struct default_platform_provider
+            {
+                static inline uint32_t get_cpu_id()
+                {
+                    return platform::get_cpu_id();
+                }
+
+                static inline uint64_t get_monotonic_counter()
+                {
+                    return platform::get_monotonic_counter();
+                }
+
+                static inline void cpu_relax()
+                {
+                    platform::cpu_relax();
+                }
+            };
 
         } // namespace platform
     } // namespace pmr

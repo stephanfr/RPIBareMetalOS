@@ -261,7 +261,7 @@ Comprehensive test suite includes:
 
 ### Test Framework
 - **CppUTest**: Unit testing framework
-- **Threading**: pthread for multithreaded test scenarios
+- **Threading**: Multithreaded test scenarios
 - **Timing**: CPU cycle counting for performance measurement
 
 ## Performance Considerations

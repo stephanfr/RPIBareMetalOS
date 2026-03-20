@@ -4,6 +4,9 @@
 
 #pragma once
 
+#include <__platform/cpu_platform_abstractions.h>
+
+#include <stddef.h>
 #include <stdint.h>
 
 #if defined(__linux__)
@@ -24,6 +27,28 @@ namespace MINIMAL_STD_NAMESPACE
 #if defined(__linux__)
                 inline thread_local uint32_t userspace_guard_depth = 0;
                 inline thread_local sigset_t userspace_saved_sigmask;
+                inline thread_local uint32_t cached_cpu_id = 0;
+                inline thread_local size_t cached_cpu_id_call_count = 500;
+
+                static constexpr size_t CPU_ID_REFRESH_EVERY_N_CALLS = 500;
+
+                inline uint32_t get_cached_cpu_id_refresh_500()
+                {
+                    if (cached_cpu_id_call_count >= CPU_ID_REFRESH_EVERY_N_CALLS)
+                    {
+                        int cpu = sched_getcpu();
+                        cached_cpu_id = (cpu < 0) ? 0u : static_cast<uint32_t>(cpu);
+                        cached_cpu_id_call_count = 0;
+                    }
+
+                    cached_cpu_id_call_count++;
+                    return cached_cpu_id;
+                }
+
+                inline void install_test_cpu_id_provider()
+                {
+                    minstd::pmr::platform::set_test_cpu_id_provider(&get_cached_cpu_id_refresh_500);
+                }
 
                 inline uint32_t get_cpu_id()
                 {
@@ -64,6 +89,11 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 #else
+                inline void install_test_cpu_id_provider()
+                {
+                    minstd::pmr::platform::clear_test_cpu_id_provider();
+                }
+
                 inline uint32_t get_cpu_id()
                 {
                     return 0u;
