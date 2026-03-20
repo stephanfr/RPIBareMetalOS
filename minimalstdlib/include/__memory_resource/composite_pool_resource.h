@@ -22,12 +22,19 @@ namespace MINIMAL_STD_NAMESPACE
                   size_t ELEMENTS_PER_BLOCK = 1024,
                   size_t MAX_NUMBER_OF_ARENAS = 32,
                   size_t MAX_NUMBER_OF_BLOCKS = 48,
-                  bool include_statistics = true>
+                  bool include_statistics = true,
+                  size_t LARGE_RESOURCE_MAX_BIN_BYTES = 32 * 1024 * 1024,
+                  size_t LARGE_RESOURCE_MAX_WASTE_PERCENT = 5>
             requires(THRESHOLD_BYTES > 0)
         class composite_pool_resource : public memory_resource, public conditional<include_statistics, extensions::memory_resource_statistics, extensions::null_memory_resource_statistics>::type
         {
         public:
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
+
+            static_assert(LARGE_RESOURCE_MAX_BIN_BYTES >= 1024,
+                          "LARGE_RESOURCE_MAX_BIN_BYTES must be at least 1024 bytes");
+            static_assert(LARGE_RESOURCE_MAX_WASTE_PERCENT > 0 && LARGE_RESOURCE_MAX_WASTE_PERCENT <= 25,
+                          "LARGE_RESOURCE_MAX_WASTE_PERCENT must be in range [1, 25]");
 
             composite_pool_resource(void *block, size_t block_size, size_t number_of_arenas, size_t cpu_shards = DEFAULT_CPU_SHARDS)
                 : large_resource_(block, block_size, cpu_shards),
@@ -36,7 +43,13 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            lockfree_single_block_resource<> large_resource_;
+            using large_resource_type = lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+                platform::default_interrupt_policy,
+                platform::default_platform_provider,
+                LARGE_RESOURCE_MAX_BIN_BYTES,
+                LARGE_RESOURCE_MAX_WASTE_PERCENT>;
+
+            large_resource_type large_resource_;
             fixed_size_element_resource<ELEMENT_SIZE_IN_BYTES, ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS, false> small_resource_;
 
             static bool should_use_small_pool(size_t bytes, size_t alignment) noexcept

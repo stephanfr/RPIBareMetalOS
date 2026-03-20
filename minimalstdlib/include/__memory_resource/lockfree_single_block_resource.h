@@ -428,8 +428,9 @@ namespace MINIMAL_STD_NAMESPACE
 
             static constexpr size_t NUM_NON_SENTINEL_FREE_BLOCK_BINS = compute_non_sentinel_bin_count();
             static constexpr size_t NUM_FREE_BLOCK_BINS = NUM_NON_SENTINEL_FREE_BLOCK_BINS + 1;
+            static constexpr size_t MAX_ALLOCATION_SIZE_INTERNAL = max_bin_bytes_aligned();
 
-            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> build_free_block_bin_sizes()
+            static array<size_t, NUM_FREE_BLOCK_BINS> build_free_block_bin_sizes()
             {
                 array<size_t, NUM_FREE_BLOCK_BINS> bins{};
 
@@ -446,12 +447,12 @@ namespace MINIMAL_STD_NAMESPACE
                 return bins;
             }
 
-            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
+            inline static array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
 
             static constexpr size_t BIN_LOOKUP_SHIFT = 13; // 8 KiB buckets
-            static constexpr size_t BIN_LOOKUP_BUCKETS = (MAX_ALLOCATION_SIZE >> BIN_LOOKUP_SHIFT) + 1;
+            static constexpr size_t BIN_LOOKUP_BUCKETS = (MAX_ALLOCATION_SIZE_INTERNAL >> BIN_LOOKUP_SHIFT) + 1;
 
-            static constexpr array<size_t, BIN_LOOKUP_BUCKETS> build_bin_index_hints()
+            static array<size_t, BIN_LOOKUP_BUCKETS> build_bin_index_hints()
             {
                 array<size_t, BIN_LOOKUP_BUCKETS> hints{};
 
@@ -472,15 +473,13 @@ namespace MINIMAL_STD_NAMESPACE
                 return hints;
             }
 
-            static constexpr array<size_t, BIN_LOOKUP_BUCKETS> BIN_INDEX_HINTS = build_bin_index_hints();
+            inline static array<size_t, BIN_LOOKUP_BUCKETS> BIN_INDEX_HINTS = build_bin_index_hints();
 
             static_assert(NUM_NON_SENTINEL_FREE_BLOCK_BINS >= 2,
                           "Uniform bin policy must generate at least two non-sentinel bins");
-            static_assert(FREE_BLOCK_BIN_SIZES[NUM_NON_SENTINEL_FREE_BLOCK_BINS - 1] <= max_bin_bytes_aligned(),
-                          "Largest generated bin exceeds aligned max_bin_bytes");
 
         public:
-            static constexpr size_t MAX_ALLOCATION_SIZE = FREE_BLOCK_BIN_SIZES[NUM_NON_SENTINEL_FREE_BLOCK_BINS - 1];
+            static constexpr size_t MAX_ALLOCATION_SIZE = MAX_ALLOCATION_SIZE_INTERNAL;
 
         private:
             const void *const block_;
@@ -681,9 +680,8 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 // Set state to LOCKED and clear the pointer atomically, increment version
                 uint64_t current = metadata.block_state_.load(memory_order_acquire);
-                metadata.block_state_.store(
-                    block_state_ptr::pack(nullptr, LOCKED, block_state_ptr::unpack_version(current) + 1),
-                    memory_order_release);
+                current = block_state_ptr::pack(nullptr, LOCKED, block_state_ptr::unpack_version(current) + 1);
+                metadata.block_state_.store(current, memory_order_release);
 
                 //  If there are no iterators, then we can move the metadata directly to the free metadata list
 
@@ -698,7 +696,6 @@ namespace MINIMAL_STD_NAMESPACE
                     metadata.soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
 
                     // Set state to SOFT_DELETED (pointer already nullptr), increment version
-                    current = metadata.block_state_.load(memory_order_acquire);
                     metadata.block_state_.store(
                         block_state_ptr::with_state_and_increment_version(current, SOFT_DELETED),
                         memory_order_release);
@@ -760,7 +757,7 @@ namespace MINIMAL_STD_NAMESPACE
                 block_metadata *metadata = metadata_start_ - metadata_index;
 
                 // Get current version (if recycled metadata) and increment it
-                uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_acquire));
+                uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_relaxed));
                 // Set pointer and state atomically in a single store
                 metadata->block_state_.store(
                     block_state_ptr::pack(free_block, IN_USE, version + 1),
@@ -884,7 +881,11 @@ namespace MINIMAL_STD_NAMESPACE
                 block_to_deallocate->block_state_.store(
                     block_state_ptr::with_state_and_increment_version(locked_block_state, AVAILABLE),
                     memory_order_release);
-                block_to_deallocate->soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
+
+                if (hard_delete_before_counter_cutoff_.load(memory_order_relaxed) != SIZE_MAX)
+                {
+                    block_to_deallocate->soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
+                }
 
                 //  Put the block into the correct free block bin
 

@@ -210,7 +210,13 @@ namespace
             start_allocations = false;
 
             {
-                minstd::pmr::lockfree_single_block_resource<minstd::pmr::extensions::null_memory_resource_statistics> lockfree_resource(buffer, BUFFER_SIZE);
+                using composite_large_resource_type = minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+                    minstd::pmr::platform::default_interrupt_policy,
+                    minstd::pmr::platform::default_platform_provider,
+                    32 * 1024 * 1024,
+                    5>;
+
+                composite_large_resource_type lockfree_resource(buffer, BUFFER_SIZE);
 
                 for (size_t i = 0; i < num_threads; i++)
                 {
