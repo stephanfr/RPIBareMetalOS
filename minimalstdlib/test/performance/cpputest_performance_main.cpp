@@ -5,4 +5,10 @@
 #include <CppUTest/TestHarness.h>
 #include <CppUTest/CommandLineTestRunner.h>
 
-CPPUTEST_DEFAULT_MAIN
+#include "../shared/os_abstractions.h"
+
+int main(int argc, char **argv)
+{
+	minstd::pmr::test::os_abstractions::install_test_cpu_id_provider();
+	return CommandLineTestRunner::RunAllTests(argc, argv);
+}

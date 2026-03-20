@@ -45,6 +45,34 @@ public:
         e.ops_per_sec = ops_per_sec;
         e.threads = thread_count;
         e.iterations = iterations;
+        e.has_baseline = false;
+        e.baseline_ops_per_sec = 0.0;
+        e.delta_percent = 0.0;
+        e.speedup = 0.0;
+    }
+
+    void record_with_baseline(const char *label,
+                              double ops_per_sec,
+                              double baseline_ops_per_sec,
+                              double delta_percent,
+                              double speedup,
+                              size_t thread_count = 0,
+                              size_t iterations = 0)
+    {
+        if (entry_count_ >= MAX_ENTRIES)
+        {
+            return;
+        }
+
+        entry &e = entries_[entry_count_++];
+        snprintf(e.label, sizeof(e.label), "%s", label);
+        e.ops_per_sec = ops_per_sec;
+        e.threads = thread_count;
+        e.iterations = iterations;
+        e.has_baseline = true;
+        e.baseline_ops_per_sec = baseline_ops_per_sec;
+        e.delta_percent = delta_percent;
+        e.speedup = speedup;
     }
 
     /// Write the Markdown report.  Creates the reports directory if it does
@@ -81,28 +109,57 @@ public:
         strftime(human_time, sizeof(human_time), "%Y-%m-%d %H:%M:%S", &tm_val);
         fprintf(f, "**Date:** %s  \n\n", human_time);
 
-        fprintf(f, "| Label | Ops/sec | Threads | Iterations/thread |\n");
-        fprintf(f, "|-------|--------:|--------:|------------------:|\n");
+        fprintf(f, "| Label | Ops/sec | Baseline Ops/sec | Delta %% | Speedup | Threads | Iterations/thread |\n");
+        fprintf(f, "|-------|--------:|-----------------:|--------:|--------:|--------:|------------------:|\n");
 
         for (size_t i = 0; i < entry_count_; ++i)
         {
             const entry &e = entries_[i];
-            if (e.threads == 0 && e.iterations == 0)
+            const char *threads_text = (e.threads == 0) ? "—" : nullptr;
+            const char *iterations_text = (e.iterations == 0) ? "—" : nullptr;
+
+            if (e.has_baseline)
             {
-                fprintf(f, "| %s | %.0f | — | — |\n", e.label, e.ops_per_sec);
-            }
-            else if (e.threads == 0)
-            {
-                fprintf(f, "| %s | %.0f | — | %zu |\n", e.label, e.ops_per_sec, e.iterations);
-            }
-            else if (e.iterations == 0)
-            {
-                fprintf(f, "| %s | %.0f | %zu | — |\n", e.label, e.ops_per_sec, e.threads);
+                if (threads_text != nullptr && iterations_text != nullptr)
+                {
+                    fprintf(f, "| %s | %.0f | %.0f | %.2f | %.3f | — | — |\n",
+                            e.label, e.ops_per_sec, e.baseline_ops_per_sec, e.delta_percent, e.speedup);
+                }
+                else if (threads_text != nullptr)
+                {
+                    fprintf(f, "| %s | %.0f | %.0f | %.2f | %.3f | — | %zu |\n",
+                            e.label, e.ops_per_sec, e.baseline_ops_per_sec, e.delta_percent, e.speedup, e.iterations);
+                }
+                else if (iterations_text != nullptr)
+                {
+                    fprintf(f, "| %s | %.0f | %.0f | %.2f | %.3f | %zu | — |\n",
+                            e.label, e.ops_per_sec, e.baseline_ops_per_sec, e.delta_percent, e.speedup, e.threads);
+                }
+                else
+                {
+                    fprintf(f, "| %s | %.0f | %.0f | %.2f | %.3f | %zu | %zu |\n",
+                            e.label, e.ops_per_sec, e.baseline_ops_per_sec, e.delta_percent, e.speedup, e.threads, e.iterations);
+                }
             }
             else
             {
-                fprintf(f, "| %s | %.0f | %zu | %zu |\n",
-                        e.label, e.ops_per_sec, e.threads, e.iterations);
+                if (threads_text != nullptr && iterations_text != nullptr)
+                {
+                    fprintf(f, "| %s | %.0f | — | — | — | — | — |\n", e.label, e.ops_per_sec);
+                }
+                else if (threads_text != nullptr)
+                {
+                    fprintf(f, "| %s | %.0f | — | — | — | — | %zu |\n", e.label, e.ops_per_sec, e.iterations);
+                }
+                else if (iterations_text != nullptr)
+                {
+                    fprintf(f, "| %s | %.0f | — | — | — | %zu | — |\n", e.label, e.ops_per_sec, e.threads);
+                }
+                else
+                {
+                    fprintf(f, "| %s | %.0f | — | — | — | %zu | %zu |\n",
+                            e.label, e.ops_per_sec, e.threads, e.iterations);
+                }
             }
         }
 
@@ -117,6 +174,10 @@ private:
         double ops_per_sec;
         size_t threads;
         size_t iterations;
+        bool has_baseline;
+        double baseline_ops_per_sec;
+        double delta_percent;
+        double speedup;
     };
 
     static constexpr size_t MAX_ENTRIES = 256;

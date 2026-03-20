@@ -191,8 +191,22 @@ TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, ThreadScalabilitySensiti
                lockfree_efficiency, malloc_efficiency, lockfree_scalability, speedup);
 
         char label[64];
-        snprintf(label, sizeof(label), "%zu threads", num_threads);
-        report.record(label, lockfree_total_ops_per_second, num_threads, PERF_ALLOCATIONS_PER_THREAD * PERF_REPETITIONS);
+        snprintf(label, sizeof(label), "lockfree %zu threads", num_threads);
+
+        const double delta_percent = (malloc_total_ops_per_second > 0.0)
+                         ? ((lockfree_total_ops_per_second - malloc_total_ops_per_second) * 100.0 / malloc_total_ops_per_second)
+                         : 0.0;
+
+        report.record_with_baseline(label,
+                        lockfree_total_ops_per_second,
+                        malloc_total_ops_per_second,
+                        delta_percent,
+                        speedup,
+                        num_threads,
+                        PERF_ALLOCATIONS_PER_THREAD * PERF_REPETITIONS);
+
+        snprintf(label, sizeof(label), "malloc/free %zu threads", num_threads);
+        report.record(label, malloc_total_ops_per_second, num_threads, PERF_ALLOCATIONS_PER_THREAD * PERF_REPETITIONS);
 
         CHECK(lockfree_elapsed_time > 0);
         CHECK(malloc_elapsed_time > 0);
