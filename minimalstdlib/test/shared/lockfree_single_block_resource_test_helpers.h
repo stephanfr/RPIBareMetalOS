@@ -74,12 +74,18 @@ namespace
     minstd::atomic<bool> exit_thread = false;
     minstd::atomic<bool> correctness_allocation_failed = false;
 
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
         test_userspace_signal_mask_interrupt_policy,
+        minstd::pmr::platform::default_platform_provider,
+        32 * 1024 * 1024,
+        5,
         minstd::pmr::extensions::memory_resource_statistics,
         minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
         test_userspace_signal_mask_interrupt_policy,
+        minstd::pmr::platform::default_platform_provider,
+        32 * 1024 * 1024,
+        5,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
 
     struct userspace_signal_guard
