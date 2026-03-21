@@ -56,9 +56,9 @@ namespace
     minstd::atomic<bool> start_allocations = false;
 
     using composite_pool_resource_perf = minstd::pmr::composite_pool_resource<
-        1000,
-        64,
-        1024,
+        3072,
+        256,
+        2048,
         32,
         512,
         false,
@@ -344,8 +344,8 @@ namespace
                NUM_ALLOCATIONS_PER_THREAD, REPETITIONS);
         printf("- Allocation sizes: lognormal(5.4, 1.2) distribution, clamped to [1, %zu] bytes\n",
                MAX_ALLOCATION_SIZE);
-         printf("- Composite settings: threshold=1000B, element=64B, arenas<=32, blocks<=512, stats=off, max_bin=32MB, max_waste=5%%\n");
-        printf("- Composite routes allocations <= 1000 bytes to fixed_size pool\n");
+         printf("- Composite settings: threshold=3072B, element=256B, arenas<=32, blocks<=512, stats=off, max_bin=32MB, max_waste=5%%\n");
+        printf("- Composite routes allocations <= 3072 bytes to fixed_size pool\n");
         printf("- All allocators tested with identical workloads for fair comparison\n");
     }
 }
