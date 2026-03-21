@@ -549,25 +549,24 @@ namespace MINIMAL_STD_NAMESPACE
                     return NUM_FREE_BLOCK_BINS - 1;
                 }
 
-                size_t bucket = (bytes - 1) >> BIN_LOOKUP_SHIFT;
-                if (bucket >= BIN_LOOKUP_BUCKETS)
+                size_t lo = 0;
+                size_t hi = NUM_FREE_BLOCK_BINS - 1;
+
+                while (lo < hi)
                 {
-                    bucket = BIN_LOOKUP_BUCKETS - 1;
+                    size_t mid = lo + (hi - lo) / 2;
+
+                    if (FREE_BLOCK_BIN_SIZES[mid] < bytes)
+                    {
+                        lo = mid + 1;
+                    }
+                    else
+                    {
+                        hi = mid;
+                    }
                 }
 
-                size_t index = BIN_INDEX_HINTS[bucket];
-
-                while (index > 0 && FREE_BLOCK_BIN_SIZES[index - 1] >= bytes)
-                {
-                    --index;
-                }
-
-                while (index < (NUM_FREE_BLOCK_BINS - 1) && FREE_BLOCK_BIN_SIZES[index] < bytes)
-                {
-                    ++index;
-                }
-
-                return index;
+                return lo;
             }
 
             void back_off(size_t &retries)

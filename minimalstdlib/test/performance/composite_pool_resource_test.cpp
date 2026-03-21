@@ -34,6 +34,16 @@ namespace
 
     minstd::atomic<bool> start_allocations = false;
 
+    using composite_pool_resource_perf = minstd::pmr::composite_pool_resource<
+        1000,
+        64,
+        1024,
+        32,
+        512,
+        false,
+        32 * 1024 * 1024,
+        5>;
+
     size_t get_number_of_arenas()
     {
         long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
@@ -129,7 +139,7 @@ namespace
         {
             start_allocations = false;
 
-            minstd::pmr::composite_pool_resource<> resource(buffer, BUFFER_SIZE, get_number_of_arenas());
+            composite_pool_resource_perf resource(buffer, BUFFER_SIZE, get_number_of_arenas());
 
             allocator_thread_arguments args[MAX_THREADS];
             pthread_t threads[MAX_THREADS];
@@ -239,6 +249,7 @@ namespace
         printf("- Speedup: Composite vs Malloc performance ratio (>1.0 = composite faster)\n");
         printf("- Each thread performs %zu initial allocations + 100 repetitions\n",
                OPERATIONS_PER_THREAD_SENSITIVITY);
+        printf("- Composite settings: threshold=1000B, element=64B, arenas<=32, blocks<=512, stats=off, max_bin=32MB, max_waste=5%%\n");
         printf("- Both allocators tested with identical workloads for fair comparison\n");
     }
 }

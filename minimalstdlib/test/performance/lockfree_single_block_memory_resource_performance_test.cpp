@@ -13,8 +13,11 @@ TEST_GROUP(LockfreeSingleBlockMemoryResourcePerformanceTests)
 };
 
 using lockfree_single_block_resource_perf =
-    minstd::pmr::lockfree_single_block_resource_with_interrupt_policy<
+    minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
         minstd::pmr::platform::noop_interrupt_policy,
+        minstd::pmr::platform::default_platform_provider,
+        32 * 1024 * 1024,
+        5,
         minstd::pmr::extensions::null_memory_resource_statistics>;
 
 TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, MultiThreadAllocateDeallocateTest)

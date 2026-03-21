@@ -299,7 +299,7 @@ namespace
             CHECK_TRUE(list.insert(key, key));
         }
 
-        minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, false> composite_resource(
+        minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, false, 32 * 1024 * 1024, 5> composite_resource(
             skiplist_composite_resource_buffer,
             SKIPLIST_COMPOSITE_BUFFER_SIZE,
             skiplist_perf_num_arenas());
