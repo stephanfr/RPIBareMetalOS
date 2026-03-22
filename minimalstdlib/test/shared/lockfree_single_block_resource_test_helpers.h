@@ -359,14 +359,12 @@ namespace
     }
 
     // ---- Interrupt robustness scaffolding ------------------------------------------------
-    static lockfree_single_block_resource_with_stats *s_intr_resource = nullptr;
+    static minstd::pmr::memory_resource *s_intr_resource = nullptr;
     static volatile sig_atomic_t s_intr_signal_count = 0;
     static volatile sig_atomic_t s_intr_nested_count = 0;
-    static volatile sig_atomic_t s_intr_nested_alloc_count = 0;
-    static volatile sig_atomic_t s_intr_nested_dealloc_count = 0;
     static thread_local volatile sig_atomic_t s_intr_pending_ops = 0;
 
-    static inline bool process_pending_intr_work(lockfree_single_block_resource_with_stats *resource)
+    static inline bool process_pending_intr_work(minstd::pmr::memory_resource *resource)
     {
         sig_atomic_t pending = s_intr_pending_ops;
         if (pending <= 0)
@@ -385,20 +383,15 @@ namespace
             void *p = guarded_allocate(resource, 16);
             if (p != nullptr)
             {
-                __atomic_add_fetch(&s_intr_nested_alloc_count, 1, __ATOMIC_SEQ_CST);
-
-                if (resource->try_deallocate(p, 16, DEFAULT_ALIGNMENT))
-                {
-                    __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
-                    __atomic_add_fetch(&s_intr_nested_dealloc_count, 1, __ATOMIC_SEQ_CST);
-                }
+                guarded_deallocate(resource, p, 16);
+                __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
             }
         }
 
         return true;
     }
 
-    static inline void drain_pending_intr_work(lockfree_single_block_resource_with_stats *resource)
+    static inline void drain_pending_intr_work(minstd::pmr::memory_resource *resource)
     {
         while (process_pending_intr_work(resource))
         {
@@ -713,17 +706,11 @@ namespace
                 size_t idx = rng() % live_count;
                 void *ptr = pointers[idx];
                 size_t sz = sizes[idx];
-                if (args->resource->try_deallocate(ptr, sz, DEFAULT_ALIGNMENT))
-                {
-                    pointers[idx] = pointers[live_count - 1];
-                    sizes[idx] = sizes[live_count - 1];
-                    live_count--;
-                    args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
-                }
-                else
-                {
-                    args->failed_deallocations.fetch_add(1, minstd::memory_order_relaxed);
-                }
+                guarded_deallocate(args->resource, ptr, sz);
+                pointers[idx] = pointers[live_count - 1];
+                sizes[idx] = sizes[live_count - 1];
+                live_count--;
+                args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
 
                 args->heartbeat.fetch_add(1, minstd::memory_order_relaxed);
                 args->last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
@@ -744,28 +731,11 @@ namespace
 
         drain_pending_intr_work(args->resource);
 
-        size_t shutdown_retry_budget = live_count * 128;
-        while (live_count > 0 && shutdown_retry_budget > 0)
+        for (size_t i = 0; i < live_count; ++i)
         {
-            size_t idx = live_count - 1;
-            void *ptr = pointers[idx];
-            size_t sz = sizes[idx];
-
-            if (args->resource->try_deallocate(ptr, sz, DEFAULT_ALIGNMENT))
-            {
-                live_count--;
-                args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
-            }
-            else
-            {
-                args->failed_deallocations.fetch_add(1, minstd::memory_order_relaxed);
-                sched_yield();
-            }
-
-            shutdown_retry_budget--;
+            guarded_deallocate(args->resource, pointers[i], sizes[i]);
+            args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
         }
-
-        args->current_live_count.store(live_count, minstd::memory_order_relaxed);
 
         return nullptr;
     }

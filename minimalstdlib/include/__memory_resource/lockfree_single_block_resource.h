@@ -290,11 +290,6 @@ namespace MINIMAL_STD_NAMESPACE
                 return {nullptr, INVALID, 0, 0};
             }
 
-            bool try_deallocate(void *block, size_t bytes, size_t alignment = DEFAULT_ALIGNMENT)
-            {
-                return do_try_deallocate(block, bytes, alignment);
-            }
-
         private:
             inline static const block_metadata END_OF_METADATA_LIST_SENTINEL = {0, nullptr, 0, 0, 0, 0, 0, 0, {}};
 

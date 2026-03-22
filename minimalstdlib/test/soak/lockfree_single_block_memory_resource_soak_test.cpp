@@ -42,8 +42,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     s_intr_resource = &resource;
     s_intr_signal_count = 0;
-    s_intr_nested_alloc_count = 0;
-    s_intr_nested_dealloc_count = 0;
+    s_intr_nested_count = 0;
     s_intr_pending_ops = 0;
 
     minstd::atomic<bool> stop_flag{false};
@@ -347,8 +346,8 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     // Validate worker + interrupt accounting before frontier-settle probes,
     // because settle_frontier_to_initial performs probe alloc/dealloc pairs.
-    const size_t expected_alloc_before_settle = total_alloc + s_intr_nested_alloc_count;
-    const size_t expected_dealloc_before_settle = total_dealloc + s_intr_nested_dealloc_count;
+    const size_t expected_alloc_before_settle = total_alloc + s_intr_nested_count;
+    const size_t expected_dealloc_before_settle = total_dealloc + s_intr_nested_count;
     CHECK_EQUAL(expected_alloc_before_settle, resource.total_allocations());
     CHECK_EQUAL(expected_dealloc_before_settle, resource.total_deallocations());
 
@@ -362,10 +361,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     printf("Soak test completed. Worker Allocs: %zu, Worker Deallocs: %zu, Failed Allocs: %zu (total across threads)\n",
            total_alloc, total_dealloc, total_failed);
-        printf("Signals delivered: %d, Nested allocs: %d, Nested deallocs: %d\n",
-            (int)s_intr_signal_count,
-            (int)s_intr_nested_alloc_count,
-            (int)s_intr_nested_dealloc_count);
+        printf("Signals delivered: %d, Nested allocs triggered: %d\n", (int)s_intr_signal_count, (int)s_intr_nested_count);
         printf("Iterator observers: scans=%zu, entries_seen=%zu, invalid_states=%zu\n",
             total_iterator_scans, total_iterator_entries, total_iterator_invalid_states);
     printf("Resource: total_allocs=%zu, total_deallocs=%zu, current_bytes=%zu, current_allocated=%zu\n",
