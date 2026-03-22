@@ -11,7 +11,7 @@
 #include <__memory_resource/lockfree_single_block_resource.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
-#include "os_abstractions.h"
+#include "interrupt_simulation_test_helpers.h"
 
 #include <array>
 #include <pthread.h>
@@ -30,21 +30,6 @@ extern "C" double exp(double);
 
 namespace
 {
-    struct test_userspace_signal_mask_interrupt_policy
-    {
-        using interrupt_state_t = uint64_t;
-
-        static inline interrupt_state_t disable_interrupts()
-        {
-            return minstd::pmr::test::os_abstractions::enter_critical_section();
-        }
-
-        static inline void restore_interrupts(interrupt_state_t /* state */)
-        {
-            minstd::pmr::test::os_abstractions::leave_critical_section();
-        }
-    };
-
     constexpr size_t DEFAULT_ALIGNMENT = alignof(max_align_t);
 
     constexpr size_t NUM_ALLOCATIONS_PER_THREAD = 5000;
@@ -87,31 +72,6 @@ namespace
         32 * 1024 * 1024,
         5,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
-
-    struct userspace_signal_guard
-    {
-        userspace_signal_guard()
-        {
-            minstd::pmr::test::os_abstractions::enter_critical_section();
-        }
-
-        ~userspace_signal_guard()
-        {
-            minstd::pmr::test::os_abstractions::leave_critical_section();
-        }
-    };
-
-    inline void *guarded_allocate(minstd::pmr::memory_resource *resource, size_t bytes)
-    {
-        userspace_signal_guard guard;
-        return resource->allocate(bytes);
-    }
-
-    inline void guarded_deallocate(minstd::pmr::memory_resource *resource, void *ptr, size_t bytes)
-    {
-        userspace_signal_guard guard;
-        resource->deallocate(ptr, bytes);
-    }
 
     struct allocator_thread_arguments
     {
@@ -399,12 +359,14 @@ namespace
     }
 
     // ---- Interrupt robustness scaffolding ------------------------------------------------
-    static minstd::pmr::memory_resource *s_intr_resource = nullptr;
+    static lockfree_single_block_resource_with_stats *s_intr_resource = nullptr;
     static volatile sig_atomic_t s_intr_signal_count = 0;
     static volatile sig_atomic_t s_intr_nested_count = 0;
+    static volatile sig_atomic_t s_intr_nested_alloc_count = 0;
+    static volatile sig_atomic_t s_intr_nested_dealloc_count = 0;
     static thread_local volatile sig_atomic_t s_intr_pending_ops = 0;
 
-    static inline bool process_pending_intr_work(minstd::pmr::memory_resource *resource)
+    static inline bool process_pending_intr_work(lockfree_single_block_resource_with_stats *resource)
     {
         sig_atomic_t pending = s_intr_pending_ops;
         if (pending <= 0)
@@ -423,15 +385,20 @@ namespace
             void *p = guarded_allocate(resource, 16);
             if (p != nullptr)
             {
-                guarded_deallocate(resource, p, 16);
-                __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
+                __atomic_add_fetch(&s_intr_nested_alloc_count, 1, __ATOMIC_SEQ_CST);
+
+                if (resource->try_deallocate(p, 16, DEFAULT_ALIGNMENT))
+                {
+                    __atomic_add_fetch(&s_intr_nested_count, 1, __ATOMIC_SEQ_CST);
+                    __atomic_add_fetch(&s_intr_nested_dealloc_count, 1, __ATOMIC_SEQ_CST);
+                }
             }
         }
 
         return true;
     }
 
-    static inline void drain_pending_intr_work(minstd::pmr::memory_resource *resource)
+    static inline void drain_pending_intr_work(lockfree_single_block_resource_with_stats *resource)
     {
         while (process_pending_intr_work(resource))
         {
@@ -482,23 +449,6 @@ namespace
         }
     }
 
-    struct intr_test_bomber_args
-    {
-        pthread_t target_thread;
-        minstd::atomic<bool> *stop_flag;
-    };
-
-    static void *intr_test_bomber_fn(void *arg)
-    {
-        auto *a = static_cast<intr_test_bomber_args *>(arg);
-        while (!a->stop_flag->load(minstd::memory_order_acquire))
-        {
-            pthread_kill(a->target_thread, SIGUSR1);
-            usleep(50);
-        }
-        return nullptr;
-    }
-
     // ---- Soak test thread types ----------------------------------------------------------
 
     struct soak_thread_args
@@ -514,6 +464,7 @@ namespace
         size_t id;
         minstd::atomic<size_t> allocations{0};
         minstd::atomic<size_t> deallocations{0};
+        minstd::atomic<size_t> failed_deallocations{0};
         minstd::atomic<size_t> failed_allocations{0};
         minstd::atomic<size_t> current_live_count{0};
         minstd::atomic<size_t> heartbeat{0};
@@ -522,11 +473,72 @@ namespace
         minstd::atomic<size_t> last_live_seen{0};
     };
 
+    struct soak_iterator_observer_args
+    {
+        lockfree_single_block_resource_with_stats *resource;
+        minstd::atomic<bool> *stop_flag;
+        minstd::atomic<int> *shared_phase;
+        minstd::atomic<size_t> scans{0};
+        minstd::atomic<size_t> entries_seen{0};
+        minstd::atomic<size_t> invalid_state_seen{0};
+        minstd::atomic<uint64_t> last_progress_ns{0};
+    };
+
     static inline uint64_t monotonic_time_ns()
     {
         struct timespec ts{};
         clock_gettime(CLOCK_MONOTONIC, &ts);
         return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL + static_cast<uint64_t>(ts.tv_nsec);
+    }
+
+    static void *soak_iterator_observer_thread(void *arg)
+    {
+        auto *args = static_cast<soak_iterator_observer_args *>(arg);
+
+        while (!args->stop_flag->load(minstd::memory_order_acquire))
+        {
+            size_t local_entries_seen = 0;
+            size_t local_invalid_state_seen = 0;
+
+            for (auto itr = args->resource->begin(); itr != args->resource->end(); ++itr)
+            {
+                const auto allocation = *itr;
+                local_entries_seen++;
+
+                if (allocation.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE ||
+                    allocation.state == lockfree_single_block_resource_with_stats::allocation_state::AVAILABLE ||
+                    allocation.state == lockfree_single_block_resource_with_stats::allocation_state::SOFT_DELETED ||
+                    allocation.state == lockfree_single_block_resource_with_stats::allocation_state::LOCKED ||
+                    allocation.state == lockfree_single_block_resource_with_stats::allocation_state::METADATA_AVAILABLE ||
+                    allocation.state == lockfree_single_block_resource_with_stats::allocation_state::FRONTIER_RECLAIM_IN_PROGRESS ||
+                    allocation.state == lockfree_single_block_resource_with_stats::allocation_state::FRONTIER_RECLAIMED)
+                {
+                    continue;
+                }
+
+                local_invalid_state_seen++;
+            }
+
+            args->scans.fetch_add(1, minstd::memory_order_relaxed);
+            args->entries_seen.fetch_add(local_entries_seen, minstd::memory_order_relaxed);
+            if (local_invalid_state_seen > 0)
+            {
+                args->invalid_state_seen.fetch_add(local_invalid_state_seen, minstd::memory_order_relaxed);
+            }
+            args->last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
+
+            const int phase = args->shared_phase->load(minstd::memory_order_acquire);
+            if (phase == 1 || phase == 2)
+            {
+                usleep(20000); // 20ms during BURSTY/RECOVERY
+            }
+            else
+            {
+                usleep(200000); // 200ms during STEADY/DRAIN
+            }
+        }
+
+        return nullptr;
     }
 
     static void *soak_worker_thread(void *arg)
@@ -699,11 +711,20 @@ namespace
             else if (live_count > 0)
             {
                 size_t idx = rng() % live_count;
-                guarded_deallocate(args->resource, pointers[idx], sizes[idx]);
-                pointers[idx] = pointers[live_count - 1];
-                sizes[idx] = sizes[live_count - 1];
-                live_count--;
-                args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
+                void *ptr = pointers[idx];
+                size_t sz = sizes[idx];
+                if (args->resource->try_deallocate(ptr, sz, DEFAULT_ALIGNMENT))
+                {
+                    pointers[idx] = pointers[live_count - 1];
+                    sizes[idx] = sizes[live_count - 1];
+                    live_count--;
+                    args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
+                }
+                else
+                {
+                    args->failed_deallocations.fetch_add(1, minstd::memory_order_relaxed);
+                }
+
                 args->heartbeat.fetch_add(1, minstd::memory_order_relaxed);
                 args->last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
             }
@@ -723,11 +744,28 @@ namespace
 
         drain_pending_intr_work(args->resource);
 
-        for (size_t i = 0; i < live_count; ++i)
+        size_t shutdown_retry_budget = live_count * 128;
+        while (live_count > 0 && shutdown_retry_budget > 0)
         {
-            guarded_deallocate(args->resource, pointers[i], sizes[i]);
-            args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
+            size_t idx = live_count - 1;
+            void *ptr = pointers[idx];
+            size_t sz = sizes[idx];
+
+            if (args->resource->try_deallocate(ptr, sz, DEFAULT_ALIGNMENT))
+            {
+                live_count--;
+                args->deallocations.fetch_add(1, minstd::memory_order_relaxed);
+            }
+            else
+            {
+                args->failed_deallocations.fetch_add(1, minstd::memory_order_relaxed);
+                sched_yield();
+            }
+
+            shutdown_retry_budget--;
         }
+
+        args->current_live_count.store(live_count, minstd::memory_order_relaxed);
 
         return nullptr;
     }
