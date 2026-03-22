@@ -290,6 +290,11 @@ namespace MINIMAL_STD_NAMESPACE
                 return {nullptr, INVALID, 0, 0};
             }
 
+            bool try_deallocate(void *block, size_t bytes, size_t alignment = DEFAULT_ALIGNMENT)
+            {
+                return do_try_deallocate(block, bytes, alignment);
+            }
+
         private:
             inline static const block_metadata END_OF_METADATA_LIST_SENTINEL = {0, nullptr, 0, 0, 0, 0, 0, 0, {}};
 
@@ -361,6 +366,8 @@ namespace MINIMAL_STD_NAMESPACE
             };
 
             static constexpr size_t NUM_ADDRESS_BINS = 8;
+            static constexpr size_t FRONTIER_RECLAIM_MAX_BLOCKS_PER_PASS = 10;
+            static constexpr size_t FRONTIER_RECLAIM_UNBOUNDED = SIZE_MAX;
 
             struct alignas(64) free_block_bin
             {
@@ -428,8 +435,9 @@ namespace MINIMAL_STD_NAMESPACE
 
             static constexpr size_t NUM_NON_SENTINEL_FREE_BLOCK_BINS = compute_non_sentinel_bin_count();
             static constexpr size_t NUM_FREE_BLOCK_BINS = NUM_NON_SENTINEL_FREE_BLOCK_BINS + 1;
+            static constexpr size_t MAX_ALLOCATION_SIZE_INTERNAL = max_bin_bytes_aligned();
 
-            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> build_free_block_bin_sizes()
+            static array<size_t, NUM_FREE_BLOCK_BINS> build_free_block_bin_sizes()
             {
                 array<size_t, NUM_FREE_BLOCK_BINS> bins{};
 
@@ -446,12 +454,12 @@ namespace MINIMAL_STD_NAMESPACE
                 return bins;
             }
 
-            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
+            inline static array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
 
             static constexpr size_t BIN_LOOKUP_SHIFT = 13; // 8 KiB buckets
-            static constexpr size_t BIN_LOOKUP_BUCKETS = (MAX_ALLOCATION_SIZE >> BIN_LOOKUP_SHIFT) + 1;
+            static constexpr size_t BIN_LOOKUP_BUCKETS = (MAX_ALLOCATION_SIZE_INTERNAL >> BIN_LOOKUP_SHIFT) + 1;
 
-            static constexpr array<size_t, BIN_LOOKUP_BUCKETS> build_bin_index_hints()
+            static array<size_t, BIN_LOOKUP_BUCKETS> build_bin_index_hints()
             {
                 array<size_t, BIN_LOOKUP_BUCKETS> hints{};
 
@@ -472,15 +480,13 @@ namespace MINIMAL_STD_NAMESPACE
                 return hints;
             }
 
-            static constexpr array<size_t, BIN_LOOKUP_BUCKETS> BIN_INDEX_HINTS = build_bin_index_hints();
+            inline static array<size_t, BIN_LOOKUP_BUCKETS> BIN_INDEX_HINTS = build_bin_index_hints();
 
             static_assert(NUM_NON_SENTINEL_FREE_BLOCK_BINS >= 2,
                           "Uniform bin policy must generate at least two non-sentinel bins");
-            static_assert(FREE_BLOCK_BIN_SIZES[NUM_NON_SENTINEL_FREE_BLOCK_BINS - 1] <= max_bin_bytes_aligned(),
-                          "Largest generated bin exceeds aligned max_bin_bytes");
 
         public:
-            static constexpr size_t MAX_ALLOCATION_SIZE = FREE_BLOCK_BIN_SIZES[NUM_NON_SENTINEL_FREE_BLOCK_BINS - 1];
+            static constexpr size_t MAX_ALLOCATION_SIZE = MAX_ALLOCATION_SIZE_INTERNAL;
 
         private:
             const void *const block_;
@@ -550,25 +556,24 @@ namespace MINIMAL_STD_NAMESPACE
                     return NUM_FREE_BLOCK_BINS - 1;
                 }
 
-                size_t bucket = (bytes - 1) >> BIN_LOOKUP_SHIFT;
-                if (bucket >= BIN_LOOKUP_BUCKETS)
+                size_t lo = 0;
+                size_t hi = NUM_FREE_BLOCK_BINS - 1;
+
+                while (lo < hi)
                 {
-                    bucket = BIN_LOOKUP_BUCKETS - 1;
+                    size_t mid = lo + (hi - lo) / 2;
+
+                    if (FREE_BLOCK_BIN_SIZES[mid] < bytes)
+                    {
+                        lo = mid + 1;
+                    }
+                    else
+                    {
+                        hi = mid;
+                    }
                 }
 
-                size_t index = BIN_INDEX_HINTS[bucket];
-
-                while (index > 0 && FREE_BLOCK_BIN_SIZES[index - 1] >= bytes)
-                {
-                    --index;
-                }
-
-                while (index < (NUM_FREE_BLOCK_BINS - 1) && FREE_BLOCK_BIN_SIZES[index] < bytes)
-                {
-                    ++index;
-                }
-
-                return index;
+                return lo;
             }
 
             void back_off(size_t &retries)
@@ -681,9 +686,8 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 // Set state to LOCKED and clear the pointer atomically, increment version
                 uint64_t current = metadata.block_state_.load(memory_order_acquire);
-                metadata.block_state_.store(
-                    block_state_ptr::pack(nullptr, LOCKED, block_state_ptr::unpack_version(current) + 1),
-                    memory_order_release);
+                current = block_state_ptr::pack(nullptr, LOCKED, block_state_ptr::unpack_version(current) + 1);
+                metadata.block_state_.store(current, memory_order_release);
 
                 //  If there are no iterators, then we can move the metadata directly to the free metadata list
 
@@ -698,7 +702,6 @@ namespace MINIMAL_STD_NAMESPACE
                     metadata.soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
 
                     // Set state to SOFT_DELETED (pointer already nullptr), increment version
-                    current = metadata.block_state_.load(memory_order_acquire);
                     metadata.block_state_.store(
                         block_state_ptr::with_state_and_increment_version(current, SOFT_DELETED),
                         memory_order_release);
@@ -760,7 +763,7 @@ namespace MINIMAL_STD_NAMESPACE
                 block_metadata *metadata = metadata_start_ - metadata_index;
 
                 // Get current version (if recycled metadata) and increment it
-                uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_acquire));
+                uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_relaxed));
                 // Set pointer and state atomically in a single store
                 metadata->block_state_.store(
                     block_state_ptr::pack(free_block, IN_USE, version + 1),
@@ -805,7 +808,7 @@ namespace MINIMAL_STD_NAMESPACE
                 return reinterpret_cast<uint8_t *>(free_block) + ALLOCATION_HEADER_SIZE;
             }
 
-            void do_deallocate(void *block, size_t bytes, size_t alignment) override
+            bool do_try_deallocate(void *block, size_t bytes, size_t alignment)
             {
                 //  Insure that the block is valid and in use.
                 //      If the hash of the metadata does not match the hash in the block, then the heap has been corrupted.
@@ -826,7 +829,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (metadata_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
-                        return;
+                        return false;
                     }
 
                     block_to_deallocate = metadata_start_ - metadata_index;
@@ -835,7 +838,7 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         if (block_to_deallocate->hash() != header.hash_)
                         {
-                            return;
+                            return false;
                         }
                     }
 
@@ -844,7 +847,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (current_state != IN_USE)
                     {
-                        return;
+                        return false;
                     }
 
                     // Build expected and desired values for CAS
@@ -854,7 +857,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, locked_block_state, memory_order_acq_rel, memory_order_acquire))
                     {
-                        return;
+                        return false;
                     }
                 }
 
@@ -871,11 +874,20 @@ namespace MINIMAL_STD_NAMESPACE
                     extensions::memory_resource_statistics::deallocation_made(bytes);
                 }
 
+                size_t reclaim_budget = FRONTIER_RECLAIM_MAX_BLOCKS_PER_PASS;
+                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                {
+                    if (extensions::memory_resource_statistics::current_allocated() == 0)
+                    {
+                        reclaim_budget = FRONTIER_RECLAIM_UNBOUNDED;
+                    }
+                }
+
                 //  If this is the last block, try to reclaim it by rolling the frontier backward.
 
-                if (try_reclaim_last_block(*block_to_deallocate))
+                if (try_reclaim_last_block(*block_to_deallocate, reclaim_budget))
                 {
-                    return;
+                    return true;
                 }
 
                 //  Mark the block as available (keep pointer, change state, increment version)
@@ -884,7 +896,11 @@ namespace MINIMAL_STD_NAMESPACE
                 block_to_deallocate->block_state_.store(
                     block_state_ptr::with_state_and_increment_version(locked_block_state, AVAILABLE),
                     memory_order_release);
-                block_to_deallocate->soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
+
+                if (hard_delete_before_counter_cutoff_.load(memory_order_relaxed) != SIZE_MAX)
+                {
+                    block_to_deallocate->soft_deleted_at_counter_ = platform_provider_type::get_monotonic_counter() + 1;
+                }
 
                 //  Put the block into the correct free block bin
 
@@ -895,6 +911,13 @@ namespace MINIMAL_STD_NAMESPACE
 
                 guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
                              *block_to_deallocate, &block_metadata::next_free_block_index_);
+
+                return true;
+            }
+
+            void do_deallocate(void *block, size_t bytes, size_t alignment) override
+            {
+                (void)do_try_deallocate(block, bytes, alignment);
             }
 
             bool do_is_equal(const memory_resource &other) const noexcept override
@@ -913,9 +936,11 @@ namespace MINIMAL_STD_NAMESPACE
              *
              * Terminates on: nullptr sentinel, non-AVAILABLE state, CAS failure, or frontier CAS failure.
              */
-            void try_reclaim_frontier_blocks()
+            void try_reclaim_frontier_blocks(size_t max_blocks)
             {
-                while (true)
+                size_t reclaimed_blocks = 0;
+
+                while (reclaimed_blocks < max_blocks)
                 {
                     //  Load the current frontier
                     uint64_t frontier_tag = next_empty_memory_block_.load(memory_order_acquire);
@@ -979,6 +1004,8 @@ namespace MINIMAL_STD_NAMESPACE
                         reclaim_expected,
                         block_state_ptr::with_state_and_increment_version(reclaim_expected, FRONTIER_RECLAIMED),
                         memory_order_acq_rel, memory_order_acquire);
+
+                    reclaimed_blocks++;
 
                     //  Continue loop to try reclaiming the next predecessor
                 }
@@ -1117,7 +1144,7 @@ namespace MINIMAL_STD_NAMESPACE
             //  Uses a calculated expected position (not a fresh load) to ensure re-entrancy safety:
             //  if an interrupt allocates between is_last_block() and the CAS, the CAS fails safely.
 
-            bool try_reclaim_last_block(block_metadata &metadata)
+            bool try_reclaim_last_block(block_metadata &metadata, size_t reclaim_budget)
             {
                 if (!is_last_block(metadata))
                 {
@@ -1144,7 +1171,22 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 move_metadata_to_soft_deleted_list(metadata);
-                try_reclaim_frontier_blocks();
+
+                size_t follow_on_budget = 0;
+                if (reclaim_budget == FRONTIER_RECLAIM_UNBOUNDED)
+                {
+                    follow_on_budget = FRONTIER_RECLAIM_UNBOUNDED;
+                }
+                else if (reclaim_budget > 0)
+                {
+                    follow_on_budget = reclaim_budget - 1;
+                }
+
+                if (follow_on_budget > 0)
+                {
+                    try_reclaim_frontier_blocks(follow_on_budget);
+                }
+
                 return true;
             }
 
@@ -1269,7 +1311,7 @@ namespace MINIMAL_STD_NAMESPACE
                         //  CAS AVAILABLE -> LOCKED succeeded — we own the block.
                         //  If it is the last block, attempt immediate frontier release.
 
-                        if (try_reclaim_last_block(*claimed_head))
+                        if (try_reclaim_last_block(*claimed_head, FRONTIER_RECLAIM_MAX_BLOCKS_PER_PASS))
                         {
                             continue;  // Restart outer loop after frontier reclamation.
                         }

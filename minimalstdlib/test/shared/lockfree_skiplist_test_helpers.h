@@ -17,6 +17,8 @@
 #include <lockfree/skiplist>
 #include <single_block_memory_heap>
 
+#include "interrupt_simulation_test_helpers.h"
+
 #include <pthread.h>
 #include <sched.h>
 #include <signal.h>
@@ -685,21 +687,5 @@ namespace
         }
     }
 
-    struct intr_test_bomber_args
-    {
-        pthread_t target_thread;
-        minstd::atomic<bool> *stop_flag;
-    };
-
-    static void *intr_test_bomber_fn(void *arg)
-    {
-        auto *a = static_cast<intr_test_bomber_args *>(arg);
-        while (!a->stop_flag->load(minstd::memory_order_acquire))
-        {
-            pthread_kill(a->target_thread, SIGUSR1);
-            usleep(50);
-        }
-        return nullptr;
-    }
     // -------------------------------------------------------------------------------------
 }

@@ -20,6 +20,7 @@ Environment variables passed through to the soak executable:
 
 import argparse
 import os
+import select
 import subprocess
 import sys
 import time
@@ -49,12 +50,17 @@ def discover_groups(exe: str) -> list[str]:
         print("error: timed out listing groups", file=sys.stderr)
         sys.exit(1)
 
-    groups = []
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        # CppUTest prints group names prefixed with a space or directly
-        if line and not line.startswith("TEST") and not line.startswith("-"):
-            groups.append(line)
+    # CppUTest output formatting can vary by version/build and may print
+    # groups on one line. Tokenize by whitespace and keep unique entries.
+    groups: list[str] = []
+    for token in result.stdout.split():
+        token = token.strip()
+        if not token:
+            continue
+        if token.startswith("TEST") or token.startswith("-"):
+            continue
+        if token not in groups:
+            groups.append(token)
 
     return groups
 
@@ -79,10 +85,53 @@ def run_group(cmd: list[str], group: str, run_index: int, timeout: int) -> bool:
 
     start = time.monotonic()
     try:
-        proc = subprocess.run(cmd, timeout=timeout)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+
+        output_chunks: list[str] = []
+        deadline = start + timeout
+
+        assert proc.stdout is not None
+
+        while True:
+            now = time.monotonic()
+            if now >= deadline:
+                proc.kill()
+                proc.wait()
+                elapsed = time.monotonic() - start
+                print(f"{label}  TIMEOUT after {elapsed:.0f}s", flush=True)
+                return False
+
+            ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+            if ready:
+                line = proc.stdout.readline()
+                if line:
+                    output_chunks.append(line)
+                    print(line, end="", flush=True)
+
+            if proc.poll() is not None:
+                # Drain any remaining buffered output.
+                rest = proc.stdout.read()
+                if rest:
+                    output_chunks.append(rest)
+                    print(rest, end="", flush=True)
+                break
+
         elapsed = time.monotonic() - start
-        ok = proc.returncode == 0
-        status = "PASS" if ok else f"FAIL (rc={proc.returncode})"
+        output = "".join(output_chunks)
+        # gdb -batch with a trailing "bt" can return 1 after a normal test
+        # exit because there is no active stack frame ("No stack.").
+        # Treat this as success when the inferior exited normally.
+        exited_normally = "exited normally" in output
+        no_stack = "No stack." in output
+        return_code = proc.returncode if proc.returncode is not None else -1
+        ok = (return_code == 0) or (return_code == 1 and exited_normally and no_stack)
+        status = "PASS" if ok else f"FAIL (rc={return_code})"
         print(f"{label}  {status}  elapsed={elapsed:.1f}s", flush=True)
         return ok
     except subprocess.TimeoutExpired:
