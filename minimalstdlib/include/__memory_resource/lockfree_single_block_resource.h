@@ -824,6 +824,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (metadata_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
+                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                        {
+                            extensions::memory_resource_statistics::deallocation_aborted_bad_index();
+                        }
                         return false;
                     }
 
@@ -833,15 +837,24 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         if (block_to_deallocate->hash() != header.hash_)
                         {
+                            if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                            {
+                                extensions::memory_resource_statistics::deallocation_aborted_hash_mismatch();
+                            }
                             return false;
                         }
                     }
 
                     uint64_t current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
                     uint8_t current_state = block_state_ptr::unpack_state(current_block_state);
+                    block_header *current_block = block_state_ptr::unpack_ptr(current_block_state);
 
-                    if (current_state != IN_USE)
+                    if ((current_state != IN_USE) || (current_block != &header))
                     {
+                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                        {
+                            extensions::memory_resource_statistics::deallocation_aborted_state_mismatch();
+                        }
                         return false;
                     }
 
@@ -852,7 +865,28 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, locked_block_state, memory_order_acq_rel, memory_order_acquire))
                     {
+                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                        {
+                            extensions::memory_resource_statistics::deallocation_aborted_cas_race();
+                        }
                         return false;
+                    }
+
+                    if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
+                    {
+                        if (block_to_deallocate->hash() != header.hash_)
+                        {
+                            // We successfully claimed the block; restore IN_USE before aborting.
+                            block_to_deallocate->block_state_.store(
+                                block_state_ptr::with_state_and_increment_version(locked_block_state, IN_USE),
+                                memory_order_release);
+
+                            if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                            {
+                                extensions::memory_resource_statistics::deallocation_aborted_hash_mismatch();
+                            }
+                            return false;
+                        }
                     }
                 }
 

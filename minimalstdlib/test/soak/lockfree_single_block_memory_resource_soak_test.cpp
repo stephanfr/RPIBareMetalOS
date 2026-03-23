@@ -348,8 +348,16 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     // because settle_frontier_to_initial performs probe alloc/dealloc pairs.
     const size_t expected_alloc_before_settle = total_alloc + s_intr_nested_count;
     const size_t expected_dealloc_before_settle = total_dealloc + s_intr_nested_count;
+    const size_t observed_aborted_dealloc_before_settle = resource.aborted_deallocations();
+    const size_t aborted_bad_index = resource.aborted_deallocations_bad_index();
+    const size_t aborted_hash_mismatch = resource.aborted_deallocations_hash_mismatch();
+    const size_t aborted_state_mismatch = resource.aborted_deallocations_state_mismatch();
+    const size_t aborted_cas_race = resource.aborted_deallocations_cas_race();
     CHECK_EQUAL(expected_alloc_before_settle, resource.total_allocations());
-    CHECK_EQUAL(expected_dealloc_before_settle, resource.total_deallocations());
+    CHECK_EQUAL(expected_dealloc_before_settle,
+                resource.total_deallocations() + observed_aborted_dealloc_before_settle);
+    CHECK_EQUAL(observed_aborted_dealloc_before_settle,
+                aborted_bad_index + aborted_hash_mismatch + aborted_state_mismatch + aborted_cas_race);
 
     bool frontier_settled = settle_frontier_to_initial(resource, initial_frontier);
     if (!frontier_settled)
@@ -362,6 +370,9 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     printf("Soak test completed. Worker Allocs: %zu, Worker Deallocs: %zu, Failed Allocs: %zu (total across threads)\n",
            total_alloc, total_dealloc, total_failed);
         printf("Signals delivered: %d, Nested allocs triggered: %d\n", (int)s_intr_signal_count, (int)s_intr_nested_count);
+        printf("Aborted deallocations observed: %zu\n", observed_aborted_dealloc_before_settle);
+        printf("Aborted dealloc reasons: bad_index=%zu, hash_mismatch=%zu, state_mismatch=%zu, cas_race=%zu\n",
+            aborted_bad_index, aborted_hash_mismatch, aborted_state_mismatch, aborted_cas_race);
         printf("Iterator observers: scans=%zu, entries_seen=%zu, invalid_states=%zu\n",
             total_iterator_scans, total_iterator_entries, total_iterator_invalid_states);
     printf("Resource: total_allocs=%zu, total_deallocs=%zu, current_bytes=%zu, current_allocated=%zu\n",
