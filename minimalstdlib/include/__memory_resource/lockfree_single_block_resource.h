@@ -86,38 +86,45 @@ namespace MINIMAL_STD_NAMESPACE
                 atomic<block_metadata *> next_;                    // 0x08, 8B
                 uint64_t soft_deleted_at_counter_;                 // 0x10, 8B - monotonic counter value when soft-deleted
                 uint64_t randomized_value_;                        // 0x18, 8B
+                uint64_t allocation_hash_;                         // 0x20, 8B - immutable hash for allocation lifetime
 
                 // 4-byte fields
-                atomic<uint32_t> requested_size_;                  // 0x20, 4B
-                uint32_t total_size_;                              // 0x24, 4B
+                atomic<uint32_t> requested_size_;                  // 0x28, 4B
+                uint32_t total_size_;                              // 0x2C, 4B
 
                 // Independent list indices - metadata may be lazily referenced from a free-block
                 // bin while concurrently being moved to a soft-deleted or free-metadata list.
-                uint32_t next_free_block_index_;                   // 0x28, 4B
-                uint32_t next_soft_deleted_index_;                  // 0x2C, 4B
-                uint32_t next_free_header_index_;                   // 0x30, 4B
+                uint32_t next_free_block_index_;                   // 0x30, 4B
+                uint32_t next_soft_deleted_index_;                 // 0x34, 4B
+                uint32_t next_free_header_index_;                  // 0x38, 4B
 
                 // 1-byte fields
-                uint8_t alignment_;                                // 0x34, 1B
+                uint8_t alignment_;                                // 0x3C, 1B
 
                 // Padding to 64 bytes
-                uint8_t reserved_[11];                             // 0x35, 11B
+                uint8_t reserved_[3];                              // 0x3D, 3B
 
                 /**
-                 * @brief Computes a 64-bit hash value for the memory block.
+                 * @brief Computes an allocation-identity hash from fields that are stable for the
+                 *        lifetime of an allocation.
                  *
-                 * This function uses the FNV-1a hash algorithm to compute a 64-bit hash value
-                 * for the memory block. The algorithm processes 24 bytes starting from next_,
-                 * skipping block_state_ since it contains state and version fields that change.
-                 *
-                 * @return A 64-bit hash value representing the memory block.
+                 * The hash intentionally excludes mutable lifecycle/linkage fields (state, list
+                 * links, soft-delete timestamps). It includes header identity plus allocation
+                 * characteristics and per-allocation randomized value.
                  */
 
-                uint64_t hash()
+                static uint64_t compute_hash(const block_header &header,
+                                             uint32_t requested_size,
+                                             uint32_t total_size,
+                                             uint8_t alignment,
+                                             uint64_t randomized_value)
                 {
-                    block_metadata *next_val = next_.load(memory_order_relaxed);
-                    uint64_t sdel_val = soft_deleted_at_counter_;
-                    uint64_t rand_val = randomized_value_;
+                    uint64_t metadata_index_val = header.metadata_index_;
+                    uint64_t block_size_val = header.size_including_header_;
+                    uint32_t requested_size_val = requested_size;
+                    uint32_t total_size_val = total_size;
+                    uint8_t alignment_val = alignment;
+                    uint64_t rand_val = randomized_value;
 
                     uint64_t hash_val = 0xcbf29ce484222325;
                     uint64_t prime = 0x100000001b3;
@@ -130,8 +137,11 @@ namespace MINIMAL_STD_NAMESPACE
                         }
                     };
 
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&next_val), sizeof(next_val));
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&sdel_val), sizeof(sdel_val));
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&metadata_index_val), sizeof(metadata_index_val));
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&block_size_val), sizeof(block_size_val));
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&requested_size_val), sizeof(requested_size_val));
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&total_size_val), sizeof(total_size_val));
+                    hash_bytes(reinterpret_cast<const uint8_t *>(&alignment_val), sizeof(alignment_val));
                     hash_bytes(reinterpret_cast<const uint8_t *>(&rand_val), sizeof(rand_val));
 
                     return hash_val;
@@ -279,7 +289,7 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     block_metadata &metadata = *(metadata_start_ - metadata_index);
 
-                    if (metadata.hash() != header.hash_)
+                    if (metadata.allocation_hash_ != header.hash_)
                     {
                         return {nullptr, INVALID, 0, 0};
                     }
@@ -291,7 +301,7 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            inline static const block_metadata END_OF_METADATA_LIST_SENTINEL = {0, nullptr, 0, 0, 0, 0, 0, 0, {}};
+            inline static const block_metadata END_OF_METADATA_LIST_SENTINEL = {0, nullptr, 0, 0, 0, 0, 0, 0, 0, 0, 0, {}};
 
             using metadata_tag = lockfree::tagged_ptr<block_metadata, uint16_t>;
             using block_tag = lockfree::tagged_ptr<block_header, uint16_t>;
@@ -747,6 +757,7 @@ namespace MINIMAL_STD_NAMESPACE
                         metadata->requested_size_.store(0, memory_order_release);
                         metadata->total_size_ = 0;
                         metadata->alignment_ = 0;
+                        metadata->allocation_hash_ = 0;
 
                         move_metadata_to_free_metadata_list(*metadata);
 
@@ -770,6 +781,13 @@ namespace MINIMAL_STD_NAMESPACE
                 if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
                 {
                     metadata->randomized_value_ = id_generator_();
+                    metadata->allocation_hash_ = block_metadata::compute_hash(
+                        *free_block,
+                        static_cast<uint32_t>(bytes),
+                        static_cast<uint32_t>(free_block->size_including_header_),
+                        static_cast<uint8_t>(alignment),
+                        metadata->randomized_value_);
+                    free_block->hash_ = metadata->allocation_hash_;
                 }
 
                 if (metadata->next_.load(memory_order_acquire) == nullptr)
@@ -788,11 +806,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                         new_tag = metadata_tag::pack(metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
                     } while (!metadata_head_.compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
-                }
-
-                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
-                {
-                    free_block->hash_ = metadata->hash();
                 }
 
                 if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
@@ -835,7 +848,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
                     {
-                        if (block_to_deallocate->hash() != header.hash_)
+                        if (block_to_deallocate->allocation_hash_ != header.hash_)
                         {
                             if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
                             {
@@ -872,22 +885,6 @@ namespace MINIMAL_STD_NAMESPACE
                         return false;
                     }
 
-                    if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
-                    {
-                        if (block_to_deallocate->hash() != header.hash_)
-                        {
-                            // We successfully claimed the block; restore IN_USE before aborting.
-                            block_to_deallocate->block_state_.store(
-                                block_state_ptr::with_state_and_increment_version(locked_block_state, IN_USE),
-                                memory_order_release);
-
-                            if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
-                            {
-                                extensions::memory_resource_statistics::deallocation_aborted_hash_mismatch();
-                            }
-                            return false;
-                        }
-                    }
                 }
 
                 //  Now we own the block. Set the soft deleted at counter to SIZE_MAX to ensure
