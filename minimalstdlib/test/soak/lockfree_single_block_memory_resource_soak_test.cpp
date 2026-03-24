@@ -14,7 +14,7 @@ TEST_GROUP(LockfreeSingleBlockMemoryResourceSoakTests)
 TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 {
     const size_t NUM_THREADS = 8;
-    const size_t NUM_ITERATOR_OBSERVERS = 2;
+    const bool ENABLE_SIGNAL_BOMBER = (getenv("ALLOCATOR_SOAK_DISABLE_BOMBER") == nullptr);
 
     const size_t SOAK_DURATION_SEC = soak_config_get_duration_sec("ALLOCATOR_SOAK_DURATION", 180);
 
@@ -54,8 +54,6 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     pthread_t workers[NUM_THREADS]{};
     soak_thread_args thread_args[NUM_THREADS]{};
-    pthread_t iterator_observers[NUM_ITERATOR_OBSERVERS]{};
-    soak_iterator_observer_args iterator_args[NUM_ITERATOR_OBSERVERS]{};
 
     for (size_t i = 0; i < NUM_THREADS; ++i)
     {
@@ -73,23 +71,22 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
         CHECK_EQUAL(0, pthread_create(&workers[i], nullptr, soak_worker_thread, &thread_args[i]));
     }
 
-    for (size_t i = 0; i < NUM_ITERATOR_OBSERVERS; ++i)
-    {
-        iterator_args[i].resource = &resource;
-        iterator_args[i].stop_flag = &stop_flag;
-        iterator_args[i].shared_phase = &shared_phase;
-        iterator_args[i].last_progress_ns.store(monotonic_time_ns(), minstd::memory_order_relaxed);
-
-        CHECK_EQUAL(0, pthread_create(&iterator_observers[i], nullptr, soak_iterator_observer_thread, &iterator_args[i]));
-    }
-
     soak_bomber_args b_args;
     b_args.targets = workers;
     b_args.num_targets = NUM_THREADS;
     b_args.stop_flag = &stop_flag;
+    b_args.shared_phase = &shared_phase;
 
     pthread_t bomber;
-    CHECK_EQUAL(0, pthread_create(&bomber, nullptr, soak_bomber_thread, &b_args));
+    if (ENABLE_SIGNAL_BOMBER)
+    {
+        CHECK_EQUAL(0, pthread_create(&bomber, nullptr, soak_bomber_thread, &b_args));
+    }
+    else
+    {
+        printf("Signal bomber disabled for this run.\n");
+        fflush(stdout);
+    }
 
     minstd::Xoroshiro128PlusPlusRNG main_rng(minstd::Xoroshiro128PlusPlusRNG::Seed(123456789ULL ^ base_seed, base_seed));
     int main_phase = 0;
@@ -106,8 +103,6 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     size_t last_allocs = 0;
     size_t last_deallocs = 0;
     size_t last_failed = 0;
-    size_t last_iterator_scans = 0;
-    size_t last_iterator_entries = 0;
     size_t last_heartbeats[NUM_THREADS]{};
     size_t hb_deltas[NUM_THREADS]{};
 
@@ -218,21 +213,6 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
             last_deallocs = c_deallocs;
             last_failed = c_failed;
 
-            size_t iterator_scans = 0;
-            size_t iterator_entries = 0;
-            size_t iterator_invalid_states = 0;
-            for (size_t i = 0; i < NUM_ITERATOR_OBSERVERS; ++i)
-            {
-                iterator_scans += iterator_args[i].scans.load(minstd::memory_order_relaxed);
-                iterator_entries += iterator_args[i].entries_seen.load(minstd::memory_order_relaxed);
-                iterator_invalid_states += iterator_args[i].invalid_state_seen.load(minstd::memory_order_relaxed);
-            }
-
-            size_t iterator_scans_per_sec = (iterator_scans - last_iterator_scans) / 10;
-            size_t iterator_entries_per_sec = (iterator_entries - last_iterator_entries) / 10;
-            last_iterator_scans = iterator_scans;
-            last_iterator_entries = iterator_entries;
-
             size_t frontier_off = resource.debug_frontier_offset();
             size_t meta_count = resource.debug_metadata_count();
             size_t meta_boundary = resource.debug_metadata_boundary_offset();
@@ -242,8 +222,6 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
                    elapsed / 10, c_live, c_allocs, allocs_per_sec, c_deallocs, deallocs_per_sec, c_failed, failed_per_sec);
             printf("  Frontier: %zuMB, MetaCount: %zu, MetaBoundary: %zuMB, Gap: %zuMB\n",
                    frontier_off / (1024*1024), meta_count, meta_boundary / (1024*1024), gap / (1024*1024));
-                 printf("  Iterator: scans=%zu ( %zu /sec ), entries=%zu ( %zu /sec ), invalid_states=%zu\n",
-                     iterator_scans, iterator_scans_per_sec, iterator_entries, iterator_entries_per_sec, iterator_invalid_states);
             fflush(stdout);
 
             if (main_phase == 3 && allocs_per_sec == 0 && deallocs_per_sec == 0)
@@ -252,17 +230,32 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
                 int acked = drain_ack_count.load(minstd::memory_order_acquire);
                 const uint64_t now_ns = monotonic_time_ns();
                 printf("  [DRAIN STALL?] acked=%d/%zu drained_count=%d/%zu\n", acked, NUM_THREADS, drained, NUM_THREADS);
+                  printf("  [ALLOC DBG] calls=%zu reuse=%zu frontier=%zu alloc_fail=%zu search_iter=%zu pops=%zu claimed=%zu reclaim_deferred=%zu frontier_cas_retry=%zu metadata_cas_retry=%zu\n",
+                      resource.debug_alloc_calls(),
+                      resource.debug_alloc_reuse_hits(),
+                      resource.debug_alloc_frontier_hits(),
+                      resource.debug_alloc_failures(),
+                      resource.debug_search_iterations(),
+                      resource.debug_search_pops(),
+                      resource.debug_search_claimed(),
+                      resource.debug_search_reclaim_deferred(),
+                      resource.debug_frontier_cas_retries(),
+                      resource.debug_metadata_cas_retries());
                 for (size_t i = 0; i < NUM_THREADS; ++i)
                 {
                     uint64_t last_ns = thread_args[i].last_progress_ns.load(minstd::memory_order_relaxed);
                     uint64_t age_ms = (now_ns > last_ns) ? ((now_ns - last_ns) / 1000000ULL) : 0ULL;
                     int t_phase = thread_args[i].last_phase_seen.load(minstd::memory_order_relaxed);
                     size_t t_live = thread_args[i].last_live_seen.load(minstd::memory_order_relaxed);
-                    printf("    [T%zu] phase=%d live=%zu hb_delta=%zu age_ms=%llu alloc=%zu dealloc=%zu failed=%zu\n",
-                           i, t_phase, t_live, hb_deltas[i], (unsigned long long)age_ms,
-                           thread_args[i].allocations.load(minstd::memory_order_relaxed),
-                           thread_args[i].deallocations.load(minstd::memory_order_relaxed),
-                           thread_args[i].failed_allocations.load(minstd::memory_order_relaxed));
+                                        uint32_t marker = thread_args[i].last_marker.load(minstd::memory_order_relaxed);
+                                        size_t pending = thread_args[i].last_pending_seen.load(minstd::memory_order_relaxed);
+                                        size_t loops = thread_args[i].loop_iterations.load(minstd::memory_order_relaxed);
+                                        printf("    [T%zu] phase=%d live=%zu marker=%u pending=%zu loops=%zu hb_delta=%zu age_ms=%llu alloc=%zu dealloc=%zu failed_alloc=%zu failed_dealloc=%zu\n",
+                                                     i, t_phase, t_live, marker, pending, loops, hb_deltas[i], (unsigned long long)age_ms,
+                                                     thread_args[i].allocations.load(minstd::memory_order_relaxed),
+                                                     thread_args[i].deallocations.load(minstd::memory_order_relaxed),
+                                                     thread_args[i].failed_allocations.load(minstd::memory_order_relaxed),
+                                                     thread_args[i].failed_deallocations.load(minstd::memory_order_relaxed));
                 }
                 fflush(stdout);
 
@@ -308,11 +301,9 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     stop_flag.store(true, minstd::memory_order_release);
 
-    pthread_join(bomber, nullptr);
-
-    for (size_t i = 0; i < NUM_ITERATOR_OBSERVERS; ++i)
+    if (ENABLE_SIGNAL_BOMBER)
     {
-        pthread_join(iterator_observers[i], nullptr);
+        pthread_join(bomber, nullptr);
     }
 
     for (size_t i = 0; i < NUM_THREADS; ++i)
@@ -332,16 +323,6 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
         total_alloc += thread_args[i].allocations.load(minstd::memory_order_relaxed);
         total_dealloc += thread_args[i].deallocations.load(minstd::memory_order_relaxed);
         total_failed += thread_args[i].failed_allocations.load(minstd::memory_order_relaxed);
-    }
-
-    size_t total_iterator_scans = 0;
-    size_t total_iterator_entries = 0;
-    size_t total_iterator_invalid_states = 0;
-    for (size_t i = 0; i < NUM_ITERATOR_OBSERVERS; ++i)
-    {
-        total_iterator_scans += iterator_args[i].scans.load(minstd::memory_order_relaxed);
-        total_iterator_entries += iterator_args[i].entries_seen.load(minstd::memory_order_relaxed);
-        total_iterator_invalid_states += iterator_args[i].invalid_state_seen.load(minstd::memory_order_relaxed);
     }
 
     // Validate worker + interrupt accounting before frontier-settle probes,
@@ -373,8 +354,6 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
         printf("Aborted deallocations observed: %zu\n", observed_aborted_dealloc_before_settle);
         printf("Aborted dealloc reasons: bad_index=%zu, hash_mismatch=%zu, state_mismatch=%zu, cas_race=%zu\n",
             aborted_bad_index, aborted_hash_mismatch, aborted_state_mismatch, aborted_cas_race);
-        printf("Iterator observers: scans=%zu, entries_seen=%zu, invalid_states=%zu\n",
-            total_iterator_scans, total_iterator_entries, total_iterator_invalid_states);
     printf("Resource: total_allocs=%zu, total_deallocs=%zu, current_bytes=%zu, current_allocated=%zu\n",
            resource.total_allocations(), resource.total_deallocations(),
            resource.current_bytes_allocated(), resource.current_allocated());
@@ -402,8 +381,4 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     // Frontier settling may add balanced probe alloc/dealloc operations.
     CHECK_EQUAL(resource.total_allocations(), resource.total_deallocations());
-
-    CHECK(total_iterator_scans > 0);
-    CHECK(total_iterator_entries > 0);
-    CHECK_EQUAL(0, total_iterator_invalid_states);
 }
