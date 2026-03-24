@@ -54,34 +54,11 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionali
     CHECK(allocation_info.size == 45678);
     CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
-    int counter = 0;
-
-    for (auto iter = resource.begin(); iter != resource.end(); ++iter)
-    {
-        allocation_info = *iter;
-
-        CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
-
-        counter++;
-    }
-
-    CHECK(counter == 4);
+    CHECK_EQUAL(4, resource.current_allocated());
 
     resource.deallocate(ptr4, 45678);
 
-    counter = 0;
-
-    for (auto iter = resource.begin(); iter != resource.end(); ++iter)
-    {
-        allocation_info = *iter;
-
-        if (allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE)
-        {
-            counter++;
-        }
-    }
-
-    CHECK(counter == 3);
+    CHECK_EQUAL(3, resource.current_allocated());
 
     void *ptr5 = resource.allocate(100);
 
@@ -109,7 +86,6 @@ TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
     constexpr size_t NUM_THREADS = 16;
 
     start_allocations = false;
-    exit_thread = false;
     correctness_allocation_failed.store(false, minstd::memory_order_release);
 
     lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
@@ -126,16 +102,6 @@ TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
         CHECK(pthread_create(&threads[i], NULL, allocation_thread, (void *)&args[i]) == 0);
     }
 
-    allocator_thread_arguments itr_thread_args[5];
-    pthread_t itr_threads[5];
-
-    for (size_t i = 0; i < 5; i++)
-    {
-        itr_thread_args[i].mem_resource = &resource;
-
-        CHECK(pthread_create(&itr_threads[i], NULL, iteration_thread, (void *)&itr_thread_args[i]) == 0);
-    }
-
     sleep(1);
 
     start_allocations = true;
@@ -150,13 +116,6 @@ TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
     }
 
     clock_gettime(CLOCK_MONOTONIC, &end_time);
-
-    exit_thread = true;
-
-    for (size_t i = 0; i < 5; i++)
-    {
-        CHECK(pthread_join(itr_threads[i], NULL) == 0);
-    }
 
     CHECK_FALSE(correctness_allocation_failed.load(minstd::memory_order_acquire));
 
@@ -197,51 +156,28 @@ TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
     CHECK_EQUAL(total_number_of_allocations, resource.current_allocated());
     CHECK_EQUAL(total_number_of_bytes_allocated, resource.current_bytes_allocated());
 
-    total_number_of_allocations = 0;
-    total_number_of_bytes_allocated = 0;
-    size_t total_number_of_free_blocks = 0;
-    size_t total_number_of_bytes_in_free_blocks = 0;
+    //  Verify each allocation can be looked up via get_allocation_info
 
-    size_t number_of_list_elements = 0;
-
-    for (auto itr = resource.begin(); itr != resource.end(); ++itr)
+    for (size_t i = 0; i < NUM_THREADS; i++)
     {
-        if ((*itr).state != lockfree_single_block_resource_with_stats::allocation_state::IN_USE)
+        for (size_t j = 0; j < NUM_ALLOCATIONS_PER_THREAD; j++)
         {
-            if ((*itr).state == lockfree_single_block_resource_with_stats::allocation_state::AVAILABLE)
+            if (args[i].pointers_allocated[j] == nullptr)
             {
-                total_number_of_free_blocks++;
-                total_number_of_bytes_in_free_blocks += (*itr).size;
+                break;
             }
 
-            continue;
-        }
-
-        bool found = false;
-
-        for (size_t i = 0; i < NUM_THREADS; i++)
-        {
-            for (size_t j = 0; j < NUM_ALLOCATIONS_PER_THREAD; j++)
+            if (!args[i].deleted_element[j])
             {
-                if ((*itr).location == args[i].pointers_allocated[j])
-                {
-                    found = true;
-                    break;
-                }
+                auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
+                CHECK(alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
             }
         }
-
-        CHECK(found);
-
-        number_of_list_elements++;
-
-        CHECK(found);
     }
 
     //  Deallocate all the allocations
 
     start_allocations = false;
-    exit_thread = false;
 
     for (size_t i = 0; i < NUM_THREADS; i++)
     {
@@ -251,25 +187,11 @@ TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
         CHECK(pthread_create(&threads[i], NULL, deallocation_thread, (void *)&args[i]) == 0);
     }
 
-    for (size_t i = 0; i < 5; i++)
-    {
-        itr_thread_args[i].mem_resource = &resource;
-
-        CHECK(pthread_create(&itr_threads[i], NULL, iteration_thread, (void *)&itr_thread_args[i]) == 0);
-    }
-
     start_allocations = true;
 
     for (size_t i = 0; i < NUM_THREADS; i++)
     {
         CHECK(pthread_join(threads[i], NULL) == 0);
-    }
-
-    exit_thread = true;
-
-    for (size_t i = 0; i < 5; i++)
-    {
-        CHECK(pthread_join(itr_threads[i], NULL) == 0);
     }
 
     CHECK_EQUAL(0, resource.current_allocated());
@@ -305,37 +227,6 @@ TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
                (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
     printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
-}
-
-TEST(LockfreeSingleBlockMemoryResourceTests, ReclaimSoftDeletedMetadataMidListEviction)
-{
-    lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
-
-    void* ptr1 = resource.allocate(64);
-    void* ptr2 = resource.allocate(64);
-    void* ptr3 = resource.allocate(64);
-    void* ptr4 = resource.allocate(64);
-    void* ptr5 = resource.allocate(64);
-
-    {
-        // Create an active iterator to hold the delete cutoff open
-        auto iter = resource.begin();
-
-        // Deallocate mid-list elements while iterator is active
-        resource.deallocate(ptr2, 64);
-        resource.deallocate(ptr4, 64);
-
-        // Iterator goes out of scope here. The destructor calls reclaim_soft_deleted_metadata()
-        // which will walk the soft-deleted list and physically unlink ptr2 and ptr4's metadata.
-    }
-
-    void* ptr6 = resource.allocate(64);
-    CHECK(ptr6 != nullptr);
-
-    resource.deallocate(ptr1, 64);
-    resource.deallocate(ptr3, 64);
-    resource.deallocate(ptr5, 64);
-    resource.deallocate(ptr6, 64);
 }
 
 TEST(LockfreeSingleBlockMemoryResourceTests, InterruptRobustness)

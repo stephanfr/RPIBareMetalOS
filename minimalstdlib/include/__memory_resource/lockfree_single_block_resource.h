@@ -716,26 +716,20 @@ namespace MINIMAL_STD_NAMESPACE
                 return unguarded_pop(head, next_index_field);
             }
 
-            void move_metadata_to_free_metadata_list(block_metadata &metadata)
+            void recycle_metadata(block_metadata &metadata)
             {
-                // Set state to METADATA_AVAILABLE, preserving pointer (nullptr) and incrementing version
+                //  Clear pointer, set METADATA_AVAILABLE, increment version by 2 (preserves ABA spacing
+                //  parity with the previous two-step soft-delete path removed after iterator elimination).
+
                 uint64_t current = metadata.block_state_.load(memory_order_acquire);
+                uint16_t new_version = static_cast<uint16_t>(block_state_ptr::unpack_version(current) + 2);
+
                 metadata.block_state_.store(
-                    block_state_ptr::with_state_and_increment_version(current, METADATA_AVAILABLE),
+                    block_state_ptr::pack(nullptr, METADATA_AVAILABLE, new_version),
                     memory_order_release);
 
                 guarded_push(free_metadata_heads_[cpu_shard_index()], metadata,
                              &block_metadata::next_free_header_index_);
-            }
-
-            void move_metadata_to_soft_deleted_list(block_metadata &metadata)
-            {
-                // Set state to LOCKED and clear the pointer atomically, increment version
-                uint64_t current = metadata.block_state_.load(memory_order_acquire);
-                current = block_state_ptr::pack(nullptr, LOCKED, block_state_ptr::unpack_version(current) + 1);
-                metadata.block_state_.store(current, memory_order_release);
-
-                move_metadata_to_free_metadata_list(metadata);
             }
 
             void *do_allocate(size_t bytes, size_t alignment) override
@@ -784,7 +778,7 @@ namespace MINIMAL_STD_NAMESPACE
                         metadata->alignment_ = 0;
                         metadata->allocation_hash_ = 0;
 
-                        move_metadata_to_free_metadata_list(*metadata);
+                        recycle_metadata(*metadata);
 
                         debug_alloc_failures_.add_fetch(1, memory_order_relaxed);
                         return nullptr;
@@ -1202,7 +1196,7 @@ namespace MINIMAL_STD_NAMESPACE
                     return false;
                 }
 
-                move_metadata_to_soft_deleted_list(metadata);
+                recycle_metadata(metadata);
                 try_reclaim_frontier_blocks();
 
                 return true;
@@ -1253,7 +1247,7 @@ namespace MINIMAL_STD_NAMESPACE
                         return claim_result::RECLAIM_DEFERRED;
                     }
 
-                    //  Stale or non-allocatable state (SOFT_DELETED, METADATA_AVAILABLE,
+                    //  Stale or non-allocatable state (METADATA_AVAILABLE,
                     //  LOCKED, IN_USE, INVALID). Discard.
                     return claim_result::DISCARD;
                 }
@@ -1267,8 +1261,8 @@ namespace MINIMAL_STD_NAMESPACE
                 auto result = unguarded_try_claim_popped_block(head, bin_head);
                 if (result == claim_result::RECLAIM_DEFERRED)
                 {
-                    //  Handle deferred reclaim while still under guard — use unguarded push.
-                    move_metadata_to_soft_deleted_list(head);
+                    //  Handle deferred reclaim while still under guard.
+                    recycle_metadata(head);
                 }
                 return result == claim_result::CLAIMED;
             }
@@ -1328,7 +1322,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (deferred_reclaim)
                     {
-                        move_metadata_to_soft_deleted_list(*deferred_reclaim);
+                        recycle_metadata(*deferred_reclaim);
                         continue;
                     }
 
@@ -1345,7 +1339,7 @@ namespace MINIMAL_STD_NAMESPACE
                         //  Return the block for reuse.
 
                         auto return_value = claimed_head->get_memory_block();
-                        move_metadata_to_soft_deleted_list(*claimed_head);
+                        recycle_metadata(*claimed_head);
                         return return_value;
                     }
 
