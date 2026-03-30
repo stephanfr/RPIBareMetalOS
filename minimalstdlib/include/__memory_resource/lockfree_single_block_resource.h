@@ -165,6 +165,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 INVALID = 0,
                 IN_USE,
+                DEALLOCATED_PENDING,
                 AVAILABLE,
                 METADATA_AVAILABLE,
                 LOCKED,
@@ -193,23 +194,20 @@ namespace MINIMAL_STD_NAMESPACE
                   next_empty_memory_block_(0),  // Will be set after allocating per-CPU arrays
                   current_metadata_record_count_(0),
                   metadata_head_(metadata_tag::make((block_metadata *)&END_OF_METADATA_LIST_SENTINEL)),
-                  free_metadata_heads_(nullptr),
+                  free_metadata_head_(metadata_tag::make(nullptr)),
+                  pending_deallocation_head_(metadata_tag::make(nullptr)),
+                  pending_deallocation_count_(0),
+                  maintenance_window_open_(false),
+                  live_allocations_(0),
                   free_block_bins_(nullptr),
                   cpu_shards_(cpu_shards > 0 ? cpu_shards : 1),
                   allocation_base_(nullptr),
                   address_bin_size_(1)
             {
                 //  Allocate the per-CPU shard arrays from the start of the managed block.
-                //  Layout: [free_metadata_heads][64-byte align][free_block_bins][64-byte align][allocations...]
+                //  Layout: [free_block_bins][64-byte align][allocations...]
 
                 uint8_t *current_ptr = static_cast<uint8_t *>(internal::align_pointer(block, DEFAULT_ALIGNMENT));
-
-                //  Allocate free_metadata_heads_ array
-                free_metadata_heads_ = reinterpret_cast<atomic<uint64_t> *>(current_ptr);
-                current_ptr += cpu_shards_ * sizeof(atomic<uint64_t>);
-
-                //  Align to 64 bytes for the free_block_bins_ array (each bin is 64-byte aligned)
-                current_ptr = static_cast<uint8_t *>(internal::align_pointer(current_ptr, DEFAULT_ALIGNMENT));
 
                 //  Allocate free_block_bins_ array (NUM_FREE_BLOCK_BINS * cpu_shards_ elements)
                 free_block_bins_ = reinterpret_cast<free_block_bin *>(current_ptr);
@@ -227,12 +225,6 @@ namespace MINIMAL_STD_NAMESPACE
                 allocation_base_ = current_ptr;
                 size_t raw_bin_size = block_size_ / NUM_ADDRESS_BINS;
                 address_bin_size_ = raw_bin_size > 0 ? raw_bin_size : 1;
-
-                //  Initialize all per-CPU shard arrays
-                for (size_t i = 0; i < cpu_shards_; ++i)
-                {
-                    free_metadata_heads_[i].store(metadata_tag::make(nullptr), memory_order_release);
-                }
 
                 for (size_t bin = 0; bin < NUM_FREE_BLOCK_BINS; ++bin)
                 {
@@ -315,6 +307,21 @@ namespace MINIMAL_STD_NAMESPACE
             size_t debug_metadata_cas_retries() const
             {
                 return debug_metadata_cas_retries_.load(memory_order_relaxed);
+            }
+
+            size_t debug_pending_deallocations() const
+            {
+                return pending_deallocation_count_.load(memory_order_acquire);
+            }
+
+            size_t debug_maintenance_windows() const
+            {
+                return debug_maintenance_windows_.load(memory_order_relaxed);
+            }
+
+            size_t current_allocated() const
+            {
+                return live_allocations_.load(memory_order_acquire);
             }
 
             allocation_info get_allocation_info(void *allocation) const
@@ -420,6 +427,8 @@ namespace MINIMAL_STD_NAMESPACE
             inline static fast_lockfree_low_quality_rng id_generator_;
 
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
+            static constexpr size_t MAINTENANCE_WINDOW_THRESHOLD = 10;
+            static constexpr size_t MAINTENANCE_WINDOW_BATCH_SIZE = 64;
             static_assert(max_waste_percent > 0 && max_waste_percent <= 25,
                           "max_waste_percent must be in the range [1, 25]");
             static_assert(max_bin_bytes >= 1024,
@@ -537,10 +546,13 @@ namespace MINIMAL_STD_NAMESPACE
 
             alignas(64) atomic<size_t> current_metadata_record_count_;
             alignas(64) atomic<uint64_t> metadata_head_;
+            alignas(64) atomic<uint64_t> free_metadata_head_;
+            alignas(64) atomic<uint64_t> pending_deallocation_head_;
+            alignas(64) atomic<size_t> pending_deallocation_count_;
+            alignas(64) atomic<bool> maintenance_window_open_;
+            alignas(64) atomic<size_t> live_allocations_;
 
-            //  Per-CPU shard arrays - dynamically allocated from the managed block
-            //  These pointers point to arrays allocated at the start of the block
-            atomic<uint64_t> *free_metadata_heads_;
+            //  Per-CPU free block bins - dynamically allocated from the managed block.
             free_block_bin *free_block_bins_;
             size_t cpu_shards_;
             const void *allocation_base_;
@@ -557,6 +569,7 @@ namespace MINIMAL_STD_NAMESPACE
             alignas(64) atomic<size_t> debug_search_reclaim_deferred_{0};
             alignas(64) atomic<size_t> debug_frontier_cas_retries_{0};
             alignas(64) atomic<size_t> debug_metadata_cas_retries_{0};
+            alignas(64) atomic<size_t> debug_maintenance_windows_{0};
 
             size_t cpu_shard_index() const
             {
@@ -576,12 +589,6 @@ namespace MINIMAL_STD_NAMESPACE
             uint32_t metadata_to_index(const block_metadata *ptr) const
             {
                 return (ptr == nullptr) ? NULL_INDEX : static_cast<uint32_t>(metadata_start_ - ptr);
-            }
-
-            bool is_last_block(const block_metadata &metadata)
-            {
-                auto next_empty = block_tag::unpack_ptr(next_empty_memory_block_.load(memory_order_acquire));
-                return ((uint8_t *)next_empty == ((uint8_t *)metadata.get_memory_block()) + metadata.total_size_);
             }
 
             size_t address_bin_for(const void *ptr) const
@@ -718,8 +725,9 @@ namespace MINIMAL_STD_NAMESPACE
 
             void recycle_metadata(block_metadata &metadata)
             {
-                //  Clear pointer, set METADATA_AVAILABLE, increment version by 2 (preserves ABA spacing
-                //  parity with the previous two-step soft-delete path removed after iterator elimination).
+                //  Clear pointer and move metadata back to METADATA_AVAILABLE.
+                //  Keep a two-step version bump to widen version-space separation between
+                //  allocation/deallocation transitions and metadata reuse.
 
                 uint64_t current = metadata.block_state_.load(memory_order_acquire);
                 uint16_t new_version = static_cast<uint16_t>(block_state_ptr::unpack_version(current) + 2);
@@ -728,8 +736,262 @@ namespace MINIMAL_STD_NAMESPACE
                     block_state_ptr::pack(nullptr, METADATA_AVAILABLE, new_version),
                     memory_order_release);
 
-                guarded_push(free_metadata_heads_[cpu_shard_index()], metadata,
+                guarded_push(free_metadata_head_, metadata,
                              &block_metadata::next_free_header_index_);
+            }
+
+            void reclaim_pending_frontier_batch(
+                array<block_metadata *, MAINTENANCE_WINDOW_BATCH_SIZE> &batch,
+                size_t batch_size)
+            {
+                //  Consume reclaimable tail blocks from the batch as a unit.
+                //  We repeatedly look for the batch entry whose end exactly matches the
+                //  current frontier and roll the frontier backward one block at a time.
+
+                while (true)
+                {
+                    uint64_t frontier_tag = next_empty_memory_block_.load(memory_order_acquire);
+                    block_header *frontier_ptr = block_tag::unpack_ptr(frontier_tag);
+
+                    block_metadata *candidate = nullptr;
+                    size_t candidate_index = 0;
+
+                    for (size_t i = 0; i < batch_size; ++i)
+                    {
+                        block_metadata *metadata = batch[i];
+                        if (metadata == nullptr)
+                        {
+                            continue;
+                        }
+
+                        uint64_t block_state = metadata->block_state_.load(memory_order_acquire);
+                        if (block_state_ptr::unpack_state(block_state) != DEALLOCATED_PENDING)
+                        {
+                            continue;
+                        }
+
+                        block_header *memory_block = block_state_ptr::unpack_ptr(block_state);
+                        block_header *expected_frontier_position = reinterpret_cast<block_header *>(
+                            reinterpret_cast<uint8_t *>(memory_block) + metadata->total_size_);
+
+                        if (expected_frontier_position == frontier_ptr)
+                        {
+                            candidate = metadata;
+                            candidate_index = i;
+                            break;
+                        }
+                    }
+
+                    if (candidate == nullptr)
+                    {
+                        return;
+                    }
+
+                    uint64_t candidate_state = candidate->block_state_.load(memory_order_acquire);
+                    if (block_state_ptr::unpack_state(candidate_state) != DEALLOCATED_PENDING)
+                    {
+                        continue;
+                    }
+
+                    uint64_t desired_state = block_state_ptr::with_state_and_increment_version(
+                        candidate_state, FRONTIER_RECLAIM_IN_PROGRESS);
+
+                    if (!candidate->block_state_.compare_exchange_strong(
+                            candidate_state, desired_state, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        continue;
+                    }
+
+                    block_header *memory_block = block_state_ptr::unpack_ptr(candidate_state);
+                    uint64_t new_frontier_tag = block_tag::pack(
+                        memory_block,
+                        static_cast<uint16_t>(block_tag::unpack_counter(frontier_tag) + 1));
+
+                    if (!next_empty_memory_block_.compare_exchange_strong(
+                            frontier_tag, new_frontier_tag, memory_order_acq_rel, memory_order_acquire))
+                    {
+                        uint64_t restore_expected = desired_state;
+                        uint64_t restore_desired = block_state_ptr::with_state_and_increment_version(
+                            restore_expected, DEALLOCATED_PENDING);
+                        candidate->block_state_.compare_exchange_strong(
+                            restore_expected, restore_desired, memory_order_acq_rel, memory_order_acquire);
+                        continue;
+                    }
+
+                    recycle_metadata(*candidate);
+                    batch[candidate_index] = nullptr;
+                }
+            }
+
+            void scavenge_frontier_reclaimed_heads()
+            {
+                //  Safely recover metadata for frontier-reclaimed nodes by popping them from
+                //  free-bin heads before recycling. This avoids leaving reclamation cleanup
+                //  solely to allocation-path discovery.
+
+                for (size_t free_block_bin = 0; free_block_bin < NUM_FREE_BLOCK_BINS; ++free_block_bin)
+                {
+                    for (size_t shard = 0; shard < cpu_shards_; ++shard)
+                    {
+                        size_t bin_index = free_block_bin * cpu_shards_ + shard;
+
+                        for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS; ++addr_bin)
+                        {
+                            auto &bin_head = free_block_bins_[bin_index].address_bin_heads_[addr_bin];
+
+                            while (true)
+                            {
+                                block_metadata *reclaimed = nullptr;
+                                bool done_with_head = false;
+
+                                {
+                                    interrupt_guard_type guard;
+
+                                    block_metadata *head = unguarded_pop(
+                                        bin_head,
+                                        &block_metadata::next_free_block_index_);
+
+                                    if (head == nullptr)
+                                    {
+                                        done_with_head = true;
+                                    }
+                                    else
+                                    {
+                                        uint64_t head_state = head->block_state_.load(memory_order_acquire);
+                                        uint8_t state = block_state_ptr::unpack_state(head_state);
+
+                                        if (state == FRONTIER_RECLAIMED)
+                                        {
+                                            reclaimed = head;
+                                        }
+                                        else
+                                        {
+                                            // Keep non-reclaimed head in place; deeper reclaimed nodes
+                                            // will be recovered when they become visible at head.
+                                            unguarded_push(bin_head, *head, &block_metadata::next_free_block_index_);
+                                            done_with_head = true;
+                                        }
+                                    }
+                                }
+
+                                if (reclaimed != nullptr)
+                                {
+                                    recycle_metadata(*reclaimed);
+                                    continue;
+                                }
+
+                                if (done_with_head)
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            void run_maintenance_window()
+            {
+                debug_maintenance_windows_.add_fetch(1, memory_order_relaxed);
+                size_t shard_cursor = cpu_shard_index();
+
+                while (true)
+                {
+                    bool drained_pending = false;
+                    array<block_metadata *, MAINTENANCE_WINDOW_BATCH_SIZE> pending_batch{};
+                    size_t pending_batch_count = 0;
+
+                    {
+                        //  Pop a bounded pending batch under one guard to reduce guard churn.
+                        interrupt_guard_type guard;
+
+                        for (size_t batch_count = 0; batch_count < MAINTENANCE_WINDOW_BATCH_SIZE; ++batch_count)
+                        {
+                            block_metadata *metadata = unguarded_pop(
+                                pending_deallocation_head_,
+                                &block_metadata::next_free_block_index_);
+
+                            if (metadata == nullptr)
+                            {
+                                drained_pending = true;
+                                break;
+                            }
+
+                            pending_deallocation_count_.fetch_sub(1, memory_order_acq_rel);
+                            pending_batch[pending_batch_count++] = metadata;
+                        }
+                    }
+
+                    if (pending_batch_count > 0)
+                    {
+                        //  Reclaim tail-adjacent entries from this batch as one operation.
+                        reclaim_pending_frontier_batch(pending_batch, pending_batch_count);
+
+                        //  Publish remaining batch entries to free bins.
+                        for (size_t i = 0; i < pending_batch_count; ++i)
+                        {
+                            block_metadata *metadata = pending_batch[i];
+                            if (metadata == nullptr)
+                            {
+                                continue;
+                            }
+
+                            uint64_t block_state = metadata->block_state_.load(memory_order_acquire);
+                            if (block_state_ptr::unpack_state(block_state) != DEALLOCATED_PENDING)
+                            {
+                                continue;
+                            }
+
+                            metadata->block_state_.store(
+                                block_state_ptr::with_state_and_increment_version(block_state, AVAILABLE),
+                                memory_order_release);
+
+                            auto free_block_bin = free_block_bin_index(metadata->total_size_);
+                            auto addr_bin = address_bin_for(metadata->get_memory_block());
+                            size_t bin_index = free_block_bin * cpu_shards_ + shard_cursor;
+
+                            guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
+                                         *metadata, &block_metadata::next_free_block_index_);
+
+                            shard_cursor = (shard_cursor + 1) % cpu_shards_;
+                        }
+                    }
+
+                    if (drained_pending)
+                    {
+                        break;
+                    }
+                }
+
+                try_reclaim_frontier_blocks();
+                scavenge_frontier_reclaimed_heads();
+            }
+
+            bool maybe_open_maintenance_window(bool force)
+            {
+                size_t pending = pending_deallocation_count_.load(memory_order_acquire);
+
+                if (pending == 0)
+                {
+                    return false;
+                }
+
+                if (!force && pending < MAINTENANCE_WINDOW_THRESHOLD)
+                {
+                    return false;
+                }
+
+                bool expected = false;
+                if (!maintenance_window_open_.compare_exchange_strong(
+                        expected, true, memory_order_acq_rel, memory_order_acquire))
+                {
+                    return false;
+                }
+
+                run_maintenance_window();
+                maintenance_window_open_.store(false, memory_order_release);
+
+                return true;
             }
 
             void *do_allocate(size_t bytes, size_t alignment) override
@@ -753,46 +1015,86 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     return nullptr;
                 }
-                // Pre-allocate metadata before grabbing block space
-                size_t metadata_index = get_next_metadata_record_index();
-                if (metadata_index == NULL_INDEX)
-                {
-                    debug_alloc_failures_.add_fetch(1, memory_order_relaxed);
-                    return nullptr;
-                }
+
+                maybe_open_maintenance_window(false);
 
                 auto free_block_bin = free_block_bin_index(total_size);
                 auto shard = cpu_shard_index();
+                bool used_frontier = false;
 
-                block_header *free_block = search_for_deallocated_block(free_block_bin, shard);
+                claimed_block claimed = search_for_deallocated_block(free_block_bin, shard);
+                block_header *free_block = claimed.block;
+                block_metadata *metadata = claimed.metadata;
+
                 if (free_block == nullptr)
                 {
+                    //  Reserve metadata only when we need the frontier path.
+                    size_t metadata_index = get_next_metadata_record_index();
+                    if (metadata_index == NULL_INDEX)
+                    {
+                        debug_alloc_failures_.add_fetch(1, memory_order_relaxed);
+                        return nullptr;
+                    }
+
+                    block_metadata *frontier_reserved_metadata = metadata_start_ - metadata_index;
+
                     free_block = get_next_empty_memory_block(free_block_bin);
+                    used_frontier = (free_block != nullptr);
+
+                    if (free_block == nullptr)
+                    {
+                        maybe_open_maintenance_window(true);
+                        claimed = search_for_deallocated_block(free_block_bin, shard);
+                        free_block = claimed.block;
+                        metadata = claimed.metadata;
+
+                        if (free_block != nullptr)
+                        {
+                            debug_alloc_reuse_hits_.add_fetch(1, memory_order_relaxed);
+                        }
+                    }
 
                     if (free_block == nullptr)
                     {
                         // Return the unused metadata record to the free list
-                        block_metadata *metadata = metadata_start_ - metadata_index;
-                        metadata->requested_size_.store(0, memory_order_release);
-                        metadata->total_size_ = 0;
-                        metadata->alignment_ = 0;
-                        metadata->allocation_hash_ = 0;
+                        frontier_reserved_metadata->requested_size_.store(0, memory_order_release);
+                        frontier_reserved_metadata->total_size_ = 0;
+                        frontier_reserved_metadata->alignment_ = 0;
+                        frontier_reserved_metadata->allocation_hash_ = 0;
 
-                        recycle_metadata(*metadata);
+                        recycle_metadata(*frontier_reserved_metadata);
 
                         debug_alloc_failures_.add_fetch(1, memory_order_relaxed);
                         return nullptr;
                     }
 
-                    debug_alloc_frontier_hits_.add_fetch(1, memory_order_relaxed);
+                    if (claimed.block == nullptr)
+                    {
+                        //  Frontier allocation path owns the reserved metadata.
+                        metadata = frontier_reserved_metadata;
+                    }
+                    else
+                    {
+                        //  Reuse won during forced maintenance retry; return reserved metadata.
+                        frontier_reserved_metadata->requested_size_.store(0, memory_order_release);
+                        frontier_reserved_metadata->total_size_ = 0;
+                        frontier_reserved_metadata->alignment_ = 0;
+                        frontier_reserved_metadata->allocation_hash_ = 0;
+
+                        recycle_metadata(*frontier_reserved_metadata);
+                    }
+
+                    if (used_frontier)
+                    {
+                        debug_alloc_frontier_hits_.add_fetch(1, memory_order_relaxed);
+                    }
                 }
                 else
                 {
                     debug_alloc_reuse_hits_.add_fetch(1, memory_order_relaxed);
                 }
 
-                free_block->metadata_index_ = metadata_index;
-                block_metadata *metadata = metadata_start_ - metadata_index;
+                free_block->metadata_index_ = metadata_to_index(metadata);
 
                 // Get current version (if recycled metadata) and increment it
                 uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_relaxed));
@@ -838,6 +1140,8 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     extensions::memory_resource_statistics::allocation_made(bytes);
                 }
+
+                live_allocations_.add_fetch(1, memory_order_acq_rel);
 
                 return reinterpret_cast<uint8_t *>(free_block) + ALLOCATION_HEADER_SIZE;
             }
@@ -920,24 +1224,20 @@ namespace MINIMAL_STD_NAMESPACE
                     extensions::memory_resource_statistics::deallocation_made(bytes);
                 }
 
-                //  Mark the block as available (keep pointer, change state, increment version)
-                //  Use the cached locked_block_state from the CAS above — no need to reload.
+                live_allocations_.fetch_sub(1, memory_order_relaxed);
+
+                //  Mark the block as pending maintenance. Reuse is deferred until a maintenance window
+                //  converts this state into AVAILABLE and routes the block into free block bins.
 
                 block_to_deallocate->block_state_.store(
-                    block_state_ptr::with_state_and_increment_version(locked_block_state, AVAILABLE),
+                    block_state_ptr::with_state_and_increment_version(locked_block_state, DEALLOCATED_PENDING),
                     memory_order_release);
 
-                //  Put the block into the correct free block bin
+                guarded_push(pending_deallocation_head_, *block_to_deallocate,
+                             &block_metadata::next_free_block_index_);
+                pending_deallocation_count_.add_fetch(1, memory_order_acq_rel);
 
-                auto free_block_bin = free_block_bin_index(block_to_deallocate->total_size_);
-                auto shard = cpu_shard_index();
-                auto addr_bin = address_bin_for(block_to_deallocate->get_memory_block());
-                size_t bin_index = free_block_bin * cpu_shards_ + shard;
-
-                guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
-                             *block_to_deallocate, &block_metadata::next_free_block_index_);
-
-                try_reclaim_frontier_blocks();
+                maybe_open_maintenance_window(false);
 
                 return true;
             }
@@ -1101,38 +1401,18 @@ namespace MINIMAL_STD_NAMESPACE
              * @brief Retrieves the next available metadata record index.
              *
              * This function attempts to obtain the next available metadata record index from the free metadata list.
-             * If the free metadata list is empty, it checks if there are any soft deleted metadata records to reclaim.
-             * If there are more than 64 soft deleted metadata records, it triggers a reclaim cycle and tries again to
-             * obtain a metadata record from the free list. If no metadata records are available after reclaiming, it
-             * allocates a new metadata record.
+             * If the free metadata list is empty, it allocates a new metadata record from the metadata region
+             * as long as doing so does not overlap with current allocation frontier usage.
              *
              * @return The index of the next available metadata record.
              */
             size_t get_next_metadata_record_index()
             {
-                //  Try to pop from the local shard's free metadata list first.
+                //  Try to pop from the global free metadata list first.
 
-                auto shard = cpu_shard_index();
-
-                if (auto *md = guarded_pop(free_metadata_heads_[shard], &block_metadata::next_free_header_index_))
+                if (auto *md = guarded_pop(free_metadata_head_, &block_metadata::next_free_header_index_))
                 {
                     return metadata_to_index(md);
-                }
-
-                //  Try stealing from other shards under a single guard scope.
-
-                {
-                    interrupt_guard_type guard;
-
-                    for (size_t offset = 1; offset < cpu_shards_; ++offset)
-                    {
-                        size_t other_shard = (shard + offset) % cpu_shards_;
-
-                        if (auto *md = unguarded_pop(free_metadata_heads_[other_shard], &block_metadata::next_free_header_index_))
-                        {
-                            return metadata_to_index(md);
-                        }
-                    }
                 }
 
                 //  If we are here, there were no metadata records available, so we have to allocate a new one.
@@ -1165,43 +1445,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return next_record_index;
             }
-            //  Attempts to reclaim the last block at the frontier by rolling the frontier backward.
-            //  Returns true if the block was successfully reclaimed.
-            //  Uses a calculated expected position (not a fresh load) to ensure re-entrancy safety:
-            //  if an interrupt allocates between is_last_block() and the CAS, the CAS fails safely.
-
-            bool try_reclaim_last_block(block_metadata &metadata)
-            {
-                if (!is_last_block(metadata))
-                {
-                    return false;
-                }
-
-                block_header *memory_block = metadata.get_memory_block();
-                block_header *expected_frontier_position = reinterpret_cast<block_header *>(
-                    reinterpret_cast<uint8_t *>(memory_block) + metadata.total_size_);
-
-                uint64_t expected_tag = next_empty_memory_block_.load(memory_order_acquire);
-
-                if (block_tag::unpack_ptr(expected_tag) != expected_frontier_position)
-                {
-                    return false;
-                }
-
-                uint64_t new_tag = block_tag::pack(memory_block,
-                                                   static_cast<uint16_t>(block_tag::unpack_counter(expected_tag) + 1));
-
-                if (!next_empty_memory_block_.compare_exchange_strong(expected_tag, new_tag, memory_order_acq_rel, memory_order_acquire))
-                {
-                    return false;
-                }
-
-                recycle_metadata(metadata);
-                try_reclaim_frontier_blocks();
-
-                return true;
-            }
-
             //  Result of attempting to claim a popped block inside a guarded scope.
             //  CLAIMED: block ownership acquired (AVAILABLE -> LOCKED).
             //  RETRY: block was re-pushed due to active frontier reclaim; caller should continue scanning.
@@ -1209,6 +1452,12 @@ namespace MINIMAL_STD_NAMESPACE
             //  DISCARD: stale or non-allocatable state; skip this block.
 
             enum class claim_result { CLAIMED, RETRY, RECLAIM_DEFERRED, DISCARD };
+
+            struct claimed_block
+            {
+                block_header *block = nullptr;
+                block_metadata *metadata = nullptr;
+            };
 
             //  Unguarded variant of try_claim_popped_block for use within an existing guard scope.
             //  PRECONDITION: caller holds interrupt_guard_type.
@@ -1253,72 +1502,67 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            //  Guarded wrapper for backward compatibility — used by code paths not under an existing guard.
-
-            bool try_claim_popped_block(block_metadata &head, atomic<uint64_t> &bin_head)
+            claimed_block search_for_deallocated_block(uint64_t free_block_bin, size_t preferred_shard)
             {
-                interrupt_guard_type guard;
-                auto result = unguarded_try_claim_popped_block(head, bin_head);
-                if (result == claim_result::RECLAIM_DEFERRED)
-                {
-                    //  Handle deferred reclaim while still under guard.
-                    recycle_metadata(head);
-                }
-                return result == claim_result::CLAIMED;
-            }
+                //  Scan address bins low-to-high, but for each address bin probe shards
+                //  width-first (round-robin), starting from the preferred shard.
+                //  This avoids starving reusable blocks that landed on non-local shards.
 
-            block_header *search_for_deallocated_block(uint64_t free_block_bin, size_t shard)
-            {
-                //  Scan address bins low-to-high, preferring low-address blocks.
-                //  Outer loop restarts after successful frontier reclamation.
-                //  A single interrupt guard covers the entire bin scan + claim, collapsing
-                //  up to NUM_ADDRESS_BINS separate guard scopes into one.
-
-                size_t bin_index = free_block_bin * cpu_shards_ + shard;
+                size_t shard_start = preferred_shard % cpu_shards_;
 
                 while (true)
                 {
                     debug_search_iterations_.add_fetch(1, memory_order_relaxed);
 
-                    bool restarted = false;
                     block_metadata *claimed_head = nullptr;
                     block_metadata *deferred_reclaim = nullptr;
 
                     {
                         interrupt_guard_type guard;
 
-                        for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS && !restarted; ++addr_bin)
+                        bool stop_scan = false;
+
+                        for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS && !stop_scan; ++addr_bin)
                         {
-                            block_metadata *head = unguarded_pop(
-                                free_block_bins_[bin_index].address_bin_heads_[addr_bin],
-                                &block_metadata::next_free_block_index_);
-
-                            if (head == nullptr)
+                            for (size_t shard_offset = 0; shard_offset < cpu_shards_ && !stop_scan; ++shard_offset)
                             {
-                                continue;
-                            }
+                                size_t shard = (shard_start + shard_offset) % cpu_shards_;
+                                size_t bin_index = free_block_bin * cpu_shards_ + shard;
+                                auto &bin_head = free_block_bins_[bin_index].address_bin_heads_[addr_bin];
+                                block_metadata *head = unguarded_pop(
+                                    bin_head,
+                                    &block_metadata::next_free_block_index_);
 
-                            debug_search_pops_.add_fetch(1, memory_order_relaxed);
+                                if (head == nullptr)
+                                {
+                                    continue;
+                                }
 
-                            auto result = unguarded_try_claim_popped_block(
-                                *head, free_block_bins_[bin_index].address_bin_heads_[addr_bin]);
+                                debug_search_pops_.add_fetch(1, memory_order_relaxed);
 
-                            if (result == claim_result::CLAIMED)
-                            {
-                                debug_search_claimed_.add_fetch(1, memory_order_relaxed);
-                                claimed_head = head;
-                                break;
+                                auto result = unguarded_try_claim_popped_block(*head, bin_head);
+
+                                if (result == claim_result::CLAIMED)
+                                {
+                                    debug_search_claimed_.add_fetch(1, memory_order_relaxed);
+                                    claimed_head = head;
+                                    stop_scan = true;
+                                    break;
+                                }
+                                if (result == claim_result::RECLAIM_DEFERRED)
+                                {
+                                    debug_search_reclaim_deferred_.add_fetch(1, memory_order_relaxed);
+                                    deferred_reclaim = head;
+                                    stop_scan = true;
+                                    break;
+                                }
+                                // RETRY and DISCARD: continue scanning
                             }
-                            if (result == claim_result::RECLAIM_DEFERRED)
-                            {
-                                debug_search_reclaim_deferred_.add_fetch(1, memory_order_relaxed);
-                                deferred_reclaim = head;
-                                break;
-                            }
-                            // RETRY and DISCARD: continue scanning
                         }
                     }
                     // Guard released — handle deferred work and claimed block outside the critical section.
+
+                    shard_start = (shard_start + 1) % cpu_shards_;
 
                     if (deferred_reclaim)
                     {
@@ -1329,24 +1573,11 @@ namespace MINIMAL_STD_NAMESPACE
                     if (claimed_head)
                     {
                         //  CAS AVAILABLE -> LOCKED succeeded — we own the block.
-                        //  If it is the last block, attempt immediate frontier release.
-
-                        if (try_reclaim_last_block(*claimed_head))
-                        {
-                            continue;  // Restart outer loop after frontier reclamation.
-                        }
-
-                        //  Return the block for reuse.
-
-                        auto return_value = claimed_head->get_memory_block();
-                        recycle_metadata(*claimed_head);
-                        return return_value;
+                        //  Caller will either reuse this metadata record directly or recycle it.
+                        return {claimed_head->get_memory_block(), claimed_head};
                     }
 
-                    if (!restarted)
-                    {
-                        return nullptr;
-                    }
+                    return {nullptr, nullptr};
                 }
             }
 

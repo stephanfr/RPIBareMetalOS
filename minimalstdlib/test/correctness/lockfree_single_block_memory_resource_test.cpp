@@ -81,6 +81,151 @@ TEST(LockfreeSingleBlockMemoryResourceTests, AllocationLargerThanMaxIsRejected)
     CHECK(ptr == nullptr);
 }
 
+TEST(LockfreeSingleBlockMemoryResourceTests, CurrentAllocatedIsTrackedOnTemplateClass)
+{
+    lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
+
+    void *ptr1 = resource.allocate(128);
+    void *ptr2 = resource.allocate(256);
+
+    CHECK(ptr1 != nullptr);
+    CHECK(ptr2 != nullptr);
+    CHECK_EQUAL(2, resource.current_allocated());
+
+    resource.deallocate(ptr1, 128);
+    CHECK_EQUAL(1, resource.current_allocated());
+
+    resource.deallocate(ptr2, 256);
+    CHECK_EQUAL(0, resource.current_allocated());
+}
+
+TEST(LockfreeSingleBlockMemoryResourceTests, DeferredDeallocationOpensMaintenanceWindowAtTen)
+{
+    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+
+    constexpr size_t ALLOC_SIZE = 512;
+    constexpr size_t NUM_BLOCKS = 10;
+    void *ptrs[NUM_BLOCKS] = {nullptr};
+
+    for (size_t i = 0; i < NUM_BLOCKS; ++i)
+    {
+        ptrs[i] = resource.allocate(ALLOC_SIZE);
+        CHECK(ptrs[i] != nullptr);
+    }
+
+    CHECK_EQUAL(NUM_BLOCKS, resource.current_allocated());
+
+    for (size_t i = 0; i < NUM_BLOCKS - 1; ++i)
+    {
+        resource.deallocate(ptrs[i], ALLOC_SIZE);
+    }
+
+    CHECK_EQUAL(1, resource.current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(NUM_BLOCKS - 1), resource.debug_pending_deallocations());
+
+    auto pending_info = resource.get_allocation_info(ptrs[0]);
+    CHECK(pending_info.state == lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
+
+    const size_t windows_before = resource.debug_maintenance_windows();
+
+    resource.deallocate(ptrs[NUM_BLOCKS - 1], ALLOC_SIZE);
+
+    CHECK_EQUAL(0, resource.current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+    CHECK(resource.debug_maintenance_windows() > windows_before);
+
+    auto finalized_info = resource.get_allocation_info(ptrs[0]);
+    CHECK(finalized_info.state != lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
+}
+
+TEST(LockfreeSingleBlockMemoryResourceTests, ReuseAfterMaintenanceKeepsMetadataCountStable)
+{
+    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+
+    constexpr size_t ALLOC_SIZE = 1024;
+    constexpr size_t NUM_BLOCKS = 10;
+    void *ptrs[NUM_BLOCKS] = {nullptr};
+
+    for (size_t i = 0; i < NUM_BLOCKS; ++i)
+    {
+        ptrs[i] = resource.allocate(ALLOC_SIZE);
+        CHECK(ptrs[i] != nullptr);
+    }
+
+    for (size_t i = 0; i < NUM_BLOCKS; ++i)
+    {
+        resource.deallocate(ptrs[i], ALLOC_SIZE);
+    }
+
+    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+
+    const size_t metadata_before_reuse = resource.debug_metadata_count();
+
+    void *reused = resource.allocate(ALLOC_SIZE);
+    CHECK(reused != nullptr);
+
+    CHECK_EQUAL(metadata_before_reuse, resource.debug_metadata_count());
+    auto reused_info = resource.get_allocation_info(reused);
+    CHECK(reused_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+
+    resource.deallocate(reused, ALLOC_SIZE);
+}
+
+TEST(LockfreeSingleBlockMemoryResourceTests, LargePendingBatchDrainsAndOpensMultipleMaintenanceWindows)
+{
+    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+
+    constexpr size_t ALLOC_SIZE = 512;
+    constexpr size_t NUM_BLOCKS = 100;
+    void *ptrs[NUM_BLOCKS] = {nullptr};
+
+    for (size_t i = 0; i < NUM_BLOCKS; ++i)
+    {
+        ptrs[i] = resource.allocate(ALLOC_SIZE);
+        CHECK(ptrs[i] != nullptr);
+    }
+
+    const size_t windows_before = resource.debug_maintenance_windows();
+
+    for (size_t i = 0; i < NUM_BLOCKS; ++i)
+    {
+        resource.deallocate(ptrs[i], ALLOC_SIZE);
+    }
+
+    CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+    CHECK(resource.debug_maintenance_windows() > windows_before);
+}
+
+TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMaintenance)
+{
+    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+
+    constexpr size_t ALLOC_SIZE = 2048;
+    constexpr size_t NUM_BLOCKS = 20;
+    void *ptrs[NUM_BLOCKS] = {nullptr};
+
+    const size_t initial_frontier = resource.debug_frontier_offset();
+
+    for (size_t i = 0; i < NUM_BLOCKS; ++i)
+    {
+        ptrs[i] = resource.allocate(ALLOC_SIZE);
+        CHECK(ptrs[i] != nullptr);
+    }
+
+    CHECK(resource.debug_frontier_offset() > initial_frontier);
+
+    // Free in reverse order to maximize contiguous tail reclaim opportunities.
+    for (size_t i = NUM_BLOCKS; i > 0; --i)
+    {
+        resource.deallocate(ptrs[i - 1], ALLOC_SIZE);
+    }
+
+    CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+    CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
+}
+
 TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
 {
     constexpr size_t NUM_THREADS = 16;
