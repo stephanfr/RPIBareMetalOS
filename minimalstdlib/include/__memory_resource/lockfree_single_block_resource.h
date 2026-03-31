@@ -8,6 +8,7 @@
 
 #include "array"
 #include "atomic"
+#include "new"
 #include "random"
 
 #include "__concepts/derived_from.h"
@@ -160,6 +161,60 @@ namespace MINIMAL_STD_NAMESPACE
 
             static_assert(ALLOCATION_METADATA_SIZE == 64, "allocation_metadata is not 64 bytes in size");
 
+            static constexpr size_t METADATA_RECORDS_PER_BLOCK = 4096;
+            static constexpr size_t METADATA_BLOCK_BYTES = METADATA_RECORDS_PER_BLOCK * ALLOCATION_METADATA_SIZE;
+
+            struct alignas(64) metadata_block_manager
+            {
+                static constexpr uint32_t TRIMMING_MASK = 0x80000000;
+                static constexpr uint32_t ACTIVE_COUNT_MASK = ~TRIMMING_MASK;
+
+                atomic<uint64_t> local_free_head_;
+                atomic<uint32_t> state_and_active_count_;
+                uint8_t reserved_[52];
+
+                metadata_block_manager() noexcept : local_free_head_(0), state_and_active_count_(0) {}
+
+                void reset()
+                {
+                    local_free_head_.store(0, memory_order_relaxed);
+                    state_and_active_count_.store(0, memory_order_relaxed);
+                }
+
+                bool reserve_active_slot()
+                {
+                    uint32_t current = state_and_active_count_.load(memory_order_acquire);
+
+                    while (true)
+                    {
+                        if ((current & TRIMMING_MASK) != 0)
+                        {
+                            return false;
+                        }
+
+                        uint32_t active_count = current & ACTIVE_COUNT_MASK;
+                        if (active_count == ACTIVE_COUNT_MASK)
+                        {
+                            return false;
+                        }
+
+                        if (state_and_active_count_.compare_exchange_weak(
+                                current,
+                                static_cast<uint32_t>(current + 1),
+                                memory_order_acq_rel,
+                                memory_order_acquire))
+                        {
+                            return true;
+                        }
+                    }
+                }
+
+                void release_active_slot()
+                {
+                    state_and_active_count_.fetch_sub(1, memory_order_release);
+                }
+            };
+
         public:
             enum allocation_state : uint8_t
             {
@@ -193,8 +248,8 @@ namespace MINIMAL_STD_NAMESPACE
                   metadata_start_(static_cast<block_metadata *>(internal::align_pointer((char *)block + block_size, 64)) - 1),
                   next_empty_memory_block_(0),  // Will be set after allocating per-CPU arrays
                   current_metadata_record_count_(0),
-                  metadata_head_(metadata_tag::make((block_metadata *)&END_OF_METADATA_LIST_SENTINEL)),
-                  free_metadata_head_(metadata_tag::make(nullptr)),
+                  block_managers_(nullptr),
+                  metadata_block_manager_capacity_(0),
                   pending_deallocation_head_(metadata_tag::make(nullptr)),
                   pending_deallocation_count_(0),
                   maintenance_window_open_(false),
@@ -205,13 +260,32 @@ namespace MINIMAL_STD_NAMESPACE
                   address_bin_size_(1)
             {
                 //  Allocate the per-CPU shard arrays from the start of the managed block.
-                //  Layout: [free_block_bins][64-byte align][allocations...]
+                //  Layout: [free_block_bins][metadata_block_managers][64-byte align][allocations...]
 
                 uint8_t *current_ptr = static_cast<uint8_t *>(internal::align_pointer(block, DEFAULT_ALIGNMENT));
 
                 //  Allocate free_block_bins_ array (NUM_FREE_BLOCK_BINS * cpu_shards_ elements)
                 free_block_bins_ = reinterpret_cast<free_block_bin *>(current_ptr);
                 current_ptr += NUM_FREE_BLOCK_BINS * cpu_shards_ * sizeof(free_block_bin);
+
+                //  Allocate per-block metadata managers at the front of the arena.
+                uint8_t *metadata_end = reinterpret_cast<uint8_t *>(metadata_start_ + 1);
+                size_t bytes_after_bins = (metadata_end > current_ptr)
+                                              ? static_cast<size_t>(metadata_end - current_ptr)
+                                              : 0;
+                size_t bytes_per_manager_and_metadata_block = METADATA_BLOCK_BYTES + sizeof(metadata_block_manager);
+
+                metadata_block_manager_capacity_ = (bytes_per_manager_and_metadata_block > 0)
+                                                       ? (bytes_after_bins / bytes_per_manager_and_metadata_block)
+                                                       : 0;
+
+                block_managers_ = reinterpret_cast<metadata_block_manager *>(current_ptr);
+                for (size_t i = 0; i < metadata_block_manager_capacity_; ++i)
+                {
+                    new (&block_managers_[i]) metadata_block_manager();
+                }
+
+                current_ptr += metadata_block_manager_capacity_ * sizeof(metadata_block_manager);
 
                 //  Align to 64 bytes for the start of allocations
                 current_ptr = static_cast<uint8_t *>(internal::align_pointer(current_ptr, DEFAULT_ALIGNMENT));
@@ -345,8 +419,6 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            inline static const block_metadata END_OF_METADATA_LIST_SENTINEL = {0, nullptr, 0, 0, 0, 0, 0, 0, 0, {}};
-
             using metadata_tag = lockfree::tagged_ptr<block_metadata, uint16_t>;
             using block_tag = lockfree::tagged_ptr<block_header, uint16_t>;
 
@@ -545,8 +617,8 @@ namespace MINIMAL_STD_NAMESPACE
             alignas(64) atomic<uint64_t> next_empty_memory_block_;
 
             alignas(64) atomic<size_t> current_metadata_record_count_;
-            alignas(64) atomic<uint64_t> metadata_head_;
-            alignas(64) atomic<uint64_t> free_metadata_head_;
+            metadata_block_manager *block_managers_;
+            size_t metadata_block_manager_capacity_;
             alignas(64) atomic<uint64_t> pending_deallocation_head_;
             alignas(64) atomic<size_t> pending_deallocation_count_;
             alignas(64) atomic<bool> maintenance_window_open_;
@@ -589,6 +661,11 @@ namespace MINIMAL_STD_NAMESPACE
             uint32_t metadata_to_index(const block_metadata *ptr) const
             {
                 return (ptr == nullptr) ? NULL_INDEX : static_cast<uint32_t>(metadata_start_ - ptr);
+            }
+
+            metadata_block_manager &manager_for(uint32_t metadata_index)
+            {
+                return block_managers_[metadata_index / METADATA_RECORDS_PER_BLOCK];
             }
 
             size_t address_bin_for(const void *ptr) const
@@ -736,8 +813,13 @@ namespace MINIMAL_STD_NAMESPACE
                     block_state_ptr::pack(nullptr, METADATA_AVAILABLE, new_version),
                     memory_order_release);
 
-                guarded_push(free_metadata_head_, metadata,
+                uint32_t metadata_index = metadata_to_index(&metadata);
+                metadata_block_manager &manager = manager_for(metadata_index);
+
+                guarded_push(manager.local_free_head_, metadata,
                              &block_metadata::next_free_header_index_);
+
+                manager.release_active_slot();
             }
 
             void reclaim_pending_frontier_batch(
@@ -890,6 +972,67 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
+            void trim_metadata_records()
+            {
+                while (true)
+                {
+                    size_t current_count = current_metadata_record_count_.load(memory_order_acquire);
+
+                    if (current_count == 0)
+                    {
+                        return;
+                    }
+
+                    size_t tail_manager_index = (current_count - 1) / METADATA_RECORDS_PER_BLOCK;
+                    if (tail_manager_index >= metadata_block_manager_capacity_)
+                    {
+                        return;
+                    }
+
+                    metadata_block_manager &manager = block_managers_[tail_manager_index];
+
+                    uint32_t expected_state = 0;
+                    if (!manager.state_and_active_count_.compare_exchange_strong(
+                            expected_state,
+                            metadata_block_manager::TRIMMING_MASK,
+                            memory_order_acq_rel,
+                            memory_order_acquire))
+                    {
+                        return;
+                    }
+
+                    // If the count changed while we were claiming the manager, abort and retry.
+                    if (current_metadata_record_count_.load(memory_order_acquire) != current_count)
+                    {
+                        manager.state_and_active_count_.store(0, memory_order_release);
+                        continue;
+                    }
+
+                    // Trim to the start of the current tail manager. This supports reclaiming
+                    // a partially created tail manager when it becomes fully idle.
+                    size_t new_count = tail_manager_index * METADATA_RECORDS_PER_BLOCK;
+                    bool shrunk = current_metadata_record_count_.compare_exchange_strong(
+                        current_count,
+                        new_count,
+                        memory_order_acq_rel,
+                        memory_order_acquire);
+
+                    if (shrunk)
+                    {
+                        manager.local_free_head_.store(metadata_tag::make(nullptr), memory_order_release);
+                    }
+
+                    manager.state_and_active_count_.store(0, memory_order_release);
+
+                    if (!shrunk)
+                    {
+                        continue;
+                    }
+
+                    // Successfully trimmed one full metadata block; attempt another if possible.
+                }
+            }
+
             void run_maintenance_window()
             {
                 debug_maintenance_windows_.add_fetch(1, memory_order_relaxed);
@@ -965,6 +1108,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 try_reclaim_frontier_blocks();
                 scavenge_frontier_reclaimed_heads();
+                trim_metadata_records();
             }
 
             bool maybe_open_maintenance_window(bool force)
@@ -1116,24 +1260,6 @@ namespace MINIMAL_STD_NAMESPACE
                         static_cast<uint8_t>(alignment),
                         metadata->randomized_value_);
                     free_block->hash_ = metadata->allocation_hash_;
-                }
-
-                if (metadata->next_.load(memory_order_acquire) == nullptr)
-                {
-                    //  Put the metadata record into the master list of metadata records.
-                    //      This list is a singly linked list that contains all metadata records ever created.
-
-                    uint64_t current_tag = metadata_head_.load(memory_order_acquire);
-
-                    uint64_t new_tag = 0;
-
-                    do
-                    {
-                        block_metadata *current = metadata_tag::unpack_ptr(current_tag);
-                        metadata->next_.store(current, memory_order_release);
-
-                        new_tag = metadata_tag::pack(metadata, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
-                    } while (!metadata_head_.compare_exchange_weak(current_tag, new_tag, memory_order_acq_rel, memory_order_acquire));
                 }
 
                 if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
@@ -1408,17 +1534,46 @@ namespace MINIMAL_STD_NAMESPACE
              */
             size_t get_next_metadata_record_index()
             {
-                //  Try to pop from the global free metadata list first.
+                size_t current_count = current_metadata_record_count_.load(memory_order_acquire);
 
-                if (auto *md = guarded_pop(free_metadata_head_, &block_metadata::next_free_header_index_))
+                if (current_count > 0)
                 {
-                    return metadata_to_index(md);
+                    size_t tail_manager_index = (current_count - 1) / METADATA_RECORDS_PER_BLOCK;
+
+                    for (size_t manager_index = 0; manager_index <= tail_manager_index; ++manager_index)
+                    {
+                        metadata_block_manager &manager = block_managers_[manager_index];
+
+                        if (!manager.reserve_active_slot())
+                        {
+                            continue;
+                        }
+
+                        if (auto *md = guarded_pop(manager.local_free_head_, &block_metadata::next_free_header_index_))
+                        {
+                            return metadata_to_index(md);
+                        }
+
+                        manager.release_active_slot();
+                    }
                 }
 
                 //  If we are here, there were no metadata records available, so we have to allocate a new one.
-                size_t current_count = current_metadata_record_count_.load(memory_order_acquire);
                 while (true)
                 {
+                    size_t manager_index = current_count / METADATA_RECORDS_PER_BLOCK;
+                    if (manager_index >= metadata_block_manager_capacity_)
+                    {
+                        return NULL_INDEX;
+                    }
+
+                    metadata_block_manager &manager = block_managers_[manager_index];
+                    if (!manager.reserve_active_slot())
+                    {
+                        current_count = current_metadata_record_count_.load(memory_order_acquire);
+                        continue;
+                    }
+
                     // Ensure the new metadata record doesnt overwrite a dynamically allocated block
                     uintptr_t new_metadata_end_ptr = (uintptr_t)metadata_start_ - ((current_count + 1) * ALLOCATION_METADATA_SIZE);
                     uint64_t current_empty_block_tag = next_empty_memory_block_.load(memory_order_acquire);
@@ -1426,6 +1581,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (empty_block != nullptr && new_metadata_end_ptr <= (uintptr_t)empty_block)
                     {
+                        manager.release_active_slot();
                         return NULL_INDEX;
                     }
 
@@ -1434,14 +1590,12 @@ namespace MINIMAL_STD_NAMESPACE
                         break;
                     }
 
+                    manager.release_active_slot();
                     debug_metadata_cas_retries_.add_fetch(1, memory_order_relaxed);
                 }
 
                 // Current_count reflects the value before increment, which is our acquired index
                 auto next_record_index = current_count;
-                block_metadata *metadata = metadata_start_ - next_record_index;
-
-                metadata->next_.store(nullptr, memory_order_release);
 
                 return next_record_index;
             }
