@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
 """
-run_soak_tests.py — discover and run soak test groups with optional GDB.
+run_lockfree_soak_tests.py — discover and run lockfree soak test groups with optional GDB.
 
 Usage:
-    python3 test/soak/run_soak_tests.py [options]
+    python3 test/soak/run_lockfree_soak_tests.py [options]
 
 Options:
     --soak-exe <path>   Path to the soak test executable.
                         Default: test/build/soak/cpputest_soak.exe
     --no-gdb            Run tests directly without GDB.
     --runs <N>          Number of times to run each test group (default: 1).
+    --allocator-soak-duration <secs>
+                        Sets ALLOCATOR_SOAK_DURATION for each run.
     --timeout <secs>    Per-run timeout in seconds (default: 600).
     --group <name>      Run only this group (may be repeated).
     --list              List discovered groups then exit.
@@ -76,7 +78,7 @@ def build_direct_cmd(exe: str, group: str) -> list[str]:
     return [exe, "-g", group]
 
 
-def run_group(cmd: list[str], group: str, run_index: int, timeout: int) -> bool:
+def run_group(cmd: list[str], group: str, run_index: int, timeout: int, run_env: dict[str, str]) -> bool:
     """Run one group in a subprocess.  Returns True on success."""
     label = f"[{group} run {run_index}]"
     print(f"\n{'='*70}")
@@ -91,6 +93,7 @@ def run_group(cmd: list[str], group: str, run_index: int, timeout: int) -> bool:
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=run_env,
         )
 
         output_chunks: list[str] = []
@@ -141,15 +144,17 @@ def run_group(cmd: list[str], group: str, run_index: int, timeout: int) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Run soak tests with optional GDB harness.")
+    parser = argparse.ArgumentParser(description="Run lockfree soak tests with optional GDB harness.")
     parser.add_argument("--soak-exe", default=DEFAULT_EXE,
                         help=f"Path to soak executable (default: {DEFAULT_EXE})")
     parser.add_argument("--no-gdb", action="store_true",
                         help="Run directly without GDB")
     parser.add_argument("--runs", type=int, default=1,
                         help="Number of runs per group (default: 1)")
-    parser.add_argument("--timeout", type=int, default=600,
-                        help="Per-run timeout in seconds (default: 600)")
+    parser.add_argument("--allocator-soak-duration", type=int, default=None,
+                        help="Set ALLOCATOR_SOAK_DURATION in seconds for each run")
+    parser.add_argument("--timeout", type=int, default=None,
+                        help="Per-run timeout in seconds (default: max(600, allocator_duration+120))")
     parser.add_argument("--group", action="append", dest="groups", default=[],
                         help="Run only this group (may be repeated)")
     parser.add_argument("--list", action="store_true",
@@ -184,6 +189,20 @@ def main() -> int:
 
     use_gdb = not args.no_gdb
 
+    run_env = os.environ.copy()
+    if args.allocator_soak_duration is not None:
+        run_env["ALLOCATOR_SOAK_DURATION"] = str(args.allocator_soak_duration)
+
+    effective_timeout = args.timeout if args.timeout is not None else 600
+    if args.allocator_soak_duration is not None:
+        min_timeout = args.allocator_soak_duration + 120
+        if effective_timeout < min_timeout:
+            effective_timeout = min_timeout
+
+    print(f"Using timeout={effective_timeout}s")
+    if "ALLOCATOR_SOAK_DURATION" in run_env:
+        print(f"Using ALLOCATOR_SOAK_DURATION={run_env['ALLOCATOR_SOAK_DURATION']}s")
+
     total = 0
     passed = 0
     failed_list: list[str] = []
@@ -196,7 +215,7 @@ def main() -> int:
                 cmd = build_direct_cmd(exe, group)
 
             total += 1
-            ok = run_group(cmd, group, run_idx, args.timeout)
+            ok = run_group(cmd, group, run_idx, effective_timeout, run_env)
             if ok:
                 passed += 1
             else:
