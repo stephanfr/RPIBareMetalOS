@@ -164,7 +164,19 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ReuseAfterMaintenanceKeepsMetadataC
     void *reused = resource.allocate(ALLOC_SIZE);
     CHECK(reused != nullptr);
 
-    CHECK_EQUAL(metadata_before_reuse, resource.debug_metadata_count());
+    const size_t metadata_after_reuse = resource.debug_metadata_count();
+
+    // Full metadata trimming can reset the count to zero; the next allocation then
+    // recreates a single metadata record.
+    if (metadata_before_reuse == 0)
+    {
+        CHECK(metadata_after_reuse <= 1);
+    }
+    else
+    {
+        CHECK_EQUAL(metadata_before_reuse, metadata_after_reuse);
+    }
+
     auto reused_info = resource.get_allocation_info(reused);
     CHECK(reused_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
 

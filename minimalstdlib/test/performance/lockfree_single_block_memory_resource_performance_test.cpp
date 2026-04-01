@@ -18,6 +18,7 @@ using lockfree_single_block_resource_perf =
         minstd::pmr::platform::default_platform_provider,
         32 * 1024 * 1024,
         5,
+        void,
         minstd::pmr::extensions::null_memory_resource_statistics>;
 
 TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, MultiThreadAllocateDeallocateTest)
