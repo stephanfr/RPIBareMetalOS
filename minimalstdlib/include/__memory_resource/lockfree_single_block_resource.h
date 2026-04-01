@@ -13,7 +13,6 @@
 
 #include "__concepts/derived_from.h"
 #include "__type_traits/conditional.h"
-#include "__type_traits/is_same.h"
 
 #include "__extensions/hash_check.h"
 #include "__extensions/memory_resource_statistics.h"
@@ -45,6 +44,52 @@ namespace MINIMAL_STD_NAMESPACE
             }
         }
 
+        template <typename metrics_type>
+        concept lockfree_single_block_debug_metrics_policy = requires(metrics_type &metrics, const metrics_type &const_metrics) {
+            { metrics.record_alloc_call() } noexcept;
+            { metrics.record_alloc_reuse_hit() } noexcept;
+            { metrics.record_alloc_frontier_hit() } noexcept;
+            { metrics.record_alloc_failure() } noexcept;
+            { metrics.record_search_iteration() } noexcept;
+            { metrics.record_search_pop() } noexcept;
+            { metrics.record_search_claimed() } noexcept;
+            { metrics.record_search_reclaim_deferred() } noexcept;
+            { metrics.record_frontier_cas_retry() } noexcept;
+            { metrics.record_metadata_cas_retry() } noexcept;
+            { metrics.record_maintenance_window() } noexcept;
+            { metrics.record_allocation_made() } noexcept;
+            { metrics.record_deallocation_made() } noexcept;
+
+            { const_metrics.debug_alloc_calls() };
+            { const_metrics.debug_alloc_reuse_hits() };
+            { const_metrics.debug_alloc_frontier_hits() };
+            { const_metrics.debug_alloc_failures() };
+            { const_metrics.debug_search_iterations() };
+            { const_metrics.debug_search_pops() };
+            { const_metrics.debug_search_claimed() };
+            { const_metrics.debug_search_reclaim_deferred() };
+            { const_metrics.debug_frontier_cas_retries() };
+            { const_metrics.debug_metadata_cas_retries() };
+            { const_metrics.debug_maintenance_windows() };
+            { const_metrics.current_allocated() };
+        };
+
+        namespace internal
+        {
+            template <typename default_metrics_type, typename... extension_types>
+            struct select_debug_metrics_policy
+            {
+                using type = default_metrics_type;
+            };
+
+            template <typename default_metrics_type, typename extension_type, typename... remaining_extension_types>
+            struct select_debug_metrics_policy<default_metrics_type, extension_type, remaining_extension_types...>
+            {
+                using fallback_type = typename select_debug_metrics_policy<default_metrics_type, remaining_extension_types...>::type;
+                using type = typename conditional<lockfree_single_block_debug_metrics_policy<extension_type>, extension_type, fallback_type>::type;
+            };
+        }
+
         //  This resource starts with a super-block of memory and then allocates blocks from that superblock.
         //      When the superblock is exhausted, a new superblock is allocated from the upstream resource.
         //      The blocks and allocations will be aligned on __max_align (should be 16 bytes) boundaries
@@ -56,7 +101,6 @@ namespace MINIMAL_STD_NAMESPACE
               typename platform_provider_type = platform::default_platform_provider,
               size_t max_bin_bytes = 32 * 1024 * 1024,
               size_t max_waste_percent = 5,
-              typename debug_metrics_policy_type = void,
               typename... optional_extensions>
         class lockfree_single_block_resource_impl : public memory_resource, public optional_extensions...
         {
@@ -139,39 +183,10 @@ namespace MINIMAL_STD_NAMESPACE
             };
 
         private:
-            using selected_debug_metrics_type = typename conditional<is_same_v<debug_metrics_policy_type, void>, empty_debug_metrics, debug_metrics_policy_type>::type;
+            using selected_debug_metrics_type = typename internal::select_debug_metrics_policy<empty_debug_metrics, optional_extensions...>::type;
 
-            static constexpr bool HAS_DEBUG_METRICS_POLICY = requires(selected_debug_metrics_type &metrics, const selected_debug_metrics_type &const_metrics) {
-                { metrics.record_alloc_call() } noexcept;
-                { metrics.record_alloc_reuse_hit() } noexcept;
-                { metrics.record_alloc_frontier_hit() } noexcept;
-                { metrics.record_alloc_failure() } noexcept;
-                { metrics.record_search_iteration() } noexcept;
-                { metrics.record_search_pop() } noexcept;
-                { metrics.record_search_claimed() } noexcept;
-                { metrics.record_search_reclaim_deferred() } noexcept;
-                { metrics.record_frontier_cas_retry() } noexcept;
-                { metrics.record_metadata_cas_retry() } noexcept;
-                { metrics.record_maintenance_window() } noexcept;
-                { metrics.record_allocation_made() } noexcept;
-                { metrics.record_deallocation_made() } noexcept;
-
-                { const_metrics.debug_alloc_calls() };
-                { const_metrics.debug_alloc_reuse_hits() };
-                { const_metrics.debug_alloc_frontier_hits() };
-                { const_metrics.debug_alloc_failures() };
-                { const_metrics.debug_search_iterations() };
-                { const_metrics.debug_search_pops() };
-                { const_metrics.debug_search_claimed() };
-                { const_metrics.debug_search_reclaim_deferred() };
-                { const_metrics.debug_frontier_cas_retries() };
-                { const_metrics.debug_metadata_cas_retries() };
-                { const_metrics.debug_maintenance_windows() };
-                { const_metrics.current_allocated() };
-            };
-
-            static_assert(HAS_DEBUG_METRICS_POLICY,
-                          "debug_metrics_policy_type must provide lockfree_single_block_resource debug metrics callbacks and getters");
+            static_assert(lockfree_single_block_debug_metrics_policy<selected_debug_metrics_type>,
+                          "debug metrics extension must provide lockfree_single_block_resource debug metrics callbacks and getters");
 
             using interrupt_guard_type = platform::basic_interrupt_guard<interrupt_policy_type>;
 
@@ -1133,6 +1148,79 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
+            block_metadata *steal_pending_deallocation_list()
+            {
+                interrupt_guard_type guard;
+
+                uint64_t stolen_head = pending_deallocation_head_.exchange(
+                    metadata_tag::make(nullptr),
+                    memory_order_acq_rel);
+
+                return metadata_tag::unpack_ptr(stolen_head);
+            }
+
+            void reduce_pending_deallocation_count(size_t stolen_count)
+            {
+                size_t current = pending_deallocation_count_.load(memory_order_acquire);
+
+                while (true)
+                {
+                    size_t updated = (current > stolen_count) ? (current - stolen_count) : 0;
+
+                    if (pending_deallocation_count_.compare_exchange_weak(
+                            current,
+                            updated,
+                            memory_order_acq_rel,
+                            memory_order_acquire))
+                    {
+                        return;
+                    }
+                }
+            }
+
+            void process_pending_batch(
+                array<block_metadata *, MAINTENANCE_WINDOW_BATCH_SIZE> &pending_batch,
+                size_t pending_batch_count,
+                size_t &shard_cursor)
+            {
+                if (pending_batch_count == 0)
+                {
+                    return;
+                }
+
+                //  Reclaim tail-adjacent entries from this batch as one operation.
+                reclaim_pending_frontier_batch(pending_batch, pending_batch_count);
+
+                //  Publish remaining batch entries to free bins.
+                for (size_t i = 0; i < pending_batch_count; ++i)
+                {
+                    block_metadata *metadata = pending_batch[i];
+                    if (metadata == nullptr)
+                    {
+                        continue;
+                    }
+
+                    uint64_t block_state = metadata->block_state_.load(memory_order_acquire);
+                    if (block_state_ptr::unpack_state(block_state) != DEALLOCATED_PENDING)
+                    {
+                        continue;
+                    }
+
+                    metadata->block_state_.store(
+                        block_state_ptr::with_state_and_increment_version(block_state, AVAILABLE),
+                        memory_order_release);
+
+                    auto free_block_bin = free_block_bin_index(metadata->total_size_);
+                    auto addr_bin = address_bin_for(metadata->get_memory_block());
+                    size_t bin_index = free_block_bin * cpu_shards_ + shard_cursor;
+
+                    guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
+                                 *metadata, &block_metadata::next_free_block_index_);
+
+                    shard_cursor = (shard_cursor + 1) % cpu_shards_;
+                }
+            }
+
             void run_maintenance_window()
             {
                 debug_metrics_.record_maintenance_window();
@@ -1140,70 +1228,36 @@ namespace MINIMAL_STD_NAMESPACE
 
                 while (true)
                 {
-                    bool drained_pending = false;
-                    array<block_metadata *, MAINTENANCE_WINDOW_BATCH_SIZE> pending_batch{};
-                    size_t pending_batch_count = 0;
+                    //  Steal the full pending list in one guarded exchange to avoid per-node
+                    //  CAS pop and count decrement traffic during maintenance.
+                    block_metadata *pending_list = steal_pending_deallocation_list();
 
-                    {
-                        //  Pop a bounded pending batch under one guard to reduce guard churn.
-                        interrupt_guard_type guard;
-
-                        for (size_t batch_count = 0; batch_count < MAINTENANCE_WINDOW_BATCH_SIZE; ++batch_count)
-                        {
-                            block_metadata *metadata = unguarded_pop(
-                                pending_deallocation_head_,
-                                &block_metadata::next_free_block_index_);
-
-                            if (metadata == nullptr)
-                            {
-                                drained_pending = true;
-                                break;
-                            }
-
-                            pending_deallocation_count_.fetch_sub(1, memory_order_acq_rel);
-                            pending_batch[pending_batch_count++] = metadata;
-                        }
-                    }
-
-                    if (pending_batch_count > 0)
-                    {
-                        //  Reclaim tail-adjacent entries from this batch as one operation.
-                        reclaim_pending_frontier_batch(pending_batch, pending_batch_count);
-
-                        //  Publish remaining batch entries to free bins.
-                        for (size_t i = 0; i < pending_batch_count; ++i)
-                        {
-                            block_metadata *metadata = pending_batch[i];
-                            if (metadata == nullptr)
-                            {
-                                continue;
-                            }
-
-                            uint64_t block_state = metadata->block_state_.load(memory_order_acquire);
-                            if (block_state_ptr::unpack_state(block_state) != DEALLOCATED_PENDING)
-                            {
-                                continue;
-                            }
-
-                            metadata->block_state_.store(
-                                block_state_ptr::with_state_and_increment_version(block_state, AVAILABLE),
-                                memory_order_release);
-
-                            auto free_block_bin = free_block_bin_index(metadata->total_size_);
-                            auto addr_bin = address_bin_for(metadata->get_memory_block());
-                            size_t bin_index = free_block_bin * cpu_shards_ + shard_cursor;
-
-                            guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
-                                         *metadata, &block_metadata::next_free_block_index_);
-
-                            shard_cursor = (shard_cursor + 1) % cpu_shards_;
-                        }
-                    }
-
-                    if (drained_pending)
+                    if (pending_list == nullptr)
                     {
                         break;
                     }
+
+                    array<block_metadata *, MAINTENANCE_WINDOW_BATCH_SIZE> pending_batch{};
+                    size_t pending_batch_count = 0;
+                    size_t stolen_count = 0;
+
+                    while (pending_list != nullptr)
+                    {
+                        block_metadata *next = index_to_metadata(pending_list->next_free_block_index_);
+                        pending_batch[pending_batch_count++] = pending_list;
+                        ++stolen_count;
+
+                        if (pending_batch_count == MAINTENANCE_WINDOW_BATCH_SIZE)
+                        {
+                            process_pending_batch(pending_batch, pending_batch_count, shard_cursor);
+                            pending_batch_count = 0;
+                        }
+
+                        pending_list = next;
+                    }
+
+                    process_pending_batch(pending_batch, pending_batch_count, shard_cursor);
+                    reduce_pending_deallocation_count(stolen_count);
                 }
 
                 try_reclaim_frontier_blocks();
@@ -1855,46 +1909,36 @@ namespace MINIMAL_STD_NAMESPACE
                                                                 max_bin_bytes,
                                                                 max_waste_percent>::concrete_debug_metrics;
 
-        template <typename debug_metrics_policy_type = void, typename... optional_extensions>
+          template <typename... optional_extensions>
         using lockfree_single_block_resource = lockfree_single_block_resource_impl<platform::default_interrupt_policy,
                                                                                     platform::default_platform_provider,
                                                                                     32 * 1024 * 1024,
                                                                                     5,
-                                                debug_metrics_policy_type,
                                                                                     optional_extensions...>;
 
-        template <typename interrupt_policy_type,
-              typename debug_metrics_policy_type = void,
-              typename... optional_extensions>
+          template <typename interrupt_policy_type, typename... optional_extensions>
         using lockfree_single_block_resource_with_interrupt_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
                                                                                                           platform::default_platform_provider,
                                                                                                           32 * 1024 * 1024,
                                                                                                           5,
-                                                          debug_metrics_policy_type,
                                                                                                           optional_extensions...>;
 
-        template <typename interrupt_policy_type,
-              typename platform_provider_type,
-              typename debug_metrics_policy_type = void,
-              typename... optional_extensions>
+          template <typename interrupt_policy_type, typename platform_provider_type, typename... optional_extensions>
         using lockfree_single_block_resource_with_interrupt_policy_and_platform_provider = lockfree_single_block_resource_impl<interrupt_policy_type,
                                                                                                                                 platform_provider_type,
                                                                                                                                 32 * 1024 * 1024,
                                                                                                                                 5,
-                                                                    debug_metrics_policy_type,
                                                                                                                                 optional_extensions...>;
 
         template <typename interrupt_policy_type,
                   typename platform_provider_type,
                   size_t max_bin_bytes,
                   size_t max_waste_percent,
-              typename debug_metrics_policy_type = void,
                   typename... optional_extensions>
         using lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
                                                                                                                                   platform_provider_type,
                                                                                                                                   max_bin_bytes,
                                                                                                                                   max_waste_percent,
-                                                                      debug_metrics_policy_type,
                                                                                                                                   optional_extensions...>;
     };
 } //  namespace MINIMAL_STD_NAMESPACE::pmr
