@@ -627,8 +627,8 @@ namespace MINIMAL_STD_NAMESPACE
             inline static fast_lockfree_low_quality_rng id_generator_;
 
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
-            static constexpr size_t MAINTENANCE_WINDOW_THRESHOLD = 10;
-            static constexpr size_t MAINTENANCE_WINDOW_BATCH_SIZE = 64;
+            static constexpr size_t MAINTENANCE_WINDOW_THRESHOLD = 128;
+            static constexpr size_t MAINTENANCE_WINDOW_BATCH_SIZE = 128;
             static_assert(max_waste_percent > 0 && max_waste_percent <= 25,
                           "max_waste_percent must be in the range [1, 25]");
             static_assert(max_bin_bytes >= 1024,
@@ -1260,8 +1260,11 @@ namespace MINIMAL_STD_NAMESPACE
                     reduce_pending_deallocation_count(stolen_count);
                 }
 
-                try_reclaim_frontier_blocks();
-                scavenge_frontier_reclaimed_heads();
+                bool reclaimed_frontier = try_reclaim_frontier_blocks();
+                if (reclaimed_frontier)
+                {
+                    scavenge_frontier_reclaimed_heads();
+                }
                 trim_metadata_records();
             }
 
@@ -1543,8 +1546,10 @@ namespace MINIMAL_STD_NAMESPACE
              *
              * Terminates on: nullptr sentinel, non-AVAILABLE state, CAS failure, or frontier CAS failure.
              */
-            void try_reclaim_frontier_blocks()
+            bool try_reclaim_frontier_blocks()
             {
+                bool reclaimed_any = false;
+
                 while (true)
                 {
                     //  Load the current frontier
@@ -1556,7 +1561,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (prev == nullptr)
                     {
-                        return;  // Sentinel reached — no more blocks to reclaim
+                        return reclaimed_any;  // Sentinel reached — no more blocks to reclaim
                     }
 
                     //  Bounds-check metadata index before dereferencing
@@ -1564,7 +1569,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (meta_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
-                        return;  // Invalid or out-of-range metadata index
+                        return reclaimed_any;  // Invalid or out-of-range metadata index
                     }
 
                     block_metadata *meta = metadata_start_ - meta_index;
@@ -1574,12 +1579,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (block_state_ptr::unpack_ptr(block_state) != prev)
                     {
-                        return;  // Stale metadata — pointer doesn't match
+                        return reclaimed_any;  // Stale metadata — pointer doesn't match
                     }
 
                     if (block_state_ptr::unpack_state(block_state) != AVAILABLE)
                     {
-                        return;  // Block is not free
+                        return reclaimed_any;  // Block is not free
                     }
 
                     //  CAS: AVAILABLE -> FRONTIER_RECLAIM_IN_PROGRESS (claim ownership)
@@ -1587,7 +1592,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (!meta->block_state_.compare_exchange_strong(block_state, desired_state, memory_order_acq_rel, memory_order_acquire))
                     {
-                        return;  // Lost race — another thread claimed or changed the state
+                        return reclaimed_any;  // Lost race — another thread claimed or changed the state
                     }
 
                     //  CAS: Move frontier backward from frontier_ptr to prev
@@ -1599,8 +1604,10 @@ namespace MINIMAL_STD_NAMESPACE
                         uint64_t restore_expected = desired_state;
                         uint64_t restore_desired = block_state_ptr::with_state_and_increment_version(restore_expected, AVAILABLE);
                         meta->block_state_.compare_exchange_strong(restore_expected, restore_desired, memory_order_acq_rel, memory_order_acquire);
-                        return;
+                        return reclaimed_any;
                     }
+
+                    reclaimed_any = true;
 
                     //  Frontier successfully rolled back. Transition to terminal FRONTIER_RECLAIMED state.
                     //  Lazy removal in search_for_deallocated_block() will recycle the metadata when popped.
