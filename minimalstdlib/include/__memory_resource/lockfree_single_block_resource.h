@@ -227,9 +227,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                 // 1-byte fields
                 uint8_t alignment_;                                // 0x30, 1B
+                uint8_t original_shard_;                           // 0x31, 1B
 
                 // Padding to 64 bytes
-                uint8_t reserved_[15];                             // 0x31, 15B
+                uint8_t reserved_[14];                             // 0x32, 14B
 
                 /**
                  * @brief Computes an allocation-identity hash from fields that are stable for the
@@ -379,18 +380,24 @@ namespace MINIMAL_STD_NAMESPACE
                   current_metadata_record_count_(0),
                   block_managers_(nullptr),
                   metadata_block_manager_capacity_(0),
-                  pending_deallocation_head_(metadata_tag::make(nullptr)),
-                  pending_deallocation_count_(0),
-                  maintenance_window_open_(false),
+                  pending_shards_(nullptr),
                   free_block_bins_(nullptr),
                   cpu_shards_(cpu_shards > 0 ? cpu_shards : 1),
                   allocation_base_(nullptr),
                   address_bin_size_(1)
             {
                 //  Allocate the per-CPU shard arrays from the start of the managed block.
-                //  Layout: [free_block_bins][metadata_block_managers][64-byte align][allocations...]
+                //  Layout: [pending_shards][free_block_bins][metadata_block_managers][64-byte align][allocations...]
 
                 uint8_t *current_ptr = static_cast<uint8_t *>(internal::align_pointer(block, DEFAULT_ALIGNMENT));
+
+                //  Allocate pending_shards_ array (cpu_shards_ elements)
+                pending_shards_ = reinterpret_cast<pending_shard *>(current_ptr);
+                for (size_t i = 0; i < cpu_shards_; ++i)
+                {
+                    new (&pending_shards_[i]) pending_shard();
+                }
+                current_ptr += cpu_shards_ * sizeof(pending_shard);
 
                 //  Allocate free_block_bins_ array (NUM_FREE_BLOCK_BINS * cpu_shards_ elements)
                 free_block_bins_ = reinterpret_cast<free_block_bin *>(current_ptr);
@@ -513,7 +520,12 @@ namespace MINIMAL_STD_NAMESPACE
 
             size_t debug_pending_deallocations() const
             {
-                return pending_deallocation_count_.load(memory_order_acquire);
+                size_t total = 0;
+                for (size_t i = 0; i < cpu_shards_; ++i)
+                {
+                    total += pending_shards_[i].count_.load(memory_order_acquire);
+                }
+                return total;
             }
 
             size_t debug_maintenance_windows() const
@@ -747,9 +759,16 @@ namespace MINIMAL_STD_NAMESPACE
             alignas(64) atomic<size_t> current_metadata_record_count_;
             metadata_block_manager *block_managers_;
             size_t metadata_block_manager_capacity_;
-            alignas(64) atomic<uint64_t> pending_deallocation_head_;
-            alignas(64) atomic<size_t> pending_deallocation_count_;
-            alignas(64) atomic<bool> maintenance_window_open_;
+
+            struct alignas(64) pending_shard
+            {
+                atomic<uint64_t> head_{metadata_tag::make(nullptr)};
+                atomic<size_t> count_{0};
+                atomic<bool> maintenance_window_open_{false};
+            };
+
+            pending_shard *pending_shards_;
+
             [[no_unique_address]] selected_debug_metrics_type debug_metrics_;
 
             //  Per-CPU free block bins - dynamically allocated from the managed block.
@@ -1148,26 +1167,26 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            block_metadata *steal_pending_deallocation_list()
+            block_metadata *steal_pending_deallocation_list(size_t target_shard)
             {
                 interrupt_guard_type guard;
 
-                uint64_t stolen_head = pending_deallocation_head_.exchange(
+                uint64_t stolen_head = pending_shards_[target_shard].head_.exchange(
                     metadata_tag::make(nullptr),
                     memory_order_acq_rel);
 
                 return metadata_tag::unpack_ptr(stolen_head);
             }
 
-            void reduce_pending_deallocation_count(size_t stolen_count)
+            void reduce_pending_deallocation_count(size_t target_shard, size_t stolen_count)
             {
-                size_t current = pending_deallocation_count_.load(memory_order_acquire);
+                size_t current = pending_shards_[target_shard].count_.load(memory_order_acquire);
 
                 while (true)
                 {
                     size_t updated = (current > stolen_count) ? (current - stolen_count) : 0;
 
-                    if (pending_deallocation_count_.compare_exchange_weak(
+                    if (pending_shards_[target_shard].count_.compare_exchange_weak(
                             current,
                             updated,
                             memory_order_acq_rel,
@@ -1212,25 +1231,24 @@ namespace MINIMAL_STD_NAMESPACE
 
                     auto free_block_bin = free_block_bin_index(metadata->total_size_);
                     auto addr_bin = address_bin_for(metadata->get_memory_block());
-                    size_t bin_index = free_block_bin * cpu_shards_ + shard_cursor;
+                    auto target_shard = metadata->original_shard_ % cpu_shards_;
+                    size_t bin_index = free_block_bin * cpu_shards_ + target_shard;
 
                     guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
                                  *metadata, &block_metadata::next_free_block_index_);
-
-                    shard_cursor = (shard_cursor + 1) % cpu_shards_;
                 }
             }
 
-            void run_maintenance_window()
+            void run_maintenance_window(size_t target_shard)
             {
                 debug_metrics_.record_maintenance_window();
-                size_t shard_cursor = cpu_shard_index();
+                size_t shard_cursor = target_shard;
 
                 while (true)
                 {
                     //  Steal the full pending list in one guarded exchange to avoid per-node
                     //  CAS pop and count decrement traffic during maintenance.
-                    block_metadata *pending_list = steal_pending_deallocation_list();
+                    block_metadata *pending_list = steal_pending_deallocation_list(target_shard);
 
                     if (pending_list == nullptr)
                     {
@@ -1257,7 +1275,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
 
                     process_pending_batch(pending_batch, pending_batch_count, shard_cursor);
-                    reduce_pending_deallocation_count(stolen_count);
+                    reduce_pending_deallocation_count(target_shard, stolen_count);
                 }
 
                 bool reclaimed_frontier = try_reclaim_frontier_blocks();
@@ -1268,9 +1286,18 @@ namespace MINIMAL_STD_NAMESPACE
                 trim_metadata_records();
             }
 
-            bool maybe_open_maintenance_window(bool force)
+            void run_maintenance_window_all()
             {
-                size_t pending = pending_deallocation_count_.load(memory_order_acquire);
+                for (size_t shard = 0; shard < cpu_shards_; ++shard)
+                {
+                    run_maintenance_window(shard);
+                }
+            }
+
+            bool maybe_open_maintenance_window(size_t target_shard, bool force)
+            {
+                auto &shard = pending_shards_[target_shard];
+                size_t pending = shard.count_.load(memory_order_acquire);
 
                 if (pending == 0)
                 {
@@ -1283,14 +1310,14 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 bool expected = false;
-                if (!maintenance_window_open_.compare_exchange_strong(
+                if (!shard.maintenance_window_open_.compare_exchange_strong(
                         expected, true, memory_order_acq_rel, memory_order_acquire))
                 {
                     return false;
                 }
 
-                run_maintenance_window();
-                maintenance_window_open_.store(false, memory_order_release);
+                run_maintenance_window(target_shard);
+                shard.maintenance_window_open_.store(false, memory_order_release);
 
                 return true;
             }
@@ -1317,10 +1344,10 @@ namespace MINIMAL_STD_NAMESPACE
                     return nullptr;
                 }
 
-                maybe_open_maintenance_window(false);
+                auto shard = cpu_shard_index();
+                maybe_open_maintenance_window(shard, false);
 
                 auto free_block_bin = free_block_bin_index(total_size);
-                auto shard = cpu_shard_index();
                 bool used_frontier = false;
 
                 claimed_block claimed = search_for_deallocated_block(free_block_bin, shard);
@@ -1344,7 +1371,21 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (free_block == nullptr)
                     {
-                        maybe_open_maintenance_window(true);
+                        maybe_open_maintenance_window(shard, true);
+                        claimed = search_for_deallocated_block(free_block_bin, shard);
+                        free_block = claimed.block;
+                        metadata = claimed.metadata;
+
+                        if (free_block != nullptr)
+                        {
+                            debug_metrics_.record_alloc_reuse_hit();
+                        }
+                    }
+
+                    if (free_block == nullptr)
+                    {
+                        // Final desperate attempt: force maintenance to completely flush all lazily queued blocks
+                        run_maintenance_window_all();
                         claimed = search_for_deallocated_block(free_block_bin, shard);
                         free_block = claimed.block;
                         metadata = claimed.metadata;
@@ -1361,6 +1402,7 @@ namespace MINIMAL_STD_NAMESPACE
                         frontier_reserved_metadata->requested_size_.store(0, memory_order_release);
                         frontier_reserved_metadata->total_size_ = 0;
                         frontier_reserved_metadata->alignment_ = 0;
+                        frontier_reserved_metadata->original_shard_ = 0;
                         frontier_reserved_metadata->allocation_hash_ = 0;
 
                         recycle_metadata(*frontier_reserved_metadata);
@@ -1380,6 +1422,7 @@ namespace MINIMAL_STD_NAMESPACE
                         frontier_reserved_metadata->requested_size_.store(0, memory_order_release);
                         frontier_reserved_metadata->total_size_ = 0;
                         frontier_reserved_metadata->alignment_ = 0;
+                        frontier_reserved_metadata->original_shard_ = 0;
                         frontier_reserved_metadata->allocation_hash_ = 0;
 
                         recycle_metadata(*frontier_reserved_metadata);
@@ -1406,6 +1449,7 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata->requested_size_.store(static_cast<uint32_t>(bytes), memory_order_release);
                 metadata->total_size_ = static_cast<uint32_t>(free_block->size_including_header_);
                 metadata->alignment_ = static_cast<uint8_t>(alignment);
+                metadata->original_shard_ = static_cast<uint8_t>(shard);
 
                 if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
                 {
@@ -1516,11 +1560,13 @@ namespace MINIMAL_STD_NAMESPACE
                     block_state_ptr::with_state_and_increment_version(locked_block_state, DEALLOCATED_PENDING),
                     memory_order_release);
 
-                guarded_push(pending_deallocation_head_, *block_to_deallocate,
-                             &block_metadata::next_free_block_index_);
-                pending_deallocation_count_.add_fetch(1, memory_order_acq_rel);
+                size_t target_shard = block_to_deallocate->original_shard_ % cpu_shards_;
 
-                maybe_open_maintenance_window(false);
+                guarded_push(pending_shards_[target_shard].head_, *block_to_deallocate,
+                             &block_metadata::next_free_block_index_);
+                pending_shards_[target_shard].count_.add_fetch(1, memory_order_acq_rel);
+
+                maybe_open_maintenance_window(target_shard, false);
 
                 return true;
             }
@@ -1831,11 +1877,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                     block_metadata *claimed_head = nullptr;
                     block_metadata *deferred_reclaim = nullptr;
+                    bool stop_scan = false;
 
                     {
                         interrupt_guard_type guard;
-
-                        bool stop_scan = false;
 
                         for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS && !stop_scan; ++addr_bin)
                         {
@@ -1877,8 +1922,6 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                     // Guard released — handle deferred work and claimed block outside the critical section.
 
-                    shard_start = (shard_start + 1) % cpu_shards_;
-
                     if (deferred_reclaim)
                     {
                         recycle_metadata(*deferred_reclaim);
@@ -1892,7 +1935,11 @@ namespace MINIMAL_STD_NAMESPACE
                         return {claimed_head->get_memory_block(), claimed_head};
                     }
 
-                    return {nullptr, nullptr};
+                    // We completed a full scan of all bins/shards and found no blocks.
+                    if (!stop_scan)
+                    {
+                        return {nullptr, nullptr};
+                    }
                 }
             }
 

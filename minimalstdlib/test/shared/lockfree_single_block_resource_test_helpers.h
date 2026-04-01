@@ -63,13 +63,13 @@ namespace
         minstd::pmr::lockfree_single_block_resource_concrete_debug_metrics<
             test_userspace_signal_mask_interrupt_policy,
             minstd::pmr::platform::default_platform_provider,
-            32 * 1024 * 1024,
+            128 * 1024 * 1024,
             5>;
 
     typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
-        32 * 1024 * 1024,
+        128 * 1024 * 1024,
         5,
         lockfree_single_block_resource_debug_metrics,
         minstd::pmr::extensions::memory_resource_statistics,
@@ -77,7 +77,7 @@ namespace
     typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
-        32 * 1024 * 1024,
+        128 * 1024 * 1024,
         5,
         lockfree_single_block_resource_debug_metrics,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
