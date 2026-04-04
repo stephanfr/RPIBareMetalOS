@@ -1,0 +1,100 @@
+// Copyright 2026 Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#pragma once
+
+#include "minstdconfig.h"
+
+#include "atomic"
+
+#include <stddef.h>
+
+namespace MINIMAL_STD_NAMESPACE
+{
+    namespace lockfree
+    {
+        template <typename node_type,
+                  typename tagged_ptr_type,
+                  typename link_type,
+                  link_type node_type::*next_field>
+        struct intrusive_tagged_stack
+        {
+            using storage_type = typename tagged_ptr_type::storage_type;
+            using counter_type = typename tagged_ptr_type::counter_type;
+
+            template <typename adapter_type, typename backoff_type>
+            static void push(atomic<storage_type> &head,
+                             node_type &node,
+                             const adapter_type &adapter,
+                             backoff_type &&backoff)
+            {
+                storage_type current_tag = head.load(memory_order_acquire);
+                size_t retries = 0;
+
+                while (true)
+                {
+                    node.*next_field = adapter.to_link(tagged_ptr_type::unpack_ptr(current_tag));
+
+                    storage_type desired_tag = tagged_ptr_type::pack(
+                        &node,
+                        static_cast<counter_type>(tagged_ptr_type::unpack_counter(current_tag) + 1));
+
+                    if (head.compare_exchange_strong(
+                            current_tag,
+                            desired_tag,
+                            memory_order_acq_rel,
+                            memory_order_acquire))
+                    {
+                        return;
+                    }
+
+                    backoff(retries);
+                }
+            }
+
+            template <typename adapter_type, typename backoff_type>
+            static node_type *pop(atomic<storage_type> &head,
+                                  const adapter_type &adapter,
+                                  backoff_type &&backoff)
+            {
+                storage_type current_tag = head.load(memory_order_acquire);
+                size_t retries = 0;
+
+                while (tagged_ptr_type::unpack_ptr(current_tag) != nullptr)
+                {
+                    node_type *current = tagged_ptr_type::unpack_ptr(current_tag);
+
+                    if (current == nullptr)
+                    {
+                        return nullptr;
+                    }
+
+                    storage_type next_tag = tagged_ptr_type::pack(
+                        adapter.to_node(current->*next_field),
+                        static_cast<counter_type>(tagged_ptr_type::unpack_counter(current_tag) + 1));
+
+                    if (head.compare_exchange_strong(
+                            current_tag,
+                            next_tag,
+                            memory_order_acq_rel,
+                            memory_order_acquire))
+                    {
+                        current->*next_field = adapter.to_link(nullptr);
+                        return current;
+                    }
+
+                    backoff(retries);
+                }
+
+                return nullptr;
+            }
+
+            static node_type *steal_all(atomic<storage_type> &head)
+            {
+                storage_type stolen = head.exchange(tagged_ptr_type::make(nullptr), memory_order_acq_rel);
+                return tagged_ptr_type::unpack_ptr(stolen);
+            }
+        };
+    }
+}
