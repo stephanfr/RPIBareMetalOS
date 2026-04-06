@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include "../shared/lockfree_single_block_resource_test_helpers.h"
+#include "../shared/lockfree_single_block_resource_soak_test_helpers.h"
 #include "../shared/soak_test_config.h"
 
 // clang-format off

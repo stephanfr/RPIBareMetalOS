@@ -48,9 +48,16 @@ TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, MultiThreadAllocateDeall
 
     start_allocations = true;
 
+    size_t total_failures = 0;
     for (size_t i = 0; i < NUM_THREADS; i++)
     {
         CHECK(pthread_join(threads[i], NULL) == 0);
+        total_failures += args[i].allocation_failures;
+    }
+    
+    if (total_failures > 0)
+    {
+        printf("[%zu Threads] Lockfree correctness test allocation failures: %zu\n", NUM_THREADS, total_failures);
     }
 
     clock_gettime(CLOCK_MONOTONIC, &end_time);
@@ -133,9 +140,16 @@ TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, ThreadScalabilitySensiti
 
         start_allocations = true;
 
+        size_t total_allocation_failures = 0;
         for (size_t i = 0; i < num_threads; i++)
         {
             CHECK(pthread_join(threads[i], NULL) == 0);
+            total_allocation_failures += args[i].allocation_failures;
+        }
+
+        if (total_allocation_failures > 0)
+        {
+            printf("\n[%zu Threads] Lockfree allocation failures caught: %zu\n", num_threads, total_allocation_failures);
         }
 
         clock_gettime(CLOCK_MONOTONIC, &end_time);
