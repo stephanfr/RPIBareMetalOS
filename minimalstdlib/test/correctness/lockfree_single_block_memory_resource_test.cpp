@@ -6,6 +6,7 @@
 #include <minstdconfig.h>
 
 #include <__memory_resource/lockfree_single_block_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include "../shared/interrupt_simulation_test_helpers.h"
@@ -31,32 +32,27 @@ namespace
     constexpr size_t BUFFER_SIZE = 512 * 1048576; // 512 MB
     char *buffer = new char[BUFFER_SIZE]();
 
-    using lockfree_single_block_resource_debug_metrics =
-        minstd::pmr::lockfree_single_block_resource_concrete_debug_metrics<
-            test_userspace_signal_mask_interrupt_policy,
-            minstd::pmr::platform::default_platform_provider,
-            128 * 1024 * 1024,
-            5>;
+    
 
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
 
         10,
-        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
         minstd::pmr::extensions::memory_resource_statistics,
         minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
         
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
 
         10,
-        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
 }
 
@@ -178,18 +174,18 @@ TEST(LockfreeSingleBlockMemoryResourceTests, DeferredDeallocationOpensMaintenanc
     }
 
     CHECK_EQUAL(1, resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(NUM_BLOCKS - 1), resource.debug_pending_deallocations());
+    CHECK_EQUAL(static_cast<size_t>(NUM_BLOCKS - 1), resource.pending_deallocations());
 
     auto pending_info = resource.get_allocation_info(ptrs[0]);
     CHECK(pending_info.state == lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
 
-    const size_t windows_before = resource.debug_maintenance_windows();
+    const size_t windows_before = resource.maintenance_windows();
 
     resource.deallocate(ptrs[NUM_BLOCKS - 1], ALLOC_SIZE);
 
     CHECK_EQUAL(0, resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
-    CHECK(resource.debug_maintenance_windows() > windows_before);
+    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
+    CHECK(resource.maintenance_windows() > windows_before);
 
     auto finalized_info = resource.get_allocation_info(ptrs[0]);
     CHECK(finalized_info.state != lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
@@ -214,7 +210,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ReuseAfterMaintenanceKeepsMetadataC
         resource.deallocate(ptrs[i], ALLOC_SIZE);
     }
 
-    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
 
     const size_t metadata_before_reuse = resource.debug_metadata_count();
 
@@ -254,7 +250,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, LargePendingBatchDrainsAndOpensMult
         CHECK(ptrs[i] != nullptr);
     }
 
-    const size_t windows_before = resource.debug_maintenance_windows();
+    const size_t windows_before = resource.maintenance_windows();
 
     for (size_t i = 0; i < NUM_BLOCKS; ++i)
     {
@@ -262,8 +258,8 @@ TEST(LockfreeSingleBlockMemoryResourceTests, LargePendingBatchDrainsAndOpensMult
     }
 
     CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
-    CHECK(resource.debug_maintenance_windows() > windows_before);
+    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
+    CHECK(resource.maintenance_windows() > windows_before);
 }
 
 TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMaintenance)
@@ -291,10 +287,10 @@ TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMai
     }
 
     CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
     CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
     CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
     CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
 }
 
@@ -305,14 +301,14 @@ struct test_unmasked_interrupt_policy
     static inline void restore_interrupts(interrupt_state_t) {}
 };
 
-typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+typedef minstd::pmr::lockfree_single_block_resource_impl<
     test_unmasked_interrupt_policy,
     minstd::pmr::platform::default_platform_provider,
     128 * 1024 * 1024,
     5,
         128,
 
-    lockfree_single_block_resource_debug_metrics,
+    minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
     minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_unmasked;
 
 static lockfree_single_block_resource_unmasked* s_reentrant_resource = nullptr;

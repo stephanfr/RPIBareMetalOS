@@ -8,6 +8,7 @@
 
 #include <__memory_resource/composite_pool_resource.h>
 #include <__memory_resource/lockfree_single_block_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include <array>
@@ -220,7 +221,7 @@ namespace
             start_allocations = false;
 
             {
-                using composite_large_resource_type = minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+                using composite_large_resource_type = minstd::pmr::lockfree_single_block_resource_impl<
                     minstd::pmr::platform::default_interrupt_policy,
                     minstd::pmr::platform::default_platform_provider,
                     32 * 1024 * 1024,

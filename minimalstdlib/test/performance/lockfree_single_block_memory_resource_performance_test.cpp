@@ -6,6 +6,7 @@
 #include <minstdconfig.h>
 
 #include <__memory_resource/lockfree_single_block_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include "../shared/interrupt_simulation_test_helpers.h"
@@ -31,30 +32,25 @@ namespace
     constexpr size_t BUFFER_SIZE = 512 * 1048576; // 512 MB
     char *buffer = new char[BUFFER_SIZE]();
 
-    using lockfree_single_block_resource_debug_metrics =
-        minstd::pmr::lockfree_single_block_resource_concrete_debug_metrics<
-            test_userspace_signal_mask_interrupt_policy,
-            minstd::pmr::platform::default_platform_provider,
-            128 * 1024 * 1024,
-            5>;
+    
 
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
         minstd::pmr::extensions::memory_resource_statistics,
         minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
         
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
 }
 
@@ -248,7 +244,7 @@ TEST_GROUP(LockfreeSingleBlockMemoryResourcePerformanceTests)
 };
 
 using lockfree_single_block_resource_perf =
-    minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    minstd::pmr::lockfree_single_block_resource_impl<
         minstd::pmr::platform::noop_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         64 * 1024 * 1024,

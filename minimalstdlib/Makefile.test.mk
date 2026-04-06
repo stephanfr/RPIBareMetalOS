@@ -28,6 +28,7 @@ COVERAGE_LIB_OBJ_DIR := test/coverage/lib
 # Executables
 # ---------------------------------------------------------------------------
 CORRECTNESS_EXE := $(CORRECTNESS_OBJ_DIR)/cpputest_correctness.exe
+LOCKFREE_CORRECTNESS_EXE := $(CORRECTNESS_OBJ_DIR)/cpputest_lockfree_correctness.exe
 PERFORMANCE_EXE := $(PERFORMANCE_OBJ_DIR)/cpputest_performance.exe
 HOST_PERF_EXE   := $(HOST_PERF_OBJ_DIR)/std_containers_perf.exe
 SOAK_EXE        := $(SOAK_OBJ_DIR)/cpputest_soak.exe
@@ -58,26 +59,37 @@ LIB_SRC := $(CPP_SRC)
 # Object file lists — each binary gets its own object directory to avoid
 # conflicts when the same shared source is compiled with different flags.
 # ---------------------------------------------------------------------------
+CORRECTNESS_SRC_DIR := test/correctness
+SHARED_SRC_DIR      := test/shared
+ALL_CORRECTNESS_SRC := $(wildcard $(CORRECTNESS_SRC_DIR)/*.cpp)
+LOCKFREE_CORRECTNESS_SRC := $(CORRECTNESS_SRC_DIR)/lockfree_single_block_memory_resource_test.cpp
+CORRECTNESS_SRC     := $(filter-out $(LOCKFREE_CORRECTNESS_SRC), $(ALL_CORRECTNESS_SRC))
+
 CORRECTNESS_OBJ := $(patsubst $(CORRECTNESS_SRC_DIR)/%.cpp,$(CORRECTNESS_OBJ_DIR)/%.o,\
-                      $(wildcard $(CORRECTNESS_SRC_DIR)/*.cpp)) \
-                   $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(CORRECTNESS_OBJ_DIR)/shared_%.o,\
-                      $(SHARED_SRC))
+	                  $(CORRECTNESS_SRC)) \
+	               $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(CORRECTNESS_OBJ_DIR)/shared_%.o,\
+	                  $(SHARED_SRC))
+
+LOCKFREE_CORRECTNESS_OBJ := $(patsubst $(CORRECTNESS_SRC_DIR)/%.cpp,$(CORRECTNESS_OBJ_DIR)/%.o,\
+	                          $(LOCKFREE_CORRECTNESS_SRC)) \
+	                        $(CORRECTNESS_OBJ_DIR)/cpputest_correctness_main.o \
+	                        $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(CORRECTNESS_OBJ_DIR)/shared_%.o,$(SHARED_SRC))
 PERFORMANCE_OBJ := $(patsubst $(PERFORMANCE_SRC_DIR)/%.cpp,$(PERFORMANCE_OBJ_DIR)/%.o,\
-                      $(wildcard $(PERFORMANCE_SRC_DIR)/*.cpp)) \
-                   $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(PERFORMANCE_OBJ_DIR)/shared_%.o,\
-                      $(SHARED_SRC))
+	                  $(wildcard $(PERFORMANCE_SRC_DIR)/*.cpp)) \
+	               $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(PERFORMANCE_OBJ_DIR)/shared_%.o,\
+	                  $(SHARED_SRC))
 SOAK_OBJ        := $(patsubst $(SOAK_SRC_DIR)/%.cpp,$(SOAK_OBJ_DIR)/%.o,\
-                      $(wildcard $(SOAK_SRC_DIR)/*.cpp)) \
-                   $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(SOAK_OBJ_DIR)/shared_%.o,\
-                      $(SHARED_SRC))
+	                  $(wildcard $(SOAK_SRC_DIR)/*.cpp)) \
+	               $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(SOAK_OBJ_DIR)/shared_%.o,\
+	                  $(SHARED_SRC))
 HOST_PERF_OBJ   := $(patsubst $(HOST_PERF_SRC_DIR)/%.cpp,$(HOST_PERF_OBJ_DIR)/%.o,$(HOST_PERF_SRC))
 
 LIB_OBJ         := $(patsubst $(CPP_SRC_DIR)/%.cpp,$(LIB_OBJ_DIR)/%.o,$(LIB_SRC))
 
 COVERAGE_OBJ    := $(patsubst $(CORRECTNESS_SRC_DIR)/%.cpp,$(COVERAGE_OBJ_DIR)/%.o,\
-                      $(wildcard $(CORRECTNESS_SRC_DIR)/*.cpp)) \
-                   $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(COVERAGE_OBJ_DIR)/shared_%.o,\
-                      $(SHARED_SRC))
+	                  $(wildcard $(CORRECTNESS_SRC_DIR)/*.cpp)) \
+	               $(patsubst $(SHARED_SRC_DIR)/%.cpp,$(COVERAGE_OBJ_DIR)/shared_%.o,\
+	                  $(SHARED_SRC))
 COVERAGE_LIB_OBJ := $(patsubst $(CPP_SRC_DIR)/%.cpp,$(COVERAGE_LIB_OBJ_DIR)/%.o,$(LIB_SRC))
 
 # ---------------------------------------------------------------------------
@@ -90,8 +102,9 @@ COVERAGE_LIB_OBJ := $(patsubst $(CPP_SRC_DIR)/%.cpp,$(COVERAGE_LIB_OBJ_DIR)/%.o,
 # ---------------------------------------------------------------------------
 test: test-correctness test-performance test-soak
 
-test-correctness: lib $(CORRECTNESS_EXE)
+test-correctness: lib $(CORRECTNESS_EXE) $(LOCKFREE_CORRECTNESS_EXE)
 	./$(CORRECTNESS_EXE)
+	./$(LOCKFREE_CORRECTNESS_EXE)
 
 test-performance: lib $(PERFORMANCE_EXE)
 	./$(PERFORMANCE_EXE)
@@ -117,6 +130,9 @@ test-coverage:
 # ---------------------------------------------------------------------------
 $(CORRECTNESS_EXE): $(LIB_OBJ) $(CORRECTNESS_OBJ)
 	$(LD) $(TEST_LDFLAGS) $(LIB_OBJ) $(CORRECTNESS_OBJ) $(LDLIBS) $(TEST_LIB) -o $@
+
+$(LOCKFREE_CORRECTNESS_EXE): $(LIB_OBJ) $(LOCKFREE_CORRECTNESS_OBJ)
+	$(LD) $(TEST_LDFLAGS) $(LIB_OBJ) $(LOCKFREE_CORRECTNESS_OBJ) $(LDLIBS) $(TEST_LIB) -o $@
 
 $(PERFORMANCE_EXE): $(LIB_OBJ) $(PERFORMANCE_OBJ)
 	$(LD) $(TEST_LDFLAGS) $(LIB_OBJ) $(PERFORMANCE_OBJ) $(LDLIBS) $(TEST_LIB) -o $@

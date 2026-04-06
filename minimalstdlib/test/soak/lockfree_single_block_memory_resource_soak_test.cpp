@@ -6,6 +6,7 @@
 #include <minstdconfig.h>
 
 #include <__memory_resource/lockfree_single_block_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include "../shared/interrupt_simulation_test_helpers.h"
@@ -31,30 +32,25 @@ namespace
     constexpr size_t BUFFER_SIZE = 512 * 1048576; // 512 MB
     char *buffer = new char[BUFFER_SIZE]();
 
-    using lockfree_single_block_resource_debug_metrics =
-        minstd::pmr::lockfree_single_block_resource_concrete_debug_metrics<
-            test_userspace_signal_mask_interrupt_policy,
-            minstd::pmr::platform::default_platform_provider,
-            128 * 1024 * 1024,
-            5>;
+    
 
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
         minstd::pmr::extensions::memory_resource_statistics,
         minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
         
-    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    typedef minstd::pmr::lockfree_single_block_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
 }
 
@@ -134,7 +130,7 @@ namespace
 
         for (size_t attempt = 0; attempt < max_attempts; ++attempt)
         {
-            if (resource.debug_frontier_offset() == initial_frontier)
+            if (resource.frontier_offset() == initial_frontier)
             {
                 return true;
             }
@@ -152,7 +148,7 @@ namespace
             }
         }
 
-        return resource.debug_frontier_offset() == initial_frontier;
+        return resource.frontier_offset() == initial_frontier;
     }
 
     static void sigusr1_nested_alloc_handler(int)
@@ -515,7 +511,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     printf("\nRunning Allocator SoakTest for %zu seconds (Base Seed: %llu)...\n", SOAK_DURATION_SEC, (unsigned long long)base_seed);
 
     lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
-    const size_t initial_frontier = resource.debug_frontier_offset();
+    const size_t initial_frontier = resource.frontier_offset();
 
     struct sigaction sa = {};
     sa.sa_handler = sigusr1_nested_alloc_handler;
@@ -584,7 +580,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     fflush(stdout);
 
     size_t drain_meta_start = resource.debug_metadata_count();
-    size_t drain_frontier_start = resource.debug_frontier_offset();
+    size_t drain_frontier_start = resource.frontier_offset();
     size_t post_drain_burst_allocs = 0;
     size_t post_drain_burst_deallocs = 0;
 
@@ -642,7 +638,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
                 else
                 {
                     const size_t meta_after_drain = resource.debug_metadata_count();
-                    size_t frontier_after_drain = resource.debug_frontier_offset();
+                    size_t frontier_after_drain = resource.frontier_offset();
                     printf("  [DrainComplete] meta_before=%zu meta_after=%zu delta=%zd frontier_before=%zu frontier_after=%zu delta=%zd\n",
                            drain_meta_start,
                            meta_after_drain,
@@ -671,7 +667,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
                     drain_ack_count.store(0, minstd::memory_order_release);
                     drain_epoch.fetch_add(1, minstd::memory_order_acq_rel);
                     drain_meta_start = resource.debug_metadata_count();
-                    drain_frontier_start = resource.debug_frontier_offset();
+                    drain_frontier_start = resource.frontier_offset();
                     printf("  [DrainStart] meta=%zu frontier=%zu\n", drain_meta_start, drain_frontier_start);
                     fflush(stdout);
                 }
@@ -714,7 +710,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
             last_deallocs = c_deallocs;
             last_failed = c_failed;
 
-            size_t frontier_off = resource.debug_frontier_offset();
+            size_t frontier_off = resource.frontier_offset();
             size_t meta_count = resource.debug_metadata_count();
             size_t meta_boundary = resource.debug_metadata_boundary_offset();
             size_t gap = (meta_boundary > frontier_off) ? (meta_boundary - frontier_off) : 0;
@@ -732,16 +728,16 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
                 const uint64_t now_ns = monotonic_time_ns();
                 printf("  [DRAIN STALL?] acked=%d/%zu drained_count=%d/%zu\n", acked, NUM_THREADS, drained, NUM_THREADS);
                   printf("  [ALLOC DBG] calls=%zu reuse=%zu frontier=%zu alloc_fail=%zu search_iter=%zu pops=%zu claimed=%zu reclaim_deferred=%zu frontier_cas_retry=%zu metadata_cas_retry=%zu\n",
-                      resource.debug_alloc_calls(),
-                      resource.debug_alloc_reuse_hits(),
-                      resource.debug_alloc_frontier_hits(),
-                      resource.debug_alloc_failures(),
-                      resource.debug_search_iterations(),
-                      resource.debug_search_pops(),
-                      resource.debug_search_claimed(),
-                      resource.debug_search_reclaim_deferred(),
-                      resource.debug_frontier_cas_retries(),
-                      resource.debug_metadata_cas_retries());
+                      resource.allocator_calls(),
+                      resource.allocator_reuse_hits(),
+                      resource.allocator_frontier_hits(),
+                      resource.allocator_failures(),
+                      resource.search_iterations(),
+                      resource.search_pops(),
+                      resource.search_claimed(),
+                      resource.search_reclaim_deferred(),
+                      resource.frontier_cas_retries(),
+                      resource.metadata_cas_retries());
                 for (size_t i = 0; i < NUM_THREADS; ++i)
                 {
                     uint64_t last_ns = thread_args[i].last_progress_ns.load(minstd::memory_order_relaxed);
@@ -773,7 +769,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     // Force a final shared DRAIN phase so teardown checks run from a true quiescent point
     const size_t final_drain_meta_start = resource.debug_metadata_count();
-    const size_t final_drain_frontier_start = resource.debug_frontier_offset();
+    const size_t final_drain_frontier_start = resource.frontier_offset();
     printf("[FinalDrainStart] meta=%zu frontier=%zu\n", final_drain_meta_start, final_drain_frontier_start);
     fflush(stdout);
 
@@ -807,7 +803,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     else
     {
         const size_t final_drain_meta_after = resource.debug_metadata_count();
-        const size_t final_drain_frontier_after = resource.debug_frontier_offset();
+        const size_t final_drain_frontier_after = resource.frontier_offset();
         printf("[FinalDrainComplete] meta_before=%zu meta_after=%zu delta=%zd frontier_before=%zu frontier_after=%zu delta=%zd\n",
                final_drain_meta_start,
                final_drain_meta_after,
@@ -821,7 +817,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     if (final_drain_complete && POST_DRAIN_BURST_OPS > 0 && POST_DRAIN_BURST_SIZE > 0)
     {
         const size_t burst_meta_before = resource.debug_metadata_count();
-        const size_t burst_frontier_before = resource.debug_frontier_offset();
+        const size_t burst_frontier_before = resource.frontier_offset();
         size_t burst_alloc_failures = 0;
 
         for (size_t i = 0; i < POST_DRAIN_BURST_OPS; ++i)
@@ -845,7 +841,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
         }
 
         const size_t burst_meta_after = resource.debug_metadata_count();
-        const size_t burst_frontier_after = resource.debug_frontier_offset();
+        const size_t burst_frontier_after = resource.frontier_offset();
         printf("[PostDrainBurst] ops=%zu size=%zu allocs=%zu deallocs=%zu alloc_failures=%zu meta_before=%zu meta_after=%zu delta=%zd frontier_before=%zu frontier_after=%zu delta=%zd\n",
                POST_DRAIN_BURST_OPS,
                POST_DRAIN_BURST_SIZE,
@@ -906,7 +902,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     if (!frontier_settled)
     {
         printf("[QuiescentSettle] frontier remained at %zu (initial=%zu, metadata=%zu)\n",
-               resource.debug_frontier_offset(), initial_frontier, resource.debug_metadata_count());
+               resource.frontier_offset(), initial_frontier, resource.debug_metadata_count());
         fflush(stdout);
     }
 
@@ -920,7 +916,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
            resource.total_allocations(), resource.total_deallocations(),
            resource.current_bytes_allocated(), resource.current_allocated());
     printf("Frontier offset: %zu, Metadata count: %zu\n",
-           resource.debug_frontier_offset(), resource.debug_metadata_count());
+           resource.frontier_offset(), resource.debug_metadata_count());
     fflush(stdout);
 
     if (resource.current_bytes_allocated() != 0)
@@ -934,11 +930,11 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     if (enforce_frontier_reset)
     {
         CHECK_TRUE(frontier_settled);
-        CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
+        CHECK_EQUAL(initial_frontier, resource.frontier_offset());
     }
     else
     {
-        CHECK_TRUE(resource.debug_frontier_offset() <= resource.debug_metadata_boundary_offset());
+        CHECK_TRUE(resource.frontier_offset() <= resource.debug_metadata_boundary_offset());
     }
 
     // Frontier settling may add balanced probe alloc/dealloc operations.

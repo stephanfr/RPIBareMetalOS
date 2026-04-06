@@ -16,6 +16,7 @@
 
 #include "__extensions/hash_check.h"
 #include "__extensions/memory_resource_statistics.h"
+#include "__extensions/lockfree_single_block_resource_extended_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
 #include "__platform/interrupt_policy_abstractions.h"
 #include "lockfree/tagged_ptr"
@@ -42,55 +43,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return (alignment_mod == 0) ? ptr : (void *)((ptr_as_int + alignment) - alignment_mod);
             }
-        }
-
-        template <typename metrics_type>
-        concept lockfree_single_block_debug_metrics_policy = requires(metrics_type &metrics, const metrics_type &const_metrics) {
-            { metrics.record_alloc_call() } noexcept;
-            { metrics.record_alloc_reuse_hit() } noexcept;
-            { metrics.record_alloc_frontier_hit() } noexcept;
-            { metrics.record_alloc_failure() } noexcept;
-            { metrics.record_search_iteration() } noexcept;
-            { metrics.record_search_pop() } noexcept;
-            { metrics.record_search_claimed() } noexcept;
-            { metrics.record_search_reclaim_deferred() } noexcept;
-            { metrics.record_frontier_cas_retry() } noexcept;
-            { metrics.record_metadata_cas_retry() } noexcept;
-            { metrics.record_maintenance_window() } noexcept;
-            { metrics.record_allocation_made() } noexcept;
-            { metrics.record_deallocation_made() } noexcept;
-
-            { const_metrics.debug_alloc_calls() };
-            { const_metrics.debug_alloc_reuse_hits() };
-            { const_metrics.debug_alloc_frontier_hits() };
-            { const_metrics.debug_alloc_failures() };
-            { const_metrics.debug_search_iterations() };
-            { const_metrics.debug_search_pops() };
-            { const_metrics.debug_search_claimed() };
-            { const_metrics.debug_search_reclaim_deferred() };
-            { const_metrics.debug_frontier_cas_retries() };
-            { const_metrics.debug_metadata_cas_retries() };
-            { const_metrics.debug_maintenance_windows() };
-            { const_metrics.current_allocated() };
-        };
-
-        namespace internal
-        {
-            template <typename default_metrics_type, typename... extension_types>
-            struct select_debug_metrics_policy
-            {
-                using type = default_metrics_type;
-            };
-
-            template <typename default_metrics_type, typename extension_type, typename... remaining_extension_types>
-            struct select_debug_metrics_policy<default_metrics_type, extension_type, remaining_extension_types...>
-            {
-                using fallback_type = typename select_debug_metrics_policy<default_metrics_type, remaining_extension_types...>::type;
-                using type = typename conditional<lockfree_single_block_debug_metrics_policy<extension_type>, extension_type, fallback_type>::type;
-            };
-        }
-
-        //  This resource starts with a super-block of memory and then allocates blocks from that superblock.
+        }//  This resource starts with a super-block of memory and then allocates blocks from that superblock.
         //      When the superblock is exhausted, a new superblock is allocated from the upstream resource.
         //      The blocks and allocations will be aligned on __max_align (should be 16 bytes) boundaries
         //      which should be optimal for modern processors.
@@ -106,89 +59,13 @@ namespace MINIMAL_STD_NAMESPACE
         class lockfree_single_block_resource_impl : public memory_resource, public optional_extensions...
         {
         public:
-            struct debug_metrics_interface
-            {
-                void record_alloc_call() noexcept {}
-                void record_alloc_reuse_hit() noexcept {}
-                void record_alloc_frontier_hit() noexcept {}
-                void record_alloc_failure() noexcept {}
-                void record_search_iteration() noexcept {}
-                void record_search_pop() noexcept {}
-                void record_search_claimed() noexcept {}
-                void record_search_reclaim_deferred() noexcept {}
-                void record_frontier_cas_retry() noexcept {}
-                void record_metadata_cas_retry() noexcept {}
-                void record_maintenance_window() noexcept {}
-                void record_allocation_made() noexcept {}
-                void record_deallocation_made() noexcept {}
+            
 
-                size_t debug_alloc_calls() const noexcept { return 0; }
-                size_t debug_alloc_reuse_hits() const noexcept { return 0; }
-                size_t debug_alloc_frontier_hits() const noexcept { return 0; }
-                size_t debug_alloc_failures() const noexcept { return 0; }
-                size_t debug_search_iterations() const noexcept { return 0; }
-                size_t debug_search_pops() const noexcept { return 0; }
-                size_t debug_search_claimed() const noexcept { return 0; }
-                size_t debug_search_reclaim_deferred() const noexcept { return 0; }
-                size_t debug_frontier_cas_retries() const noexcept { return 0; }
-                size_t debug_metadata_cas_retries() const noexcept { return 0; }
-                size_t debug_maintenance_windows() const noexcept { return 0; }
-                size_t current_allocated() const noexcept { return 0; }
-            };
+            
 
-            struct empty_debug_metrics : public debug_metrics_interface
-            {
-            };
-
-            struct concrete_debug_metrics : public debug_metrics_interface
-            {
-                alignas(64) atomic<size_t> live_allocations_{0};
-                alignas(64) atomic<size_t> debug_alloc_calls_{0};
-                alignas(64) atomic<size_t> debug_alloc_reuse_hits_{0};
-                alignas(64) atomic<size_t> debug_alloc_frontier_hits_{0};
-                alignas(64) atomic<size_t> debug_alloc_failures_{0};
-                alignas(64) atomic<size_t> debug_search_iterations_{0};
-                alignas(64) atomic<size_t> debug_search_pops_{0};
-                alignas(64) atomic<size_t> debug_search_claimed_{0};
-                alignas(64) atomic<size_t> debug_search_reclaim_deferred_{0};
-                alignas(64) atomic<size_t> debug_frontier_cas_retries_{0};
-                alignas(64) atomic<size_t> debug_metadata_cas_retries_{0};
-                alignas(64) atomic<size_t> debug_maintenance_windows_{0};
-
-                void record_alloc_call() noexcept { debug_alloc_calls_.add_fetch(1, memory_order_relaxed); }
-                void record_alloc_reuse_hit() noexcept { debug_alloc_reuse_hits_.add_fetch(1, memory_order_relaxed); }
-                void record_alloc_frontier_hit() noexcept { debug_alloc_frontier_hits_.add_fetch(1, memory_order_relaxed); }
-                void record_alloc_failure() noexcept { debug_alloc_failures_.add_fetch(1, memory_order_relaxed); }
-                void record_search_iteration() noexcept { debug_search_iterations_.add_fetch(1, memory_order_relaxed); }
-                void record_search_pop() noexcept { debug_search_pops_.add_fetch(1, memory_order_relaxed); }
-                void record_search_claimed() noexcept { debug_search_claimed_.add_fetch(1, memory_order_relaxed); }
-                void record_search_reclaim_deferred() noexcept { debug_search_reclaim_deferred_.add_fetch(1, memory_order_relaxed); }
-                void record_frontier_cas_retry() noexcept { debug_frontier_cas_retries_.add_fetch(1, memory_order_relaxed); }
-                void record_metadata_cas_retry() noexcept { debug_metadata_cas_retries_.add_fetch(1, memory_order_relaxed); }
-                void record_maintenance_window() noexcept { debug_maintenance_windows_.add_fetch(1, memory_order_relaxed); }
-                void record_allocation_made() noexcept { live_allocations_.add_fetch(1, memory_order_acq_rel); }
-                void record_deallocation_made() noexcept { live_allocations_.fetch_sub(1, memory_order_relaxed); }
-
-                size_t debug_alloc_calls() const noexcept { return debug_alloc_calls_.load(memory_order_relaxed); }
-                size_t debug_alloc_reuse_hits() const noexcept { return debug_alloc_reuse_hits_.load(memory_order_relaxed); }
-                size_t debug_alloc_frontier_hits() const noexcept { return debug_alloc_frontier_hits_.load(memory_order_relaxed); }
-                size_t debug_alloc_failures() const noexcept { return debug_alloc_failures_.load(memory_order_relaxed); }
-                size_t debug_search_iterations() const noexcept { return debug_search_iterations_.load(memory_order_relaxed); }
-                size_t debug_search_pops() const noexcept { return debug_search_pops_.load(memory_order_relaxed); }
-                size_t debug_search_claimed() const noexcept { return debug_search_claimed_.load(memory_order_relaxed); }
-                size_t debug_search_reclaim_deferred() const noexcept { return debug_search_reclaim_deferred_.load(memory_order_relaxed); }
-                size_t debug_frontier_cas_retries() const noexcept { return debug_frontier_cas_retries_.load(memory_order_relaxed); }
-                size_t debug_metadata_cas_retries() const noexcept { return debug_metadata_cas_retries_.load(memory_order_relaxed); }
-                size_t debug_maintenance_windows() const noexcept { return debug_maintenance_windows_.load(memory_order_relaxed); }
-                size_t current_allocated() const noexcept { return live_allocations_.load(memory_order_acquire); }
-            };
+            
 
         private:
-            using selected_debug_metrics_type = typename internal::select_debug_metrics_policy<empty_debug_metrics, optional_extensions...>::type;
-
-            static_assert(lockfree_single_block_debug_metrics_policy<selected_debug_metrics_type>,
-                          "debug metrics extension must provide lockfree_single_block_resource debug metrics callbacks and getters");
-
             using interrupt_guard_type = platform::basic_interrupt_guard<interrupt_policy_type>;
 
             //  Internally, all blocks will be aligned on 64-byte boundaries.  This will support alignments
@@ -457,6 +334,20 @@ namespace MINIMAL_STD_NAMESPACE
                 return reinterpret_cast<uintptr_t>(frontier) - reinterpret_cast<uintptr_t>(block_);
             }
 
+			[[nodiscard]] constexpr size_t debug_alloc_calls() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_calls(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_alloc_reuse_hits() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_reuse_hits(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_alloc_frontier_hits() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_frontier_hits(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_alloc_failures() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_failures(); } return 0; }
+			[[nodiscard]] constexpr size_t current_allocated() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::current_allocated(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_search_iterations() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_iterations(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_search_pops() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_pops(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_search_claimed() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_claimed(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_search_reclaim_deferred() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_reclaim_deferred(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_frontier_cas_retries() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::frontier_cas_retries(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_metadata_cas_retries() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::metadata_cas_retries(); } return 0; }
+			[[nodiscard]] constexpr size_t debug_maintenance_windows() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::maintenance_windows(); } return 0; }
+
+
             size_t debug_metadata_count() const
             {
                 return current_metadata_record_count_.load(memory_order_acquire);
@@ -467,59 +358,7 @@ namespace MINIMAL_STD_NAMESPACE
                 auto count = current_metadata_record_count_.load(memory_order_acquire);
                 uintptr_t boundary = reinterpret_cast<uintptr_t>(metadata_start_) - (count + 1) * ALLOCATION_METADATA_SIZE;
                 return boundary - reinterpret_cast<uintptr_t>(block_);
-            }
-
-            size_t debug_alloc_calls() const
-            {
-                return debug_metrics_.debug_alloc_calls();
-            }
-
-            size_t debug_alloc_reuse_hits() const
-            {
-                return debug_metrics_.debug_alloc_reuse_hits();
-            }
-
-            size_t debug_alloc_frontier_hits() const
-            {
-                return debug_metrics_.debug_alloc_frontier_hits();
-            }
-
-            size_t debug_alloc_failures() const
-            {
-                return debug_metrics_.debug_alloc_failures();
-            }
-
-            size_t debug_search_iterations() const
-            {
-                return debug_metrics_.debug_search_iterations();
-            }
-
-            size_t debug_search_pops() const
-            {
-                return debug_metrics_.debug_search_pops();
-            }
-
-            size_t debug_search_claimed() const
-            {
-                return debug_metrics_.debug_search_claimed();
-            }
-
-            size_t debug_search_reclaim_deferred() const
-            {
-                return debug_metrics_.debug_search_reclaim_deferred();
-            }
-
-            size_t debug_frontier_cas_retries() const
-            {
-                return debug_metrics_.debug_frontier_cas_retries();
-            }
-
-            size_t debug_metadata_cas_retries() const
-            {
-                return debug_metrics_.debug_metadata_cas_retries();
-            }
-
-            size_t debug_pending_deallocations() const
+            }size_t pending_deallocations() const
             {
                 size_t total = 0;
                 for (size_t i = 0; i < cpu_shards_; ++i)
@@ -527,19 +366,7 @@ namespace MINIMAL_STD_NAMESPACE
                     total += pending_shards_[i].count_.load(memory_order_acquire);
                 }
                 return total;
-            }
-
-            size_t debug_maintenance_windows() const
-            {
-                return debug_metrics_.debug_maintenance_windows();
-            }
-
-            size_t current_allocated() const
-            {
-                return debug_metrics_.current_allocated();
-            }
-
-            allocation_info get_allocation_info(void *allocation) const
+            }allocation_info get_allocation_info(void *allocation) const
             {
                 const block_header &header = as_block_header(allocation);
                 const size_t metadata_index = header.metadata_index_;
@@ -769,8 +596,6 @@ namespace MINIMAL_STD_NAMESPACE
             };
 
             pending_shard *pending_shards_;
-
-            [[no_unique_address]] selected_debug_metrics_type debug_metrics_;
 
             //  Per-CPU free block bins - dynamically allocated from the managed block.
             free_block_bin *free_block_bins_;
@@ -1242,7 +1067,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void run_maintenance_window(size_t target_shard)
             {
-                debug_metrics_.record_maintenance_window();
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_maintenance_window(); };
                 size_t shard_cursor = target_shard;
 
                 while (true)
@@ -1325,7 +1150,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void *do_allocate(size_t bytes, size_t alignment) override
             {
-                debug_metrics_.record_alloc_call();
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_call(); };
 
                 //  We cannot throw and exception which is what the standard requires if we cannot allocate the memory
                 //      of either the desired size or alignment, so we will just return nullptr.
@@ -1361,7 +1186,7 @@ namespace MINIMAL_STD_NAMESPACE
                     size_t metadata_index = get_next_metadata_record_index();
                     if (metadata_index == NULL_INDEX)
                     {
-                        debug_metrics_.record_alloc_failure();
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_failure(); };
                         return nullptr;
                     }
 
@@ -1379,7 +1204,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         if (free_block != nullptr)
                         {
-                            debug_metrics_.record_alloc_reuse_hit();
+                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_reuse_hit(); };
                         }
                     }
 
@@ -1393,7 +1218,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         if (free_block != nullptr)
                         {
-                            debug_metrics_.record_alloc_reuse_hit();
+                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_reuse_hit(); };
                         }
                     }
 
@@ -1408,7 +1233,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         recycle_metadata(*frontier_reserved_metadata);
 
-                        debug_metrics_.record_alloc_failure();
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_failure(); };
                         return nullptr;
                     }
 
@@ -1431,12 +1256,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (used_frontier)
                     {
-                        debug_metrics_.record_alloc_frontier_hit();
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_frontier_hit(); };
                     }
                 }
                 else
                 {
-                    debug_metrics_.record_alloc_reuse_hit();
+                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_reuse_hit(); };
                 }
 
                 free_block->metadata_index_ = metadata_to_index(metadata);
@@ -1469,7 +1294,7 @@ namespace MINIMAL_STD_NAMESPACE
                     extensions::memory_resource_statistics::allocation_made(bytes);
                 }
 
-                debug_metrics_.record_allocation_made();
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocation_made(); };
 
                 return reinterpret_cast<uint8_t *>(free_block) + ALLOCATION_HEADER_SIZE;
             }
@@ -1552,7 +1377,7 @@ namespace MINIMAL_STD_NAMESPACE
                     extensions::memory_resource_statistics::deallocation_made(bytes);
                 }
 
-                debug_metrics_.record_deallocation_made();
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_deallocation_made(); };
 
                 //  Mark the block as pending maintenance. Reuse is deferred until a maintenance window
                 //  converts this state into AVAILABLE and routes the block into free block bins.
@@ -1722,7 +1547,7 @@ namespace MINIMAL_STD_NAMESPACE
                             break;
                         }
 
-                        debug_metrics_.record_frontier_cas_retry();
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_frontier_cas_retry(); };
                         back_off(retries);
                     } while (true);
                 }
@@ -1799,7 +1624,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
 
                     manager.release_active_slot();
-                    debug_metrics_.record_metadata_cas_retry();
+                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_metadata_cas_retry(); };
                 }
 
                 // Current_count reflects the value before increment, which is our acquired index
@@ -1874,7 +1699,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 while (true)
                 {
-                    debug_metrics_.record_search_iteration();
+                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_iteration(); };
 
                     block_metadata *claimed_head = nullptr;
                     block_metadata *deferred_reclaim = nullptr;
@@ -1899,20 +1724,20 @@ namespace MINIMAL_STD_NAMESPACE
                                     continue;
                                 }
 
-                                debug_metrics_.record_search_pop();
+                                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_pop(); };
 
                                 auto result = unguarded_try_claim_popped_block(*head, bin_head);
 
                                 if (result == claim_result::CLAIMED)
                                 {
-                                    debug_metrics_.record_search_claimed();
+                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_claimed(); };
                                     claimed_head = head;
                                     stop_scan = true;
                                     break;
                                 }
                                 if (result == claim_result::RECLAIM_DEFERRED)
                                 {
-                                    debug_metrics_.record_search_reclaim_deferred();
+                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_reclaim_deferred(); };
                                     deferred_reclaim = head;
                                     stop_scan = true;
                                     break;
@@ -1943,59 +1768,6 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
             }
-
         };
-
-        template <typename interrupt_policy_type = platform::default_interrupt_policy,
-              typename platform_provider_type = platform::default_platform_provider,
-              size_t max_bin_bytes = 32 * 1024 * 1024,
-              size_t max_waste_percent = 5>
-        using lockfree_single_block_resource_empty_debug_metrics = typename lockfree_single_block_resource_impl<interrupt_policy_type,
-                                                             platform_provider_type,
-                                                             max_bin_bytes,
-                                                             max_waste_percent>::empty_debug_metrics;
-
-        template <typename interrupt_policy_type = platform::default_interrupt_policy,
-              typename platform_provider_type = platform::default_platform_provider,
-              size_t max_bin_bytes = 32 * 1024 * 1024,
-              size_t max_waste_percent = 5>
-        using lockfree_single_block_resource_concrete_debug_metrics = typename lockfree_single_block_resource_impl<interrupt_policy_type,
-                                                                platform_provider_type,
-                                                                max_bin_bytes,
-                                                                max_waste_percent>::concrete_debug_metrics;
-
-          template <typename... optional_extensions>
-        using lockfree_single_block_resource = lockfree_single_block_resource_impl<platform::default_interrupt_policy,
-                                                                                    platform::default_platform_provider,
-                                                                                    32 * 1024 * 1024,
-                                                                                    5, 128,
-                                                                                    optional_extensions...>;
-
-          template <typename interrupt_policy_type, typename... optional_extensions>
-        using lockfree_single_block_resource_with_interrupt_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
-                                                                                                          platform::default_platform_provider,
-                                                                                                          32 * 1024 * 1024,
-                                                                                                          5, 128,
-                                                                                                          optional_extensions...>;
-
-          template <typename interrupt_policy_type, typename platform_provider_type, typename... optional_extensions>
-        using lockfree_single_block_resource_with_interrupt_policy_and_platform_provider = lockfree_single_block_resource_impl<interrupt_policy_type,
-                                                                                                                                platform_provider_type,
-                                                                                                                                32 * 1024 * 1024,
-                                                                                                                                5, 128,
-                                                                                                                                optional_extensions...>;
-
-        template <typename interrupt_policy_type,
-                  typename platform_provider_type,
-                  size_t max_bin_bytes,
-                  size_t max_waste_percent,
-                  size_t maintenance_window_threshold,
-                  typename... optional_extensions>
-        using lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
-                                                                                                                                  platform_provider_type,
-                                                                                                                                  max_bin_bytes,
-                                                                                                                                  max_waste_percent,
-                                                                                                                                  maintenance_window_threshold,
-                                                                                                                                  optional_extensions...>;
     };
 } //  namespace MINIMAL_STD_NAMESPACE::pmr

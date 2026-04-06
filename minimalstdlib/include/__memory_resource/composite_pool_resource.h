@@ -43,7 +43,7 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            using large_resource_type = lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+            using large_resource_type = lockfree_single_block_resource_impl<
                 platform::default_interrupt_policy,
                 platform::default_platform_provider,
                 LARGE_RESOURCE_MAX_BIN_BYTES,
