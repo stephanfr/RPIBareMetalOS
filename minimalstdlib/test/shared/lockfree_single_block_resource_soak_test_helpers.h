@@ -77,7 +77,7 @@ namespace
         int local_phase = 0;
         int local_cycle_count = 0;
         time_t local_phase_start = time(NULL);
-        time_t local_phase_duration = 10 + ((int64_t)(rng() % 11) - 5);
+        time_t local_phase_duration = 15 + ((int64_t)(rng() % 11) - 5);
         int last_acked_drain_epoch = -1;
         int previous_phase = -1;
         size_t burst_target_live = 2500;
@@ -119,7 +119,7 @@ namespace
                             local_cycle_count++;
                         }
                         local_phase_start = now;
-                        local_phase_duration = 10 + ((int64_t)(rng() % 11) - 5);
+                        local_phase_duration = 15 + ((int64_t)(rng() % 11) - 5);
 
                         static const char *pnames[] = {"STEADY", "BURSTY", "RECOVERY"};
                         printf("  [Thread %zu] Independent -> %s (duration: %zd secs, live: %zu)\n",
