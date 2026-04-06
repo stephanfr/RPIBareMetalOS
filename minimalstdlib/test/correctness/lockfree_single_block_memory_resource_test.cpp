@@ -43,6 +43,8 @@ namespace
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
+
+        10,
         lockfree_single_block_resource_debug_metrics,
         minstd::pmr::extensions::memory_resource_statistics,
         minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
@@ -52,6 +54,8 @@ namespace
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
+
+        10,
         lockfree_single_block_resource_debug_metrics,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
 }
@@ -306,6 +310,8 @@ typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platfo
     minstd::pmr::platform::default_platform_provider,
     128 * 1024 * 1024,
     5,
+        128,
+
     lockfree_single_block_resource_debug_metrics,
     minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_unmasked;
 

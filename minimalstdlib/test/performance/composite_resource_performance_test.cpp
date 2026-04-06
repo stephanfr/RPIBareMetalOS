@@ -224,7 +224,8 @@ namespace
                     minstd::pmr::platform::default_interrupt_policy,
                     minstd::pmr::platform::default_platform_provider,
                     32 * 1024 * 1024,
-                    5>;
+                    5,
+             128>;
 
                 composite_large_resource_type lockfree_resource(buffer, BUFFER_SIZE);
 

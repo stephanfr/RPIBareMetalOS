@@ -43,6 +43,7 @@ namespace
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
+        128,
         lockfree_single_block_resource_debug_metrics,
         minstd::pmr::extensions::memory_resource_statistics,
         minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
@@ -52,6 +53,7 @@ namespace
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
+        128,
         lockfree_single_block_resource_debug_metrics,
         minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
 }
@@ -204,6 +206,8 @@ namespace
         minstd::atomic<uint32_t> last_marker{0};
         minstd::atomic<size_t> last_pending_seen{0};
         minstd::atomic<size_t> loop_iterations{0};
+        size_t phase_base_sec{15};
+        size_t phase_range_sec{11};
     };
 
     static inline uint64_t monotonic_time_ns()
@@ -229,7 +233,7 @@ namespace
         int local_phase = 0;
         int local_cycle_count = 0;
         time_t local_phase_start = time(NULL);
-        time_t local_phase_duration = 15 + ((int64_t)(rng() % 11) - 5);
+        time_t local_phase_duration = args->phase_base_sec + ((int64_t)(rng() % args->phase_range_sec) - (int64_t)(args->phase_range_sec / 2));
         int last_acked_drain_epoch = -1;
         int previous_phase = -1;
         size_t burst_target_live = 2500;
@@ -271,7 +275,7 @@ namespace
                             local_cycle_count++;
                         }
                         local_phase_start = now;
-                        local_phase_duration = 15 + ((int64_t)(rng() % 11) - 5);
+                        local_phase_duration = args->phase_base_sec + ((int64_t)(rng() % args->phase_range_sec) - (int64_t)(args->phase_range_sec / 2));
 
                         static const char *pnames[] = {"STEADY", "BURSTY", "RECOVERY"};
                         printf("  [Thread %zu] Independent -> %s (duration: %zd secs, live: %zu)\n",
@@ -492,6 +496,10 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     }
 
     const size_t SOAK_DURATION_SEC = soak_config_get_duration_sec("ALLOCATOR_SOAK_DURATION", 180);
+    const size_t phase_base_sec = soak_config_get_duration_sec("ALLOCATOR_SOAK_PHASE_BASE", 15);
+    const size_t phase_range_sec = soak_config_get_duration_sec("ALLOCATOR_SOAK_PHASE_RANGE", 11);
+    if(phase_range_sec == 0) { printf("Error: ALLOCATOR_SOAK_PHASE_RANGE must be > 0\n"); exit(1); }
+
 
     uint64_t base_seed = 987654321ULL;
     const char* soak_seed_env = getenv("ALLOCATOR_SOAK_SEED");
@@ -568,7 +576,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
     int main_cycle_count = 0;
     bool main_shared_mode = true;
     time_t phase_start = time(NULL);
-    time_t phase_dur = 15 + ((int64_t)(main_rng() % 11) - 5);
+    time_t phase_dur = phase_base_sec + ((int64_t)(main_rng() % phase_range_sec) - (int64_t)(phase_range_sec / 2));
 
     static const char* phase_names[] = {"STEADY", "BURSTY", "RECOVERY", "DRAIN"};
     printf("Phase -> %s [SHARED] (duration: %zd secs)\n", phase_names[main_phase], (ssize_t)phase_dur);
@@ -654,7 +662,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
                 }
 
                 phase_start = now;
-                phase_dur = 15 + ((int64_t)(main_rng() % 11) - 5);
+                phase_dur = phase_base_sec + ((int64_t)(main_rng() % phase_range_sec) - (int64_t)(phase_range_sec / 2));
 
                 if (main_phase == 3)
                 {

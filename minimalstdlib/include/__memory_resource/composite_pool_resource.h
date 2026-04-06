@@ -47,7 +47,8 @@ namespace MINIMAL_STD_NAMESPACE
                 platform::default_interrupt_policy,
                 platform::default_platform_provider,
                 LARGE_RESOURCE_MAX_BIN_BYTES,
-                LARGE_RESOURCE_MAX_WASTE_PERCENT>;
+                LARGE_RESOURCE_MAX_WASTE_PERCENT,
+                128>;
 
             large_resource_type large_resource_;
             fixed_size_element_resource<ELEMENT_SIZE_IN_BYTES, ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS, false> small_resource_;

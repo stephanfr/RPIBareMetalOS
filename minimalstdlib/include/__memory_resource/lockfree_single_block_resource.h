@@ -101,6 +101,7 @@ namespace MINIMAL_STD_NAMESPACE
               typename platform_provider_type = platform::default_platform_provider,
               size_t max_bin_bytes = 32 * 1024 * 1024,
               size_t max_waste_percent = 5,
+              size_t maintenance_window_threshold = 128,
               typename... optional_extensions>
         class lockfree_single_block_resource_impl : public memory_resource, public optional_extensions...
         {
@@ -639,8 +640,8 @@ namespace MINIMAL_STD_NAMESPACE
             inline static fast_lockfree_low_quality_rng id_generator_;
 
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
-            static constexpr size_t MAINTENANCE_WINDOW_THRESHOLD = 128;
-            static constexpr size_t MAINTENANCE_WINDOW_BATCH_SIZE = 128;
+            static constexpr size_t MAINTENANCE_WINDOW_THRESHOLD = maintenance_window_threshold;
+            static constexpr size_t MAINTENANCE_WINDOW_BATCH_SIZE = maintenance_window_threshold;
             static_assert(max_waste_percent > 0 && max_waste_percent <= 25,
                           "max_waste_percent must be in the range [1, 25]");
             static_assert(max_bin_bytes >= 1024,
@@ -1967,32 +1968,34 @@ namespace MINIMAL_STD_NAMESPACE
         using lockfree_single_block_resource = lockfree_single_block_resource_impl<platform::default_interrupt_policy,
                                                                                     platform::default_platform_provider,
                                                                                     32 * 1024 * 1024,
-                                                                                    5,
+                                                                                    5, 128,
                                                                                     optional_extensions...>;
 
           template <typename interrupt_policy_type, typename... optional_extensions>
         using lockfree_single_block_resource_with_interrupt_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
                                                                                                           platform::default_platform_provider,
                                                                                                           32 * 1024 * 1024,
-                                                                                                          5,
+                                                                                                          5, 128,
                                                                                                           optional_extensions...>;
 
           template <typename interrupt_policy_type, typename platform_provider_type, typename... optional_extensions>
         using lockfree_single_block_resource_with_interrupt_policy_and_platform_provider = lockfree_single_block_resource_impl<interrupt_policy_type,
                                                                                                                                 platform_provider_type,
                                                                                                                                 32 * 1024 * 1024,
-                                                                                                                                5,
+                                                                                                                                5, 128,
                                                                                                                                 optional_extensions...>;
 
         template <typename interrupt_policy_type,
                   typename platform_provider_type,
                   size_t max_bin_bytes,
                   size_t max_waste_percent,
+                  size_t maintenance_window_threshold,
                   typename... optional_extensions>
         using lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy = lockfree_single_block_resource_impl<interrupt_policy_type,
                                                                                                                                   platform_provider_type,
                                                                                                                                   max_bin_bytes,
                                                                                                                                   max_waste_percent,
+                                                                                                                                  maintenance_window_threshold,
                                                                                                                                   optional_extensions...>;
     };
 } //  namespace MINIMAL_STD_NAMESPACE::pmr
