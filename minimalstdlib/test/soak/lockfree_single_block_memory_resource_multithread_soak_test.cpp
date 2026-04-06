@@ -2,22 +2,18 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#pragma once
-
 #include <CppUTest/TestHarness.h>
-
 #include <minstdconfig.h>
 
 #include <__memory_resource/lockfree_single_block_resource.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
-#include "interrupt_simulation_test_helpers.h"
+#include "../shared/interrupt_simulation_test_helpers.h"
 
 #include <array>
 #include <pthread.h>
 #include <random>
 #include <time.h>
-
 #include <stdio.h>
 #include <unistd.h>
 #include <signal.h>
@@ -417,4 +413,156 @@ namespace
         MARK_THREAD_EXIT
     };
 
+}
+
+
+// clang-format off
+
+TEST_GROUP(LockfreeSingleBlockMemoryResourceMultithreadSoakTests)
+{
+};
+
+TEST(LockfreeSingleBlockMemoryResourceMultithreadSoakTests, MultiThreadTest)
+{
+    constexpr size_t NUM_THREADS = 16;
+
+    start_allocations = false;
+    correctness_allocation_failed.store(false, minstd::memory_order_release);
+
+    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+
+    allocator_thread_arguments args[NUM_THREADS];
+    pthread_t threads[NUM_THREADS];
+
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        args[i].mem_resource = &resource;
+        args[i].rng_seed = i + 333;
+        args[i].reduced_pressure_for_correctness = true;
+
+        CHECK(pthread_create(&threads[i], NULL, allocation_thread, (void *)&args[i]) == 0);
+    }
+
+    sleep(1);
+
+    start_allocations = true;
+
+    timespec start_time{};
+    timespec end_time{};
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        CHECK(pthread_join(threads[i], NULL) == 0);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+    CHECK_FALSE(correctness_allocation_failed.load(minstd::memory_order_acquire));
+
+    double duration = (end_time.tv_sec - start_time.tv_sec) +
+                      (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+
+    printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
+
+    size_t total_number_of_allocations = 0;
+    size_t total_number_of_bytes_allocated = 0;
+
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        for (size_t j = 0; j < NUM_ALLOCATIONS_PER_THREAD; j++)
+        {
+            if (args[i].pointers_allocated[j] == nullptr)
+            {
+                break;
+            }
+
+            if (!args[i].deleted_element[j])
+            {
+                auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
+
+                if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::INVALID)
+                {
+                    printf("Invalid allocation info\n");
+                }
+
+                CHECK(alloc_info.state != lockfree_single_block_resource_with_stats::allocation_state::INVALID);
+
+                total_number_of_allocations++;
+                total_number_of_bytes_allocated += args[i].sizes_allocated[j];
+            }
+        }
+    }
+
+    CHECK_EQUAL(total_number_of_allocations, resource.current_allocated());
+    CHECK_EQUAL(total_number_of_bytes_allocated, resource.current_bytes_allocated());
+
+    // Verify each allocation can be looked up via get_allocation_info.
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        for (size_t j = 0; j < NUM_ALLOCATIONS_PER_THREAD; j++)
+        {
+            if (args[i].pointers_allocated[j] == nullptr)
+            {
+                break;
+            }
+
+            if (!args[i].deleted_element[j])
+            {
+                auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
+                CHECK(alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+            }
+        }
+    }
+
+    // Deallocate all the allocations.
+    start_allocations = false;
+
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        args[i].mem_resource = &resource;
+        args[i].rng_seed = i + 333;
+
+        CHECK(pthread_create(&threads[i], NULL, deallocation_thread, (void *)&args[i]) == 0);
+    }
+
+    start_allocations = true;
+
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        CHECK(pthread_join(threads[i], NULL) == 0);
+    }
+
+    CHECK_EQUAL(0, resource.current_allocated());
+    CHECK_EQUAL(0, resource.current_bytes_allocated());
+
+    // Again with malloc/free.
+    start_allocations = false;
+
+    minstd::pmr::malloc_free_wrapper_memory_resource malloc_free_resource(nullptr);
+
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        args[i].mem_resource = &malloc_free_resource;
+
+        CHECK(pthread_create(&threads[i], NULL, allocation_thread, (void *)&args[i]) == 0);
+    }
+
+    sleep(1);
+
+    start_allocations = true;
+
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+    for (size_t i = 0; i < NUM_THREADS; i++)
+    {
+        CHECK(pthread_join(threads[i], NULL) == 0);
+    }
+
+    clock_gettime(CLOCK_MONOTONIC, &end_time);
+
+    duration = (end_time.tv_sec - start_time.tv_sec) +
+               (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+
+    printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
 }

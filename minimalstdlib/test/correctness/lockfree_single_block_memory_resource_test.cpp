@@ -2,7 +2,60 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include "../shared/lockfree_single_block_resource_test_helpers.h"
+#include <CppUTest/TestHarness.h>
+#include <minstdconfig.h>
+
+#include <__memory_resource/lockfree_single_block_resource.h>
+#include <__memory_resource/malloc_free_wrapper_memory_resource.h>
+
+#include "../shared/interrupt_simulation_test_helpers.h"
+
+#include <array>
+#include <pthread.h>
+#include <random>
+#include <time.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <signal.h>
+#include <stdlib.h>
+
+extern "C" double sqrt(double);
+extern "C" double log(double);
+extern "C" double cos(double);
+extern "C" double exp(double);
+
+namespace
+{
+    constexpr size_t DEFAULT_ALIGNMENT = alignof(max_align_t);
+
+    constexpr size_t BUFFER_SIZE = 512 * 1048576; // 512 MB
+    char *buffer = new char[BUFFER_SIZE]();
+
+    using lockfree_single_block_resource_debug_metrics =
+        minstd::pmr::lockfree_single_block_resource_concrete_debug_metrics<
+            test_userspace_signal_mask_interrupt_policy,
+            minstd::pmr::platform::default_platform_provider,
+            128 * 1024 * 1024,
+            5>;
+
+    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+        test_userspace_signal_mask_interrupt_policy,
+        minstd::pmr::platform::default_platform_provider,
+        128 * 1024 * 1024,
+        5,
+        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::memory_resource_statistics,
+        minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
+        
+    typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+        test_userspace_signal_mask_interrupt_policy,
+        minstd::pmr::platform::default_platform_provider,
+        128 * 1024 * 1024,
+        5,
+        lockfree_single_block_resource_debug_metrics,
+        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+}
+
 
 // clang-format off
 
@@ -236,195 +289,87 @@ TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMai
     CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
     CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
     CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.debug_pending_deallocations());
+    CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, MultiThreadTest)
+struct test_unmasked_interrupt_policy
 {
-    constexpr size_t NUM_THREADS = 16;
+    using interrupt_state_t = uint64_t;
+    static inline interrupt_state_t disable_interrupts() { return 0; }
+    static inline void restore_interrupts(interrupt_state_t) {}
+};
 
-    start_allocations = false;
-    correctness_allocation_failed.store(false, minstd::memory_order_release);
+typedef minstd::pmr::lockfree_single_block_resource_with_interrupt_policy_platform_and_bin_policy<
+    test_unmasked_interrupt_policy,
+    minstd::pmr::platform::default_platform_provider,
+    128 * 1024 * 1024,
+    5,
+    lockfree_single_block_resource_debug_metrics,
+    minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_unmasked;
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+static lockfree_single_block_resource_unmasked* s_reentrant_resource = nullptr;
+static minstd::atomic<int> s_reentrant_signal_count{0};
+static minstd::atomic<bool> s_reentrant_test_done{false};
 
-    allocator_thread_arguments args[NUM_THREADS];
-    pthread_t threads[NUM_THREADS];
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
+static void sigusr1_reentrant_alloc_handler(int)
+{
+    if (s_reentrant_resource != nullptr)
     {
-        args[i].mem_resource = &resource;
-        args[i].rng_seed = i + 333;
-        args[i].reduced_pressure_for_correctness = true;
-
-        CHECK(pthread_create(&threads[i], NULL, allocation_thread, (void *)&args[i]) == 0);
-    }
-
-    sleep(1);
-
-    start_allocations = true;
-
-    timespec start_time{};
-    timespec end_time{};
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
-    {
-        CHECK(pthread_join(threads[i], NULL) == 0);
-    }
-
-    clock_gettime(CLOCK_MONOTONIC, &end_time);
-
-    CHECK_FALSE(correctness_allocation_failed.load(minstd::memory_order_acquire));
-
-    double duration = (end_time.tv_sec - start_time.tv_sec) +
-                      (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
-
-    printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
-
-    size_t total_number_of_allocations = 0;
-    size_t total_number_of_bytes_allocated = 0;
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
-    {
-        for (size_t j = 0; j < NUM_ALLOCATIONS_PER_THREAD; j++)
+        void* p = s_reentrant_resource->allocate(32);
+        if (p)
         {
-            if (args[i].pointers_allocated[j] == nullptr)
-            {
-                break;
-            }
-
-            if (!args[i].deleted_element[j])
-            {
-                auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
-
-                if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::INVALID)
-                {
-                    printf("Invalid allocation info\n");
-                }
-
-                CHECK(alloc_info.state != lockfree_single_block_resource_with_stats::allocation_state::INVALID);
-
-                total_number_of_allocations++;
-                total_number_of_bytes_allocated += args[i].sizes_allocated[j];
-            }
+            s_reentrant_resource->deallocate(p, 32);
+            s_reentrant_signal_count.fetch_add(1, minstd::memory_order_seq_cst);
         }
     }
-
-    CHECK_EQUAL(total_number_of_allocations, resource.current_allocated());
-    CHECK_EQUAL(total_number_of_bytes_allocated, resource.current_bytes_allocated());
-
-    //  Verify each allocation can be looked up via get_allocation_info
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
-    {
-        for (size_t j = 0; j < NUM_ALLOCATIONS_PER_THREAD; j++)
-        {
-            if (args[i].pointers_allocated[j] == nullptr)
-            {
-                break;
-            }
-
-            if (!args[i].deleted_element[j])
-            {
-                auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
-                CHECK(alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
-            }
-        }
-    }
-
-    //  Deallocate all the allocations
-
-    start_allocations = false;
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
-    {
-        args[i].mem_resource = &resource;
-        args[i].rng_seed = i + 333;
-
-        CHECK(pthread_create(&threads[i], NULL, deallocation_thread, (void *)&args[i]) == 0);
-    }
-
-    start_allocations = true;
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
-    {
-        CHECK(pthread_join(threads[i], NULL) == 0);
-    }
-
-    CHECK_EQUAL(0, resource.current_allocated());
-    CHECK_EQUAL(0, resource.current_bytes_allocated());
-
-    //  Again with malloc/free
-
-    start_allocations = false;
-
-    minstd::pmr::malloc_free_wrapper_memory_resource malloc_free_resource(nullptr);
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
-    {
-        args[i].mem_resource = &malloc_free_resource;
-
-        CHECK(pthread_create(&threads[i], NULL, allocation_thread, (void *)&args[i]) == 0);
-    }
-
-    sleep(1);
-
-    start_allocations = true;
-
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
-
-    for (size_t i = 0; i < NUM_THREADS; i++)
-    {
-        CHECK(pthread_join(threads[i], NULL) == 0);
-    }
-
-    clock_gettime(CLOCK_MONOTONIC, &end_time);
-
-    duration = (end_time.tv_sec - start_time.tv_sec) +
-               (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
-
-    printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, InterruptRobustness)
+static void* bomber_reentrant_fn(void* arg)
 {
-    lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
-    s_intr_resource = &resource;
-    s_intr_signal_count = 0;
-    s_intr_nested_count = 0;
-    s_intr_pending_ops = 0;
+    pthread_t target_thread = *static_cast<pthread_t*>(arg);
+    while (!s_reentrant_test_done.load(minstd::memory_order_acquire))
+    {
+        pthread_kill(target_thread, SIGUSR1);
+        usleep(100);
+    }
+    return nullptr;
+}
+
+TEST(LockfreeSingleBlockMemoryResourceTests, DirectInterruptReentrancy)
+{
+    lockfree_single_block_resource_unmasked resource(buffer, BUFFER_SIZE);
+    
+    s_reentrant_resource = &resource;
+    s_reentrant_signal_count = 0;
+    s_reentrant_test_done.store(false, minstd::memory_order_release);
 
     struct sigaction sa = {};
-    sa.sa_handler = sigusr1_nested_alloc_handler;
+    sa.sa_handler = sigusr1_reentrant_alloc_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_RESTART;
     sigaction(SIGUSR1, &sa, nullptr);
 
-    minstd::atomic<bool> stop_flag{false};
-    intr_test_bomber_args args{pthread_self(), &stop_flag};
+    pthread_t target = pthread_self();
     pthread_t bomber;
-    CHECK_EQUAL(0, pthread_create(&bomber, nullptr, intr_test_bomber_fn, &args));
+    CHECK_EQUAL(0, pthread_create(&bomber, nullptr, bomber_reentrant_fn, &target));
 
     for (int i = 0; i < 50000; ++i)
     {
-        process_pending_intr_work(&resource);
-
-        void* p = guarded_allocate(&resource, 32);
+        void* p = resource.allocate(64);
         if (p)
         {
-            guarded_deallocate(&resource, p, 32);
+            resource.deallocate(p, 64);
         }
     }
 
-    drain_pending_intr_work(&resource);
-
-    stop_flag.store(true, minstd::memory_order_release);
+    s_reentrant_test_done.store(true, minstd::memory_order_release);
     pthread_join(bomber, nullptr);
 
     sa.sa_handler = SIG_DFL;
     sigaction(SIGUSR1, &sa, nullptr);
-    s_intr_resource = nullptr;
+    s_reentrant_resource = nullptr;
 
-    CHECK_TRUE(s_intr_signal_count > 0);
-    CHECK_TRUE(s_intr_nested_count > 0);
+    CHECK_TRUE(s_reentrant_signal_count > 0);
 }
