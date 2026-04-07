@@ -65,8 +65,7 @@ namespace
         5,
         128,
         minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::memory_resource_statistics,
-        minstd::pmr::extensions::hash_check> lockfree_single_block_resource_with_stats;
+        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_block_resource_with_stats;
     typedef minstd::pmr::lockfree_single_block_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,

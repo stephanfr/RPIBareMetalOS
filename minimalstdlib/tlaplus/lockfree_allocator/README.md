@@ -173,7 +173,6 @@ The `allocatedBy` variable in TLA+ is **for verification only** - it tracks owne
 ### What's Abstracted Away
 
 - **Size bins** - 257 size classes in C++, single list per CPU in TLA+
-- **Hash verification** - `hash_check` extension for corruption detection
 - **Detailed counter arithmetic** - Simplified monotonic counter
 
 ## Running the Model Checker

@@ -65,11 +65,6 @@ namespace MINIMAL_STD_NAMESPACE
                     return aborted_deallocations_bad_index_.load(memory_order_acquire);
                 }
 
-                size_t aborted_deallocations_hash_mismatch() const
-                {
-                    return aborted_deallocations_hash_mismatch_.load(memory_order_acquire);
-                }
-
                 size_t aborted_deallocations_state_mismatch() const
                 {
                     return aborted_deallocations_state_mismatch_.load(memory_order_acquire);
@@ -89,7 +84,6 @@ namespace MINIMAL_STD_NAMESPACE
                 alignas(64) atomic<size_t> current_bytes_allocated_ = 0;
                 alignas(64) atomic<size_t> aborted_deallocations_ = 0;
                 alignas(64) atomic<size_t> aborted_deallocations_bad_index_ = 0;
-                alignas(64) atomic<size_t> aborted_deallocations_hash_mismatch_ = 0;
                 alignas(64) atomic<size_t> aborted_deallocations_state_mismatch_ = 0;
                 alignas(64) atomic<size_t> aborted_deallocations_cas_race_ = 0;
 
@@ -121,12 +115,6 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     aborted_deallocations_.fetch_add(1, memory_order_relaxed);
                     aborted_deallocations_bad_index_.fetch_add(1, memory_order_relaxed);
-                }
-
-                void deallocation_aborted_hash_mismatch()
-                {
-                    aborted_deallocations_.fetch_add(1, memory_order_relaxed);
-                    aborted_deallocations_hash_mismatch_.fetch_add(1, memory_order_relaxed);
                 }
 
                 void deallocation_aborted_state_mismatch()
@@ -166,11 +154,6 @@ namespace MINIMAL_STD_NAMESPACE
                     return 0;
                 }
 
-                size_t aborted_deallocations_hash_mismatch() const
-                {
-                    return 0;
-                }
-
                 size_t aborted_deallocations_state_mismatch() const
                 {
                     return 0;
@@ -194,10 +177,6 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 void deallocation_aborted_bad_index()
-                {
-                }
-
-                void deallocation_aborted_hash_mismatch()
                 {
                 }
 

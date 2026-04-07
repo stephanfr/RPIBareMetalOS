@@ -9,14 +9,12 @@
 #include "array"
 #include "atomic"
 #include "new"
-#include "random"
 
 #include "__concepts/derived_from.h"
 #include "__type_traits/conditional.h"
 
-#include "__extensions/hash_check.h"
-#include "__extensions/memory_resource_statistics.h"
 #include "__extensions/lockfree_single_block_resource_extended_statistics.h"
+#include "__extensions/memory_resource_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
 #include "__platform/interrupt_policy_abstractions.h"
 #include "lockfree/tagged_ptr"
@@ -43,28 +41,23 @@ namespace MINIMAL_STD_NAMESPACE
 
                 return (alignment_mod == 0) ? ptr : (void *)((ptr_as_int + alignment) - alignment_mod);
             }
-        }//  This resource starts with a super-block of memory and then allocates blocks from that superblock.
+        }
+
+        //  This resource starts with a super-block of memory and then allocates blocks from that superblock.
         //      When the superblock is exhausted, a new superblock is allocated from the upstream resource.
         //      The blocks and allocations will be aligned on __max_align (should be 16 bytes) boundaries
         //      which should be optimal for modern processors.
         //
         //  On destruction, this resource will just dump all the memory it allocated without invoking any destructors
 
-          template <typename interrupt_policy_type,
-              typename platform_provider_type = platform::default_platform_provider,
-              size_t max_bin_bytes = 32 * 1024 * 1024,
-              size_t max_waste_percent = 5,
-              size_t maintenance_window_threshold = 128,
-              typename... optional_extensions>
+        template <typename interrupt_policy_type,
+                  typename platform_provider_type = platform::default_platform_provider,
+                  size_t max_bin_bytes = 32 * 1024 * 1024,
+                  size_t max_waste_percent = 5,
+                  size_t maintenance_window_threshold = 128,
+                  typename... optional_extensions>
         class lockfree_single_block_resource_impl : public memory_resource, public optional_extensions...
         {
-        public:
-            
-
-            
-
-            
-
         private:
             using interrupt_guard_type = platform::basic_interrupt_guard<interrupt_policy_type>;
 
@@ -78,7 +71,6 @@ namespace MINIMAL_STD_NAMESPACE
                 size_t metadata_index_;
                 size_t size_including_header_; //  size of the block including the block_header
                 block_header *previous_block_;
-                uint64_t hash_; //  hash of the header - we will use this to insure the heap has not been corrupted
             };
 
             static constexpr size_t ALLOCATION_HEADER_SIZE = sizeof(block_header);
@@ -90,68 +82,23 @@ namespace MINIMAL_STD_NAMESPACE
                 // 8-byte aligned fields
                 // Packed pointer + state + version: [ptr:48][state:4][version:12]
                 // This allows atomic CAS to verify both pointer AND state simultaneously
-                atomic<uint64_t> block_state_;                     // 0x00, 8B
-                atomic<block_metadata *> next_;                    // 0x08, 8B
-                uint64_t randomized_value_;                        // 0x10, 8B
-                uint64_t allocation_hash_;                         // 0x18, 8B - immutable hash for allocation lifetime
+                atomic<uint64_t> block_state_;  // 0x00, 8B
+                atomic<block_metadata *> next_; // 0x08, 8B
 
                 // 4-byte fields
-                atomic<uint32_t> requested_size_;                  // 0x20, 4B
-                uint32_t total_size_;                              // 0x24, 4B
+                atomic<uint32_t> requested_size_; // 0x10, 4B
+                uint32_t total_size_;             // 0x14, 4B
 
                 // Independent list indices
-                uint32_t next_free_block_index_;                   // 0x28, 4B
-                uint32_t next_free_header_index_;                  // 0x2C, 4B
+                uint32_t next_free_block_index_;  // 0x18, 4B
+                uint32_t next_free_header_index_; // 0x1C, 4B
 
                 // 1-byte fields
-                uint8_t alignment_;                                // 0x30, 1B
-                uint8_t original_shard_;                           // 0x31, 1B
+                uint8_t alignment_;      // 0x20, 1B
+                uint8_t original_shard_; // 0x21, 1B
 
                 // Padding to 64 bytes
-                uint8_t reserved_[14];                             // 0x32, 14B
-
-                /**
-                 * @brief Computes an allocation-identity hash from fields that are stable for the
-                 *        lifetime of an allocation.
-                 *
-                 * The hash intentionally excludes mutable lifecycle/linkage fields (state, list
-                 * links, soft-delete timestamps). It includes header identity plus allocation
-                 * characteristics and per-allocation randomized value.
-                 */
-
-                static uint64_t compute_hash(const block_header &header,
-                                             uint32_t requested_size,
-                                             uint32_t total_size,
-                                             uint8_t alignment,
-                                             uint64_t randomized_value)
-                {
-                    uint64_t metadata_index_val = header.metadata_index_;
-                    uint64_t block_size_val = header.size_including_header_;
-                    uint32_t requested_size_val = requested_size;
-                    uint32_t total_size_val = total_size;
-                    uint8_t alignment_val = alignment;
-                    uint64_t rand_val = randomized_value;
-
-                    uint64_t hash_val = 0xcbf29ce484222325;
-                    uint64_t prime = 0x100000001b3;
-
-                    auto hash_bytes = [&](const uint8_t *data, size_t len) {
-                        for (size_t i = 0; i < len; ++i)
-                        {
-                            hash_val ^= data[i];
-                            hash_val *= prime;
-                        }
-                    };
-
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&metadata_index_val), sizeof(metadata_index_val));
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&block_size_val), sizeof(block_size_val));
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&requested_size_val), sizeof(requested_size_val));
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&total_size_val), sizeof(total_size_val));
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&alignment_val), sizeof(alignment_val));
-                    hash_bytes(reinterpret_cast<const uint8_t *>(&rand_val), sizeof(rand_val));
-
-                    return hash_val;
-                };
+                uint8_t reserved_[30]; // 0x22, 30B
 
                 // Helper methods to access packed fields
                 block_header *get_memory_block() const
@@ -249,12 +196,12 @@ namespace MINIMAL_STD_NAMESPACE
             lockfree_single_block_resource_impl() = delete;
 
             explicit lockfree_single_block_resource_impl(void *block,
-                                                    size_t block_size,
-                                                    size_t cpu_shards = DEFAULT_CPU_SHARDS)
+                                                         size_t block_size,
+                                                         size_t cpu_shards = DEFAULT_CPU_SHARDS)
                 : block_(block),
                   block_size_(block_size),
                   metadata_start_(static_cast<block_metadata *>(internal::align_pointer((char *)block + block_size, 64)) - 1),
-                  next_empty_memory_block_(0),  // Will be set after allocating per-CPU arrays
+                  next_empty_memory_block_(0), // Will be set after allocating per-CPU arrays
                   current_metadata_record_count_(0),
                   block_managers_(nullptr),
                   metadata_block_manager_capacity_(0),
@@ -305,7 +252,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Set next_empty_memory_block_ to point after the per-CPU arrays
                 block_header *initial_frontier = reinterpret_cast<block_header *>(current_ptr);
-                initial_frontier->previous_block_ = nullptr;  // Sentinel: walk terminates here
+                initial_frontier->previous_block_ = nullptr; // Sentinel: walk terminates here
                 next_empty_memory_block_.store(block_tag::make(initial_frontier), memory_order_release);
 
                 //  Set allocation_base_ and precompute address_bin_size_ for address bin routing
@@ -330,7 +277,7 @@ namespace MINIMAL_STD_NAMESPACE
             ~lockfree_single_block_resource_impl() = default;
 
             const extensions::lockfree_single_block_resource_extended_statistics &extended_metrics() const noexcept
-            requires (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                requires(is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
             {
                 return static_cast<const extensions::lockfree_single_block_resource_extended_statistics &>(*this);
             }
@@ -343,11 +290,6 @@ namespace MINIMAL_STD_NAMESPACE
                 if (metadata_index < current_metadata_record_count_.load(memory_order_acquire))
                 {
                     block_metadata &metadata = *(metadata_start_ - metadata_index);
-
-                    if (metadata.allocation_hash_ != header.hash_)
-                    {
-                        return {nullptr, INVALID, 0, 0};
-                    }
 
                     return {allocation, static_cast<allocation_state>(metadata.get_state()), metadata.requested_size_.load(memory_order_acquire), metadata.alignment_};
                 }
@@ -378,21 +320,19 @@ namespace MINIMAL_STD_NAMESPACE
 
                 static constexpr storage_type pack(pointer ptr, uint8_t state, uint16_t version = 0)
                 {
-                    return (static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr)) & PTR_MASK)
-                         | ((static_cast<storage_type>(state) & STATE_MASK) << PTR_BITS)
-                         | ((static_cast<storage_type>(version) & VERSION_MASK) << (PTR_BITS + STATE_BITS));
+                    return (static_cast<storage_type>(reinterpret_cast<uintptr_t>(ptr)) & PTR_MASK) | ((static_cast<storage_type>(state) & STATE_MASK) << PTR_BITS) | ((static_cast<storage_type>(version) & VERSION_MASK) << (PTR_BITS + STATE_BITS));
                 }
 
                 static constexpr pointer unpack_ptr(storage_type value)
                 {
                     uintptr_t raw = static_cast<uintptr_t>(value & PTR_MASK);
-                    // Sign-extend from bit 47 for AArch64 canonical addresses
-                    #ifndef __MINIMAL_STD_TEST__
+// Sign-extend from bit 47 for AArch64 canonical addresses
+#ifndef __MINIMAL_STD_TEST__
                     if (raw & (1ULL << 47))
                     {
                         raw |= ~PTR_MASK;
                     }
-                    #endif
+#endif
                     return reinterpret_cast<pointer>(raw);
                 }
 
@@ -432,8 +372,6 @@ namespace MINIMAL_STD_NAMESPACE
 
             static_assert(sizeof(free_block_bin) == 64, "free_block_bin is not 64 bytes in size");
             static_assert(NUM_ADDRESS_BINS == 8, "NUM_ADDRESS_BINS must be 8 to fit in a single cache line");
-
-            inline static fast_lockfree_low_quality_rng id_generator_;
 
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
             static constexpr size_t MAINTENANCE_WINDOW_THRESHOLD = maintenance_window_threshold;
@@ -1070,7 +1008,10 @@ namespace MINIMAL_STD_NAMESPACE
 
             void run_maintenance_window(size_t target_shard)
             {
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_maintenance_window(); };
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                {
+                    this->record_maintenance_window();
+                };
                 size_t shard_cursor = target_shard;
 
                 while (true)
@@ -1155,7 +1096,10 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 extended_metrics_sync_guard sync_guard{*this};
 
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_call(); };
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                {
+                    this->record_allocator_call();
+                };
 
                 //  We cannot throw and exception which is what the standard requires if we cannot allocate the memory
                 //      of either the desired size or alignment, so we will just return nullptr.
@@ -1191,7 +1135,10 @@ namespace MINIMAL_STD_NAMESPACE
                     size_t metadata_index = get_next_metadata_record_index();
                     if (metadata_index == NULL_INDEX)
                     {
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_failure(); };
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        {
+                            this->record_allocator_failure();
+                        };
                         return nullptr;
                     }
 
@@ -1209,7 +1156,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                         if (free_block != nullptr)
                         {
-                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_reuse_hit(); };
+                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                            {
+                                this->record_allocator_reuse_hit();
+                            };
                         }
                     }
 
@@ -1223,7 +1173,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                         if (free_block != nullptr)
                         {
-                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_reuse_hit(); };
+                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                            {
+                                this->record_allocator_reuse_hit();
+                            };
                         }
                     }
 
@@ -1234,11 +1187,13 @@ namespace MINIMAL_STD_NAMESPACE
                         frontier_reserved_metadata->total_size_ = 0;
                         frontier_reserved_metadata->alignment_ = 0;
                         frontier_reserved_metadata->original_shard_ = 0;
-                        frontier_reserved_metadata->allocation_hash_ = 0;
 
                         recycle_metadata(*frontier_reserved_metadata);
 
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_failure(); };
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        {
+                            this->record_allocator_failure();
+                        };
                         return nullptr;
                     }
 
@@ -1254,19 +1209,24 @@ namespace MINIMAL_STD_NAMESPACE
                         frontier_reserved_metadata->total_size_ = 0;
                         frontier_reserved_metadata->alignment_ = 0;
                         frontier_reserved_metadata->original_shard_ = 0;
-                        frontier_reserved_metadata->allocation_hash_ = 0;
 
                         recycle_metadata(*frontier_reserved_metadata);
                     }
 
                     if (used_frontier)
                     {
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_frontier_hit(); };
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        {
+                            this->record_allocator_frontier_hit();
+                        };
                     }
                 }
                 else
                 {
-                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_reuse_hit(); };
+                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                    {
+                        this->record_allocator_reuse_hit();
+                    };
                 }
 
                 free_block->metadata_index_ = metadata_to_index(metadata);
@@ -1282,24 +1242,15 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata->alignment_ = static_cast<uint8_t>(alignment);
                 metadata->original_shard_ = static_cast<uint8_t>(shard);
 
-                if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
-                {
-                    metadata->randomized_value_ = id_generator_();
-                    metadata->allocation_hash_ = block_metadata::compute_hash(
-                        *free_block,
-                        static_cast<uint32_t>(bytes),
-                        static_cast<uint32_t>(free_block->size_including_header_),
-                        static_cast<uint8_t>(alignment),
-                        metadata->randomized_value_);
-                    free_block->hash_ = metadata->allocation_hash_;
-                }
-
                 if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
                 {
                     extensions::memory_resource_statistics::allocation_made(bytes);
                 }
 
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocation_made(); };
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                {
+                    this->record_allocation_made();
+                };
 
                 return reinterpret_cast<uint8_t *>(free_block) + ALLOCATION_HEADER_SIZE;
             }
@@ -1309,7 +1260,6 @@ namespace MINIMAL_STD_NAMESPACE
                 extended_metrics_sync_guard sync_guard{*this};
 
                 //  Insure that the block is valid and in use.
-                //      If the hash of the metadata does not match the hash in the block, then the heap has been corrupted.
 
                 const block_header &header = as_block_header(block);
                 //  Insure the block has not already been deallocated and lock it.
@@ -1335,18 +1285,6 @@ namespace MINIMAL_STD_NAMESPACE
                     }
 
                     block_to_deallocate = metadata_start_ - metadata_index;
-
-                    if constexpr (minstd::is_base_of_v<extensions::hash_check, lockfree_single_block_resource_impl>)
-                    {
-                        if (block_to_deallocate->allocation_hash_ != header.hash_)
-                        {
-                            if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
-                            {
-                                extensions::memory_resource_statistics::deallocation_aborted_hash_mismatch();
-                            }
-                            return false;
-                        }
-                    }
 
                     uint64_t current_block_state = block_to_deallocate->block_state_.load(memory_order_acquire);
                     uint8_t current_state = block_state_ptr::unpack_state(current_block_state);
@@ -1374,7 +1312,6 @@ namespace MINIMAL_STD_NAMESPACE
                         }
                         return false;
                     }
-
                 }
 
                 //  Track the deallocation.  We know bytes is the correct size as the hash matches.
@@ -1384,7 +1321,10 @@ namespace MINIMAL_STD_NAMESPACE
                     extensions::memory_resource_statistics::deallocation_made(bytes);
                 }
 
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_deallocation_made(); };
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                {
+                    this->record_deallocation_made();
+                };
 
                 //  Mark the block as pending maintenance. Reuse is deferred until a maintenance window
                 //  converts this state into AVAILABLE and routes the block into free block bins.
@@ -1440,7 +1380,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (prev == nullptr)
                     {
-                        return reclaimed_any;  // Sentinel reached — no more blocks to reclaim
+                        return reclaimed_any; // Sentinel reached — no more blocks to reclaim
                     }
 
                     //  Bounds-check metadata index before dereferencing
@@ -1448,7 +1388,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (meta_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
-                        return reclaimed_any;  // Invalid or out-of-range metadata index
+                        return reclaimed_any; // Invalid or out-of-range metadata index
                     }
 
                     block_metadata *meta = metadata_start_ - meta_index;
@@ -1458,12 +1398,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (block_state_ptr::unpack_ptr(block_state) != prev)
                     {
-                        return reclaimed_any;  // Stale metadata — pointer doesn't match
+                        return reclaimed_any; // Stale metadata — pointer doesn't match
                     }
 
                     if (block_state_ptr::unpack_state(block_state) != AVAILABLE)
                     {
-                        return reclaimed_any;  // Block is not free
+                        return reclaimed_any; // Block is not free
                     }
 
                     //  CAS: AVAILABLE -> FRONTIER_RECLAIM_IN_PROGRESS (claim ownership)
@@ -1471,7 +1411,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (!meta->block_state_.compare_exchange_strong(block_state, desired_state, memory_order_acq_rel, memory_order_acquire))
                     {
-                        return reclaimed_any;  // Lost race — another thread claimed or changed the state
+                        return reclaimed_any; // Lost race — another thread claimed or changed the state
                     }
 
                     //  CAS: Move frontier backward from frontier_ptr to prev
@@ -1554,7 +1494,10 @@ namespace MINIMAL_STD_NAMESPACE
                             break;
                         }
 
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_frontier_cas_retry(); };
+                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        {
+                            this->record_frontier_cas_retry();
+                        };
                         back_off(retries);
                     } while (true);
                 }
@@ -1631,7 +1574,10 @@ namespace MINIMAL_STD_NAMESPACE
                     }
 
                     manager.release_active_slot();
-                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_metadata_cas_retry(); };
+                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                    {
+                        this->record_metadata_cas_retry();
+                    };
                 }
 
                 // Current_count reflects the value before increment, which is our acquired index
@@ -1645,7 +1591,13 @@ namespace MINIMAL_STD_NAMESPACE
             //  RECLAIM_DEFERRED: block already reclaimed; metadata cleanup deferred to after guard release.
             //  DISCARD: stale or non-allocatable state; skip this block.
 
-            enum class claim_result { CLAIMED, RETRY, RECLAIM_DEFERRED, DISCARD };
+            enum class claim_result
+            {
+                CLAIMED,
+                RETRY,
+                RECLAIM_DEFERRED,
+                DISCARD
+            };
 
             struct claimed_block
             {
@@ -1706,7 +1658,10 @@ namespace MINIMAL_STD_NAMESPACE
 
                 while (true)
                 {
-                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_iteration(); };
+                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                    {
+                        this->record_search_iteration();
+                    };
 
                     block_metadata *claimed_head = nullptr;
                     block_metadata *deferred_reclaim = nullptr;
@@ -1731,20 +1686,29 @@ namespace MINIMAL_STD_NAMESPACE
                                     continue;
                                 }
 
-                                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_pop(); };
+                                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                                {
+                                    this->record_search_pop();
+                                };
 
                                 auto result = unguarded_try_claim_popped_block(*head, bin_head);
 
                                 if (result == claim_result::CLAIMED)
                                 {
-                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_claimed(); };
+                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                                    {
+                                        this->record_search_claimed();
+                                    };
                                     claimed_head = head;
                                     stop_scan = true;
                                     break;
                                 }
                                 if (result == claim_result::RECLAIM_DEFERRED)
                                 {
-                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_search_reclaim_deferred(); };
+                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                                    {
+                                        this->record_search_reclaim_deferred();
+                                    };
                                     deferred_reclaim = head;
                                     stop_scan = true;
                                     break;
