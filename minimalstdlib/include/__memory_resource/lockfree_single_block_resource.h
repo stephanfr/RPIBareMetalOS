@@ -323,50 +323,19 @@ namespace MINIMAL_STD_NAMESPACE
                         }
                     }
                 }
+
+                refresh_extended_metrics_diagnostics();
             }
 
             ~lockfree_single_block_resource_impl() = default;
 
-            // Diagnostic getters for soak test analysis
-            size_t debug_frontier_offset() const
+            const extensions::lockfree_single_block_resource_extended_statistics &extended_metrics() const noexcept
+            requires (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
             {
-                auto frontier = block_tag::unpack_ptr(next_empty_memory_block_.load(memory_order_acquire));
-                return reinterpret_cast<uintptr_t>(frontier) - reinterpret_cast<uintptr_t>(block_);
+                return static_cast<const extensions::lockfree_single_block_resource_extended_statistics &>(*this);
             }
 
-			[[nodiscard]] constexpr size_t debug_alloc_calls() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_calls(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_alloc_reuse_hits() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_reuse_hits(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_alloc_frontier_hits() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_frontier_hits(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_alloc_failures() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::allocator_failures(); } return 0; }
-			[[nodiscard]] constexpr size_t current_allocated() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::current_allocated(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_search_iterations() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_iterations(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_search_pops() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_pops(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_search_claimed() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_claimed(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_search_reclaim_deferred() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::search_reclaim_deferred(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_frontier_cas_retries() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::frontier_cas_retries(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_metadata_cas_retries() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::metadata_cas_retries(); } return 0; }
-			[[nodiscard]] constexpr size_t debug_maintenance_windows() const noexcept { if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { return this->extensions::lockfree_single_block_resource_extended_statistics::maintenance_windows(); } return 0; }
-
-
-            size_t debug_metadata_count() const
-            {
-                return current_metadata_record_count_.load(memory_order_acquire);
-            }
-
-            size_t debug_metadata_boundary_offset() const
-            {
-                auto count = current_metadata_record_count_.load(memory_order_acquire);
-                uintptr_t boundary = reinterpret_cast<uintptr_t>(metadata_start_) - (count + 1) * ALLOCATION_METADATA_SIZE;
-                return boundary - reinterpret_cast<uintptr_t>(block_);
-            }size_t pending_deallocations() const
-            {
-                size_t total = 0;
-                for (size_t i = 0; i < cpu_shards_; ++i)
-                {
-                    total += pending_shards_[i].count_.load(memory_order_acquire);
-                }
-                return total;
-            }allocation_info get_allocation_info(void *allocation) const
+            allocation_info get_allocation_info(void *allocation) const
             {
                 const block_header &header = as_block_header(allocation);
                 const size_t metadata_index = header.metadata_index_;
@@ -602,6 +571,40 @@ namespace MINIMAL_STD_NAMESPACE
             size_t cpu_shards_;
             const void *allocation_base_;
             size_t address_bin_size_;
+
+            struct extended_metrics_sync_guard
+            {
+                lockfree_single_block_resource_impl &resource_;
+
+                ~extended_metrics_sync_guard()
+                {
+                    resource_.refresh_extended_metrics_diagnostics();
+                }
+            };
+
+            void refresh_extended_metrics_diagnostics()
+            {
+                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                {
+                    auto frontier = block_tag::unpack_ptr(next_empty_memory_block_.load(memory_order_acquire));
+                    size_t frontier_offset = reinterpret_cast<uintptr_t>(frontier) - reinterpret_cast<uintptr_t>(block_);
+
+                    size_t count = current_metadata_record_count_.load(memory_order_acquire);
+                    uintptr_t boundary = reinterpret_cast<uintptr_t>(metadata_start_) - (count + 1) * ALLOCATION_METADATA_SIZE;
+                    size_t metadata_boundary_offset = boundary - reinterpret_cast<uintptr_t>(block_);
+
+                    size_t total_pending = 0;
+                    for (size_t i = 0; i < cpu_shards_; ++i)
+                    {
+                        total_pending += pending_shards_[i].count_.load(memory_order_acquire);
+                    }
+
+                    this->record_frontier_offset(frontier_offset);
+                    this->record_metadata_count(count);
+                    this->record_metadata_boundary_offset(metadata_boundary_offset);
+                    this->record_pending_deallocations(total_pending);
+                }
+            }
 
             size_t cpu_shard_index() const
             {
@@ -1150,6 +1153,8 @@ namespace MINIMAL_STD_NAMESPACE
 
             void *do_allocate(size_t bytes, size_t alignment) override
             {
+                extended_metrics_sync_guard sync_guard{*this};
+
                 if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>) { this->record_allocator_call(); };
 
                 //  We cannot throw and exception which is what the standard requires if we cannot allocate the memory
@@ -1301,6 +1306,8 @@ namespace MINIMAL_STD_NAMESPACE
 
             bool do_try_deallocate(void *block, size_t bytes, size_t alignment)
             {
+                extended_metrics_sync_guard sync_guard{*this};
+
                 //  Insure that the block is valid and in use.
                 //      If the hash of the metadata does not match the hash in the block, then the heap has been corrupted.
 

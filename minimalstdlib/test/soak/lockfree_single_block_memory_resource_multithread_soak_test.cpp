@@ -356,13 +356,13 @@ namespace
 
     static bool settle_frontier_to_initial(lockfree_single_block_resource_with_stats &resource, size_t initial_frontier)
     {
-        const size_t metadata_count = resource.debug_metadata_count();
+        const size_t metadata_count = resource.extended_metrics().metadata_count();
         const size_t max_attempts = (metadata_count < 1000) ? 50000 : (metadata_count * 64);
         static constexpr size_t probe_sizes[] = {16, 4096, 65536, 1048576, 4194304};
 
         for (size_t attempt = 0; attempt < max_attempts; ++attempt)
         {
-            if (resource.frontier_offset() == initial_frontier)
+            if (resource.extended_metrics().frontier_offset() == initial_frontier)
             {
                 return true;
             }
@@ -380,7 +380,7 @@ namespace
             }
         }
 
-        return resource.frontier_offset() == initial_frontier;
+        return resource.extended_metrics().frontier_offset() == initial_frontier;
     }
 
     static void sigusr1_nested_alloc_handler(int)
@@ -492,7 +492,7 @@ TEST(LockfreeSingleBlockMemoryResourceMultithreadSoakTests, MultiThreadTest)
         }
     }
 
-    CHECK_EQUAL(total_number_of_allocations, resource.current_allocated());
+    CHECK_EQUAL(total_number_of_allocations, resource.extended_metrics().current_allocated());
     CHECK_EQUAL(total_number_of_bytes_allocated, resource.current_bytes_allocated());
 
     // Verify each allocation can be looked up via get_allocation_info.
@@ -531,7 +531,7 @@ TEST(LockfreeSingleBlockMemoryResourceMultithreadSoakTests, MultiThreadTest)
         CHECK(pthread_join(threads[i], NULL) == 0);
     }
 
-    CHECK_EQUAL(0, resource.current_allocated());
+    CHECK_EQUAL(0, resource.extended_metrics().current_allocated());
     CHECK_EQUAL(0, resource.current_bytes_allocated());
 
     // Again with malloc/free.

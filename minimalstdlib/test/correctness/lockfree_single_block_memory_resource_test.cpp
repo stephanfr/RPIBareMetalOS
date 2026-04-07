@@ -107,11 +107,11 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionali
     CHECK(allocation_info.size == 45678);
     CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
-    CHECK_EQUAL(4, resource.current_allocated());
+    CHECK_EQUAL(4, resource.extended_metrics().current_allocated());
 
     resource.deallocate(ptr4, 45678);
 
-    CHECK_EQUAL(3, resource.current_allocated());
+    CHECK_EQUAL(3, resource.extended_metrics().current_allocated());
 
     void *ptr5 = resource.allocate(100);
 
@@ -143,13 +143,13 @@ TEST(LockfreeSingleBlockMemoryResourceTests, CurrentAllocatedIsTrackedOnTemplate
 
     CHECK(ptr1 != nullptr);
     CHECK(ptr2 != nullptr);
-    CHECK_EQUAL(2, resource.current_allocated());
+    CHECK_EQUAL(2, resource.extended_metrics().current_allocated());
 
     resource.deallocate(ptr1, 128);
-    CHECK_EQUAL(1, resource.current_allocated());
+    CHECK_EQUAL(1, resource.extended_metrics().current_allocated());
 
     resource.deallocate(ptr2, 256);
-    CHECK_EQUAL(0, resource.current_allocated());
+    CHECK_EQUAL(0, resource.extended_metrics().current_allocated());
 }
 
 TEST(LockfreeSingleBlockMemoryResourceTests, DeferredDeallocationOpensMaintenanceWindowAtTen)
@@ -166,26 +166,26 @@ TEST(LockfreeSingleBlockMemoryResourceTests, DeferredDeallocationOpensMaintenanc
         CHECK(ptrs[i] != nullptr);
     }
 
-    CHECK_EQUAL(NUM_BLOCKS, resource.current_allocated());
+    CHECK_EQUAL(NUM_BLOCKS, resource.extended_metrics().current_allocated());
 
     for (size_t i = 0; i < NUM_BLOCKS - 1; ++i)
     {
         resource.deallocate(ptrs[i], ALLOC_SIZE);
     }
 
-    CHECK_EQUAL(1, resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(NUM_BLOCKS - 1), resource.pending_deallocations());
+    CHECK_EQUAL(1, resource.extended_metrics().current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(NUM_BLOCKS - 1), resource.extended_metrics().pending_deallocations());
 
     auto pending_info = resource.get_allocation_info(ptrs[0]);
     CHECK(pending_info.state == lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
 
-    const size_t windows_before = resource.maintenance_windows();
+    const size_t windows_before = resource.extended_metrics().maintenance_windows();
 
     resource.deallocate(ptrs[NUM_BLOCKS - 1], ALLOC_SIZE);
 
-    CHECK_EQUAL(0, resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
-    CHECK(resource.maintenance_windows() > windows_before);
+    CHECK_EQUAL(0, resource.extended_metrics().current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().pending_deallocations());
+    CHECK(resource.extended_metrics().maintenance_windows() > windows_before);
 
     auto finalized_info = resource.get_allocation_info(ptrs[0]);
     CHECK(finalized_info.state != lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
@@ -210,14 +210,14 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ReuseAfterMaintenanceKeepsMetadataC
         resource.deallocate(ptrs[i], ALLOC_SIZE);
     }
 
-    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().pending_deallocations());
 
-    const size_t metadata_before_reuse = resource.debug_metadata_count();
+    const size_t metadata_before_reuse = resource.extended_metrics().metadata_count();
 
     void *reused = resource.allocate(ALLOC_SIZE);
     CHECK(reused != nullptr);
 
-    const size_t metadata_after_reuse = resource.debug_metadata_count();
+    const size_t metadata_after_reuse = resource.extended_metrics().metadata_count();
 
     // Full metadata trimming can reset the count to zero; the next allocation then
     // recreates a single metadata record.
@@ -250,16 +250,16 @@ TEST(LockfreeSingleBlockMemoryResourceTests, LargePendingBatchDrainsAndOpensMult
         CHECK(ptrs[i] != nullptr);
     }
 
-    const size_t windows_before = resource.maintenance_windows();
+    const size_t windows_before = resource.extended_metrics().maintenance_windows();
 
     for (size_t i = 0; i < NUM_BLOCKS; ++i)
     {
         resource.deallocate(ptrs[i], ALLOC_SIZE);
     }
 
-    CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
-    CHECK(resource.maintenance_windows() > windows_before);
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().pending_deallocations());
+    CHECK(resource.extended_metrics().maintenance_windows() > windows_before);
 }
 
 TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMaintenance)
@@ -270,7 +270,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMai
     constexpr size_t NUM_BLOCKS = 20;
     void *ptrs[NUM_BLOCKS] = {nullptr};
 
-    const size_t initial_frontier = resource.debug_frontier_offset();
+    const size_t initial_frontier = resource.extended_metrics().frontier_offset();
 
     for (size_t i = 0; i < NUM_BLOCKS; ++i)
     {
@@ -278,7 +278,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMai
         CHECK(ptrs[i] != nullptr);
     }
 
-    CHECK(resource.debug_frontier_offset() > initial_frontier);
+    CHECK(resource.extended_metrics().frontier_offset() > initial_frontier);
 
     // Free in reverse order to maximize contiguous tail reclaim opportunities.
     for (size_t i = NUM_BLOCKS; i > 0; --i)
@@ -286,12 +286,12 @@ TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMai
         resource.deallocate(ptrs[i - 1], ALLOC_SIZE);
     }
 
-    CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
-    CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.current_allocated());
-    CHECK_EQUAL(static_cast<size_t>(0), resource.pending_deallocations());
-    CHECK_EQUAL(initial_frontier, resource.debug_frontier_offset());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().pending_deallocations());
+    CHECK_EQUAL(initial_frontier, resource.extended_metrics().frontier_offset());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().current_allocated());
+    CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().pending_deallocations());
+    CHECK_EQUAL(initial_frontier, resource.extended_metrics().frontier_offset());
 }
 
 struct test_unmasked_interrupt_policy
