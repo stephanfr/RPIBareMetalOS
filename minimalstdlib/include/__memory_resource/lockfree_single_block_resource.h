@@ -10,9 +10,6 @@
 #include "atomic"
 #include "new"
 
-#include "__concepts/derived_from.h"
-#include "__type_traits/conditional.h"
-
 #include "__extensions/lockfree_single_block_resource_extended_statistics.h"
 #include "__extensions/memory_resource_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
@@ -452,32 +449,6 @@ namespace MINIMAL_STD_NAMESPACE
 
             inline static array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
 
-            static constexpr size_t BIN_LOOKUP_SHIFT = 13; // 8 KiB buckets
-            static constexpr size_t BIN_LOOKUP_BUCKETS = (MAX_ALLOCATION_SIZE_INTERNAL >> BIN_LOOKUP_SHIFT) + 1;
-
-            static array<size_t, BIN_LOOKUP_BUCKETS> build_bin_index_hints()
-            {
-                array<size_t, BIN_LOOKUP_BUCKETS> hints{};
-
-                size_t bin = 0;
-                for (size_t bucket = 0; bucket < BIN_LOOKUP_BUCKETS; ++bucket)
-                {
-                    const size_t bucket_upper_bound_exclusive = (bucket + 1) << BIN_LOOKUP_SHIFT;
-
-                    while ((bin + 1) < NUM_NON_SENTINEL_FREE_BLOCK_BINS &&
-                           FREE_BLOCK_BIN_SIZES[bin] < bucket_upper_bound_exclusive)
-                    {
-                        ++bin;
-                    }
-
-                    hints[bucket] = bin;
-                }
-
-                return hints;
-            }
-
-            inline static array<size_t, BIN_LOOKUP_BUCKETS> BIN_INDEX_HINTS = build_bin_index_hints();
-
             static_assert(NUM_NON_SENTINEL_FREE_BLOCK_BINS >= 2,
                           "Uniform bin policy must generate at least two non-sentinel bins");
 
@@ -662,11 +633,6 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     block_metadata *current = metadata_tag::unpack_ptr(current_tag);
 
-                    if (current == nullptr)
-                    {
-                        return nullptr;
-                    }
-
                     uint64_t next_tag = metadata_tag::pack(
                         index_to_metadata(current->*next_index_field),
                         static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
@@ -806,73 +772,6 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             }
 
-            void scavenge_frontier_reclaimed_heads()
-            {
-                //  Safely recover metadata for frontier-reclaimed nodes by popping them from
-                //  free-bin heads before recycling. This avoids leaving reclamation cleanup
-                //  solely to allocation-path discovery.
-
-                for (size_t free_block_bin = 0; free_block_bin < NUM_FREE_BLOCK_BINS; ++free_block_bin)
-                {
-                    for (size_t shard = 0; shard < cpu_shards_; ++shard)
-                    {
-                        size_t bin_index = free_block_bin * cpu_shards_ + shard;
-
-                        for (size_t addr_bin = 0; addr_bin < NUM_ADDRESS_BINS; ++addr_bin)
-                        {
-                            auto &bin_head = free_block_bins_[bin_index].address_bin_heads_[addr_bin];
-
-                            while (true)
-                            {
-                                block_metadata *reclaimed = nullptr;
-                                bool done_with_head = false;
-
-                                {
-                                    interrupt_guard_type guard;
-
-                                    block_metadata *head = unguarded_pop(
-                                        bin_head,
-                                        &block_metadata::next_free_block_index_);
-
-                                    if (head == nullptr)
-                                    {
-                                        done_with_head = true;
-                                    }
-                                    else
-                                    {
-                                        uint64_t head_state = head->block_state_.load(memory_order_acquire);
-                                        uint8_t state = block_state_ptr::unpack_state(head_state);
-
-                                        if (state == FRONTIER_RECLAIMED)
-                                        {
-                                            reclaimed = head;
-                                        }
-                                        else
-                                        {
-                                            // Keep non-reclaimed head in place; deeper reclaimed nodes
-                                            // will be recovered when they become visible at head.
-                                            unguarded_push(bin_head, *head, &block_metadata::next_free_block_index_);
-                                            done_with_head = true;
-                                        }
-                                    }
-                                }
-
-                                if (reclaimed != nullptr)
-                                {
-                                    recycle_metadata(*reclaimed);
-                                    continue;
-                                }
-
-                                if (done_with_head)
-                                {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
             void trim_metadata_records()
             {
                 while (true)
@@ -966,8 +865,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void process_pending_batch(
                 array<block_metadata *, MAINTENANCE_WINDOW_BATCH_SIZE> &pending_batch,
-                size_t pending_batch_count,
-                size_t &shard_cursor)
+                size_t pending_batch_count)
             {
                 if (pending_batch_count == 0)
                 {
@@ -1012,7 +910,6 @@ namespace MINIMAL_STD_NAMESPACE
                 {
                     this->record_maintenance_window();
                 };
-                size_t shard_cursor = target_shard;
 
                 while (true)
                 {
@@ -1037,22 +934,18 @@ namespace MINIMAL_STD_NAMESPACE
 
                         if (pending_batch_count == MAINTENANCE_WINDOW_BATCH_SIZE)
                         {
-                            process_pending_batch(pending_batch, pending_batch_count, shard_cursor);
+                            process_pending_batch(pending_batch, pending_batch_count);
                             pending_batch_count = 0;
                         }
 
                         pending_list = next;
                     }
 
-                    process_pending_batch(pending_batch, pending_batch_count, shard_cursor);
+                    process_pending_batch(pending_batch, pending_batch_count);
                     reduce_pending_deallocation_count(target_shard, stolen_count);
                 }
 
-                bool reclaimed_frontier = try_reclaim_frontier_blocks();
-                if (reclaimed_frontier)
-                {
-                    scavenge_frontier_reclaimed_heads();
-                }
+                (void)try_reclaim_frontier_blocks();
                 trim_metadata_records();
             }
 
@@ -1314,7 +1207,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                //  Track the deallocation.  We know bytes is the correct size as the hash matches.
+                //  Track the deallocation after ownership is successfully acquired.
 
                 if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
                 {

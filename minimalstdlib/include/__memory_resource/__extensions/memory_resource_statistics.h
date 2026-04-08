@@ -106,11 +106,6 @@ namespace MINIMAL_STD_NAMESPACE
                     current_bytes_allocated_.fetch_sub(size, memory_order_relaxed);
                 }
 
-                void deallocation_aborted()
-                {
-                    aborted_deallocations_.fetch_add(1, memory_order_relaxed);
-                }
-
                 void deallocation_aborted_bad_index()
                 {
                     aborted_deallocations_.fetch_add(1, memory_order_relaxed);
@@ -169,10 +164,6 @@ namespace MINIMAL_STD_NAMESPACE
                 }
 
                 void deallocation_made(size_t size)
-                {
-                }
-
-                void deallocation_aborted()
                 {
                 }
 

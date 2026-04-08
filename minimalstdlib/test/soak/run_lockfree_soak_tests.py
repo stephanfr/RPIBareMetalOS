@@ -19,6 +19,14 @@ Options:
     --status-file <path>   Output file for overall test status (default: /tmp/soak_status.log).
     --timeout <secs>    Per-run timeout in seconds.
     --group <name>      Run only this group (may be repeated).
+    --break-on-deallocate-fail
+                        In GDB mode, set hard breakpoints on allocator deallocate-failure paths,
+                        dump thread state, and write a core file on first hit.
+    --gdb-artifacts-dir <path>
+                        Directory for generated gdb command files, logs, and core dumps.
+                        Default: /tmp/soak_gdb_artifacts
+    --stop-on-first-failure
+                        Stop the run loop as soon as any group/run fails.
     --list              List discovered groups then exit.
 """
 
@@ -28,13 +36,15 @@ import select
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 DEFAULT_EXE = "test/build/soak/cpputest_soak.exe"
-GDB_PREAMBLE = [
-    "handle SIGUSR1 noprint nostop pass",
-    "run",
-    "bt",
+
+DEALLOC_FAIL_BREAKPOINTS = [
+    (1175, "deallocation_aborted_bad_index"),
+    (1190, "deallocation_aborted_state_mismatch"),
+    (1204, "deallocation_aborted_cas_race"),
 ]
 
 progress_file_path = None
@@ -70,16 +80,91 @@ def discover_groups(exe: str) -> list[str]:
             groups.append(token)
     return groups
 
-def build_gdb_cmd(exe: str, group: str) -> list[str]:
-    ex_args = []
-    for ex in GDB_PREAMBLE:
-        ex_args += ["-ex", ex]
-    return ["gdb", "-batch"] + ex_args + ["--args", exe, "-g", group]
+def sanitize_filename(value: str) -> str:
+    return "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in value)
+
+def write_gdb_script(
+    script_path: Path,
+    group: str,
+    run_index: int,
+    artifacts_dir: Path,
+    break_on_deallocate_fail: bool,
+) -> tuple[Path, Path]:
+    safe_group = sanitize_filename(group)
+    gdb_log_path = artifacts_dir / f"gdb_{safe_group}_run_{run_index}.log"
+    core_path = artifacts_dir / f"core_{safe_group}_run_{run_index}.core"
+
+    lines: list[str] = [
+        "set pagination off",
+        "set confirm off",
+        "set print pretty on",
+        "set print frame-arguments all",
+        "handle SIGUSR1 noprint nostop pass",
+        f"set logging file {gdb_log_path}",
+        "set logging overwrite on",
+        "set logging enabled on",
+    ]
+
+    if break_on_deallocate_fail:
+        for line_no, reason in DEALLOC_FAIL_BREAKPOINTS:
+            lines.extend(
+                [
+                    f"break minimalstdlib/include/__memory_resource/lockfree_single_block_resource.h:{line_no}",
+                    "commands",
+                    "silent",
+                    f"printf \\\"\\n*** BREAK: {reason} group={group} run={run_index} ***\\n\\\"",
+                    "bt",
+                    "info args",
+                    "info locals",
+                    "thread apply all bt 3",
+                    f"generate-core-file {core_path}",
+                    "set logging enabled off",
+                    "quit 99",
+                    "end",
+                ]
+            )
+
+    lines.extend(
+        [
+            "run",
+            "set logging enabled off",
+        ]
+    )
+
+    script_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return gdb_log_path, core_path
+
+def build_gdb_cmd(
+    exe: str,
+    group: str,
+    run_index: int,
+    artifacts_dir: Path,
+    break_on_deallocate_fail: bool,
+) -> tuple[list[str], Path, Path]:
+    safe_group = sanitize_filename(group)
+    script_path = artifacts_dir / f"gdb_cmd_{safe_group}_run_{run_index}.gdb"
+    gdb_log_path, core_path = write_gdb_script(
+        script_path,
+        group,
+        run_index,
+        artifacts_dir,
+        break_on_deallocate_fail,
+    )
+    cmd = ["gdb", "-q", "-batch", "-x", str(script_path), "--args", exe, "-g", group]
+    return cmd, gdb_log_path, core_path
 
 def build_direct_cmd(exe: str, group: str) -> list[str]:
     return [exe, "-g", group]
 
-def run_group(cmd: list[str], group: str, run_index: int, timeout: int, run_env: dict[str, str]) -> bool:
+def run_group(
+    cmd: list[str],
+    group: str,
+    run_index: int,
+    timeout: int,
+    run_env: dict[str, str],
+    gdb_log_path: Path | None = None,
+    core_path: Path | None = None,
+) -> bool:
     label = f"[{group} run {run_index}]"
     log_progress(f"\n{'='*70}\n")
     log_progress(f"{label}  cmd: {' '.join(cmd)}\n")
@@ -125,6 +210,11 @@ def run_group(cmd: list[str], group: str, run_index: int, timeout: int, run_env:
         return_code = proc.returncode if proc.returncode is not None else -1
         ok = (return_code == 0) or (return_code == 1 and exited_normally and no_stack)
         status = "PASS" if ok else f"FAIL (rc={return_code})"
+
+        if not ok and gdb_log_path is not None:
+            log_progress(f"{label}  gdb_log={gdb_log_path}\n")
+        if core_path is not None and core_path.exists():
+            log_progress(f"{label}  core_dump={core_path}\n")
         
         log_progress(f"{label}  {status}  elapsed={elapsed:.1f}s\n")
         log_status(f"{label} {status} (rc={return_code}, elapsed={elapsed:.1f}s)\n")
@@ -149,6 +239,9 @@ def main() -> int:
     parser.add_argument("--status-file", default="/tmp/soak_status.log")
     parser.add_argument("--timeout", type=int, default=None)
     parser.add_argument("--group", action="append", dest="groups", default=[])
+    parser.add_argument("--break-on-deallocate-fail", action="store_true")
+    parser.add_argument("--gdb-artifacts-dir", default="/tmp/soak_gdb_artifacts")
+    parser.add_argument("--stop-on-first-failure", action="store_true")
     parser.add_argument("--list", action="store_true")
     args = parser.parse_args()
 
@@ -192,6 +285,10 @@ def main() -> int:
         effective_timeout = max(effective_timeout, args.allocator_soak_duration + 120)
 
     log_progress(f"Using timeout={effective_timeout}s\n")
+
+    artifacts_dir = Path(args.gdb_artifacts_dir)
+    if not args.no_gdb:
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
     
     total = 0
     passed = 0
@@ -202,10 +299,33 @@ def main() -> int:
     keep_running = True
     while keep_running:
         for group in target_groups:
-            cmd = build_direct_cmd(exe, group) if args.no_gdb else build_gdb_cmd(exe, group)
+            gdb_log_path = None
+            core_path = None
+            if args.no_gdb:
+                cmd = build_direct_cmd(exe, group)
+            else:
+                cmd, gdb_log_path, core_path = build_gdb_cmd(
+                    exe,
+                    group,
+                    run_idx,
+                    artifacts_dir,
+                    args.break_on_deallocate_fail,
+                )
             total += 1
-            if run_group(cmd, group, run_idx, effective_timeout, run_env):
+            ok = run_group(
+                cmd,
+                group,
+                run_idx,
+                effective_timeout,
+                run_env,
+                gdb_log_path,
+                core_path,
+            )
+            if ok:
                 passed += 1
+            elif args.stop_on_first_failure:
+                keep_running = False
+                break
 
         if args.test_duration is not None:
             if time.time() - start_time >= args.test_duration:

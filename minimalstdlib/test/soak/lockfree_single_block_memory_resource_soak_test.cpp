@@ -915,6 +915,30 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
             resource.current_bytes_allocated(), resource.extended_metrics().current_allocated());
             printf("Frontier offset: %zu, Metadata count: %zu\n",
                 resource.extended_metrics().frontier_offset(), resource.extended_metrics().metadata_count());
+
+     const size_t allocator_calls = resource.extended_metrics().allocator_calls();
+     const size_t allocator_reuse_hits = resource.extended_metrics().allocator_reuse_hits();
+     const size_t allocator_frontier_hits = resource.extended_metrics().allocator_frontier_hits();
+     const size_t allocator_failures = resource.extended_metrics().allocator_failures();
+     const size_t search_iterations = resource.extended_metrics().search_iterations();
+     const size_t search_pops = resource.extended_metrics().search_pops();
+     const size_t search_claimed = resource.extended_metrics().search_claimed();
+     const size_t search_reclaim_deferred = resource.extended_metrics().search_reclaim_deferred();
+     const double miss_pct = (allocator_calls == 0)
+                                          ? 0.0
+                                          : (100.0 * static_cast<double>(allocator_frontier_hits + allocator_failures) /
+                                              static_cast<double>(allocator_calls));
+
+     printf("Allocator internals: calls=%zu reuse=%zu frontier=%zu failures=%zu search_iter=%zu pops=%zu claimed=%zu reclaim_deferred=%zu miss_pct=%.2f\n",
+              allocator_calls,
+              allocator_reuse_hits,
+              allocator_frontier_hits,
+              allocator_failures,
+              search_iterations,
+              search_pops,
+              search_claimed,
+              search_reclaim_deferred,
+              miss_pct);
     fflush(stdout);
 
     if (resource.current_bytes_allocated() != 0)
