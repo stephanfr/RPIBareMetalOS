@@ -112,7 +112,7 @@ def write_gdb_script(
                     f"break minimalstdlib/include/__memory_resource/lockfree_single_block_resource.h:{line_no}",
                     "commands",
                     "silent",
-                    f"printf \\\"\\n*** BREAK: {reason} group={group} run={run_index} ***\\n\\\"",
+                    f'printf "\\n*** BREAK: {reason} group={group} run={run_index} ***\\n"',
                     "bt",
                     "info args",
                     "info locals",

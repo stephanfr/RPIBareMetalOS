@@ -77,24 +77,37 @@ namespace
 
     struct allocator_thread_arguments
     {
-        minstd::pmr::memory_resource *mem_resource;
-        uint64_t rng_seed;
+        minstd::pmr::memory_resource *mem_resource = nullptr;
+        uint64_t rng_seed = 0;
         bool reduced_pressure_for_correctness = false;
-        minstd::array<void *, NUM_ALLOCATIONS_PER_THREAD> pointers_allocated = {nullptr};
-        minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> sizes_allocated = {0};
-        minstd::array<bool, NUM_ALLOCATIONS_PER_THREAD> deleted_element = {false};
+        minstd::array<void *, NUM_ALLOCATIONS_PER_THREAD> pointers_allocated;
+        minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> sizes_allocated;
+        minstd::array<bool, NUM_ALLOCATIONS_PER_THREAD> deleted_element;
         size_t repetitions = 0;
         size_t allocation_failures = 0;
+
+        allocator_thread_arguments()
+        {
+            pointers_allocated.fill(nullptr);
+            sizes_allocated.fill(0);
+            deleted_element.fill(false);
+        }
     };
 
     struct perf_thread_arguments
     {
-        minstd::pmr::memory_resource *mem_resource;
-        uint64_t rng_seed;
-        minstd::array<void *, PERF_ALLOCATIONS_PER_THREAD> pointers_allocated = {nullptr};
-        minstd::array<size_t, PERF_ALLOCATIONS_PER_THREAD> sizes_allocated = {0};
+        minstd::pmr::memory_resource *mem_resource = nullptr;
+        uint64_t rng_seed = 0;
+        minstd::array<void *, PERF_ALLOCATIONS_PER_THREAD> pointers_allocated;
+        minstd::array<size_t, PERF_ALLOCATIONS_PER_THREAD> sizes_allocated;
         size_t repetitions = 0;
         size_t allocation_failures = 0;
+
+        perf_thread_arguments()
+        {
+            pointers_allocated.fill(nullptr);
+            sizes_allocated.fill(0);
+        }
     };
 
     void *allocation_thread(void *arguments)
@@ -104,8 +117,10 @@ namespace
         minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
 
         minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> sizes;
-        minstd::array<bool, NUM_ALLOCATIONS_PER_THREAD> deallocate_operation = {false};
-        minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> deallocation_index = {0};
+        minstd::array<bool, NUM_ALLOCATIONS_PER_THREAD> deallocate_operation;
+        deallocate_operation.fill(false);
+        minstd::array<size_t, NUM_ALLOCATIONS_PER_THREAD> deallocation_index;
+        deallocation_index.fill(0);
 
         for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
         {
@@ -183,136 +198,6 @@ namespace
         return nullptr;
     }
 
-    void *repeated_allocation_deallocation_thread(void *arguments)
-    {
-        allocator_thread_arguments *args = static_cast<allocator_thread_arguments *>(arguments);
-
-        minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
-
-        while (!start_allocations)
-        {
-            // spin wait
-        }
-
-        for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
-        {
-            size_t block_size = 128 + (rng() % 7000);
-
-            void *ptr = nullptr;
-            do
-            {
-                ptr = args->mem_resource->allocate(block_size);
-                if (ptr == nullptr)
-                {
-                    args->allocation_failures++;
-                }
-            } while (ptr == nullptr);
-
-            args->pointers_allocated[i] = ptr;
-            args->sizes_allocated[i] = block_size;
-        }
-
-        for (size_t j = 0; j < args->repetitions; j++)
-        {
-            for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
-            {
-                args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
-
-                size_t block_size = 128 + (rng() % 7000);
-
-                void *ptr = nullptr;
-                do
-                {
-                    ptr = args->mem_resource->allocate(block_size);
-                    if (ptr == nullptr)
-                    {
-                        args->allocation_failures++;
-                    }
-                } while (ptr == nullptr);
-
-                args->pointers_allocated[i] = ptr;
-                args->sizes_allocated[i] = block_size;
-            }
-        }
-
-        for (size_t i = 0; i < NUM_ALLOCATIONS_PER_THREAD; i++)
-        {
-            if (args->pointers_allocated[i] != nullptr)
-            {
-                args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
-            }
-        }
-
-        return nullptr;
-    }
-
-    void *perf_repeated_allocation_deallocation_thread(void *arguments)
-    {
-        perf_thread_arguments *args = static_cast<perf_thread_arguments *>(arguments);
-
-        minstd::Xoroshiro128PlusPlusRNG rng(minstd::Xoroshiro128PlusPlusRNG::Seed(args->rng_seed, args->rng_seed * 10));
-
-        while (!start_allocations)
-        {
-            // spin wait
-        }
-
-        for (size_t i = 0; i < PERF_ALLOCATIONS_PER_THREAD; i++)
-        {
-            size_t block_size = lognormal_sample(rng);
-            if (block_size > PERF_MAX_ALLOCATION_SIZE)
-                block_size = PERF_MAX_ALLOCATION_SIZE;
-
-            void *ptr = nullptr;
-            do
-            {
-                ptr = args->mem_resource->allocate(block_size);
-                if (ptr == nullptr)
-                {
-                    args->allocation_failures++;
-                }
-            } while (ptr == nullptr);
-
-            args->pointers_allocated[i] = ptr;
-            args->sizes_allocated[i] = block_size;
-        }
-
-        for (size_t j = 0; j < args->repetitions; j++)
-        {
-            for (size_t i = 0; i < PERF_ALLOCATIONS_PER_THREAD; i++)
-            {
-                args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
-
-                size_t block_size = lognormal_sample(rng);
-                if (block_size > PERF_MAX_ALLOCATION_SIZE)
-                    block_size = PERF_MAX_ALLOCATION_SIZE;
-
-                void *ptr = nullptr;
-                do
-                {
-                    ptr = args->mem_resource->allocate(block_size);
-                    if (ptr == nullptr)
-                    {
-                        args->allocation_failures++;
-                    }
-                } while (ptr == nullptr);
-
-                args->pointers_allocated[i] = ptr;
-                args->sizes_allocated[i] = block_size;
-            }
-        }
-
-        for (size_t i = 0; i < PERF_ALLOCATIONS_PER_THREAD; i++)
-        {
-            if (args->pointers_allocated[i] != nullptr)
-            {
-                args->mem_resource->deallocate(args->pointers_allocated[i], args->sizes_allocated[i]);
-            }
-        }
-
-        return nullptr;
-    }
-
     // ---- Interrupt robustness scaffolding ------------------------------------------------
     static minstd::pmr::memory_resource *s_intr_resource = nullptr;
     static volatile sig_atomic_t s_intr_signal_count = 0;
@@ -350,44 +235,6 @@ namespace
     {
         while (process_pending_intr_work(resource))
         {
-        }
-    }
-
-    static bool settle_frontier_to_initial(lockfree_single_block_resource_with_stats &resource, size_t initial_frontier)
-    {
-        const size_t metadata_count = resource.extended_metrics().metadata_count();
-        const size_t max_attempts = (metadata_count < 1000) ? 50000 : (metadata_count * 64);
-        static constexpr size_t probe_sizes[] = {16, 4096, 65536, 1048576, 4194304};
-
-        for (size_t attempt = 0; attempt < max_attempts; ++attempt)
-        {
-            if (resource.extended_metrics().frontier_offset() == initial_frontier)
-            {
-                return true;
-            }
-
-            const size_t probe_size = probe_sizes[attempt % (sizeof(probe_sizes) / sizeof(probe_sizes[0]))];
-            void *probe = guarded_allocate(&resource, probe_size);
-            if (probe != nullptr)
-            {
-                guarded_deallocate(&resource, probe, probe_size);
-            }
-
-            if ((attempt & 0x3F) == 0)
-            {
-                // spin wait
-            }
-        }
-
-        return resource.extended_metrics().frontier_offset() == initial_frontier;
-    }
-
-    static void sigusr1_nested_alloc_handler(int)
-    {
-        if (s_intr_resource != nullptr)
-        {
-            __atomic_add_fetch(&s_intr_pending_ops, 1, __ATOMIC_RELAXED);
-            __atomic_add_fetch(&s_intr_signal_count, 1, __ATOMIC_SEQ_CST);
         }
     }
 

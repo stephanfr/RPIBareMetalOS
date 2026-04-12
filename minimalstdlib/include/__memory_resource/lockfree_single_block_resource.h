@@ -674,7 +674,7 @@ namespace MINIMAL_STD_NAMESPACE
                 //  allocation/deallocation transitions and metadata reuse.
 
                 uint64_t current = metadata.block_state_.load(memory_order_acquire);
-                uint16_t new_version = static_cast<uint16_t>(block_state_ptr::unpack_version(current) + 2);
+                uint16_t new_version = static_cast<uint16_t>(block_state_ptr::unpack_version(current));
 
                 metadata.block_state_.store(
                     block_state_ptr::pack(nullptr, METADATA_AVAILABLE, new_version),
@@ -742,7 +742,7 @@ namespace MINIMAL_STD_NAMESPACE
                         continue;
                     }
 
-                    uint64_t desired_state = block_state_ptr::with_state_and_increment_version(
+                    uint64_t desired_state = block_state_ptr::with_state(
                         candidate_state, FRONTIER_RECLAIM_IN_PROGRESS);
 
                     if (!candidate->block_state_.compare_exchange_strong(
@@ -760,7 +760,7 @@ namespace MINIMAL_STD_NAMESPACE
                             frontier_tag, new_frontier_tag, memory_order_acq_rel, memory_order_acquire))
                     {
                         uint64_t restore_expected = desired_state;
-                        uint64_t restore_desired = block_state_ptr::with_state_and_increment_version(
+                        uint64_t restore_desired = block_state_ptr::with_state(
                             restore_expected, DEALLOCATED_PENDING);
                         candidate->block_state_.compare_exchange_strong(
                             restore_expected, restore_desired, memory_order_acq_rel, memory_order_acquire);
@@ -891,7 +891,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
 
                     metadata->block_state_.store(
-                        block_state_ptr::with_state_and_increment_version(block_state, AVAILABLE),
+                        block_state_ptr::with_state(block_state, AVAILABLE),
                         memory_order_release);
 
                     auto free_block_bin = free_block_bin_index(metadata->total_size_);
@@ -1125,10 +1125,10 @@ namespace MINIMAL_STD_NAMESPACE
                 free_block->metadata_index_ = metadata_to_index(metadata);
 
                 // Get current version (if recycled metadata) and increment it
-                uint8_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_relaxed));
+                uint16_t version = block_state_ptr::unpack_version(metadata->block_state_.load(memory_order_relaxed));
                 // Set pointer and state atomically in a single store
                 metadata->block_state_.store(
-                    block_state_ptr::pack(free_block, IN_USE, version + 1),
+                    block_state_ptr::pack(free_block, IN_USE, version),
                     memory_order_release);
                 metadata->requested_size_.store(static_cast<uint32_t>(bytes), memory_order_release);
                 metadata->total_size_ = static_cast<uint32_t>(free_block->size_including_header_);
@@ -1223,7 +1223,7 @@ namespace MINIMAL_STD_NAMESPACE
                 //  converts this state into AVAILABLE and routes the block into free block bins.
 
                 block_to_deallocate->block_state_.store(
-                    block_state_ptr::with_state_and_increment_version(locked_block_state, DEALLOCATED_PENDING),
+                    block_state_ptr::with_state(locked_block_state, DEALLOCATED_PENDING),
                     memory_order_release);
 
                 size_t target_shard = block_to_deallocate->original_shard_ % cpu_shards_;
@@ -1300,7 +1300,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
 
                     //  CAS: AVAILABLE -> FRONTIER_RECLAIM_IN_PROGRESS (claim ownership)
-                    uint64_t desired_state = block_state_ptr::with_state_and_increment_version(block_state, FRONTIER_RECLAIM_IN_PROGRESS);
+                    uint64_t desired_state = block_state_ptr::with_state(block_state, FRONTIER_RECLAIM_IN_PROGRESS);
 
                     if (!meta->block_state_.compare_exchange_strong(block_state, desired_state, memory_order_acq_rel, memory_order_acquire))
                     {
@@ -1314,7 +1314,7 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         //  Frontier moved (e.g. interrupt allocated). Restore AVAILABLE if we still own it.
                         uint64_t restore_expected = desired_state;
-                        uint64_t restore_desired = block_state_ptr::with_state_and_increment_version(restore_expected, AVAILABLE);
+                        uint64_t restore_desired = block_state_ptr::with_state(restore_expected, AVAILABLE);
                         meta->block_state_.compare_exchange_strong(restore_expected, restore_desired, memory_order_acq_rel, memory_order_acquire);
                         return reclaimed_any;
                     }
@@ -1326,7 +1326,7 @@ namespace MINIMAL_STD_NAMESPACE
                     uint64_t reclaim_expected = meta->block_state_.load(memory_order_acquire);
                     meta->block_state_.compare_exchange_strong(
                         reclaim_expected,
-                        block_state_ptr::with_state_and_increment_version(reclaim_expected, FRONTIER_RECLAIMED),
+                        block_state_ptr::with_state(reclaim_expected, FRONTIER_RECLAIMED),
                         memory_order_acq_rel, memory_order_acquire);
 
                     //  Continue loop to try reclaiming the next predecessor
@@ -1512,7 +1512,7 @@ namespace MINIMAL_STD_NAMESPACE
                     {
                         if (head.block_state_.compare_exchange_strong(
                                 head_block_state,
-                                block_state_ptr::with_state_and_increment_version(head_block_state, LOCKED),
+                                block_state_ptr::with_state(head_block_state, LOCKED),
                                 memory_order_acq_rel, memory_order_acquire))
                         {
                             return claim_result::CLAIMED;
