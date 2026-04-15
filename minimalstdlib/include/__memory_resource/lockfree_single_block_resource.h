@@ -430,7 +430,7 @@ namespace MINIMAL_STD_NAMESPACE
             static constexpr size_t NUM_FREE_BLOCK_BINS = NUM_NON_SENTINEL_FREE_BLOCK_BINS + 1;
             static constexpr size_t MAX_ALLOCATION_SIZE_INTERNAL = max_bin_bytes_aligned();
 
-            static array<size_t, NUM_FREE_BLOCK_BINS> build_free_block_bin_sizes()
+            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> build_free_block_bin_sizes()
             {
                 array<size_t, NUM_FREE_BLOCK_BINS> bins{};
 
@@ -447,7 +447,7 @@ namespace MINIMAL_STD_NAMESPACE
                 return bins;
             }
 
-            inline static array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
+            static constexpr array<size_t, NUM_FREE_BLOCK_BINS> FREE_BLOCK_BIN_SIZES = build_free_block_bin_sizes();
 
             static_assert(NUM_NON_SENTINEL_FREE_BLOCK_BINS >= 2,
                           "Uniform bin policy must generate at least two non-sentinel bins");

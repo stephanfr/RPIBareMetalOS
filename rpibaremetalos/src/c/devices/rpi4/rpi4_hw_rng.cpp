@@ -32,14 +32,20 @@ bool RPi4HardwareRandomNumberGenerator::Initialize()
     registers_->fifo_count_ = 2 << RNG_FIFO_COUNT_RNG_FIFO_THRESHOLD_SHIFT;
     registers_->control_ = (0x3 << RNG_CTRL_RNG_DIV_CTRL_SHIFT) | RNG_CTRL_RNG_RBGEN_MASK;
 
-    //	Wait for the RNG to warm up
+    //	Single probe: give the HW RNG a brief window to warm up
 
-    while (registers_->total_bit_count_ < 16)
+    CPUTicksDelay(10000);
+
+    if (registers_->total_bit_count_ >= 16)
     {
-        CPUTicksDelay(1000);        //  Wait one millisecond
+        return true;
     }
 
-    return true;
+    //  Warmup did not complete - HW RNG is not functional, disable and return failure
+
+    registers_->control_ = 0;
+
+    return false;
 }
 
 uint32_t RPi4HardwareRandomNumberGenerator::Next32BitValue()
