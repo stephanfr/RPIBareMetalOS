@@ -451,29 +451,39 @@ namespace MINIMAL_STD_NAMESPACE
             const uint64_t first_mask = create_bit_mask(start_bit_in_word, bits_in_first_word);
             const uint64_t last_mask = create_bit_mask(0, bits_in_last_word);
 
-            uint64_t old_first = words_[start_word].load(minstd::memory_order_acquire);
-            uint64_t old_last = words_[end_word].load(minstd::memory_order_acquire);
+            //  Atomically clear the first word's bits with a CAS loop so that
+            //  only one thread can succeed in claiming the release.
 
-            const bool first_ok = (old_first & first_mask) == first_mask;
-            const bool last_ok = (old_last & last_mask) == last_mask;
+            uint64_t expected_first = words_[start_word].load(minstd::memory_order_acquire);
 
-            if (!first_ok && !last_ok)
+            while (true)
             {
-                return bitblock_set_result::failed_bit_already_released;
+                if ((expected_first & first_mask) != first_mask)
+                {
+                    return bitblock_set_result::failed_bit_already_released_first_word;
+                }
+
+                uint64_t desired_first = expected_first & ~first_mask;
+
+                if (words_[start_word].compare_exchange_weak(expected_first, desired_first,
+                                                             minstd::memory_order_release,
+                                                             minstd::memory_order_relaxed))
+                {
+                    break;
+                }
             }
 
-            if (!first_ok)
-            {
-                return bitblock_set_result::failed_bit_already_released_first_word;
-            }
+            //  First word cleared successfully — now clear the last word.
+            //  Use fetch_and and verify the bits were set.
 
-            if (!last_ok)
+            uint64_t old_last = words_[end_word].fetch_and(~last_mask, minstd::memory_order_release);
+
+            if ((old_last & last_mask) != last_mask)
             {
+                //  Last word bits were not all set — roll back first word
+                words_[start_word].fetch_or(first_mask, minstd::memory_order_release);
                 return bitblock_set_result::failed_bit_already_released_last_word;
             }
-
-            words_[start_word].fetch_and(~first_mask, minstd::memory_order_release);
-            words_[end_word].fetch_and(~last_mask, minstd::memory_order_release);
 
             return bitblock_set_result::success;
         }

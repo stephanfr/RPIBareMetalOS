@@ -454,4 +454,117 @@ namespace
         // But we can still release the properly acquired bit 63
         CHECK_EQUAL(result::success, blocks.release(63));
     }
+
+    //  Test for release_multi_word TOCTOU race.
+    //
+    //  The bug: release_multi_word loads both words, checks that all bits are set,
+    //  then does two separate fetch_and calls to clear them. Two threads releasing
+    //  the SAME range concurrently can both pass the check and both execute the
+    //  fetch_and, so release returns success to BOTH callers (double release).
+    //
+    //  This test acquires a cross-word range, then races N threads to release it.
+    //  Exactly one should succeed; the rest should fail. If more than one succeeds,
+    //  the TOCTOU bug is present.
+
+    namespace
+    {
+        static constexpr size_t RACE_SIZE = 256;
+        static constexpr size_t RACE_THREADS = 8;
+        static constexpr size_t RACE_ITERATIONS = 10000;
+
+        struct alignas(64) race_thread_args
+        {
+            minstd::bitblock_set<RACE_SIZE> *blocks_ = nullptr;
+            minstd::atomic<size_t> *epoch_ = nullptr;
+            minstd::atomic<size_t> *done_count_ = nullptr;
+            size_t success_count_ = 0;
+            size_t iterations_ = 0;
+        };
+
+        void *release_race_worker(void *arg)
+        {
+            auto *args = static_cast<race_thread_args *>(arg);
+
+            for (size_t iter = 1; iter <= args->iterations_; ++iter)
+            {
+                // Wait for the main thread to advance the epoch to this iteration
+                while (args->epoch_->load(minstd::memory_order_acquire) < iter)
+                {
+                }
+
+                // Race to release the cross-word range (bits 60-67)
+                auto result = args->blocks_->release(60, 8);
+
+                if (result == minstd::bitblock_set_result::success)
+                {
+                    args->success_count_++;
+                }
+
+                // Signal done
+                args->done_count_->fetch_add(1, minstd::memory_order_release);
+            }
+
+            return nullptr;
+        }
+    }
+
+    TEST(BitblockSetTests, ReleaseMultiWordTOCTOURace)
+    {
+        minstd::bitblock_set<RACE_SIZE> blocks;
+        minstd::atomic<size_t> epoch{0};
+        minstd::atomic<size_t> done_count{0};
+
+        pthread_t threads[RACE_THREADS];
+        race_thread_args arguments[RACE_THREADS];
+
+        for (size_t i = 0; i < RACE_THREADS; ++i)
+        {
+            arguments[i].blocks_ = &blocks;
+            arguments[i].epoch_ = &epoch;
+            arguments[i].done_count_ = &done_count;
+            arguments[i].success_count_ = 0;
+            arguments[i].iterations_ = RACE_ITERATIONS;
+            pthread_create(&threads[i], nullptr, release_race_worker, &arguments[i]);
+        }
+
+        size_t total_double_releases = 0;
+
+        for (size_t iter = 1; iter <= RACE_ITERATIONS; ++iter)
+        {
+            // Acquire the cross-word range
+            blocks.acquire(60, 8);
+
+            // Reset done counter and release the threads for this epoch
+            done_count.store(0, minstd::memory_order_relaxed);
+            epoch.store(iter, minstd::memory_order_release);
+
+            // Wait for all threads to complete their attempt
+            while (done_count.load(minstd::memory_order_acquire) < RACE_THREADS)
+            {
+            }
+        }
+
+        for (size_t i = 0; i < RACE_THREADS; ++i)
+        {
+            pthread_join(threads[i], nullptr);
+        }
+
+        // Count total successes across all threads
+        size_t total_successes = 0;
+        for (size_t i = 0; i < RACE_THREADS; ++i)
+        {
+            total_successes += arguments[i].success_count_;
+        }
+
+        // Exactly one thread should succeed per iteration
+        total_double_releases = total_successes - RACE_ITERATIONS;
+
+        printf("\nRelease Multi-Word TOCTOU Race Results:\n");
+        printf("  Iterations: %zu\n", RACE_ITERATIONS);
+        printf("  Total successes: %zu (expected %zu)\n", total_successes, RACE_ITERATIONS);
+        printf("  Double releases detected: %zu\n", total_double_releases);
+
+        // If the TOCTOU bug exists, total_successes > RACE_ITERATIONS
+        CHECK_EQUAL(RACE_ITERATIONS, total_successes);
+    }
 }
