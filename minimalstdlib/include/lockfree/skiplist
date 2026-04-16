@@ -1590,29 +1590,11 @@ namespace MINIMAL_STD_NAMESPACE
                 NOT_FOUND
             };
 
-            void backoff(uint32_t &backoff_state, size_t cpu_slot)
+            void backoff(uint32_t &backoff_state, size_t /*cpu_slot*/)
             {
-                uint64_t state = slot_policy_.slot(cpu_slot).load_rng_state();
-
-                state ^= (state << 13);
-                state ^= (state >> 7);
-                state ^= (state << 17);
-
-                slot_policy_.slot(cpu_slot).store_rng_state(state);
-
-                const uint32_t base_spins = (backoff_state < BACKOFF_MAX_RELAX_SPINS) ? backoff_state : BACKOFF_MAX_RELAX_SPINS;
-                const uint32_t jitter_spins = static_cast<uint32_t>(state & 0x3u);
-                const uint32_t relax_spins = ((base_spins + jitter_spins) < BACKOFF_MAX_RELAX_SPINS) ? (base_spins + jitter_spins) : BACKOFF_MAX_RELAX_SPINS;
-
-                for (uint32_t spin = 0; spin < relax_spins; ++spin)
-                {
-                    pmr::platform::cpu_relax();
-                }
-
-                if (backoff_state < BACKOFF_MAX_RELAX_SPINS)
-                {
-                    ++backoff_state;
-                }
+                size_t retries = backoff_state;
+                pmr::platform::default_platform_provider::back_off(retries);
+                backoff_state = static_cast<uint32_t>((retries < BACKOFF_MAX_RELAX_SPINS) ? retries : BACKOFF_MAX_RELAX_SPINS);
             }
 
             void retire_node(skip_node *node, size_t cpu_slot)

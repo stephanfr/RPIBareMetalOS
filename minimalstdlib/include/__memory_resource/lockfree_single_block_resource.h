@@ -582,16 +582,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void back_off(size_t &retries)
             {
-                // Keep contention backoff bounded so threads cannot disappear into very long spin windows.
-                const size_t bounded_retries = (retries > 256) ? 256 : retries;
-                const size_t spin_count = 32 + (bounded_retries * 32);
-
-                for (size_t i = 0; i < spin_count; ++i)
-                {
-                    platform_provider_type::cpu_relax();
-                }
-
-                retries++;
+                platform_provider_type::back_off(retries);
             }
 
             //  Unguarded CAS push: atomically prepends `node` to the tagged-ptr list at `head`.

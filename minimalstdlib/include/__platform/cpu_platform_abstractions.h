@@ -193,7 +193,10 @@ namespace MINIMAL_STD_NAMESPACE
             /**
              * @brief Hint to the CPU that we are in a spin-wait loop.
              *
-             * This can reduce power or contention while spinning.
+             * This can reduce power or contention while spinning. Note that on modern
+             * x86_64 architectures (Skylake and newer), PAUSE takes ~140 cycles, whereas
+             * on AArch64, YIELD is typically much faster. Use the back_off() function
+             * which normalizes these latency differences.
              */
             inline void cpu_relax()
             {
@@ -204,6 +207,28 @@ namespace MINIMAL_STD_NAMESPACE
 #else
                 __asm__ __volatile__("" ::: "memory");
 #endif
+            }
+
+            /**
+             * @brief Standardized exponential backoff for lock-free contention.
+             *
+             * On x64, PAUSE is ~140 cycles on modern architectures, so we use a small multiplier.
+             * On AArch64, YIELD is much faster, so we use a larger multiplier.
+             */
+            inline void back_off(size_t &retries)
+            {
+                const size_t bounded_retries = (retries > 256) ? 256 : retries;
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+                const size_t spin_count = 2 + (bounded_retries * 2);
+#else
+                const size_t spin_count = 32 + (bounded_retries * 32);
+#endif
+                for (size_t i = 0; i < spin_count; ++i)
+                {
+                    cpu_relax();
+                }
+
+                retries++;
             }
 
             /**
@@ -252,6 +277,11 @@ namespace MINIMAL_STD_NAMESPACE
                 static inline void cpu_relax()
                 {
                     platform::cpu_relax();
+                }
+
+                static inline void back_off(size_t &retries)
+                {
+                    platform::back_off(retries);
                 }
             };
 
