@@ -14,6 +14,7 @@
 #include "__extensions/memory_resource_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
 #include "__platform/interrupt_policy_abstractions.h"
+#include "lockfree/intrusive_tagged_stack"
 #include "lockfree/tagged_ptr"
 #include "memory_resource.h"
 
@@ -540,6 +541,30 @@ namespace MINIMAL_STD_NAMESPACE
                 return block_managers_[metadata_index / METADATA_RECORDS_PER_BLOCK];
             }
 
+
+            struct stack_adapter
+            {
+                const lockfree_single_block_resource_impl *resource_;
+
+                block_metadata *to_node(uint32_t index) const
+                {
+                    return resource_->index_to_metadata(index);
+                }
+
+                uint32_t to_link(const block_metadata *node) const
+                {
+                    return resource_->metadata_to_index(node);
+                }
+            };
+
+            stack_adapter get_adapter() const
+            {
+                return stack_adapter{this};
+            }
+
+            using free_block_stack = lockfree::intrusive_tagged_stack<block_metadata, metadata_tag, uint32_t, &block_metadata::next_free_block_index_>;
+            using free_header_stack = lockfree::intrusive_tagged_stack<block_metadata, metadata_tag, uint32_t, &block_metadata::next_free_header_index_>;
+
             size_t address_bin_for(const void *ptr) const
             {
                 if (ptr <= allocation_base_)
@@ -585,79 +610,6 @@ namespace MINIMAL_STD_NAMESPACE
                 platform_provider_type::back_off(retries);
             }
 
-            //  Unguarded CAS push: atomically prepends `node` to the tagged-ptr list at `head`.
-            //  PRECONDITION: caller holds interrupt_guard_type.
-
-            void unguarded_push(atomic<uint64_t> &head, block_metadata &node,
-                                uint32_t block_metadata::*next_index_field)
-            {
-                uint64_t current_tag = head.load(memory_order_acquire);
-                size_t retries = 0;
-
-                do
-                {
-                    node.*next_index_field = metadata_to_index(metadata_tag::unpack_ptr(current_tag));
-
-                    if (head.compare_exchange_strong(
-                            current_tag,
-                            metadata_tag::pack(&node, static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1)),
-                            memory_order_acq_rel, memory_order_acquire))
-                    {
-                        break;
-                    }
-
-                    back_off(retries);
-                } while (true);
-            }
-
-            //  Unguarded CAS pop: atomically removes and returns the head of the tagged-ptr list.
-            //  Returns nullptr if the list is empty.
-            //  PRECONDITION: caller holds interrupt_guard_type.
-
-            block_metadata *unguarded_pop(atomic<uint64_t> &head,
-                                          uint32_t block_metadata::*next_index_field)
-            {
-                uint64_t current_tag = head.load(memory_order_acquire);
-                size_t retries = 0;
-
-                while (metadata_tag::unpack_ptr(current_tag) != nullptr)
-                {
-                    block_metadata *current = metadata_tag::unpack_ptr(current_tag);
-
-                    uint64_t next_tag = metadata_tag::pack(
-                        index_to_metadata(current->*next_index_field),
-                        static_cast<uint16_t>(metadata_tag::unpack_counter(current_tag) + 1));
-
-                    if (head.compare_exchange_strong(current_tag, next_tag, memory_order_acq_rel, memory_order_acquire))
-                    {
-                        current->*next_index_field = NULL_INDEX;
-                        return current;
-                    }
-
-                    back_off(retries);
-                }
-
-                return nullptr;
-            }
-
-            //  Guarded CAS push: wraps unguarded_push with an interrupt guard.
-
-            void guarded_push(atomic<uint64_t> &head, block_metadata &node,
-                              uint32_t block_metadata::*next_index_field)
-            {
-                interrupt_guard_type guard;
-                unguarded_push(head, node, next_index_field);
-            }
-
-            //  Guarded CAS pop: wraps unguarded_pop with an interrupt guard.
-
-            block_metadata *guarded_pop(atomic<uint64_t> &head,
-                                        uint32_t block_metadata::*next_index_field)
-            {
-                interrupt_guard_type guard;
-                return unguarded_pop(head, next_index_field);
-            }
-
             void recycle_metadata(block_metadata &metadata)
             {
                 //  Clear pointer and move metadata back to METADATA_AVAILABLE.
@@ -674,8 +626,11 @@ namespace MINIMAL_STD_NAMESPACE
                 uint32_t metadata_index = metadata_to_index(&metadata);
                 metadata_block_manager &manager = manager_for(metadata_index);
 
-                guarded_push(manager.local_free_head_, metadata,
-                             &block_metadata::next_free_header_index_);
+                {
+                    interrupt_guard_type guard;
+                    free_header_stack::push(manager.local_free_head_, metadata, get_adapter(), [this](size_t &retries)
+                                            { this->back_off(retries); });
+                }
 
                 manager.release_active_slot();
             }
@@ -890,8 +845,11 @@ namespace MINIMAL_STD_NAMESPACE
                     auto target_shard = metadata->original_shard_ % cpu_shards_;
                     size_t bin_index = free_block_bin * cpu_shards_ + target_shard;
 
-                    guarded_push(free_block_bins_[bin_index].address_bin_heads_[addr_bin],
-                                 *metadata, &block_metadata::next_free_block_index_);
+                    {
+                        interrupt_guard_type guard;
+                        free_block_stack::push(free_block_bins_[bin_index].address_bin_heads_[addr_bin], *metadata, get_adapter(), [this](size_t &retries)
+                                               { this->back_off(retries); });
+                    }
                 }
             }
 
@@ -1219,8 +1177,11 @@ namespace MINIMAL_STD_NAMESPACE
 
                 size_t target_shard = block_to_deallocate->original_shard_ % cpu_shards_;
 
-                guarded_push(pending_shards_[target_shard].head_, *block_to_deallocate,
-                             &block_metadata::next_free_block_index_);
+                {
+                    interrupt_guard_type guard;
+                    free_block_stack::push(pending_shards_[target_shard].head_, *block_to_deallocate, get_adapter(), [this](size_t &retries)
+                                           { this->back_off(retries); });
+                }
                 pending_shards_[target_shard].count_.add_fetch(1, memory_order_acq_rel);
 
                 maybe_open_maintenance_window(target_shard, false);
@@ -1416,7 +1377,12 @@ namespace MINIMAL_STD_NAMESPACE
                             continue;
                         }
 
-                        if (auto *md = guarded_pop(manager.local_free_head_, &block_metadata::next_free_header_index_))
+                        block_metadata *md = nullptr;
+                        {
+                            interrupt_guard_type guard;
+                            md = free_header_stack::pop(manager.local_free_head_, get_adapter(), [this](size_t &retries) { this->back_off(retries); });
+                        }
+                        if (md)
                         {
                             return metadata_to_index(md);
                         }
@@ -1516,7 +1482,7 @@ namespace MINIMAL_STD_NAMESPACE
                     if (current_state == FRONTIER_RECLAIM_IN_PROGRESS)
                     {
                         //  Walk is actively reclaiming this block. Re-push it to prevent a free-list leak.
-                        unguarded_push(bin_head, head, &block_metadata::next_free_block_index_);
+                        free_block_stack::push(bin_head, head, get_adapter(), [this](size_t &retries) { this->back_off(retries); });
                         return claim_result::RETRY;
                     }
 
@@ -1561,9 +1527,9 @@ namespace MINIMAL_STD_NAMESPACE
                                 size_t shard = (shard_start + shard_offset) % cpu_shards_;
                                 size_t bin_index = free_block_bin * cpu_shards_ + shard;
                                 auto &bin_head = free_block_bins_[bin_index].address_bin_heads_[addr_bin];
-                                block_metadata *head = unguarded_pop(
+                                block_metadata *head = free_block_stack::pop(
                                     bin_head,
-                                    &block_metadata::next_free_block_index_);
+                                    get_adapter(), [this](size_t &retries) { this->back_off(retries); });
 
                                 if (head == nullptr)
                                 {
