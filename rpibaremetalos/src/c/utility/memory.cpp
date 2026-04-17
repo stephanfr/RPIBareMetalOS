@@ -3,7 +3,7 @@
 #include "asm_globals.h"
 #include "heaps.h"
 #include "synchronization.h"
-#include "__memory_resource/composite_pool_resource.h"
+#include "__memory_resource/lockfree_composite_single_arena_resource.h"
 
 extern const unsigned int __static_heap_start;
 extern const unsigned int __static_heap_size_in_bytes;
@@ -51,8 +51,8 @@ protected:
     }
 };
 
-minstd::pmr::composite_pool_resource<> __os_static_resource_core((uint8_t *)&__static_heap_start, STATIC_HEAP_SIZE_IN_BYTES, 1, 1);
-minstd::pmr::composite_pool_resource<> __os_dynamic_resource_core((uint8_t *)&__dynamic_heap_start, DYNAMIC_HEAP_SIZE_IN_BYTES, 4, 4);
+minstd::pmr::lockfree_composite_single_arena_resource<> __os_static_resource_core((uint8_t *)&__static_heap_start, STATIC_HEAP_SIZE_IN_BYTES, 1, 1);
+minstd::pmr::lockfree_composite_single_arena_resource<> __os_dynamic_resource_core((uint8_t *)&__dynamic_heap_start, DYNAMIC_HEAP_SIZE_IN_BYTES, 4, 4);
 
 minstd::pmr::memory_resource& __os_dynamic_heap_resource = __os_dynamic_resource_core;
 minstd::pmr::memory_resource& __os_static_heap_resource = __os_static_resource_core;

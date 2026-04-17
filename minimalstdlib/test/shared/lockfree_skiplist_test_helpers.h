@@ -9,7 +9,7 @@
 
 #include <minstdconfig.h>
 
-#include <__memory_resource/composite_pool_resource.h>
+#include <__memory_resource/lockfree_composite_single_arena_resource.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 #include <avl_tree>
 #include <heap_allocator>

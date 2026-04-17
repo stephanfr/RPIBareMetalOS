@@ -166,7 +166,7 @@ namespace
             CHECK_TRUE(list.insert(i, i));
         }
 
-        minstd::pmr::composite_pool_resource<1000, 64, 1024, 32, 512, true> composite_resource(
+        minstd::pmr::lockfree_composite_single_arena_resource<1000, 64, 1024, 32, 512, true> composite_resource(
             skiplist_composite_resource_buffer,
             SKIPLIST_COMPOSITE_BUFFER_SIZE,
             skiplist_perf_num_arenas());

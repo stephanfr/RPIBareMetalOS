@@ -6,7 +6,7 @@
 
 #include <minstdconfig.h>
 
-#include <__memory_resource/composite_pool_resource.h>
+#include <__memory_resource/lockfree_composite_single_arena_resource.h>
 #include <__memory_resource/lockfree_single_arena_resource.h>
 #include <__memory_resource/__extensions/lockfree_single_arena_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
@@ -29,7 +29,7 @@ namespace
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    TEST_GROUP (CompositeResourcePerformanceTests)
+    TEST_GROUP (LockfreeCompositeSingleArenaResourcePerformanceTests)
     {
     };
 #pragma GCC diagnostic pop
@@ -56,7 +56,7 @@ namespace
 
     minstd::atomic<bool> start_allocations = false;
 
-    using composite_pool_resource_perf = minstd::pmr::composite_pool_resource<
+    using lockfree_composite_single_arena_resource_perf = minstd::pmr::lockfree_composite_single_arena_resource<
         3072,
         256,
         2048,
@@ -149,7 +149,7 @@ namespace
         return nullptr;
     }
 
-    TEST(CompositeResourcePerformanceTests, ThreadScalabilitySensitivityAnalysis)
+    TEST(LockfreeCompositeSingleArenaResourcePerformanceTests, ThreadScalabilitySensitivityAnalysis)
     {
         printf("\n=== Thread Scalability Analysis: Composite vs Lockfree vs Malloc/Free ===\n");
         printf("Threads | Composite Ops/sec | Lockfree Ops/sec | Malloc Ops/sec | CP Eff | LF Eff | Malloc Eff | CP Scale | LF Scale\n");
@@ -182,7 +182,7 @@ namespace
             double malloc_elapsed_time = 0.0;
 
             {
-                composite_pool_resource_perf composite_resource(buffer, BUFFER_SIZE, get_number_of_arenas());
+                lockfree_composite_single_arena_resource_perf composite_resource(buffer, BUFFER_SIZE, get_number_of_arenas());
 
                 for (size_t i = 0; i < num_threads; i++)
                 {

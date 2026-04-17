@@ -26,7 +26,7 @@ namespace MINIMAL_STD_NAMESPACE
                   size_t LARGE_RESOURCE_MAX_BIN_BYTES = 32 * 1024 * 1024,
                   size_t LARGE_RESOURCE_MAX_WASTE_PERCENT = 5>
             requires(THRESHOLD_BYTES > 0)
-        class composite_pool_resource : public memory_resource, public conditional<include_statistics, extensions::memory_resource_statistics, extensions::null_memory_resource_statistics>::type
+        class lockfree_composite_single_arena_resource : public memory_resource, public conditional<include_statistics, extensions::memory_resource_statistics, extensions::null_memory_resource_statistics>::type
         {
         public:
             static constexpr size_t DEFAULT_CPU_SHARDS = 8;
@@ -36,7 +36,7 @@ namespace MINIMAL_STD_NAMESPACE
             static_assert(LARGE_RESOURCE_MAX_WASTE_PERCENT > 0 && LARGE_RESOURCE_MAX_WASTE_PERCENT <= 25,
                           "LARGE_RESOURCE_MAX_WASTE_PERCENT must be in range [1, 25]");
 
-            composite_pool_resource(void *block, size_t block_size, size_t number_of_arenas, size_t cpu_shards = DEFAULT_CPU_SHARDS)
+            lockfree_composite_single_arena_resource(void *block, size_t block_size, size_t number_of_arenas, size_t cpu_shards = DEFAULT_CPU_SHARDS)
                 : large_resource_(block, block_size, cpu_shards),
                   small_resource_(static_cast<memory_resource *>(&large_resource_), number_of_arenas)
             {
