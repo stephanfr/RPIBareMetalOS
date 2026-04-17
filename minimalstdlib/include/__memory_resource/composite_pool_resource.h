@@ -9,7 +9,7 @@
 #include "__type_traits/conditional.h"
 
 #include "__extensions/memory_resource_statistics.h"
-#include "fixed_size_element_resource.h"
+#include "lockfree_bitblock_resource.h"
 #include "lockfree_single_arena_resource.h"
 #include "memory_resource.h"
 
@@ -51,7 +51,7 @@ namespace MINIMAL_STD_NAMESPACE
                 128>;
 
             large_resource_type large_resource_;
-            fixed_size_element_resource<ELEMENT_SIZE_IN_BYTES, ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS, false> small_resource_;
+            lockfree_bitblock_resource<ELEMENT_SIZE_IN_BYTES, ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS, false> small_resource_;
 
             static bool should_use_small_pool(size_t bytes, size_t alignment) noexcept
             {

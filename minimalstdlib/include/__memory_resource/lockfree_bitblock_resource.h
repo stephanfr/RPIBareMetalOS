@@ -38,7 +38,7 @@ namespace MINIMAL_STD_NAMESPACE
                      (MAX_NUMBER_OF_ARENAS >= 1) &&
                      (MAX_NUMBER_OF_ARENAS <= 32) &&
                      (MAX_NUMBER_OF_BLOCKS >= 1))
-        class fixed_size_element_resource : public memory_resource, public conditional<include_statistics, extensions::memory_resource_statistics, extensions::null_memory_resource_statistics>::type
+        class lockfree_bitblock_resource : public memory_resource, public conditional<include_statistics, extensions::memory_resource_statistics, extensions::null_memory_resource_statistics>::type
         {
         private:
             static constexpr size_t HEADER_SIZE = 16;
@@ -88,7 +88,7 @@ namespace MINIMAL_STD_NAMESPACE
             struct arena
             {
                 memory_resource *upstream_resource_;
-                fixed_size_element_resource *parent_;
+                lockfree_bitblock_resource *parent_;
                 size_t arena_index_ = 0;
 
                 alignas(64) atomic<block *> first_block_;
@@ -220,7 +220,7 @@ namespace MINIMAL_STD_NAMESPACE
             };
 
         public:
-            fixed_size_element_resource(memory_resource *memory_resource, size_t number_of_arenas)
+            lockfree_bitblock_resource(memory_resource *memory_resource, size_t number_of_arenas)
                 : upstream_resource_(memory_resource),
                   number_of_arenas_(clamp_arena_count(number_of_arenas))
             {
@@ -238,7 +238,7 @@ namespace MINIMAL_STD_NAMESPACE
                 total_blocks_.store(number_of_arenas_, memory_order_release);
             }
 
-            ~fixed_size_element_resource()
+            ~lockfree_bitblock_resource()
             {
                 for (size_t arena = 0; arena < number_of_arenas_; arena++)
                 {

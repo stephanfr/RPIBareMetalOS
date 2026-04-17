@@ -27,7 +27,7 @@ namespace
 {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
-    TEST_GROUP (FixedSizeElementMemoryResourceTests)
+    TEST_GROUP (LockfreeBitblockMemoryResourceTests)
     {
     };
 #pragma GCC diagnostic pop
@@ -213,11 +213,11 @@ namespace
         return nullptr;
     }
 
-    TEST(FixedSizeElementMemoryResourceTests, SingleBlockResourceBasicFunctionality)
+    TEST(LockfreeBitblockMemoryResourceTests, SingleBlockResourceBasicFunctionality)
     {
         minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
-        minstd::pmr::fixed_size_element_resource<32, 2024, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS> resource(
+        minstd::pmr::lockfree_bitblock_resource<32, 2024, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS> resource(
             static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
             get_number_of_arenas());
 
@@ -289,11 +289,11 @@ namespace
         CHECK(resource.total_deallocations() == 2);
     }
 
-    TEST(FixedSizeElementMemoryResourceTests, GrowthUntilMemoryExhaustionTest)
+    TEST(LockfreeBitblockMemoryResourceTests, GrowthUntilMemoryExhaustionTest)
     {
         minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
-        minstd::pmr::fixed_size_element_resource<32, 2048, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS> resource(
+        minstd::pmr::lockfree_bitblock_resource<32, 2048, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS> resource(
             static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
             get_number_of_arenas());
 
@@ -323,7 +323,7 @@ namespace
 
         auto duration = ((double)(end - start)) / (double)CLOCKS_PER_SEC;
 
-        printf("Duration fixed size element allocator exhaust heap: %f\n", duration);
+        printf("Duration lockfree bitblock allocator exhaust heap: %f\n", duration);
         printf("Total Allocations: %ld\n", total_allocations);
 
         CHECK_EQUAL(resource.current_allocated(), total_allocations);
@@ -349,7 +349,7 @@ namespace
         printf("Duration malloc/free exhaust heap: %f\n", duration);
     }
 
-    TEST(FixedSizeElementMemoryResourceTests, MultiThreadTest)
+    TEST(LockfreeBitblockMemoryResourceTests, MultiThreadTest)
     {
         constexpr size_t NUM_THREADS = 8;
         constexpr size_t NUM_BYTES_PER_ELEMENT = 32;
@@ -357,7 +357,7 @@ namespace
 
         minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
-        auto *resource = new minstd::pmr::fixed_size_element_resource<NUM_BYTES_PER_ELEMENT, NUM_ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS, false>(
+        auto *resource = new minstd::pmr::lockfree_bitblock_resource<NUM_BYTES_PER_ELEMENT, NUM_ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, MAX_NUMBER_OF_BLOCKS, false>(
             static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
             get_number_of_arenas());
 
@@ -394,7 +394,7 @@ namespace
             summed_duration += args[i].duration;
         }
 
-        printf("Duration fixed_size_element_resource multi-thread test: %f\n", summed_duration);
+        printf("Duration lockfree_bitblock_resource multi-thread test: %f\n", summed_duration);
 
         size_t total_number_of_allocations = 0;
         size_t total_number_of_bytes_allocated = 0;
@@ -496,7 +496,7 @@ namespace
         //        CHECK_EQUAL(total_number_of_bytes_allocated, resource.current_bytes_allocated());
     }
 
-    TEST(FixedSizeElementMemoryResourceTests, ThreadSensitivityPerformanceTest)
+    TEST(LockfreeBitblockMemoryResourceTests, ThreadSensitivityPerformanceTest)
     {
         constexpr size_t NUM_BYTES_PER_ELEMENT = 64;
         constexpr size_t NUM_ELEMENTS_PER_BLOCK = 1024;
@@ -504,11 +504,11 @@ namespace
         constexpr size_t REPETITIONS = 500;
         constexpr size_t PERF_MAX_BLOCKS = 512;
 
-        printf("\n=== Fixed Size Element Resource Thread Scalability ===\n");
-        printf("Threads | FixedSize Ops/sec | Malloc Ops/sec | FS Efficiency | Malloc Eff | FS Scale\n");
-        printf("--------|-------------------|----------------|---------------|------------|----------\n");
+        printf("\n=== Lockfree Bitblock Resource Thread Scalability ===\n");
+        printf("Threads | Bitblock Ops/sec | Malloc Ops/sec | BB Efficiency | Malloc Eff | BB Scale\n");
+        printf("--------|------------------|----------------|---------------|------------|----------\n");
 
-        static double baseline_fixedsize_efficiency = 0.0;
+        static double baseline_bitblock_efficiency = 0.0;
 
         for (size_t num_threads = 1; num_threads <= MAX_THREADS; ++num_threads)
         {
@@ -516,7 +516,7 @@ namespace
 
             minstd::pmr::single_block_resource upstream_resource(buffer, BUFFER_SIZE);
 
-            auto *resource = new minstd::pmr::fixed_size_element_resource<NUM_BYTES_PER_ELEMENT, NUM_ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, PERF_MAX_BLOCKS, false>(
+            auto *resource = new minstd::pmr::lockfree_bitblock_resource<NUM_BYTES_PER_ELEMENT, NUM_ELEMENTS_PER_BLOCK, MAX_NUMBER_OF_ARENAS, PERF_MAX_BLOCKS, false>(
                 static_cast<minstd::pmr::memory_resource *>(&upstream_resource),
                 get_number_of_arenas());
 
@@ -527,7 +527,7 @@ namespace
             size_t total_deallocation_operations = num_threads * NUM_PERF_ALLOCATIONS_PER_THREAD * REPETITIONS;
             size_t total_operations = total_allocation_operations + total_deallocation_operations;
 
-            //  Fixed size element resource test
+            //  Lockfree bitblock resource test
 
             for (size_t i = 0; i < num_threads; i++)
             {
@@ -555,11 +555,11 @@ namespace
 
             clock_gettime(CLOCK_MONOTONIC, &end_time);
 
-            double fixedsize_elapsed_time = (end_time.tv_sec - start_time.tv_sec) +
+            double bitblock_elapsed_time = (end_time.tv_sec - start_time.tv_sec) +
                                             (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
-            double fixedsize_total_ops_per_second = total_operations / fixedsize_elapsed_time;
-            double fixedsize_efficiency = fixedsize_total_ops_per_second / num_threads;
+            double bitblock_total_ops_per_second = total_operations / bitblock_elapsed_time;
+            double bitblock_efficiency = bitblock_total_ops_per_second / num_threads;
 
             delete resource;
 
@@ -602,24 +602,24 @@ namespace
 
             if (num_threads == 1)
             {
-                baseline_fixedsize_efficiency = fixedsize_efficiency;
+                baseline_bitblock_efficiency = bitblock_efficiency;
             }
 
-            double fixedsize_scalability = baseline_fixedsize_efficiency > 0
-                ? (fixedsize_efficiency / baseline_fixedsize_efficiency)
+            double bitblock_scalability = baseline_bitblock_efficiency > 0
+                ? (bitblock_efficiency / baseline_bitblock_efficiency)
                 : 1.0;
 
             printf("  %2zu   | %15.0f | %12.0f | %11.0f | %8.0f | %8.2fx\n",
                    num_threads,
-                   fixedsize_total_ops_per_second,
+                   bitblock_total_ops_per_second,
                    malloc_total_ops_per_second,
-                   fixedsize_efficiency,
+                   bitblock_efficiency,
                    malloc_efficiency,
-                   fixedsize_scalability);
+                   bitblock_scalability);
 
-            CHECK(fixedsize_elapsed_time > 0);
+            CHECK(bitblock_elapsed_time > 0);
             CHECK(malloc_elapsed_time > 0);
-            CHECK(fixedsize_total_ops_per_second > 0);
+            CHECK(bitblock_total_ops_per_second > 0);
             CHECK(malloc_total_ops_per_second > 0);
 
             usleep(100000); // 100ms
@@ -628,7 +628,7 @@ namespace
         printf("\nNotes:\n");
         printf("- Ops/sec: Total allocation + deallocation operations per second\n");
         printf("- Efficiency: Total operations per second per thread\n");
-        printf("- FS Scale: Fixed-size efficiency relative to single-thread baseline\n");
+        printf("- BB Scale: Bitblock efficiency relative to single-thread baseline\n");
         printf("- Each thread performs %zu initial allocations + %zu repetitions\n",
                NUM_PERF_ALLOCATIONS_PER_THREAD, REPETITIONS);
         printf("- Allocation sizes: lognormal(5.4, 1.2) distribution, clamped to [1, %zu] bytes, element size: %zu bytes\n",
@@ -639,7 +639,7 @@ namespace
             //      from x64 that generalization here doesn't make much sense.  I have them just to insure that there
             //      is not a huge difference between the two implementations on the x64 platform at least.
 
-            TEST(FixedSizeElementMemoryResourceTests, Benchmark)
+            TEST(LockfreeBitblockMemoryResourceTests, Benchmark)
             {
                 minstd::pmr::single_block_resource resource(buffer, BUFFER_SIZE);
 
