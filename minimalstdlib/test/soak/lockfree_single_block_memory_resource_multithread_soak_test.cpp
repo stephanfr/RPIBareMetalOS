@@ -35,20 +35,6 @@ namespace
     constexpr size_t PERF_MAX_ALLOCATION_SIZE = 16384;
     constexpr size_t PERF_REPETITIONS = 500;
 
-    size_t lognormal_sample(minstd::Xoroshiro128PlusPlusRNG &rng)
-    {
-        double u1, u2;
-        do
-        {
-            u1 = static_cast<double>(rng() >> 11) * (1.0 / 9007199254740992.0);
-            u2 = static_cast<double>(rng() >> 11) * (1.0 / 9007199254740992.0);
-        } while (u1 == 0.0);
-
-        double z = sqrt(-2.0 * log(u1)) * cos(2.0 * 3.14159265358979323846 * u2);
-        double value = exp(5.4 + 1.2 * z);
-        return (value < 1.0) ? 1 : static_cast<size_t>(value);
-    }
-
     constexpr size_t BUFFER_SIZE = 512 * 1048576; // 512 MB
     char *buffer = new char[BUFFER_SIZE]();
 
@@ -199,7 +185,7 @@ namespace
     }
 
     // ---- Interrupt robustness scaffolding ------------------------------------------------
-    static minstd::pmr::memory_resource *s_intr_resource = nullptr;
+
     static volatile sig_atomic_t s_intr_signal_count = 0;
     static volatile sig_atomic_t s_intr_nested_count = 0;
     static thread_local volatile sig_atomic_t s_intr_pending_ops = 0;

@@ -128,12 +128,6 @@ namespace MINIMAL_STD_NAMESPACE
 
                 metadata_block_manager() noexcept : local_free_head_(0), state_and_active_count_(0) {}
 
-                void reset()
-                {
-                    local_free_head_.store(0, memory_order_relaxed);
-                    state_and_active_count_.store(0, memory_order_relaxed);
-                }
-
                 bool reserve_active_slot()
                 {
                     uint32_t current = state_and_active_count_.load(memory_order_acquire);
@@ -1079,7 +1073,10 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata->block_state_.store(
                     block_state_ptr::pack(free_block, IN_USE, version),
                     memory_order_release);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
                 metadata->requested_size_.store(static_cast<uint32_t>(bytes), memory_order_release);
+#pragma GCC diagnostic pop
                 metadata->total_size_ = static_cast<uint32_t>(free_block->size_including_header_);
                 metadata->alignment_ = static_cast<uint8_t>(alignment);
                 metadata->original_shard_ = static_cast<uint8_t>(shard);
