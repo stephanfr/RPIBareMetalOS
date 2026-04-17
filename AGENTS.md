@@ -60,7 +60,7 @@ private:
 ```
 
 ### Reference Files
-- `lockfree_single_block_resource.h`, `avl_tree`, `list`, `forward_list`
+- `lockfree_single_arena_resource.h`, `avl_tree`, `list`, `forward_list`
 
 ## Pre-Commit Cleanup
 

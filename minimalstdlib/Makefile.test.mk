@@ -62,7 +62,9 @@ LIB_SRC := $(CPP_SRC)
 CORRECTNESS_SRC_DIR := test/correctness
 SHARED_SRC_DIR      := test/shared
 ALL_CORRECTNESS_SRC := $(wildcard $(CORRECTNESS_SRC_DIR)/*.cpp)
-LOCKFREE_CORRECTNESS_SRC := $(CORRECTNESS_SRC_DIR)/lockfree_single_block_memory_resource_test.cpp
+LOCKFREE_CORRECTNESS_SRC := \
+	$(CORRECTNESS_SRC_DIR)/lockfree_single_arena_memory_resource_test.cpp \
+	$(CORRECTNESS_SRC_DIR)/lockfree_single_arena_memory_resource_multithread_test.cpp
 CORRECTNESS_SRC     := $(filter-out $(LOCKFREE_CORRECTNESS_SRC), $(ALL_CORRECTNESS_SRC))
 
 CORRECTNESS_OBJ := $(patsubst $(CORRECTNESS_SRC_DIR)/%.cpp,$(CORRECTNESS_OBJ_DIR)/%.o,\

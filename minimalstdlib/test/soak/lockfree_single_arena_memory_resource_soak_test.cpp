@@ -5,8 +5,8 @@
 #include <CppUTest/TestHarness.h>
 #include <minstdconfig.h>
 
-#include <__memory_resource/lockfree_single_block_resource.h>
-#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
+#include <__memory_resource/lockfree_single_arena_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_arena_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include "../shared/interrupt_simulation_test_helpers.h"
@@ -34,23 +34,23 @@ namespace
 
     
 
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_block_resource_with_stats;
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_arena_resource_with_stats;
         
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_arena_resource_without_stats;
 }
 
 
@@ -121,7 +121,7 @@ namespace
         }
     }
 
-    static bool settle_frontier_to_initial(lockfree_single_block_resource_with_stats &resource, size_t initial_frontier)
+    static bool settle_frontier_to_initial(lockfree_single_arena_resource_with_stats &resource, size_t initial_frontier)
     {
         const size_t metadata_count = resource.extended_metrics().metadata_count();
         const size_t max_attempts = (metadata_count < 1000) ? 50000 : (metadata_count * 64);
@@ -180,7 +180,7 @@ namespace
 
     struct soak_thread_args
     {
-        lockfree_single_block_resource_with_stats *resource;
+        lockfree_single_arena_resource_with_stats *resource;
         minstd::atomic<bool> *stop_flag;
         minstd::atomic<int> *shared_phase;
         minstd::atomic<bool> *use_shared_phase;
@@ -471,11 +471,11 @@ namespace
 
 // clang-format off
 
-TEST_GROUP(LockfreeSingleBlockMemoryResourceSoakTests)
+TEST_GROUP(LockfreeSingleArenaMemoryResourceSoakTests)
 {
 };
 
-TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
+TEST(LockfreeSingleArenaMemoryResourceSoakTests, SoakTest)
 {
     const size_t NUM_THREADS = 8;
     const bool ENABLE_SIGNAL_BOMBER = (getenv("ALLOCATOR_SOAK_DISABLE_BOMBER") == nullptr);
@@ -509,7 +509,7 @@ TEST(LockfreeSingleBlockMemoryResourceSoakTests, SoakTest)
 
     printf("\nRunning Allocator SoakTest for %zu seconds (Base Seed: %llu)...\n", SOAK_DURATION_SEC, (unsigned long long)base_seed);
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE, minstd::pmr::test::os_abstractions::get_cpu_count());
     const size_t initial_frontier = resource.extended_metrics().frontier_offset();
 
     struct sigaction sa = {};

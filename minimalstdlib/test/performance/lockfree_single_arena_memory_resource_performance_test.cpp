@@ -5,8 +5,8 @@
 #include <CppUTest/TestHarness.h>
 #include <minstdconfig.h>
 
-#include <__memory_resource/lockfree_single_block_resource.h>
-#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
+#include <__memory_resource/lockfree_single_arena_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_arena_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include "../shared/interrupt_simulation_test_helpers.h"
@@ -34,23 +34,23 @@ namespace
 
     
 
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_block_resource_with_stats;
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_arena_resource_with_stats;
         
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_arena_resource_without_stats;
 }
 
 #include "../shared/perf_test_config.h"
@@ -238,12 +238,12 @@ namespace
 
 
 
-TEST_GROUP(LockfreeSingleBlockMemoryResourcePerformanceTests)
+TEST_GROUP(LockfreeSingleArenaMemoryResourcePerformanceTests)
 {
 };
 
-using lockfree_single_block_resource_perf =
-    minstd::pmr::lockfree_single_block_resource_impl<
+using lockfree_single_arena_resource_perf =
+    minstd::pmr::lockfree_single_arena_resource_impl<
         minstd::pmr::platform::noop_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         64 * 1024 * 1024,
@@ -251,13 +251,13 @@ using lockfree_single_block_resource_perf =
         128,
         minstd::pmr::extensions::null_memory_resource_statistics>;
 
-TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, MultiThreadAllocateDeallocateTest)
+TEST(LockfreeSingleArenaMemoryResourcePerformanceTests, MultiThreadAllocateDeallocateTest)
 {
     constexpr size_t NUM_THREADS = 12;
 
     start_allocations = false;
 
-    lockfree_single_block_resource_perf resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_perf resource(buffer, BUFFER_SIZE, minstd::pmr::test::os_abstractions::get_cpu_count());
 
     allocator_thread_arguments args[NUM_THREADS];
     pthread_t threads[NUM_THREADS];
@@ -294,7 +294,7 @@ TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, MultiThreadAllocateDeall
     clock_gettime(CLOCK_MONOTONIC, &end_time);
     double duration = (end_time.tv_sec - start_time.tv_sec) +
                       (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
-    printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
+    printf("Lockfree Single Arena Resource Multithread Tests Duration: %f\n", duration);
 
     //  Do it again with malloc/free
 
@@ -326,16 +326,20 @@ TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, MultiThreadAllocateDeall
     printf("Malloc Free Resource Multithread Tests Duration: %f\n", duration);
 }
 
-TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, ThreadScalabilitySensitivityAnalysis)
+TEST(LockfreeSingleArenaMemoryResourcePerformanceTests, ThreadScalabilitySensitivityAnalysis)
 {
     printf("\n=== Thread Scalability Analysis: Lockfree vs Malloc/Free Comparison ===\n");
     printf("Threads | Lockfree Ops/sec | Malloc Ops/sec | LF Efficiency | Malloc Eff | LF Scale | Speedup\n");
     printf("--------|------------------|----------------|---------------|------------|----------|----------\n");
 
     static double baseline_lockfree_efficiency = 0.0;
-    const size_t MAX_THREADS = perf_config_get_thread_count("SINGLE_BLOCK_PERF_MAX_THREADS", 16, 64);
+    const char *max_threads_env = getenv("SINGLE_ARENA_PERF_MAX_THREADS");
+    const size_t MAX_THREADS = perf_config_get_thread_count(
+        (max_threads_env != nullptr) ? "SINGLE_ARENA_PERF_MAX_THREADS" : "SINGLE_BLOCK_PERF_MAX_THREADS",
+        16,
+        64);
 
-    perf_report report("LockfreeSingleBlockMemoryResourcePerformanceTests", "ThreadScalabilitySensitivityAnalysis");
+    perf_report report("LockfreeSingleArenaMemoryResourcePerformanceTests", "ThreadScalabilitySensitivityAnalysis");
 
     for (size_t num_threads = 1; num_threads <= MAX_THREADS; ++num_threads)
     {
@@ -347,7 +351,7 @@ TEST(LockfreeSingleBlockMemoryResourcePerformanceTests, ThreadScalabilitySensiti
         start_allocations = false;
         exit_thread = false;
 
-        lockfree_single_block_resource_perf resource(buffer, BUFFER_SIZE);
+        lockfree_single_arena_resource_perf resource(buffer, BUFFER_SIZE, minstd::pmr::test::os_abstractions::get_cpu_count());
 
         perf_thread_arguments args[64];
         pthread_t threads[64];

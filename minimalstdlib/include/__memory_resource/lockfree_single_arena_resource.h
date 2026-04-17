@@ -10,7 +10,7 @@
 #include "atomic"
 #include "new"
 
-#include "__extensions/lockfree_single_block_resource_extended_statistics.h"
+#include "__extensions/lockfree_single_arena_resource_extended_statistics.h"
 #include "__extensions/memory_resource_statistics.h"
 #include "__platform/cpu_platform_abstractions.h"
 #include "__platform/interrupt_policy_abstractions.h"
@@ -54,7 +54,7 @@ namespace MINIMAL_STD_NAMESPACE
                   size_t max_waste_percent = 5,
                   size_t maintenance_window_threshold = 128,
                   typename... optional_extensions>
-        class lockfree_single_block_resource_impl : public memory_resource, public optional_extensions...
+        class lockfree_single_arena_resource_impl : public memory_resource, public optional_extensions...
         {
         private:
             using interrupt_guard_type = platform::basic_interrupt_guard<interrupt_policy_type>;
@@ -185,9 +185,9 @@ namespace MINIMAL_STD_NAMESPACE
                 size_t alignment = 0;
             };
 
-            lockfree_single_block_resource_impl() = delete;
+            lockfree_single_arena_resource_impl() = delete;
 
-            explicit lockfree_single_block_resource_impl(void *block,
+            explicit lockfree_single_arena_resource_impl(void *block,
                                                          size_t block_size,
                                                          size_t cpu_shards = DEFAULT_CPU_SHARDS)
                 : block_(block),
@@ -266,12 +266,12 @@ namespace MINIMAL_STD_NAMESPACE
                 refresh_extended_metrics_diagnostics();
             }
 
-            ~lockfree_single_block_resource_impl() = default;
+            ~lockfree_single_arena_resource_impl() = default;
 
-            const extensions::lockfree_single_block_resource_extended_statistics &extended_metrics() const noexcept
-                requires(is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+            const extensions::lockfree_single_arena_resource_extended_statistics &extended_metrics() const noexcept
+                requires(is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
             {
-                return static_cast<const extensions::lockfree_single_block_resource_extended_statistics &>(*this);
+                return static_cast<const extensions::lockfree_single_arena_resource_extended_statistics &>(*this);
             }
 
             allocation_info get_allocation_info(void *allocation) const
@@ -478,7 +478,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             struct extended_metrics_sync_guard
             {
-                lockfree_single_block_resource_impl &resource_;
+                lockfree_single_arena_resource_impl &resource_;
 
                 ~extended_metrics_sync_guard()
                 {
@@ -488,7 +488,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void refresh_extended_metrics_diagnostics()
             {
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                 {
                     auto frontier = block_tag::unpack_ptr(next_empty_memory_block_.load(memory_order_acquire));
                     size_t frontier_offset = reinterpret_cast<uintptr_t>(frontier) - reinterpret_cast<uintptr_t>(block_);
@@ -538,7 +538,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             struct stack_adapter
             {
-                const lockfree_single_block_resource_impl *resource_;
+                const lockfree_single_arena_resource_impl *resource_;
 
                 block_metadata *to_node(uint32_t index) const
                 {
@@ -849,7 +849,7 @@ namespace MINIMAL_STD_NAMESPACE
 
             void run_maintenance_window(size_t target_shard)
             {
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                 {
                     this->record_maintenance_window();
                 };
@@ -932,7 +932,7 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 extended_metrics_sync_guard sync_guard{*this};
 
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                 {
                     this->record_allocator_call();
                 };
@@ -971,7 +971,7 @@ namespace MINIMAL_STD_NAMESPACE
                     size_t metadata_index = get_next_metadata_record_index();
                     if (metadata_index == NULL_INDEX)
                     {
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                         {
                             this->record_allocator_failure();
                         };
@@ -992,7 +992,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         if (free_block != nullptr)
                         {
-                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                            if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                             {
                                 this->record_allocator_reuse_hit();
                             };
@@ -1009,7 +1009,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         if (free_block != nullptr)
                         {
-                            if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                            if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                             {
                                 this->record_allocator_reuse_hit();
                             };
@@ -1026,7 +1026,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                         recycle_metadata(*frontier_reserved_metadata);
 
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                         {
                             this->record_allocator_failure();
                         };
@@ -1051,7 +1051,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (used_frontier)
                     {
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                         {
                             this->record_allocator_frontier_hit();
                         };
@@ -1059,7 +1059,7 @@ namespace MINIMAL_STD_NAMESPACE
                 }
                 else
                 {
-                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                    if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                     {
                         this->record_allocator_reuse_hit();
                     };
@@ -1081,12 +1081,12 @@ namespace MINIMAL_STD_NAMESPACE
                 metadata->alignment_ = static_cast<uint8_t>(alignment);
                 metadata->original_shard_ = static_cast<uint8_t>(shard);
 
-                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_arena_resource_impl>)
                 {
                     extensions::memory_resource_statistics::allocation_made(bytes);
                 }
 
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                 {
                     this->record_allocation_made();
                 };
@@ -1116,7 +1116,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (metadata_index >= current_metadata_record_count_.load(memory_order_acquire))
                     {
-                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_arena_resource_impl>)
                         {
                             extensions::memory_resource_statistics::deallocation_aborted_bad_index();
                         }
@@ -1131,7 +1131,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if ((current_state != IN_USE) || (current_block != &header))
                     {
-                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_arena_resource_impl>)
                         {
                             extensions::memory_resource_statistics::deallocation_aborted_state_mismatch();
                         }
@@ -1145,7 +1145,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (!block_to_deallocate->block_state_.compare_exchange_strong(current_block_state, locked_block_state, memory_order_acq_rel, memory_order_acquire))
                     {
-                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                        if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_arena_resource_impl>)
                         {
                             extensions::memory_resource_statistics::deallocation_aborted_cas_race();
                         }
@@ -1155,12 +1155,12 @@ namespace MINIMAL_STD_NAMESPACE
 
                 //  Track the deallocation after ownership is successfully acquired.
 
-                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_block_resource_impl>)
+                if constexpr (minstd::is_base_of_v<extensions::memory_resource_statistics, lockfree_single_arena_resource_impl>)
                 {
                     extensions::memory_resource_statistics::deallocation_made(bytes);
                 }
 
-                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                 {
                     this->record_deallocation_made();
                 };
@@ -1336,7 +1336,7 @@ namespace MINIMAL_STD_NAMESPACE
                             break;
                         }
 
-                        if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                        if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                         {
                             this->record_frontier_cas_retry();
                         };
@@ -1421,7 +1421,7 @@ namespace MINIMAL_STD_NAMESPACE
                     }
 
                     manager.release_active_slot();
-                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                    if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                     {
                         this->record_metadata_cas_retry();
                     };
@@ -1505,7 +1505,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                 while (true)
                 {
-                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                    if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                     {
                         this->record_search_iteration();
                     };
@@ -1533,7 +1533,7 @@ namespace MINIMAL_STD_NAMESPACE
                                     continue;
                                 }
 
-                                if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                                if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                                 {
                                     this->record_search_pop();
                                 };
@@ -1542,7 +1542,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                                 if (result == claim_result::CLAIMED)
                                 {
-                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                                    if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                                     {
                                         this->record_search_claimed();
                                     };
@@ -1552,7 +1552,7 @@ namespace MINIMAL_STD_NAMESPACE
                                 }
                                 if (result == claim_result::RECLAIM_DEFERRED)
                                 {
-                                    if constexpr (is_base_of_v<extensions::lockfree_single_block_resource_extended_statistics, lockfree_single_block_resource_impl>)
+                                    if constexpr (is_base_of_v<extensions::lockfree_single_arena_resource_extended_statistics, lockfree_single_arena_resource_impl>)
                                     {
                                         this->record_search_reclaim_deferred();
                                     };

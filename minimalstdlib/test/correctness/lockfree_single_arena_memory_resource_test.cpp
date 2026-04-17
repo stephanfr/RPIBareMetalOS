@@ -5,8 +5,8 @@
 #include <CppUTest/TestHarness.h>
 #include <minstdconfig.h>
 
-#include <__memory_resource/lockfree_single_block_resource.h>
-#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
+#include <__memory_resource/lockfree_single_arena_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_arena_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include "../shared/interrupt_simulation_test_helpers.h"
@@ -35,37 +35,37 @@ namespace
 
     
 
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
 
         10,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_block_resource_with_stats;
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_arena_resource_with_stats;
         
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
 
         10,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_arena_resource_without_stats;
 }
 
 
 // clang-format off
 
-TEST_GROUP(LockfreeSingleBlockMemoryResourceTests)
+TEST_GROUP(LockfreeSingleArenaMemoryResourceTests)
 {
 };
 
-TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionality)
+TEST(LockfreeSingleArenaMemoryResourceTests, SingleArenaResourceBasicFunctionality)
 {
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     void *ptr1 = resource.allocate(50);
 
@@ -73,7 +73,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionali
     CHECK((unsigned long)ptr1 % DEFAULT_ALIGNMENT == 0);
 
     auto allocation_info = resource.get_allocation_info(ptr1);
-    CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+    CHECK(allocation_info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
     CHECK(allocation_info.size == 50);
     CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
@@ -83,7 +83,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionali
     CHECK((unsigned long)ptr2 % DEFAULT_ALIGNMENT == 0);
 
     allocation_info = resource.get_allocation_info(ptr2);
-    CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+    CHECK(allocation_info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
     CHECK(allocation_info.size == 1023);
     CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
@@ -93,7 +93,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionali
     CHECK((unsigned long)ptr3 % DEFAULT_ALIGNMENT == 0);
 
     allocation_info = resource.get_allocation_info(ptr3);
-    CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+    CHECK(allocation_info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
     CHECK(allocation_info.size == 123);
     CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
@@ -103,7 +103,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionali
     CHECK((unsigned long)ptr4 % DEFAULT_ALIGNMENT == 0);
 
     allocation_info = resource.get_allocation_info(ptr4);
-    CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+    CHECK(allocation_info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
     CHECK(allocation_info.size == 45678);
     CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 
@@ -119,24 +119,24 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SingleBlockResourceBasicFunctionali
     CHECK((unsigned long)ptr5 % DEFAULT_ALIGNMENT == 0);
 
     allocation_info = resource.get_allocation_info(ptr5);
-    CHECK(allocation_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+    CHECK(allocation_info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
     CHECK(allocation_info.size == 100);
     CHECK(allocation_info.alignment == DEFAULT_ALIGNMENT);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, AllocationLargerThanMaxIsRejected)
+TEST(LockfreeSingleArenaMemoryResourceTests, AllocationLargerThanMaxIsRejected)
 {
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
-    size_t too_large = lockfree_single_block_resource_with_stats::MAX_ALLOCATION_SIZE + 1;
+    size_t too_large = lockfree_single_arena_resource_with_stats::MAX_ALLOCATION_SIZE + 1;
     void *ptr = resource.allocate(too_large);
 
     CHECK(ptr == nullptr);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, CurrentAllocatedIsTrackedOnTemplateClass)
+TEST(LockfreeSingleArenaMemoryResourceTests, CurrentAllocatedIsTrackedOnTemplateClass)
 {
-    lockfree_single_block_resource_without_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_without_stats resource(buffer, BUFFER_SIZE);
 
     void *ptr1 = resource.allocate(128);
     void *ptr2 = resource.allocate(256);
@@ -152,9 +152,9 @@ TEST(LockfreeSingleBlockMemoryResourceTests, CurrentAllocatedIsTrackedOnTemplate
     CHECK_EQUAL(0, resource.extended_metrics().current_allocated());
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, DeferredDeallocationOpensMaintenanceWindowAtTen)
+TEST(LockfreeSingleArenaMemoryResourceTests, DeferredDeallocationOpensMaintenanceWindowAtTen)
 {
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t ALLOC_SIZE = 512;
     constexpr size_t NUM_BLOCKS = 10;
@@ -177,7 +177,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, DeferredDeallocationOpensMaintenanc
     CHECK_EQUAL(static_cast<size_t>(NUM_BLOCKS - 1), resource.extended_metrics().pending_deallocations());
 
     auto pending_info = resource.get_allocation_info(ptrs[0]);
-    CHECK(pending_info.state == lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
+    CHECK(pending_info.state == lockfree_single_arena_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
 
     const size_t windows_before = resource.extended_metrics().maintenance_windows();
 
@@ -188,12 +188,12 @@ TEST(LockfreeSingleBlockMemoryResourceTests, DeferredDeallocationOpensMaintenanc
     CHECK(resource.extended_metrics().maintenance_windows() > windows_before);
 
     auto finalized_info = resource.get_allocation_info(ptrs[0]);
-    CHECK(finalized_info.state != lockfree_single_block_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
+    CHECK(finalized_info.state != lockfree_single_arena_resource_with_stats::allocation_state::DEALLOCATED_PENDING);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, ReuseAfterMaintenanceKeepsMetadataCountStable)
+TEST(LockfreeSingleArenaMemoryResourceTests, ReuseAfterMaintenanceKeepsMetadataCountStable)
 {
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t ALLOC_SIZE = 1024;
     constexpr size_t NUM_BLOCKS = 10;
@@ -231,14 +231,14 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ReuseAfterMaintenanceKeepsMetadataC
     }
 
     auto reused_info = resource.get_allocation_info(reused);
-    CHECK(reused_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+    CHECK(reused_info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
 
     resource.deallocate(reused, ALLOC_SIZE);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, LargePendingBatchDrainsAndOpensMultipleMaintenanceWindows)
+TEST(LockfreeSingleArenaMemoryResourceTests, LargePendingBatchDrainsAndOpensMultipleMaintenanceWindows)
 {
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t ALLOC_SIZE = 512;
     constexpr size_t NUM_BLOCKS = 100;
@@ -262,9 +262,9 @@ TEST(LockfreeSingleBlockMemoryResourceTests, LargePendingBatchDrainsAndOpensMult
     CHECK(resource.extended_metrics().maintenance_windows() > windows_before);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, TailFreeingRestoresFrontierAfterMaintenance)
+TEST(LockfreeSingleArenaMemoryResourceTests, TailFreeingRestoresFrontierAfterMaintenance)
 {
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t ALLOC_SIZE = 2048;
     constexpr size_t NUM_BLOCKS = 20;
@@ -298,17 +298,17 @@ struct test_unmasked_interrupt_policy
     static inline void restore_interrupts(interrupt_state_t) {}
 };
 
-typedef minstd::pmr::lockfree_single_block_resource_impl<
+typedef minstd::pmr::lockfree_single_arena_resource_impl<
     test_unmasked_interrupt_policy,
     minstd::pmr::platform::default_platform_provider,
     128 * 1024 * 1024,
     5,
         128,
 
-    minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-    minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_unmasked;
+    minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+    minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_arena_resource_unmasked;
 
-static lockfree_single_block_resource_unmasked* s_reentrant_resource = nullptr;
+static lockfree_single_arena_resource_unmasked* s_reentrant_resource = nullptr;
 static minstd::atomic<int> s_reentrant_signal_count{0};
 static minstd::atomic<bool> s_reentrant_test_done{false};
 
@@ -336,9 +336,9 @@ static void* bomber_reentrant_fn(void* arg)
     return nullptr;
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, DirectInterruptReentrancy)
+TEST(LockfreeSingleArenaMemoryResourceTests, DirectInterruptReentrancy)
 {
-    lockfree_single_block_resource_unmasked resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_unmasked resource(buffer, BUFFER_SIZE);
     
     s_reentrant_resource = &resource;
     s_reentrant_signal_count = 0;
@@ -377,12 +377,12 @@ TEST(LockfreeSingleBlockMemoryResourceTests, DirectInterruptReentrancy)
 // Multi-threaded concurrency correctness tests
 // ---------------------------------------------------------------------------
 
-TEST(LockfreeSingleBlockMemoryResourceTests, ConcurrentDoubleFreeResilience)
+TEST(LockfreeSingleArenaMemoryResourceTests, ConcurrentDoubleFreeResilience)
 {
     //  Multiple threads attempt to deallocate the same pointer simultaneously.
     //  Exactly one should succeed; no crashes, no corruption.
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t ALLOC_SIZE = 256;
     constexpr size_t NUM_THREADS = 8;
@@ -422,7 +422,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ConcurrentDoubleFreeResilience)
         CHECK(ptr != nullptr);
 
         auto info = resource.get_allocation_info(ptr);
-        CHECK(info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+        CHECK(info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
 
         minstd::atomic<size_t> success_count{0};
         minstd::atomic<bool> go{false};
@@ -445,20 +445,20 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ConcurrentDoubleFreeResilience)
 
         //  After all threads finish, the allocation must not be IN_USE
         info = resource.get_allocation_info(ptr);
-        CHECK(info.state != lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+        CHECK(info.state != lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
     }
 
     //  Final consistency: no live allocations remain
     CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().current_allocated());
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, ConcurrentAllocDeallocChurn)
+TEST(LockfreeSingleArenaMemoryResourceTests, ConcurrentAllocDeallocChurn)
 {
     //  Multiple threads perform rapid alloc/dealloc cycles concurrently.
     //  Validates that reuse paths and frontier paths are both exercised
     //  without corruption.
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t NUM_THREADS = 16;
     constexpr size_t CYCLES_PER_THREAD = 10000;
@@ -549,7 +549,7 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ConcurrentAllocDeallocChurn)
     CHECK(resource.extended_metrics().allocator_reuse_hits() > 0);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, ExhaustAndRecoverUnderContention)
+TEST(LockfreeSingleArenaMemoryResourceTests, ExhaustAndRecoverUnderContention)
 {
     //  Drive the allocator to exhaustion from multiple threads, then
     //  have all threads deallocate and confirm the resource recovers fully.
@@ -558,13 +558,13 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ExhaustAndRecoverUnderContention)
     char *small_buffer = static_cast<char *>(malloc(SMALL_BUFFER_SIZE));
     memset(small_buffer, 0, SMALL_BUFFER_SIZE);
 
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         16 * 1024 * 1024,
         5,
         10,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
         minstd::pmr::extensions::memory_resource_statistics> small_resource_type;
 
     small_resource_type resource(small_buffer, SMALL_BUFFER_SIZE);
@@ -689,12 +689,12 @@ TEST(LockfreeSingleBlockMemoryResourceTests, ExhaustAndRecoverUnderContention)
     free(small_buffer);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, CrossThreadDeallocation)
+TEST(LockfreeSingleArenaMemoryResourceTests, CrossThreadDeallocation)
 {
     //  Thread A allocates, Thread B deallocates — validates that blocks
     //  allocated on one thread can be safely deallocated on another.
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t NUM_THREADS = 8;
     constexpr size_t ALLOCS_PER_THREAD = 2000;
@@ -795,12 +795,12 @@ TEST(LockfreeSingleBlockMemoryResourceTests, CrossThreadDeallocation)
     CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().current_allocated());
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, FrontierReclaimRace)
+TEST(LockfreeSingleArenaMemoryResourceTests, FrontierReclaimRace)
 {
     //  Allocate exactly in order, then deallocate the tail blocks from multiple
     //  threads to stress the frontier reclaim path (try_reclaim_frontier_blocks).
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t NUM_THREADS = 8;
     constexpr size_t BLOCKS_PER_THREAD = 13;
@@ -885,13 +885,13 @@ TEST(LockfreeSingleBlockMemoryResourceTests, FrontierReclaimRace)
     CHECK(resource.extended_metrics().frontier_offset() < peak_frontier);
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, SignalDuringDeallocation)
+TEST(LockfreeSingleArenaMemoryResourceTests, SignalDuringDeallocation)
 {
     //  Exercise the allocator with SIGUSR1 bombing specifically during
     //  the deallocation path (not just during allocation as DirectInterruptReentrancy tests).
     //  The signal handler performs allocation + deallocation to provoke reentrancy.
 
-    lockfree_single_block_resource_unmasked resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_unmasked resource(buffer, BUFFER_SIZE);
 
     s_reentrant_resource = &resource;
     s_reentrant_signal_count = 0;
@@ -947,12 +947,12 @@ TEST(LockfreeSingleBlockMemoryResourceTests, SignalDuringDeallocation)
     CHECK_EQUAL(static_cast<size_t>(0), resource.extended_metrics().current_allocated());
 }
 
-TEST(LockfreeSingleBlockMemoryResourceTests, MetadataTrimStress)
+TEST(LockfreeSingleArenaMemoryResourceTests, MetadataTrimStress)
 {
     //  Repeatedly exhaust and release all blocks to stress the metadata trim
     //  path.  Metadata count should remain bounded.
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE);
 
     constexpr size_t ALLOC_SIZE = 2048;
     constexpr size_t NUM_BLOCKS = 500;

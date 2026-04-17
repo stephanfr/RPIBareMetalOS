@@ -10,7 +10,7 @@
 
 #include "__extensions/memory_resource_statistics.h"
 #include "fixed_size_element_resource.h"
-#include "lockfree_single_block_resource.h"
+#include "lockfree_single_arena_resource.h"
 #include "memory_resource.h"
 
 namespace MINIMAL_STD_NAMESPACE
@@ -43,7 +43,7 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            using large_resource_type = lockfree_single_block_resource_impl<
+            using large_resource_type = lockfree_single_arena_resource_impl<
                 platform::default_interrupt_policy,
                 platform::default_platform_provider,
                 LARGE_RESOURCE_MAX_BIN_BYTES,

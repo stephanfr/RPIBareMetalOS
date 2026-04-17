@@ -5,8 +5,8 @@
 #include <CppUTest/TestHarness.h>
 #include <minstdconfig.h>
 
-#include <__memory_resource/lockfree_single_block_resource.h>
-#include <__memory_resource/__extensions/lockfree_single_block_resource_extended_statistics.h>
+#include <__memory_resource/lockfree_single_arena_resource.h>
+#include <__memory_resource/__extensions/lockfree_single_arena_resource_extended_statistics.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 
 #include "../shared/interrupt_simulation_test_helpers.h"
@@ -44,22 +44,22 @@ namespace
 
     
 
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_block_resource_with_stats;
-    typedef minstd::pmr::lockfree_single_block_resource_impl<
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::memory_resource_statistics> lockfree_single_arena_resource_with_stats;
+    typedef minstd::pmr::lockfree_single_arena_resource_impl<
         test_userspace_signal_mask_interrupt_policy,
         minstd::pmr::platform::default_platform_provider,
         128 * 1024 * 1024,
         5,
         128,
-        minstd::pmr::extensions::lockfree_single_block_resource_extended_statistics,
-        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_block_resource_without_stats;
+        minstd::pmr::extensions::lockfree_single_arena_resource_extended_statistics,
+        minstd::pmr::extensions::null_memory_resource_statistics> lockfree_single_arena_resource_without_stats;
 
     struct allocator_thread_arguments
     {
@@ -248,18 +248,18 @@ namespace
 
 // clang-format off
 
-TEST_GROUP(LockfreeSingleBlockMemoryResourceMultithreadSoakTests)
+TEST_GROUP(LockfreeSingleArenaMemoryResourceMultithreadCorrectnessTests)
 {
 };
 
-TEST(LockfreeSingleBlockMemoryResourceMultithreadSoakTests, MultiThreadTest)
+TEST(LockfreeSingleArenaMemoryResourceMultithreadCorrectnessTests, MultiThreadTest)
 {
     constexpr size_t NUM_THREADS = 16;
 
     start_allocations = false;
     correctness_allocation_failed.store(false, minstd::memory_order_release);
 
-    lockfree_single_block_resource_with_stats resource(buffer, BUFFER_SIZE);
+    lockfree_single_arena_resource_with_stats resource(buffer, BUFFER_SIZE, minstd::pmr::test::os_abstractions::get_cpu_count());
 
     allocator_thread_arguments args[NUM_THREADS];
     pthread_t threads[NUM_THREADS];
@@ -293,7 +293,7 @@ TEST(LockfreeSingleBlockMemoryResourceMultithreadSoakTests, MultiThreadTest)
     double duration = (end_time.tv_sec - start_time.tv_sec) +
                       (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
-    printf("Lockfree Single Block Resource Multithread Tests Duration: %f\n", duration);
+    printf("Lockfree Single Arena Resource Multithread Tests Duration: %f\n", duration);
 
     size_t total_number_of_allocations = 0;
     size_t total_number_of_bytes_allocated = 0;
@@ -311,12 +311,12 @@ TEST(LockfreeSingleBlockMemoryResourceMultithreadSoakTests, MultiThreadTest)
             {
                 auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
 
-                if (alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::INVALID)
+                if (alloc_info.state == lockfree_single_arena_resource_with_stats::allocation_state::INVALID)
                 {
                     printf("Invalid allocation info\n");
                 }
 
-                CHECK(alloc_info.state != lockfree_single_block_resource_with_stats::allocation_state::INVALID);
+                CHECK(alloc_info.state != lockfree_single_arena_resource_with_stats::allocation_state::INVALID);
 
                 total_number_of_allocations++;
                 total_number_of_bytes_allocated += args[i].sizes_allocated[j];
@@ -340,7 +340,7 @@ TEST(LockfreeSingleBlockMemoryResourceMultithreadSoakTests, MultiThreadTest)
             if (!args[i].deleted_element[j])
             {
                 auto alloc_info = resource.get_allocation_info(args[i].pointers_allocated[j]);
-                CHECK(alloc_info.state == lockfree_single_block_resource_with_stats::allocation_state::IN_USE);
+                CHECK(alloc_info.state == lockfree_single_arena_resource_with_stats::allocation_state::IN_USE);
             }
         }
     }

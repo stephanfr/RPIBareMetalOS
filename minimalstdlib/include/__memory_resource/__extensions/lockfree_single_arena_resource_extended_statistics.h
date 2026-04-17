@@ -11,7 +11,7 @@ namespace MINIMAL_STD_NAMESPACE
         namespace extensions
         {
 
-            struct lockfree_single_block_resource_extended_statistics
+            struct lockfree_single_arena_resource_extended_statistics
             {
             protected:
                 void record_allocator_call() noexcept { allocator_calls_.fetch_add(1, memory_order_relaxed); }

@@ -69,7 +69,7 @@ namespace MINIMAL_STD_NAMESPACE
         };
 
         //  Instance-level statistics extension for skip_list.
-        //  Inherited as a base class, matching the lockfree_single_block_resource pattern.
+        //  Inherited as a base class, matching the lockfree_single_arena_resource pattern.
 
         class skiplist_statistics
         {
