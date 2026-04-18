@@ -430,6 +430,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (other_result != nullptr)
                     {
+                        block *successful_blk = block_from_allocation(other_result);
+                        core_hints_[hint_index].last_block.store(successful_blk, memory_order_relaxed);
                         return other_result;
                     }
                 }
