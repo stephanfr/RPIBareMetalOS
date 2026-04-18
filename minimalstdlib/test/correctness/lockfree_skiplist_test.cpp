@@ -164,6 +164,139 @@ namespace
         }
     }
 
+    TEST(SkiplistTests, ConstructorUsesProvidedMemoryResource)
+    {
+        class counting_memory_resource : public minstd::pmr::memory_resource
+        {
+        public:
+            explicit counting_memory_resource(minstd::pmr::memory_resource *upstream)
+                : upstream_(upstream)
+            {
+            }
+
+            size_t allocations() const
+            {
+                return allocations_;
+            }
+
+            size_t deallocations() const
+            {
+                return deallocations_;
+            }
+
+        private:
+            void *do_allocate(size_t bytes, size_t alignment) override
+            {
+                ++allocations_;
+                return upstream_->allocate(bytes, alignment);
+            }
+
+            void do_deallocate(void *ptr, size_t bytes, size_t alignment) override
+            {
+                ++deallocations_;
+                upstream_->deallocate(ptr, bytes, alignment);
+            }
+
+            bool do_is_equal(const minstd::pmr::memory_resource &other) const noexcept override
+            {
+                return this == &other;
+            }
+
+            minstd::pmr::memory_resource *upstream_;
+            size_t allocations_ = 0;
+            size_t deallocations_ = 0;
+        };
+
+        static unsigned char test_resource_buffer[2 * 1024 * 1024];
+        minstd::pmr::lockfree_composite_single_arena_resource<> upstream_resource(test_resource_buffer, sizeof(test_resource_buffer), 2);
+        counting_memory_resource counting_resource(&upstream_resource);
+
+        const size_t allocations_before = counting_resource.allocations();
+        const size_t deallocations_before = counting_resource.deallocations();
+
+        {
+            using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+
+            list_type list(&counting_resource);
+
+            for (uint32_t i = 0; i < 64; ++i)
+            {
+                CHECK_TRUE(list.insert(i, i + 1));
+            }
+
+            for (uint32_t i = 0; i < 64; ++i)
+            {
+                auto item = list.find(i);
+                CHECK_TRUE(item != list.end());
+                CHECK_EQUAL(i + 1, item->second);
+            }
+
+            for (uint32_t i = 0; i < 32; ++i)
+            {
+                CHECK_TRUE(list.remove(i));
+            }
+
+            CHECK_TRUE(counting_resource.allocations() > allocations_before);
+        }
+
+        CHECK_TRUE(counting_resource.deallocations() > deallocations_before);
+    }
+
+    TEST(SkiplistTests, DefaultConstructorFallbackMatchesResourceConstructorBehavior)
+    {
+        using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
+
+        list_type default_list;
+
+        static unsigned char resource_buffer[2 * 1024 * 1024];
+        minstd::pmr::lockfree_composite_single_arena_resource<> resource(resource_buffer, sizeof(resource_buffer), 2);
+        list_type resource_list(&resource);
+
+        for (uint32_t i = 0; i < 128; ++i)
+        {
+            CHECK_TRUE(default_list.insert(i, i * 3));
+            CHECK_TRUE(resource_list.insert(i, i * 3));
+        }
+
+        for (uint32_t i = 0; i < 128; ++i)
+        {
+            auto default_item = default_list.find(i);
+            auto resource_item = resource_list.find(i);
+
+            CHECK_TRUE(default_item != default_list.end());
+            CHECK_TRUE(resource_item != resource_list.end());
+            CHECK_EQUAL(default_item->second, resource_item->second);
+        }
+
+        for (uint32_t i = 0; i < 64; ++i)
+        {
+            const uint32_t key = i * 2;
+            CHECK_TRUE(default_list.remove(key));
+            CHECK_TRUE(resource_list.remove(key));
+        }
+
+        CHECK_EQUAL(default_list.size(), resource_list.size());
+
+        for (uint32_t i = 0; i < 128; ++i)
+        {
+            auto default_item = default_list.find(i);
+            auto resource_item = resource_list.find(i);
+
+            const bool in_default = (default_item != default_list.end());
+            const bool in_resource = (resource_item != resource_list.end());
+
+            CHECK_EQUAL(in_default, in_resource);
+
+            if (in_default)
+            {
+                CHECK_EQUAL(default_item->second, resource_item->second);
+            }
+        }
+
+        CHECK_TRUE(default_list.validate_ordering());
+        CHECK_TRUE(resource_list.validate_ordering());
+    }
+
     TEST(SkiplistTests, TemplateInstantiationWithCustomMaxLevels)
     {
         minstd::skip_list<uint32_t, uint64_t, SKIPLIST_STRESS_MAX_THREADS, 8> list;

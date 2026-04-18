@@ -27,11 +27,6 @@ namespace MINIMAL_STD_NAMESPACE
             return max_size_;
         }
 
-        size_t current_size() const noexcept override
-        {
-            return current_size_;
-        }
-
         T *allocate(size_t num_elements) override
         {
             if( current_size_ + num_elements > max_size_ )

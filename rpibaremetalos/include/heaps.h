@@ -9,7 +9,6 @@
 #include "synchronization.h"
 
 static SpinLock __os_static_heap_lock;
-static SpinLock __os_dynamic_heap_lock;
 
 
 extern minstd::memory_heap &__os_static_heap;
@@ -69,24 +68,18 @@ public:
 template <typename T, typename... Args>
 inline minstd::unique_ptr<T> dynamic_new(Args &&...args)
 {
-    LockGuard lock(__os_dynamic_heap_lock);
-    
     return minstd::unique_ptr<T>( new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...), __os_dynamic_heap);
 }
 
 template <typename T, typename U, typename... Args>
 inline minstd::unique_ptr<T> dynamic_new(Args &&...args)
 {
-    LockGuard lock(__os_dynamic_heap_lock);
-    
     return minstd::unique_ptr<T>( dynamic_cast<T*>( new (__os_dynamic_heap.allocate_block<U>(1)) U(minstd::forward<Args>(args)...)), __os_dynamic_heap);
 }
 
 template <typename T>
 inline void dynamic_delete(T *pointer)
 {
-    LockGuard lock(__os_dynamic_heap_lock);
-    
     __os_dynamic_heap.deallocate_block(pointer, 1);
 }
 
@@ -94,8 +87,6 @@ inline void dynamic_delete(T *pointer)
 template <typename T, typename... Args>
 inline minstd::unique_ptr<T> make_dynamic_unique(Args &&...args)
 {
-    LockGuard lock(__os_dynamic_heap_lock);
-    
     T *temp = new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...);
     return minstd::unique_ptr<T>(temp, __os_dynamic_heap);
 }
@@ -103,8 +94,6 @@ inline minstd::unique_ptr<T> make_dynamic_unique(Args &&...args)
 template <typename T, typename T2, typename... Args>
 inline minstd::unique_ptr<T2> make_dynamic_unique(Args &&...args)
 {
-    LockGuard lock(__os_dynamic_heap_lock);
-    
     T2 *temp = dynamic_cast<T2*>(new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...));
     return minstd::unique_ptr<T2>(temp, __os_dynamic_heap);
 }

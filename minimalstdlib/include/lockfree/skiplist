@@ -15,6 +15,7 @@
 #include "__extensions/skiplist_statistics.h"
 #include "epoch_policy"
 #include "epoch_reclaimer_core"
+#include "__memory_resource/memory_resource.h"
 #define DEFAULT_MAX_LEVELS 16
 
 #ifndef MINIMAL_STD_SKIPLIST_MAX_SLOTS
@@ -919,23 +920,40 @@ namespace MINIMAL_STD_NAMESPACE
 
 
             skip_list()
-                : epoch_reclaimer_(slot_policy_)
+                : skip_list(nullptr)
             {
-                NIL_ = new skip_node(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
-                head_ = new skip_node(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL_);
+            }
+
+            explicit skip_list(pmr::memory_resource *memory_resource)
+                : memory_resource_(memory_resource), epoch_reclaimer_(slot_policy_)
+            {
+                NIL_ = allocate_skip_node(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
+
+                if (NIL_ == nullptr)
+                {
+                    return;
+                }
+
+                head_ = allocate_skip_node(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL_);
+
+                if (head_ == nullptr)
+                {
+                    destroy_skip_node(NIL_);
+                    NIL_ = nullptr;
+                }
             }
 
             ~skip_list()
             {
-                skip_node *current_node = head_->next_node[0].get_reference();
+                skip_node *current_node = (head_ != nullptr) ? head_->next_node[0].get_reference() : nullptr;
 
-                while (current_node != NIL_)
+                while (current_node != nullptr && current_node != NIL_)
                 {
                     skip_node *next_node = current_node->next_node[0].get_reference();
 
                     if (!current_node->retirement_enqueued_.load(memory_order_acquire))
                     {
-                        delete current_node;
+                        destroy_skip_node(current_node);
                     }
 
                     current_node = next_node;
@@ -943,8 +961,8 @@ namespace MINIMAL_STD_NAMESPACE
 
                 reclaim_all_retired_nodes();
 
-                delete head_;
-                delete NIL_;
+                destroy_skip_node(head_);
+                destroy_skip_node(NIL_);
             };
 
             iterator find(const KeyType search_key)
@@ -1112,17 +1130,23 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (found == find_result::FOUND)
                     {
-                        delete new_node;
+                        destroy_skip_node(new_node);
                         return false;
                     }
                     else
                     {
                         if (new_node == nullptr)
                         {
-                            new_node = new skip_node(key, value, top_level);
+                            new_node = allocate_skip_node(key, value, top_level);
+
+                            if (new_node == nullptr)
+                            {
+                                return false;
+                            }
+
                             if (new_node->internal_slot_ == 0)
                             {
-                                delete new_node;
+                                destroy_skip_node(new_node);
                                 return false;
                             }
                         }
@@ -1150,7 +1174,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                             if (insert_level0_retry_count >= MAX_INSERT_LEVEL0_RETRIES)
                             {
-                                delete new_node;
+                                destroy_skip_node(new_node);
                                 return false;
                             }
 
@@ -1234,7 +1258,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                             if ((curr->key == key) || soft_deleted)
                             {
-                                delete new_node;
+                                destroy_skip_node(new_node);
                                 return false;
                             }
 
@@ -1655,7 +1679,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (fully_unlinked && (current->retired_epoch_ <= reclaim_epoch))
                     {
-                        delete current;
+                        destroy_skip_node(current);
                         ++nodes_freed;
                         Statistics::node_reclaimed();
                     }
@@ -1780,7 +1804,7 @@ namespace MINIMAL_STD_NAMESPACE
                     while (node != nullptr)
                     {
                         skip_node *next = node->retired_next;
-                        delete node;
+                        destroy_skip_node(node);
                         node = next;
                     }
 
@@ -1796,6 +1820,42 @@ namespace MINIMAL_STD_NAMESPACE
 
             
         private:
+            template <typename... Args>
+            skip_node *allocate_skip_node(Args &&...args)
+            {
+                if (memory_resource_ == nullptr)
+                {
+                    return new skip_node(minstd::forward<Args>(args)...);
+                }
+
+                void *buffer = memory_resource_->allocate(sizeof(skip_node), alignof(skip_node));
+                if (buffer == nullptr)
+                {
+                    return nullptr;
+                }
+
+                return new (buffer) skip_node(minstd::forward<Args>(args)...);
+            }
+
+            void destroy_skip_node(skip_node *node)
+            {
+                if (node == nullptr)
+                {
+                    return;
+                }
+
+                if (memory_resource_ == nullptr)
+                {
+                    delete node;
+                    return;
+                }
+
+                node->~skip_node();
+                memory_resource_->deallocate(node, sizeof(skip_node), alignof(skip_node));
+            }
+
+            pmr::memory_resource *memory_resource_ = nullptr;
+
             skip_node *find_lower_bound_after(const KeyType current_key) const
             {
                 bool is_tombstoned = false;

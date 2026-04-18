@@ -114,7 +114,9 @@ namespace task
     } // namespace internal
 
     TaskManagerImpl::TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc)
-        : number_of_cores_(GetPlatformInfo().GetNumberOfCores()), task_map_allocator_(alloc)
+                : number_of_cores_(GetPlatformInfo().GetNumberOfCores()),
+                    task_map_allocator_(alloc),
+                    task_map_(alloc.resource())
     {
     }
 

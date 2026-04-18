@@ -35,11 +35,6 @@ namespace MINIMAL_STD_NAMESPACE
             return FIXED_SIZE;
         }
 
-        size_t current_size() const noexcept override
-        {
-            return current_size_;
-        }
-
         T *allocate(size_t num_elements) override
         {
             MINIMAL_STD_ASSERT(current_size_ + num_elements <= FIXED_SIZE);
