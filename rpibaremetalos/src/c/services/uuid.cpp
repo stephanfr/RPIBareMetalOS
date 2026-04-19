@@ -4,14 +4,35 @@
 
 #include "services/uuid.h"
 
+#include <atomic>
 #include <minimalstdio.h>
+#include "__random/fast_lockfree_low_quality_rng.h"
 
-#include "platform/platform_sw_rngs.h"
+namespace
+{
+    static constexpr uint64_t DEFAULT_UUID_SEED = 88172645463325252ULL;
+    static minstd::atomic<uint64_t> uuid_seed_{DEFAULT_UUID_SEED};
 
-#include "synchronization.h"
+    uint64_t uuid_seed_provider()
+    {
+        return uuid_seed_.load(minstd::memory_order_relaxed);
+    }
+
+    minstd::fast_lockfree_low_quality_rng &uuid_rng()
+    {
+        static minstd::fast_lockfree_low_quality_rng instance(uuid_seed_provider);
+
+        return instance;
+    }
+}
 
 const UUID UUID::NIL(0UL, 0UL);
 const UUID UUID::MAX(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
+
+void UUID::SeedRNG(uint64_t seed)
+{
+    uuid_seed_.store(seed == 0 ? DEFAULT_UUID_SEED : seed, minstd::memory_order_relaxed);
+}
 
 UUID UUID::GenerateUUID(Versions version)
 {
@@ -21,12 +42,12 @@ UUID UUID::GenerateUUID(Versions version)
     //      the version nunmber 4 must be placed in the top 4 bits of time_hi_and_version_
     //      and the rest of the bits are random.
 
-    static SpinLock uuid_generator_lock_;
+    (void)version;
 
-    LockGuard lock(uuid_generator_lock_);
+    auto &rng = uuid_rng();
 
-    return UUID((GetUUIDGeneratorRNG().Next64BitValue() & ~0x000000000000F000) | 0x0000000000004000,
-                (GetUUIDGeneratorRNG().Next64BitValue() & ~0xC000000000000000) | 0x8000000000000000);
+    return UUID((rng() & ~0x000000000000F000) | 0x0000000000004000,
+                (rng() & ~0xC000000000000000) | 0x8000000000000000);
 }
 
 char *UUID::ToString(char buffer[UUID_STRING_BUFFER_SIZE]) const

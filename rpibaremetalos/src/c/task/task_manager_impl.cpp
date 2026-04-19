@@ -87,9 +87,7 @@ namespace task
 
         extern "C" void SecondaryCoreMain()
         {
-            //  We need to serialize the creation of the secondary core main task as the UUID generator is not thread-reentrant,
-            //      but we are not in a task context (it will not exist until after the task itself is created and SetCoreMainTaskContext is called)
-            //      so use the __TasklessMutex.
+            //  Secondary core bootstrap creates the per-core main task context.
 
             uint32_t core_id = GetCoreID();
 

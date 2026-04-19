@@ -3,14 +3,12 @@
 # license that can be found in the LICENSE file.
 
 TEST_TARGETS := test test-coverage
-ARM64_TARGETS := arm64
+NATIVE_TARGETS := native
 
-ifneq (,$(filter $(ARM64_TARGETS), $(MAKECMDGOALS)))
-include Makefile.arm64.mk
-else
-ifeq (,$(filter $(TEST_TARGETS), $(MAKECMDGOALS)))
+ifneq (,$(filter $(NATIVE_TARGETS), $(MAKECMDGOALS)))
+include Makefile.native.mk
+else ifeq (,$(filter $(TEST_TARGETS), $(MAKECMDGOALS)))
 include Makefile.aarch64.mk
 else
 include Makefile.test.mk
-endif
 endif

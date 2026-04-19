@@ -6,11 +6,14 @@ TOOLS := ${HOME}/dev_tools
 THIRD_PARTY := ${HOME}/dev/third-party
 
 # Variables for AArch64 builds follow
+# Detect host architecture for cross-compiler toolchain path
+
+HOST_ARCH := $(shell uname -m)
 
 GCC_CROSS_DIRECTORY := ${HOME}/dev/gcc-cross
 
 GCC_AARCH64_BARE_METAL_VERSION := 13.3.1
-GCC_AARCH64_BARE_METAL_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-aarch64-aarch64-none-elf/bin/
+GCC_AARCH64_BARE_METAL_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-$(HOST_ARCH)-aarch64-none-elf/bin/
 GCC_AARCH64_BARE_METAL_INCLUDE := $(GCC_CROSS_DIRECTORY)/aarch64-none-elf
 
 CC := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-gcc

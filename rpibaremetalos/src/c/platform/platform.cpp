@@ -30,6 +30,7 @@
 
 #include "platform/mmu_manager.h"
 
+#include "services/uuid.h"
 #include "services/xoroshiro128plusplus.h"
 
 #include "devices/physical_timer.h"
@@ -207,6 +208,11 @@ void InitializePlatform()
             Xoroshiro128PlusPlusRNG::Seed(ticks ^ 0x9E3779B97F4A7C15ULL,
                                           serial ^ 0x6A09E667F3BCC908ULL));
     }
+
+    //  Seed UUID generation before entities/tasks are created on additional cores.
+
+//    UUID::SeedRNG(__hw_random_number_generator->Next64BitValue());
+UUID::SeedRNG(88172645463325252ULL);
 
     //  Initialize the platform software RNGs from the HW RNG
 
