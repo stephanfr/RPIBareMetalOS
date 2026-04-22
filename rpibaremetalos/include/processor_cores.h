@@ -5,8 +5,8 @@
 #pragma once
 
 #define CORE_NOT_STARTED 0
-#define CORE_STARTED_IN_EL2 1
-#define CORE_SPINNING_IN_EL2 2
+#define CORE_STARTED_IN_EL3 1
+#define CORE_STARTED_IN_EL2 2
 #define CORE_CONFIGURING_STACKS_IN_EL2 3
 #define CORE_SPINNING_IN_EL1 4
 #define CORE_INITIALIZING_KERNEL 5
@@ -23,8 +23,8 @@
 typedef enum class CoreInitializationStates : uint32_t
 {
     NotStarted = CORE_NOT_STARTED,
+    StartedInEL3 = CORE_STARTED_IN_EL3,
     StartedInEL2 = CORE_STARTED_IN_EL2,
-    SpinningInEL2 = CORE_SPINNING_IN_EL2,
     ConfiguringStacksInEL2 = CORE_CONFIGURING_STACKS_IN_EL2,
     SpinningInEL1 = CORE_SPINNING_IN_EL1,
     InitializingKernel = CORE_INITIALIZING_KERNEL,

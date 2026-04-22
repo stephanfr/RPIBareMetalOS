@@ -43,10 +43,7 @@ ConfigureGIC400:
 
 test_for_gic_400:
 
-	adrp 	x10, __hw_board_type				//	Insure this is not a RPI3
-    add 	x10, x10, :lo12:__hw_board_type
-    ldr 	w9, [x10]
-    cmp 	x9, #RPI_BOARD_ENUM_RPI3
+    cmp     x0, #RPI_BOARD_ENUM_RPI3
 	b.ne 	has_gic_400						//	Board has a GIC-400
 
 	ret										//	Board does not have a GIC-400, so return now
