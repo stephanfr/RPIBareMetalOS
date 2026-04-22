@@ -257,6 +257,7 @@ running_in_el2:
 el2_spin:
 	wfe
 	add     x15, x22_coreJumpTableAddress, x19_coreNumber, lsl #3
+	dc      civac, x15
 	ldr     x9, [x15]
 	cbz     x9, el2_spin
 
