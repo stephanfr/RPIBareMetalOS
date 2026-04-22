@@ -42,7 +42,6 @@ extern const unsigned int __os_process_start;
 extern uint32_t __hw_board_type;
 extern uint32_t __number_of_cores_available;
 extern minstd::atomic<uint32_t> __core_state[];
-extern uint64_t __core_jmp_table[];
 
 extern uint32_t __board_version;
 extern uint32_t __videocore_memory_base;

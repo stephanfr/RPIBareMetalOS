@@ -107,7 +107,9 @@ namespace task
 
             __core_state[core_id].store((uint32_t)CoreInitializationStates::WaitingInSecondaryMain);
 
-            //  Keep the scheduler running - we should really never return here
+            //  StartSecondaryCores() sends a CORE_TASK_SWITCH IPI after observing WaitingInSecondaryMain.
+            //  That IPI fires SwitchToNextTask() which replaces this execution context entirely.
+            //  The loop below is a safety fallback that should never execute in normal operation.
 
             while (1)
             {
@@ -156,7 +158,7 @@ namespace task
 
         for (uint32_t core_id = 0; core_id < instance_->get().number_of_cores_; core_id++)
         {
-            // TODO LEAK LEAK LEAK LEAK
+            // BUG: idle_task_runnable is never freed — static_new does not register for cleanup.
 
             auto idle_task_runnable = static_new<internal::IdleTask>();
 
@@ -280,7 +282,6 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        //        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
 
         new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
@@ -332,7 +333,6 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        //        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1;
 
         new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
@@ -367,7 +367,26 @@ namespace task
             task_map_.insert(task->ID(), task.release());
         }
 
-        //  Determine which core to schedule the task on
+        //  Determine which core to schedule the task on.
+        //  Validate first: if no core in [0, number_of_cores_) matches the mask, LogFatal now
+        //  rather than spinning forever.
+
+        bool found_valid_core = false;
+
+        for (uint32_t i = 0; i < number_of_cores_; i++)
+        {
+            if (task_ref.CoreRestrictionMask().ContainsCore(i))
+            {
+                found_valid_core = true;
+                break;
+            }
+        }
+
+        if (!found_valid_core)
+        {
+            LogFatal("AddTask: CoreRestrictionMask has no valid core in [0, %u)\n", number_of_cores_);
+            ParkCore();
+        }
 
         uint32_t schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
 
@@ -407,12 +426,10 @@ namespace task
      */
     void TaskManagerImpl::PreemptiveSchedule()
     {
-        //  Signal all the cores to switch tasks
-
-        GetExceptionManager().SendInterprocessorInterrupt(0, InterprocessorInterrupts::CORE_TASK_SWITCH);
-        GetExceptionManager().SendInterprocessorInterrupt(1, InterprocessorInterrupts::CORE_TASK_SWITCH);
-        GetExceptionManager().SendInterprocessorInterrupt(2, InterprocessorInterrupts::CORE_TASK_SWITCH);
-        GetExceptionManager().SendInterprocessorInterrupt(3, InterprocessorInterrupts::CORE_TASK_SWITCH);
+        for (uint32_t core_id = 0; core_id < number_of_cores_; core_id++)
+        {
+            GetExceptionManager().SendInterprocessorInterrupt(core_id, InterprocessorInterrupts::CORE_TASK_SWITCH);
+        }
     }
 
     void TaskManagerImpl::SwitchToNextTask()

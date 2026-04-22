@@ -22,8 +22,9 @@ CoreExecute:
 
 	adrp    x9, __core_state
     add     x9, x9, :lo12:__core_state
-	add		x11, x9, x0, lsl #2							// 	Compute address of the state block (64 bytes per core)
-	dc 		civac, x11									// 	Invalidate the cache line
+	add		x11, x9, x0, lsl #2							// 	Compute address of the state slot (4 bytes per core)
+	dc 		civac, x11									// 	Invalidate Core 0's cached copy so the next load reads from DRAM
+	dsb		sy											//	ARM ARM requires DSB after DC CIVAC before a dependent load
 	ldr		w10, [x11]
 
 	cmp		w10, #CORE_SPINNING_IN_EL1					// 	Core must be spinning in EL1 before we can ask it to execute code
@@ -31,12 +32,11 @@ CoreExecute:
 
 	adrp    x9, __core_jump_table
     add     x9, x9, :lo12:__core_jump_table
-	mov		x0, x0, lsl #3								// 	Compute the address of the correct jump table slot (64 bytes per core)
+	mov		x0, x0, lsl #3								// 	Compute the address of the correct jump table slot (8 bytes per core)
 	add		x9, x9, x0									// 	Compute the address of the correct jump table slot
 	str		x1, [x9]									// 	Store the function pointer in the correct jump table slot
-	dc 		civac, x9									// 	Invalidate the cache line containing the function pointer
-	dsb		sy											// 	Ensure flush completes before the event
-	isb 	sy											// 	Instruction synchronization barrier, sometimes it looks like the cache line invalidation does not run before the sev
+	dc 		civac, x9									// 	Flush the function pointer to DRAM so the spinning core sees it
+	dsb		sy											// 	Ensure the flush and store are visible before SEV
 
 	sev													// 	Wake up the core
 

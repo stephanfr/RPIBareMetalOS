@@ -362,6 +362,7 @@ el1_spin:
 	mov     x6, #0
 	mov     x7, #0
 
+	//  x9 was trashed by the bl EnableMMUTables above (x9 is caller-saved per AAPCS64), so re-fetch the jump address.
 	add     x15, x22_coreJumpTableAddress, x19_coreNumber, lsl #3
 	ldr     x9, [x15]
 	br      x9
