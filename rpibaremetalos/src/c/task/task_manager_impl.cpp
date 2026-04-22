@@ -200,8 +200,6 @@ namespace task
             {
                 CPUTicksDelay(1000);
 
-                SEND_EVENT; //  Send another SEV to nudge the core if it has gone into WFE
-
                 current_state = __core_state[core_id].load();
             }
 

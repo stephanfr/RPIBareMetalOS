@@ -250,24 +250,6 @@ running_in_el2:
 
     cbz     x19_coreNumber, configure_stacks_for_core                          //  Core zero will build the MMU tables.  The other cores will just point to them.
 
-    //  Spin on cores 1->3
-
-    SetCoreState #CORE_SPINNING_IN_EL2
-
-el2_spin:
-	wfe
-	add     x15, x22_coreJumpTableAddress, x19_coreNumber, lsl #3
-	dc      civac, x15
-	ldr     x9, [x15]
-	cbz     x9, el2_spin
-
-    //  Clear the jump table address for the current core - we will use it again to jump to the application code
-
-    mov     x10, #0
-	str     x10, [x15]
-
-	br      x9
-
 .align 4                                                        //  Align the code to a 4 byte boundary
 configure_stacks_for_core :
 
@@ -514,16 +496,8 @@ StartCore:
 
 wait_core_ack:
 	GetCoreState x9
-	cmp	    w0, #CORE_SPINNING_IN_EL2			                    //  Wait for the core to be spinning in the startup code in EL2
+	cmp	    w0, #CORE_SPINNING_IN_EL1			                    //  Wait for the core to drop into EL1 spin loop
 	bne	    wait_core_ack
-
-	ldr     x11, = configure_stacks_for_core	                    //  We want to configure the stacks next
-	add	    x10, x22_coreJumpTableAddress, x9, lsl #3               //  Compute slot address so we can flush the cache line
-	str	    x11, [x10]                                              //  Store the function address to the core
-	dc 	    civac, x10                                              //  Flush to memory: secondary cores at EL2 have no D-cache and read directly from memory
-	dsb	    sy                                                      //  Ensure flush completes before the event
-	isb	    sy                                                      //  Instruction synchronization barrier
-	sev										                        //  Wake up core
 
     ret                                                             //  Return
 
