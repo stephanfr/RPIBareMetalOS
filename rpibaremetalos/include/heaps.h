@@ -8,7 +8,7 @@
 #include "__memory_resource/memory_resource.h"
 #include "synchronization.h"
 
-static SpinLock __os_static_heap_lock;
+extern SpinLock __os_static_heap_lock;
 
 
 extern minstd::memory_heap &__os_static_heap;

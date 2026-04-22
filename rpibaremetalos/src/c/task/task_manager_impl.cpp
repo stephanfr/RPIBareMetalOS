@@ -34,6 +34,14 @@ UUID GetCurrentTaskId(void)
 
 namespace task
 {
+
+    //  There are atomic loads and stores to state variables below to insure that
+    //      during start-up Core 0, which is handling startup, and the secondary cores
+    //      both have the same view of memory.  When Core 0 is running with its MMU but the
+    //      secondary cores are still running with their MMU off, they will not have the same
+    //      view of memory until the MMU is enabled on the secondary cores, so we need to use
+    //      atomic operations to make sure that the state changes are visible on both cores.
+
     minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> TaskManagerImpl::instance_;
 
     TaskManager &GetTaskManager(void)
@@ -50,7 +58,7 @@ namespace task
             {
                 uint32_t core_id = GetCoreID();
 
-                *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::ExecutingApplicationCode;
+                __core_state[core_id].store((uint32_t)CoreInitializationStates::ExecutingApplicationCode);
 
                 while (1)
                 {
@@ -87,19 +95,17 @@ namespace task
 
         extern "C" void SecondaryCoreMain()
         {
-            //  Secondary core bootstrap creates the per-core main task context.
-
             uint32_t core_id = GetCoreID();
 
             auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
-
+            
             task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
 
             //  Wait for an interrupt - this will be the first task switch message
 
             EnableIRQs();
 
-            *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::WaitingInSecondaryMain;
+            __core_state[core_id].store((uint32_t)CoreInitializationStates::WaitingInSecondaryMain);
 
             //  Keep the scheduler running - we should really never return here
 
@@ -188,11 +194,15 @@ namespace task
 
             CPUTicksDelay(1000);
 
-            while (__core_state[core_id] != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain)
+            uint32_t current_state = __core_state[core_id].load();
+
+            while (current_state != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain && current_state != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
             {
                 CPUTicksDelay(1000);
 
                 SEND_EVENT; //  Send another SEV to nudge the core if it has gone into WFE
+
+                current_state = __core_state[core_id].load();
             }
 
             //  Ask the core to switch from the core main to the Idle Task
@@ -201,7 +211,7 @@ namespace task
 
             CPUTicksDelay(1000);
 
-            while (__core_state[core_id] != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
+            while (__core_state[core_id].load() != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
             {
                 CPUTicksDelay(1000);
             }

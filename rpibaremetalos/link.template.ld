@@ -52,6 +52,26 @@ SECTIONS
         __init_array_end = .;
     } > OS_RAM
 
+    /*
+     * Early page tables are here to provide a small, fixed section of mapped memory 
+     *     that will be used for a simple boot-time page table.  This allows the boot
+     *     sequence to enable the MMU, which is required for any atomic operations,
+     *     before the C++ statics initialization takes place.  Trying to execute an
+     *     aarch64 atomic operation without the MMU is undefined behavior.
+     */
+
+    .early_page_tables (NOLOAD) : {
+        . = ALIGN(4096);
+        __early_l1_page_table = .;
+        . = . + 4096;           /* 512 L1 entries x 8 bytes; we use 4 (covers 0-4GB) */
+        __early_l2_page_table = .;
+        . = . + (4096 * 4);     /* 4 sub-tables x 512 entries x 8 bytes = 16KB */
+        . = ALIGN(4096);
+        __early_page_tables_end = .;
+    } > OS_RAM
+
+    /* BSS is just the standard C BSS (Block Started by Symbol).  It is initialized to zero. */
+
     .bss (NOLOAD) : {
         . = ALIGN(4);
         __bss_start = .;
@@ -61,6 +81,11 @@ SECTIONS
         __bss_end = .;
     } > OS_RAM
 
+    /* Static heap is a section of memory for the kernel which is intended for data storage expected to last for the
+     *     lifetime of the OS.  Effectively, storage allocated during initialization that will be retained until
+     *     the OS halts.
+     */ 
+
     .static_heap : {
         . = ALIGN(4);
         __static_heap_start = .;
@@ -69,6 +94,8 @@ SECTIONS
     } > OS_RAM
 
     __static_heap_size_in_bytes = __static_heap_end - __static_heap_start;
+
+    /*  Dynamic heap is exactly that, a heap for use by the kernel within which objects with transitory lifetimes are allocated. */
 
     .dynamic_heap : {
         . = ALIGN(4);

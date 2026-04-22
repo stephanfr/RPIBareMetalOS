@@ -35,6 +35,7 @@ typedef enum class CoreInitializationStates : uint32_t
     Parked = CORE_STATE_PARKED,
 } CoreInitializationStates;
 
+
 class CoreList
 {
 public:

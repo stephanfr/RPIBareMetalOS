@@ -78,13 +78,6 @@ x23_arrivedInEL3 .req x23
 x24_numberOfCoresAvailable .req x24
 
 
-//.macro EnableIRQs
-//	msr	daifclr, #2
-//.endm
-
-//.macro DisableIRQs
-//	msr	daifset, #2
-//.endm
 
 .macro InitializeLocalRegisterVariables
     mrs     x19_coreNumber, MPIDR_EL1
@@ -263,13 +256,14 @@ running_in_el2:
 
 el2_spin:
 	wfe
-	ldr     x9, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
+	add     x15, x22_coreJumpTableAddress, x19_coreNumber, lsl #3
+	ldr     x9, [x15]
 	cbz     x9, el2_spin
 
     //  Clear the jump table address for the current core - we will use it again to jump to the application code
 
     mov     x10, #0
-	str     x10, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
+	str     x10, [x15]
 
 	br      x9
 
@@ -320,8 +314,7 @@ configure_stacks_for_core :
 
     mov     x9, #0x0800
     movk    x9, #0x30d0, lsl #16
-	orr     x9, x9, #(0x1 << 2)                                 // Enable the data cache 
-	orr     x9, x9, #(0x1 << 12)                                // Enable the instruction cache
+	orr     x9, x9, #(0x1 << 12)                                // Enable the instruction cache (D-cache enabled with MMU below)
     msr     SCTLR_EL1, x9
 
     //  Change execution level to EL1
@@ -369,11 +362,10 @@ el1_spin:
 
     //  Enable the memory manager on the core
 
-    bl      EnableMMUForCore
-
-    //  Enable interrupts on the core
-
-    EnableIRQs
+    adrp    x0, __early_l1_page_table
+    add     x0, x0, :lo12:__early_l1_page_table
+    mov     x1, #0
+    bl      EnableMMUTables
 
     //  Mark the core as having jumped to application code
 
@@ -389,7 +381,8 @@ el1_spin:
 	mov     x6, #0
 	mov     x7, #0
 
-	ldr     x9, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
+	add     x15, x22_coreJumpTableAddress, x19_coreNumber, lsl #3
+	ldr     x9, [x15]
 	br      x9
 
     //  We should never get here, but if we do, park the core
@@ -402,7 +395,10 @@ continue_on_core0:
 
     SetCoreState #CORE_INITIALIZING_KERNEL
 
-    //  Save the board HW type in a global C variable so the C code may access it.
+    //  Save BEFORE GetBootTimeSettings: that function reads __hw_board_type from memory
+    //  to select the MMIO base address.  Without this, __hw_board_type is 0 and the
+    //  function calls park_core_on_error, producing no output.
+    //  Note: BSS clear below will zero these globals again; they are re-saved afterwards.
 
     SaveBoardHWType
     SaveNumberOfCoresAvailable
@@ -411,19 +407,39 @@ continue_on_core0:
 
     bl GetBootTimeSettings
 
+    //  Enable the MMU before clearing BSS or running any C++ static constructors.
+    //  Conservative 1:1 identity map (see SetupEarlyPageTables in mmu.S for region breakdown).
+    //  InitializePlatform() will replace these tables with final platform-specific ones.
+
+    bl      SetupEarlyPageTables
+
+    adrp    x0, __early_l1_page_table
+    add     x0, x0, :lo12:__early_l1_page_table
+    mov     x1, #0                                              //  TTBR1 unused; TTBR0 covers all
+    bl      EnableMMUTables
+    //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
+
     //  Clear bss
     //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length
 
     adrp    x9, __bss_start
     add     x9, x9, :lo12:__bss_start
     ldr     w10, =__bss_size_in_double_words
-    cbz     w10, initialize_cpp_statics                         //  Skip the loop if the bss section is zero length
+    cbz     w10, restore_globals_after_bss                      //  Skip the loop if the bss section is zero length
 
 loop_for_bss_clear:
 
     str     xzr, [x9], #8                                       //  Set 8 bytes at a time - the section in the linker script must match
     sub     w10, w10, #1
     cbnz    w10, loop_for_bss_clear
+
+restore_globals_after_bss:
+    //  BSS clear zeroed __hw_board_type and __number_of_cores_available (both live in BSS).
+    //  Restore from preserved registers: x20 = board HW id, x24 = number of cores.
+    //  CoreExecute() reads __number_of_cores_available directly — must be non-zero.
+
+    SaveBoardHWType
+    SaveNumberOfCoresAvailable
 
     //  Initialize the C++ statics
     //      Use registers x25 and x26 to hold the start and end addresses of the C++ statics to be initialized
@@ -501,7 +517,11 @@ wait_core_ack:
 	bne	    wait_core_ack
 
 	ldr     x11, = configure_stacks_for_core	                    //  We want to configure the stacks next
-	str	    x11, [x22_coreJumpTableAddress, x9, lsl #3]             //  Store the function address to the core
+	add	    x10, x22_coreJumpTableAddress, x9, lsl #3               //  Compute slot address so we can flush the cache line
+	str	    x11, [x10]                                              //  Store the function address to the core
+	dc 	    civac, x10                                              //  Flush to memory: secondary cores at EL2 have no D-cache and read directly from memory
+	dsb	    sy                                                      //  Ensure flush completes before the event
+	isb	    sy                                                      //  Instruction synchronization barrier
 	sev										                        //  Wake up core
 
     ret                                                             //  Return

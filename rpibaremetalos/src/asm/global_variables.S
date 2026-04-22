@@ -9,7 +9,7 @@
 
 .global __hw_board_type
 .data
-.align 4
+.balign 64
 
 __hw_board_type : .word RPI_BOARD_ENUM_UNKNOWN
 
@@ -17,11 +17,13 @@ __hw_board_type : .word RPI_BOARD_ENUM_UNKNOWN
 
 .global __number_of_cores_available
 .data
-.align 4
+.balign 64
 
 __number_of_cores_available : .word 0
 
-//  Global variable for holding and array indicating which cores are active
+//  Global variable for holding an array indicating which cores are active
+//  We assign 64 bytes (one full cache line) per core to completely remove any false sharing.
+//  Each core gets 64 contiguous bytes, 16 cores maximum.
 
 .global __core_state
 .data
@@ -44,7 +46,8 @@ __core_state : .word 0
                .word 0
                .word 0
 
-//  Global variable for holding and array indicating which cores are active
+//  Global variable for holding an array indicating core jump destinations
+//  Also 64 bytes per core.
 
 .global __core_jump_table
 .data

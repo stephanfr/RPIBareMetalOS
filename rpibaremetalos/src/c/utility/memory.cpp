@@ -65,3 +65,5 @@ minstd::memory_heap &__os_dynamic_heap = __os_dynamic_heap_adapter;
 minstd::memory_heap &__os_filesystem_cache_heap = __os_dynamic_heap_adapter;
 
 dynamic_allocator<char> __dynamic_string_allocator;
+
+SpinLock __os_static_heap_lock;

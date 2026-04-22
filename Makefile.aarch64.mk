@@ -14,7 +14,7 @@ GCC_CROSS_DIRECTORY := ${HOME}/dev/gcc-cross
 
 GCC_AARCH64_BARE_METAL_VERSION := 13.3.1
 GCC_AARCH64_BARE_METAL_TOOLS_PATH := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-$(HOST_ARCH)-aarch64-none-elf/bin/
-GCC_AARCH64_BARE_METAL_INCLUDE := $(GCC_CROSS_DIRECTORY)/aarch64-none-elf
+GCC_AARCH64_BARE_METAL_INCLUDE := $(TOOLS)/arm-gnu-toolchain-13.3.rel1-$(HOST_ARCH)-aarch64-none-elf
 
 CC := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-gcc
 LD := $(GCC_AARCH64_BARE_METAL_TOOLS_PATH)aarch64-none-elf-ld
@@ -31,7 +31,9 @@ LD_FLAGS := -nostartfiles -nodefaultlibs -nostdlib -static
 
 INCLUDE_DIRS := -I$(GCC_AARCH64_BARE_METAL_INCLUDE)/lib/gcc/aarch64-none-elf/$(GCC_AARCH64_BARE_METAL_VERSION)/include \
 				-I$(GCC_AARCH64_BARE_METAL_INCLUDE)/lib/gcc/aarch64-none-elf/$(GCC_AARCH64_BARE_METAL_VERSION)/include-fixed \
-				-I$(GCC_AARCH64_BARE_METAL_INCLUDE)/aarch64-none-elf/include 
+				-I$(GCC_AARCH64_BARE_METAL_INCLUDE)/aarch64-none-elf/include/c++/$(GCC_AARCH64_BARE_METAL_VERSION) \
+				-I$(GCC_AARCH64_BARE_METAL_INCLUDE)/aarch64-none-elf/include/c++/$(GCC_AARCH64_BARE_METAL_VERSION)/aarch64-none-elf \
+				-I$(GCC_AARCH64_BARE_METAL_INCLUDE)/aarch64-none-elf/include
 
 
 #docs :

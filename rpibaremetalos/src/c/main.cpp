@@ -332,8 +332,6 @@ extern "C" void kernel_main()
 
     SetLogLevel(LogLevel::WARNING);
 
-    EnableIRQs();
-
     //  Setup the ISRs
 
     SystemTimerRescheduleISR timerRescheduleISR;
@@ -346,9 +344,13 @@ extern "C" void kernel_main()
     GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR, CoreList(CoreList::CoreID::ALL_CORES));
     GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR, CoreList(CoreList::CoreID::ALL_CORES));
 
+    printf("ISRs started\n");
+
     //  Initialize the task manager
 
     task::TaskManagerImpl::Instance().Initialize();
+
+    printf("Task Manager Initialized\n");
 
     //    DumpDiagnostics();
 
@@ -357,6 +359,9 @@ extern "C" void kernel_main()
     filesystems::MountSDCardFilesystems();
 
     printf("Starting recurring interrupt\n");
+
+    EnableIRQs();
+    printf("IRQs Enabled\n");
 
     GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, milliseconds{50});
 
@@ -530,7 +535,7 @@ extern "C" void kernel_main()
     //            return;
     //        }
 
-    //        printf("Cores active: %d, %d, %d, %d\n", __core_state[0], __core_state[1], __core_state[2], __core_state[3]);
+    //        printf("Cores active: %d, %d, %d, %d\n", __core_state[0].load(), __core_state[1].load(), __core_state[2].load(), __core_state[3].load());
 
     //  Keep the scheduler running
 
