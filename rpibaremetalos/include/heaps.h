@@ -8,7 +8,7 @@
 #include "__memory_resource/memory_resource.h"
 #include "synchronization.h"
 
-extern SpinLock __os_static_heap_lock;
+
 
 
 extern minstd::memory_heap &__os_static_heap;
@@ -30,16 +30,12 @@ public:
 template <typename T, typename... Args>
 T *static_new(Args &&...args)
 {
-    LockGuard lock(__os_static_heap_lock);
-
     return new (__os_static_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...);
 }
 
 template <typename T, typename... Args>
 inline minstd::unique_ptr<T> make_static_unique(Args &&...args)
 {
-     LockGuard lock(__os_static_heap_lock);
-    
    T *temp = new (__os_static_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...);
     return minstd::unique_ptr<T>(temp, __os_static_heap);
 }
@@ -47,8 +43,6 @@ inline minstd::unique_ptr<T> make_static_unique(Args &&...args)
 template <typename T, typename T2, typename... Args>
 inline minstd::unique_ptr<T2> make_static_unique(Args &&...args)
 {
-    LockGuard lock(__os_static_heap_lock);
-    
     T2 *temp = dynamic_cast<T2*>(new (__os_static_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...));
     return minstd::unique_ptr<T2>(temp, __os_static_heap);
 }

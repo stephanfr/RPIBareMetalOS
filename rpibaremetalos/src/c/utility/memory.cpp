@@ -4,6 +4,7 @@
 #include "heaps.h"
 #include "synchronization.h"
 #include "__memory_resource/lockfree_composite_single_arena_resource.h"
+#include "__memory_resource/lockfree_static_arena_resource.h"
 
 extern const unsigned int __static_heap_start;
 extern const unsigned int __static_heap_size_in_bytes;
@@ -51,7 +52,7 @@ protected:
     }
 };
 
-minstd::pmr::lockfree_composite_single_arena_resource<> __os_static_resource_core((uint8_t *)&__static_heap_start, STATIC_HEAP_SIZE_IN_BYTES, 1, 1);
+minstd::pmr::lockfree_static_arena_resource __os_static_resource_core((uint8_t *)&__static_heap_start, STATIC_HEAP_SIZE_IN_BYTES);
 minstd::pmr::lockfree_composite_single_arena_resource<> __os_dynamic_resource_core((uint8_t *)&__dynamic_heap_start, DYNAMIC_HEAP_SIZE_IN_BYTES, 4, 4);
 
 minstd::pmr::memory_resource& __os_dynamic_heap_resource = __os_dynamic_resource_core;
@@ -66,4 +67,4 @@ minstd::memory_heap &__os_filesystem_cache_heap = __os_dynamic_heap_adapter;
 
 dynamic_allocator<char> __dynamic_string_allocator;
 
-SpinLock __os_static_heap_lock;
+
