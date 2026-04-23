@@ -34,7 +34,22 @@ namespace MINIMAL_STD_NAMESPACE
             uint8_t* arena_start_;
             uint8_t* arena_end_;
             atomic<uint8_t*> current_ptr_;
-            alignas(64) atomic<typename tagged_ptr_type::storage_type> free_stack_head_{0};
+
+            static constexpr size_t NUM_BINS = 8;
+            static constexpr size_t MIN_ALIGNMENT = 64;
+            alignas(64) atomic<typename tagged_ptr_type::storage_type> free_stack_heads_[NUM_BINS];
+
+            size_t get_bin(size_t size) const {
+                size_t aligned_size = (size + (MIN_ALIGNMENT - 1)) & ~(MIN_ALIGNMENT - 1);
+                if (aligned_size <= 64) return 0;
+                if (aligned_size <= 128) return 1;
+                if (aligned_size <= 256) return 2;
+                if (aligned_size <= 512) return 3;
+                if (aligned_size <= 1024) return 4;
+                if (aligned_size <= 2048) return 5;
+                if (aligned_size <= 4096) return 6;
+                return 7;
+            }
 
             // adapter for intrusive stack
             struct adapter_type {
@@ -55,6 +70,9 @@ namespace MINIMAL_STD_NAMESPACE
                   arena_end_(arena_start_ + size),
                   current_ptr_(arena_start_)
             {
+                for (size_t i = 0; i < NUM_BINS; ++i) {
+                    free_stack_heads_[i].store(0, memory_order_relaxed);
+                }
             }
 
             ~lockfree_static_arena_resource() override = default;
@@ -62,18 +80,24 @@ namespace MINIMAL_STD_NAMESPACE
         protected:
             void* do_allocate(size_t bytes, size_t alignment) override
             {
+                if (alignment > MIN_ALIGNMENT) {
+                    return nullptr;
+                }
+                
                 size_t alloc_size = bytes;
                 if (alloc_size < sizeof(free_block_node)) {
                     alloc_size = sizeof(free_block_node);
                 }
+                // Round up to min alignment boundary
+                alloc_size = (alloc_size + (MIN_ALIGNMENT - 1)) & ~(MIN_ALIGNMENT - 1);
 
                 // Bump pointer allocation
                 uint8_t* expected = current_ptr_.load(memory_order_relaxed);
                 while (true)
                 {
                     uintptr_t ptr_as_int = reinterpret_cast<uintptr_t>(expected);
-                    size_t alignment_mod = ptr_as_int % alignment;
-                    uint8_t* aligned_expected = (alignment_mod == 0) ? expected : expected + (alignment - alignment_mod);
+                    uintptr_t aligned_int = (ptr_as_int + MIN_ALIGNMENT - 1) & ~(MIN_ALIGNMENT - 1);
+                    uint8_t* aligned_expected = reinterpret_cast<uint8_t*>(aligned_int);
 
                     uint8_t* new_ptr = aligned_expected + alloc_size;
 
@@ -87,53 +111,63 @@ namespace MINIMAL_STD_NAMESPACE
                     }
                 }
 
-                // Fallback: Check free stack
+                // Fallback: Check free stacks
                 adapter_type adapter;
                 backoff_type backoff;
 
-                free_block_node* stolen_list = stack_type::steal_all(free_stack_head_);
+                size_t start_bin = get_bin(alloc_size);
 
-                free_block_node* best_fit = nullptr;
-                free_block_node* prev = nullptr;
-                free_block_node* best_fit_prev = nullptr;
-
-                free_block_node* current = stolen_list;
-
-                while (current)
+                for (size_t bin = start_bin; bin < NUM_BINS; ++bin)
                 {
-                    uintptr_t ptr_as_int = reinterpret_cast<uintptr_t>(current);
-                    size_t alignment_mod = ptr_as_int % alignment;
-                    if (alignment_mod == 0 && current->size >= alloc_size)
+                    free_block_node* stolen_list = stack_type::steal_all(free_stack_heads_[bin]);
+                    if (!stolen_list) continue;
+
+                    free_block_node* best_fit = nullptr;
+                    free_block_node* prev = nullptr;
+                    free_block_node* best_fit_prev = nullptr;
+
+                    free_block_node* current = stolen_list;
+
+                    while (current)
                     {
-                        if (!best_fit || current->size < best_fit->size)
+                        uintptr_t ptr_as_int = reinterpret_cast<uintptr_t>(current);
+                        
+                        if ((ptr_as_int & (MIN_ALIGNMENT - 1)) == 0 && current->size >= alloc_size)
                         {
-                            best_fit = current;
-                            best_fit_prev = prev;
+                            if (!best_fit || current->size < best_fit->size)
+                            {
+                                best_fit = current;
+                                best_fit_prev = prev;
+                            }
                         }
+                        prev = current;
+                        current = current->next;
                     }
-                    prev = current;
-                    current = current->next;
-                }
 
-                if (best_fit) {
-                    if (best_fit_prev) {
-                        best_fit_prev->next = best_fit->next;
-                    } else {
-                        stolen_list = best_fit->next;
+                    if (best_fit) {
+                        if (best_fit_prev) {
+                            best_fit_prev->next = best_fit->next;
+                        } else {
+                            stolen_list = best_fit->next;
+                        }
+                        best_fit->next = nullptr;
                     }
-                    best_fit->next = nullptr;
+
+                    // Put remainder back into the same bin
+                    current = stolen_list;
+                    while (current)
+                    {
+                        free_block_node* next = current->next;
+                        stack_type::push(free_stack_heads_[bin], *current, adapter, backoff);
+                        current = next;
+                    }
+
+                    if (best_fit) {
+                        return best_fit;
+                    }
                 }
 
-                // Put remainder back
-                current = stolen_list;
-                while (current)
-                {
-                    free_block_node* next = current->next;
-                    stack_type::push(free_stack_head_, *current, adapter, backoff);
-                    current = next;
-                }
-
-                return best_fit;
+                return nullptr;
             }
 
             void do_deallocate(void* p, size_t bytes, size_t alignment) override
@@ -142,14 +176,18 @@ namespace MINIMAL_STD_NAMESPACE
                     return;
                 }
 
+                size_t rounded_bytes = (bytes < sizeof(free_block_node)) ? sizeof(free_block_node) : bytes;
+                rounded_bytes = (rounded_bytes + (MIN_ALIGNMENT - 1)) & ~(MIN_ALIGNMENT - 1);
+
                 free_block_node* node = static_cast<free_block_node*>(p);
-                node->size = bytes;
+                node->size = rounded_bytes;
                 node->next = nullptr;
 
                 adapter_type adapter;
                 backoff_type backoff;
 
-                stack_type::push(free_stack_head_, *node, adapter, backoff);
+                size_t bin = get_bin(rounded_bytes);
+                stack_type::push(free_stack_heads_[bin], *node, adapter, backoff);
             }
 
             bool do_is_equal(memory_resource const& other) const noexcept override
