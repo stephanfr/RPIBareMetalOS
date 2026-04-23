@@ -11,6 +11,7 @@
 #include "devices/physical_timer.h"
 #include "task/tasks.h"
 #include "task/runnable.h"
+#include "heaps.h"
 
 namespace cli::commands
 {
@@ -176,14 +177,14 @@ namespace cli::commands
 
         context << minstd::format(buffer, "\nForking test: {} short-lived tasks\n", NUM_TASKS);
 
-        minstd::array<ShortLivedKernelProcess, NUM_TASKS> processes;
-        minstd::array<UUID, NUM_TASKS>                     task_ids;
+        auto processes = dynamic_new<minstd::array<ShortLivedKernelProcess, NUM_TASKS>>();
+        auto task_ids = dynamic_new<minstd::array<UUID, NUM_TASKS>>();
 
         auto start = PhysicalTimer::Now();
 
         for (uint32_t i = 0; i < NUM_TASKS; i++)
         {
-            auto result = context.task_manager_.ForkKernelTask(&processes[i], "ForkTest Worker");
+            auto result = context.task_manager_.ForkKernelTask(&(*processes)[i], "ForkTest Worker");
 
             if (result.Failed())
             {
@@ -191,12 +192,12 @@ namespace cli::commands
                 return;
             }
 
-            task_ids[i] = result.Value();
+            (*task_ids)[i] = result.Value();
         }
 
         for (uint32_t i = 0; i < NUM_TASKS; i++)
         {
-            auto task = context.task_manager_.FindTask(task_ids[i]);
+            auto task = context.task_manager_.FindTask((*task_ids)[i]);
 
             if (task.has_value())
             {
