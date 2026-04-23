@@ -80,9 +80,8 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
     //      The MMU is enabled, so we need to copy the message to the non-cached block and
     //      adjust the address of the block so the GPU can see it.
     //
-    //  Insert an instruction cache barrier to ensure the data is visible to the GPU, as
-    //    instructions *could* be reordered such that the write to the register occurs before
-    //    the data is written to the uncached memory.
+    //  DSB ensures all prior writes (the memcpy) are globally visible before the GPU reads
+    //  the buffer. ISB is insufficient here — it only flushes the instruction pipeline.
 
     void *uncached_memory_base = MMUManager::Instance().DMAUncachedMemoryBase();
 
@@ -90,7 +89,7 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 
     void *message_ARM_address = reinterpret_cast<void *>(((uint64_t)(uncached_memory_base) & 0xFFFFFFFFFFFFFFF0) | ((uint64_t)MailboxChannels::PROP & 0x000000000000000F));
 
-    INSTRUCTION_CACHE_BARRIER;
+    asm volatile("dsb sy" ::: "memory");
 
     Register(MailboxRegister::WRITE) = (uint32_t) reinterpret_cast<uint64_t>(MMUManager::Instance().ARMToGPUAddress(message_ARM_address));
 
