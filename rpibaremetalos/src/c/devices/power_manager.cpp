@@ -4,28 +4,12 @@
 
 #include "devices/power_manager.h"
 
-#include "platform/gpu_mailbox_messages.h"
-
 #include "devices/gpio.h"
 #include "devices/physical_timer.h"
 #include "devices/log.h"
 
 void PowerManager::Halt()
 {
-    GPUMailbox mbox;
-
-    //  Power off all the devices one at a time
-
-    for (uint32_t deviceId = 0; deviceId < 16; deviceId++)
-    {
-        GPUMailboxPropertyMessage  setBoardPowerStateMessage;
-        SetBoardPowerStateTag getBoardPowerStateTag( deviceId, 0 );
-
-        setBoardPowerStateMessage.AddTag( getBoardPowerStateTag );
-
-        mbox.sendMessage(setBoardPowerStateMessage);
-    }
-
     //  Power off gpio pins (but not VCC pins)
 
     GPIO gpio;

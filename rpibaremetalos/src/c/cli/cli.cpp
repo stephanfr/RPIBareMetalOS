@@ -17,12 +17,13 @@
 #include "cli/list_command.h"
 #include "cli/rename_command.h"
 #include "cli/show_command.h"
+#include "cli/test_command.h"
 
 namespace cli
 {
     //  Declare the CLI Root
 
-    class CLIRoot : public CLIParentCommand<8>
+    class CLIRoot : public CLIParentCommand<9>
     {
     public:
         static const CLIRoot instance;
@@ -35,7 +36,8 @@ namespace cli
                                     commands::CLIRebootCommand::instance,
                                     commands::CLICreateCommand::instance,
                                     commands::CLIDeleteCommand::instance,
-                                    commands::CLIRenameCommand::instance})
+                                    commands::CLIRenameCommand::instance,
+                                    commands::CLITestCommand::instance})
         {
         }
 
