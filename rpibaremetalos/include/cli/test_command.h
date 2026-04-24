@@ -36,14 +36,44 @@ namespace cli::commands
                           CLISessionContext &context) const override;
     };
 
-    class CLITestCommand : public CLIParentCommand<2>
+    class CLITestFairnessCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestFairnessCommand instance;
+
+        CLITestFairnessCommand()
+            : CLICommandExecutor("fairness")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
+
+    class CLITestTaskCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestTaskCommand instance;
+
+        CLITestTaskCommand()
+            : CLICommandExecutor("task")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
+
+    class CLITestCommand : public CLIParentCommand<4>
     {
     public:
         static const CLITestCommand instance;
 
         CLITestCommand()
             : CLIParentCommand("test", {CLITestSchedulingCommand::instance,
-                                        CLITestForkingCommand::instance})
+                                        CLITestForkingCommand::instance,
+                                        CLITestFairnessCommand::instance,
+                                        CLITestTaskCommand::instance})
         {
         }
     };
