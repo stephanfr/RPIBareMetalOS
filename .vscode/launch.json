@@ -2,14 +2,31 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) Remote Attach",
-            "type": "gdb",
-            "request": "attach",
-            "executable": "${workspaceFolder}/rpibaremetalos/build/kernel8.elf",
-            "target": "localhost:1234",
-            "remote": true,
-            "cwd": "${workspaceRoot}",
-            "gdbpath": "/home/steve/dev_tools/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-gdb"
+            "name": "(gdb) QEMU Remote Attach",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/rpibaremetalos/build/kernel8.elf",
+            "miDebuggerServerAddress": "localhost:1234",
+            "miDebuggerPath": "/home/steve/dev_tools/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-elf/bin/aarch64-none-elf-gdb",
+            "miDebuggerArgs": "-ex \"set architecture aarch64\"",
+            "cwd": "${workspaceFolder}",
+            "MIMode": "gdb",
+            "stopAtConnect": true,
+            "setupCommands": [
+                {
+                    "text": "set architecture aarch64",
+                    "ignoreFailures": false
+                },
+                {
+                    "text": "set sysroot /",
+                    "ignoreFailures": true
+                },
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
         },
         {
             "name": "(gdb) Launch",

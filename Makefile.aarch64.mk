@@ -26,7 +26,7 @@ ASM_FLAGS := -Wall -Og -ffreestanding -mcpu=cortex-a53 -mstrict-align
 C_CPP_SHARED_FLAGS := -Wall -ffreestanding -fno-stack-protector -nostdinc -nostdlib -nostartfiles -fno-exceptions -fno-unwind-tables -mcpu=cortex-a53 -mstrict-align -fno-threadsafe-statics -mno-outline-atomics
 C_FLAGS := -std=c17 $(C_CPP_SHARED_FLAGS)
 CPP_FLAGS := -std=c++20 -fno-rtti $(C_CPP_SHARED_FLAGS)
-OPTIMIZATION_FLAGS := -Og
+OPTIMIZATION_FLAGS := -Og -fno-inline
 LD_FLAGS := -nostartfiles -nodefaultlibs -nostdlib -static
 
 INCLUDE_DIRS := -I$(GCC_AARCH64_BARE_METAL_INCLUDE)/lib/gcc/aarch64-none-elf/$(GCC_AARCH64_BARE_METAL_VERSION)/include \
