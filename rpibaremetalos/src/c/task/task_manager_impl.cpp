@@ -358,14 +358,10 @@ namespace task
     {
         TaskImpl &task_ref = *task.get();
 
-        {
-            //  We need to single-thread actions on the task map
+        //  Add the task to the task map
 
-
-            //  Add the task to the task map
-
-            task_map_.insert(task->ID(), task.release());
-        }
+        auto id = task_ref.ID();
+        task_map_.insert(id, task.release());
 
         //  Determine which core to schedule the task on.
         //  Validate first: if no core in [0, number_of_cores_) matches the mask, LogFatal now

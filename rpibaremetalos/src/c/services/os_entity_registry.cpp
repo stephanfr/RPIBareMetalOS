@@ -126,7 +126,8 @@ OSEntityRegistryResultCodes OSEntityRegistryImpl::AddEntityInternal(minstd::uniq
 
     //  Insert the device into the the devices by id map
 
-    auto insert_entity_result = entity_by_id_.insert(new_entity->Id(), minstd::move(new_entity));
+    auto new_entity_id = new_entity->Id();
+    auto insert_entity_result = entity_by_id_.insert(new_entity_id, minstd::move(new_entity));
 
     if (!minstd::get<1>(insert_entity_result))
     {
