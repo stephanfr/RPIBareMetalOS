@@ -30,7 +30,7 @@ TEST(LockfreeBitblockResourceTests, ContiguousScanIntegrity)
 
     void* max_contiguous_ptr = small_pool.allocate(1024, 16);
     CHECK(max_contiguous_ptr != nullptr);
-    CHECK(small_pool.contains(max_contiguous_ptr));
+    CHECK((uintptr_t)max_contiguous_ptr >= (uintptr_t)test_buffer && (uintptr_t)max_contiguous_ptr < (uintptr_t)test_buffer + buffer_size);
 
     // Fill the pool to test fragmentation
     void* pointers[1024];
@@ -47,7 +47,7 @@ TEST(LockfreeBitblockResourceTests, ContiguousScanIntegrity)
     // Try a large aligned alloc—should fail or find another fresh block rather than the fragmented one
     void* large_ptr = small_pool.allocate(1024, 16);
     CHECK(large_ptr != nullptr);
-    CHECK(small_pool.contains(large_ptr));
+    CHECK((uintptr_t)large_ptr >= (uintptr_t)test_buffer && (uintptr_t)large_ptr < (uintptr_t)test_buffer + buffer_size);
 
     // Release the max chunk to let it recombine seamlessly internally over scanning
     small_pool.deallocate(max_contiguous_ptr, 1024, 16);
@@ -55,7 +55,7 @@ TEST(LockfreeBitblockResourceTests, ContiguousScanIntegrity)
     // After out of order free, we can still re-allocate
     void* new_max = small_pool.allocate(1024, 16);
     CHECK(new_max != nullptr);
-    CHECK(small_pool.contains(new_max));
+    CHECK((uintptr_t)new_max >= (uintptr_t)test_buffer && (uintptr_t)new_max < (uintptr_t)test_buffer + buffer_size);
 
     // Clean up
     small_pool.deallocate(new_max, 1024, 16);

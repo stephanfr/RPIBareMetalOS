@@ -8,7 +8,8 @@
 
 #include <forward_list>
 #include <heap_allocator>
-#include <stack_allocator>
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
@@ -48,7 +49,7 @@ namespace
 
     using forward_list_allocator = minstd::allocator<test_element_forward_list::node_type>;
     using forward_list_static_heap_allocator = minstd::heap_allocator<test_element_forward_list::node_type>;
-    using forward_list_stack_allocator = minstd::stack_allocator<test_element_forward_list::node_type, 24>;
+    using forward_list_stack_allocator = minstd::pmr::polymorphic_allocator<test_element_forward_list::node_type>;
 
 
     void testInvariants(forward_list_allocator &allocator)
@@ -190,7 +191,9 @@ namespace
 
         testInvariants(heap_allocator);
 
-        forward_list_stack_allocator stack_allocator;
+        char stack_buffer[1024];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
+        forward_list_stack_allocator stack_allocator(&monotonic_resource);
 
         testInvariants(stack_allocator);
     }
@@ -204,7 +207,9 @@ namespace
 
         CHECK(test_heap.blocks_reserved() == 15);
 
-        forward_list_stack_allocator stack_allocator;
+        char stack_buffer[1024];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
+        forward_list_stack_allocator stack_allocator(&monotonic_resource);
 
         testListFunctionality(stack_allocator);
     }
