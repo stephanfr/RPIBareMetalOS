@@ -11,8 +11,7 @@
 #include <vector>
 
 #include <heap_allocator>
-#include <__memory_resource/monotonic_buffer_resource.h>
-#include <__memory_resource/polymorphic_allocator.h>
+#include <stack_allocator>
 #include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
@@ -52,13 +51,13 @@ namespace
 
     using uint32t_vectorAllocator = minstd::allocator<uint32t_vector::element_type>;
     using uint32t_vectorStaticHeapAllocator = minstd::heap_allocator<uint32t_vector::element_type>;
-    using uint32t_vectorStackAllocator = minstd::pmr::polymorphic_allocator<uint32t_vector::element_type>;
+    using uint32t_vectorStackAllocator = minstd::stack_allocator<uint32t_vector::element_type, 24>;
 
     using test_element_vector = minstd::vector<test_element, 0, 6>;
 
     using test_element_vectorAllocator = minstd::allocator<test_element_vector::element_type>;
     using test_element_vectorStaticHeapAllocator = minstd::heap_allocator<test_element_vector::element_type>;
-    using test_element_vectorStackAllocator = minstd::pmr::polymorphic_allocator<test_element_vector::element_type>;
+    using test_element_vectorStackAllocator = minstd::stack_allocator<test_element_vector::element_type, 24>;
 
 
     void iteratorInvariantsTest(uint32t_vectorAllocator &allocator)
@@ -304,9 +303,7 @@ namespace
 
         iteratorInvariantsTest(heap_allocator);
 
-        char stack_buffer[1024];
-        minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-        uint32t_vectorStackAllocator stack_allocator(&monotonic_resource);
+        uint32t_vectorStackAllocator stack_allocator;
 
         iteratorInvariantsTest(stack_allocator);
     }
@@ -319,9 +316,7 @@ namespace
 
             pushPopUintTest(heap_allocator);
 
-            char stack_buffer[1024];
-            minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-            uint32t_vectorStackAllocator stack_allocator(&monotonic_resource);
+            uint32t_vectorStackAllocator stack_allocator;
 
             pushPopUintTest(stack_allocator);
         }
@@ -332,9 +327,7 @@ namespace
 
             pushPopTestElementTest(heap_allocator);
 
-            char stack_buffer[1024];
-            minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-            test_element_vectorStackAllocator stack_allocator(&monotonic_resource);
+            test_element_vectorStackAllocator stack_allocator;
 
             pushPopTestElementTest(stack_allocator);
         }
@@ -348,9 +341,7 @@ namespace
 
             basicUintTest(heap_allocator);
 
-            char stack_buffer[1024];
-            minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-            uint32t_vectorStackAllocator stack_allocator(&monotonic_resource);
+            uint32t_vectorStackAllocator stack_allocator;
 
             basicUintTest(stack_allocator);
         }
@@ -361,9 +352,7 @@ namespace
 
             basicTestElementTest(heap_allocator);
 
-            char stack_buffer[1024];
-            minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-            test_element_vectorStackAllocator stack_allocator(&monotonic_resource);
+            test_element_vectorStackAllocator stack_allocator;
 
             basicTestElementTest(stack_allocator);
         }

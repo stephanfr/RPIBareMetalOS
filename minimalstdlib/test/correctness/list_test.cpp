@@ -11,8 +11,7 @@
 #include <heap_allocator>
 #include <list>
 #include <single_block_memory_heap>
-#include <__memory_resource/monotonic_buffer_resource.h>
-#include <__memory_resource/polymorphic_allocator.h>
+#include <stack_allocator>
 
 #define TEST_BUFFER_SIZE 65536
 #define MAX_HEAP_ELEMENTS 4096
@@ -53,7 +52,7 @@ namespace
 
     using list_allocator = minstd::allocator<test_element_list::node_type>;
     using list_static_heap_allocator = minstd::heap_allocator<test_element_list::node_type>;
-    using list_stack_allocator = minstd::pmr::polymorphic_allocator<test_element_list::node_type>;
+    using list_stack_allocator = minstd::stack_allocator<test_element_list::node_type, 24>;
 
     void testListFunctionality(list_allocator &allocator)
     {
@@ -537,9 +536,7 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        char stack_buffer[1024];
-        minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-        list_stack_allocator stack_allocator(&monotonic_resource);
+        list_stack_allocator stack_allocator;
 
         testListFunctionality(stack_allocator);
     }
@@ -553,9 +550,7 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        char stack_buffer[1024];
-        minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-        list_stack_allocator stack_allocator(&monotonic_resource);
+        list_stack_allocator stack_allocator;
 
         testInsertAfterFunctionality(stack_allocator);
     }
@@ -569,9 +564,7 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        char stack_buffer[1024];
-        minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-        list_stack_allocator stack_allocator(&monotonic_resource);
+        list_stack_allocator stack_allocator;
 
         testMoveFront(stack_allocator);
     }
@@ -585,9 +578,7 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        char stack_buffer[1024];
-        minstd::pmr::monotonic_buffer_resource monotonic_resource(stack_buffer, sizeof(stack_buffer), nullptr);
-        list_stack_allocator stack_allocator(&monotonic_resource);
+        list_stack_allocator stack_allocator;
 
         testErase(stack_allocator);
     }
