@@ -241,7 +241,8 @@ namespace
 
         CHECK(static_test_heap.blocks_allocated_but_unused() == 1);
 
-        //  Test deallocate of a class, the destructor should be called
+        //  Test deallocate of a class. Deallocate releases raw memory only;
+        //  element destructors are managed by owning containers/RAII wrappers.
 
         test_heap.deallocate_block(fifth_block, 11);
 
@@ -251,9 +252,9 @@ namespace
         CHECK(test_heap.bytes_in_use() == test_heap.bytes_reserved() - (BLOCK_2_SIZE + BLOCK_5_SIZE));
 
         CHECK(static_test_heap.blocks_allocated_but_unused() == 2);
-        CHECK(test_class::destructor_called_count() == 11);
+        CHECK(test_class::destructor_called_count() == 0);
 
-        //  Test deallocate of a struct, the destructor should be called
+        //  Test deallocate of a struct. Same raw-memory behavior as classes.
 
         test_heap.deallocate_block(seventh_block, 5);
 
@@ -263,7 +264,7 @@ namespace
         CHECK(test_heap.bytes_in_use() == test_heap.bytes_reserved() - (BLOCK_2_SIZE + BLOCK_5_SIZE + BLOCK_7_SIZE));
 
         CHECK(static_test_heap.blocks_allocated_but_unused() == 3);
-        CHECK(test_struct::destructor_called_count() == 5);
+        CHECK(test_struct::destructor_called_count() == 0);
 
         //  Keep allocating TestClasses until we run out of space
         //      One unused block should be re-used.

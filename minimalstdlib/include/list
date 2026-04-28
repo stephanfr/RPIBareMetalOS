@@ -89,7 +89,8 @@ namespace MINIMAL_STD_NAMESPACE
             {
                 node_type *node_to_delete = front_;
 
-                allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+                node_to_delete->~node_type();
+                allocator_.deallocate(node_to_delete, 1);
 
                 front_ = front_->next_;
             }
@@ -246,7 +247,8 @@ namespace MINIMAL_STD_NAMESPACE
                 back_ = nullptr;
             }
 
-            allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+            node_to_delete->~node_type();
+            allocator_.deallocate(node_to_delete, 1);
 
             size_--;
         }
@@ -271,7 +273,8 @@ namespace MINIMAL_STD_NAMESPACE
                 front_ = nullptr;
             }
 
-            allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+            node_to_delete->~node_type();
+            allocator_.deallocate(node_to_delete, 1);
 
             size_--;
         }
@@ -673,7 +676,8 @@ namespace MINIMAL_STD_NAMESPACE
             back_ = pos.node_->prev_;
         }
 
-        allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+        node_to_delete->~node_type();
+        allocator_.deallocate(node_to_delete, 1);
 
         size_--;
     }
@@ -701,7 +705,8 @@ namespace MINIMAL_STD_NAMESPACE
             back_ = pos.node_;
         }
 
-        allocator_.deallocate(node_to_delete, 1); //  Allocator will delete the instance
+        node_to_delete->~node_type();
+        allocator_.deallocate(node_to_delete, 1);
 
         size_--;
     }

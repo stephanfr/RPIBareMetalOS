@@ -470,7 +470,8 @@ namespace MINIMAL_STD_NAMESPACE
                         }
                     }
 
-                    allocator_.deallocate(temp, 1); //  Allocator will invoke delete
+                    temp->~node_type();
+                    allocator_.deallocate(temp, 1);
                     size_--;
                 }
                 else

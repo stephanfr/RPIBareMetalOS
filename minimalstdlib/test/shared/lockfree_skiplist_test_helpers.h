@@ -41,7 +41,7 @@ namespace
 
     char *skiplist_composite_resource_buffer = new char[SKIPLIST_COMPOSITE_BUFFER_SIZE]();
 
-    size_t skiplist_scaling_iterations_per_thread()
+    [[maybe_unused]] size_t skiplist_scaling_iterations_per_thread()
     {
         const char *multiplier_text = getenv("SKIPLIST_STRESS_ITERATIONS_MULTIPLIER");
 
@@ -71,7 +71,7 @@ namespace
         return SKIPLIST_STRESS_ITERATIONS_PER_THREAD * static_cast<size_t>(clamped_multiplier);
     }
 
-    size_t skiplist_mixed_iterations_per_thread()
+    [[maybe_unused]] size_t skiplist_mixed_iterations_per_thread()
     {
         const char *multiplier_text = getenv("SKIPLIST_MIXED_ITERATIONS_MULTIPLIER");
 
@@ -113,7 +113,7 @@ namespace
         return static_cast<size_t>(cpu_count);
     }
 
-    size_t skiplist_perf_thread_count()
+    [[maybe_unused]] size_t skiplist_perf_thread_count()
     {
         const char *thread_count_text = getenv("SKIPLIST_PERF_THREADS");
 
@@ -673,7 +673,7 @@ namespace
     static volatile sig_atomic_t s_intr_signal_count = 0;
     static volatile sig_atomic_t s_intr_nested_count = 0;
 
-    static void sigusr1_nested_read_handler(int)
+    [[maybe_unused]] static void sigusr1_nested_read_handler(int)
     {
         if (s_intr_list != nullptr)
         {

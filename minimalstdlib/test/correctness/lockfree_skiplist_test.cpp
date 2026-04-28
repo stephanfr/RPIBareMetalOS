@@ -244,57 +244,90 @@ namespace
 
     TEST(SkiplistTests, DefaultConstructorFallbackMatchesResourceConstructorBehavior)
     {
+        //  The two lists must NOT coexist: atomic_forward_link::block_memory_resource_
+        //  is a static shared across all instances of the same template instantiation.
+        //  Run them in non-overlapping scopes and record results for cross-comparison.
+
         using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
 
-        list_type default_list;
+        bool   default_found[128]{};
+        uint32_t default_values[128]{};
+        uint32_t default_size = 0;
 
-        static unsigned char resource_buffer[2 * 1024 * 1024];
-        minstd::pmr::lockfree_composite_single_arena_resource<> resource(resource_buffer, sizeof(resource_buffer), 2);
-        list_type resource_list(&resource);
-
-        for (uint32_t i = 0; i < 128; ++i)
         {
-            CHECK_TRUE(default_list.insert(i, i * 3));
-            CHECK_TRUE(resource_list.insert(i, i * 3));
-        }
+            list_type default_list;
 
-        for (uint32_t i = 0; i < 128; ++i)
-        {
-            auto default_item = default_list.find(i);
-            auto resource_item = resource_list.find(i);
-
-            CHECK_TRUE(default_item != default_list.end());
-            CHECK_TRUE(resource_item != resource_list.end());
-            CHECK_EQUAL(default_item->second, resource_item->second);
-        }
-
-        for (uint32_t i = 0; i < 64; ++i)
-        {
-            const uint32_t key = i * 2;
-            CHECK_TRUE(default_list.remove(key));
-            CHECK_TRUE(resource_list.remove(key));
-        }
-
-        CHECK_EQUAL(default_list.size(), resource_list.size());
-
-        for (uint32_t i = 0; i < 128; ++i)
-        {
-            auto default_item = default_list.find(i);
-            auto resource_item = resource_list.find(i);
-
-            const bool in_default = (default_item != default_list.end());
-            const bool in_resource = (resource_item != resource_list.end());
-
-            CHECK_EQUAL(in_default, in_resource);
-
-            if (in_default)
+            for (uint32_t i = 0; i < 128; ++i)
             {
-                CHECK_EQUAL(default_item->second, resource_item->second);
+                CHECK_TRUE(default_list.insert(i, i * 3));
             }
+
+            for (uint32_t i = 0; i < 128; ++i)
+            {
+                auto item = default_list.find(i);
+                CHECK_TRUE(item != default_list.end());
+                CHECK_EQUAL(i * 3, item->second);
+            }
+
+            for (uint32_t i = 0; i < 64; ++i)
+            {
+                CHECK_TRUE(default_list.remove(i * 2));
+            }
+
+            default_size = default_list.size();
+
+            for (uint32_t i = 0; i < 128; ++i)
+            {
+                auto item = default_list.find(i);
+                default_found[i] = (item != default_list.end());
+                if (default_found[i])
+                {
+                    default_values[i] = item->second;
+                }
+            }
+
+            CHECK_TRUE(default_list.validate_ordering());
         }
 
-        CHECK_TRUE(default_list.validate_ordering());
-        CHECK_TRUE(resource_list.validate_ordering());
+        {
+            static unsigned char resource_buffer[2 * 1024 * 1024];
+            minstd::pmr::lockfree_composite_single_arena_resource<> resource(resource_buffer, sizeof(resource_buffer), 2);
+            list_type resource_list(&resource);
+
+            for (uint32_t i = 0; i < 128; ++i)
+            {
+                CHECK_TRUE(resource_list.insert(i, i * 3));
+            }
+
+            for (uint32_t i = 0; i < 128; ++i)
+            {
+                auto item = resource_list.find(i);
+                CHECK_TRUE(item != resource_list.end());
+                CHECK_EQUAL(i * 3, item->second);
+            }
+
+            for (uint32_t i = 0; i < 64; ++i)
+            {
+                CHECK_TRUE(resource_list.remove(i * 2));
+            }
+
+            CHECK_EQUAL(default_size, resource_list.size());
+
+            for (uint32_t i = 0; i < 128; ++i)
+            {
+                auto resource_item = resource_list.find(i);
+                const bool in_resource = (resource_item != resource_list.end());
+
+                CHECK_EQUAL(default_found[i], in_resource);
+
+                if (default_found[i] && in_resource)
+                {
+                    CHECK_EQUAL(default_values[i], resource_item->second);
+                }
+            }
+
+            CHECK_TRUE(resource_list.validate_ordering());
+        }
     }
 
     TEST(SkiplistTests, TemplateInstantiationWithCustomMaxLevels)

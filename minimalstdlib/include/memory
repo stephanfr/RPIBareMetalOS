@@ -51,7 +51,7 @@ namespace MINIMAL_STD_NAMESPACE
         {
             if (wrapped_pointer_ != nullptr)
             {
-                //  If T is a class, the destructor is called in deallocate_block
+                wrapped_pointer_->~T();
                 heap_->deallocate_block(wrapped_pointer_, 1);
             }
         }
@@ -62,7 +62,7 @@ namespace MINIMAL_STD_NAMESPACE
         {
             if (wrapped_pointer_ != nullptr)
             {
-                //  If T is a class, the destructor is called in deallocate_block
+                wrapped_pointer_->~T();
                 heap_->deallocate_block(wrapped_pointer_, 1);
             }
 
