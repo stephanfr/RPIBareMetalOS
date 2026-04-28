@@ -556,17 +556,17 @@ EthernetResultCodes BCMGenetDriver::ResetPHY()
         }
     }
 
-    // Advertise 1000BASE-T full and half duplex
-    result = MDIOWrite(GENET_PHY_ADDR, PHY_REG_1000T_CTRL,
-                       ADVERTISE_1000FULL | ADVERTISE_1000HALF);
+    // Suppress 1000BASE-T advertisement — link will negotiate to 10 Mbps max,
+    // giving ~4–79 ms to drain the RX ring before overflow at polling rates.
+    result = MDIOWrite(GENET_PHY_ADDR, PHY_REG_1000T_CTRL, 0);
     if (Failed(result))
     {
         return result;
     }
 
-    // Advertise 100/10 BASE-T capabilities
+    // Advertise 10BASE-T full and half duplex only
     result = MDIOWrite(GENET_PHY_ADDR, PHY_REG_ANAR,
-                       ANAR_100TX_FD | ANAR_100TX_HD | ANAR_10T_FD | ANAR_10T_HD | ANAR_IEEE802_3);
+                       ANAR_10T_FD | ANAR_10T_HD | ANAR_IEEE802_3);
     if (Failed(result))
     {
         return result;
