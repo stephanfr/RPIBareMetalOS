@@ -41,7 +41,7 @@ TEST_EXE := $(TEST_OBJ_DIR)/cpputest_main.exe
 
 INCLUDE_DIRS := -Iinclude -I../minimalstdio/include -I../minimalclib/include -I../minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include 
 LDFLAGS += -L../minimalclib/lib/$(NATIVE_BUILD_DIR) -L../minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
-LDLIBS = -lminimalclib -lminimalstdio -lminimalstdlib -lCppUTest -lCppUTestExt
+LDLIBS = -lCppUTest -lCppUTestExt -lminimalclib -lminimalstdio -lminimalstdlib
 
 CDEFINES += -D__NO_LOGGING__
 

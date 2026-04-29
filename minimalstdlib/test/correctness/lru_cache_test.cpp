@@ -10,7 +10,6 @@
 
 #include <heap_allocator>
 #include <single_block_memory_heap>
-#include <stack_allocator>
 
 #include <memory>
 

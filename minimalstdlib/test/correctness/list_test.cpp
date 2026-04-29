@@ -8,10 +8,11 @@
 
 #include <new>
 
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <heap_allocator>
 #include <list>
 #include <single_block_memory_heap>
-#include <stack_allocator>
 
 #define TEST_BUFFER_SIZE 65536
 #define MAX_HEAP_ELEMENTS 4096
@@ -52,7 +53,7 @@ namespace
 
     using list_allocator = minstd::allocator<test_element_list::node_type>;
     using list_static_heap_allocator = minstd::heap_allocator<test_element_list::node_type>;
-    using list_stack_allocator = minstd::stack_allocator<test_element_list::node_type, 24>;
+    using list_monotonic_allocator = minstd::pmr::polymorphic_allocator<test_element_list::node_type>;
 
     void testListFunctionality(list_allocator &allocator)
     {
@@ -527,7 +528,7 @@ namespace
         CHECK(((++list1.begin())->value()) == 3);
     }
 
-    TEST(ListTests, ListWithStaticHeapAndStackAllocators_push_pop_PositiveCases)
+    TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_push_pop_PositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, MAX_HEAP_ELEMENTS);
         list_static_heap_allocator heap_allocator(test_heap);
@@ -536,12 +537,14 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        list_stack_allocator stack_allocator;
+        alignas(test_element_list::node_type) unsigned char monotonic_buffer[sizeof(test_element_list::node_type) * 24 + alignof(test_element_list::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        list_monotonic_allocator monotonic_allocator(&monotonic_resource);
 
-        testListFunctionality(stack_allocator);
+        testListFunctionality(monotonic_allocator);
     }
 
-    TEST(ListTests, ListWithStaticHeapAndStackAllocators_insert_erase_after_PositiveCases)
+    TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_insert_erase_after_PositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
         list_static_heap_allocator heap_allocator(test_heap);
@@ -550,12 +553,14 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        list_stack_allocator stack_allocator;
+        alignas(test_element_list::node_type) unsigned char monotonic_buffer[sizeof(test_element_list::node_type) * 24 + alignof(test_element_list::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        list_monotonic_allocator monotonic_allocator(&monotonic_resource);
 
-        testInsertAfterFunctionality(stack_allocator);
+        testInsertAfterFunctionality(monotonic_allocator);
     }
 
-    TEST(ListTests, ListWithStaticHeapAndStackAllocators_move_front)
+    TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_move_front)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
         list_static_heap_allocator heap_allocator(test_heap);
@@ -564,12 +569,14 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        list_stack_allocator stack_allocator;
+        alignas(test_element_list::node_type) unsigned char monotonic_buffer[sizeof(test_element_list::node_type) * 24 + alignof(test_element_list::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        list_monotonic_allocator monotonic_allocator(&monotonic_resource);
 
-        testMoveFront(stack_allocator);
+        testMoveFront(monotonic_allocator);
     }
 
-    TEST(ListTests, ListWithStaticHeapAndStackAllocators_erase)
+    TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_erase)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
         list_static_heap_allocator heap_allocator(test_heap);
@@ -578,9 +585,11 @@ namespace
 
         CHECK(test_heap.bytes_in_use() == 0);
 
-        list_stack_allocator stack_allocator;
+        alignas(test_element_list::node_type) unsigned char monotonic_buffer[sizeof(test_element_list::node_type) * 24 + alignof(test_element_list::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        list_monotonic_allocator monotonic_allocator(&monotonic_resource);
 
-        testErase(stack_allocator);
+        testErase(monotonic_allocator);
     }
 
     TEST(ListTests, TestMaxSize)

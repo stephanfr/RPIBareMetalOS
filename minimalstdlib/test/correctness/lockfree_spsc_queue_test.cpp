@@ -8,7 +8,6 @@
 
 #include <heap_allocator>
 #include <single_block_memory_heap>
-#include <stack_allocator>
 
 #include <pthread.h>
 
@@ -51,7 +50,6 @@ namespace
 
     using queue_allocator = minstd::allocator<test_element_queue::value_type>;
     using queue_static_heap_allocator = minstd::heap_allocator<test_element_queue::value_type>;
-    using queue_stack_allocator = minstd::stack_allocator<test_element_queue::value_type, 24>;
 
     void *produce(void *arguments)
     {

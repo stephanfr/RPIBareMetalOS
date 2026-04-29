@@ -4,7 +4,8 @@
 
 #include "../../cpputest_support.h"
 
-#include <stack_allocator>
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 
 #include "../../utility/in_memory_blockio_device.h"
 
@@ -32,7 +33,9 @@ namespace filesystems::fat32::test
 
         //  Load the partition - there should be just one
 
-        minstd::stack_allocator<::filesystems::MassStoragePartition, MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE> partition_allocator;
+        alignas(::filesystems::MassStoragePartition) uint8_t partition_buffer[sizeof(::filesystems::MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE + alignof(::filesystems::MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE];
+        minstd::pmr::monotonic_buffer_resource partition_resource(partition_buffer, sizeof(partition_buffer), nullptr);
+        minstd::pmr::polymorphic_allocator<::filesystems::MassStoragePartition> partition_allocator(&partition_resource);
 
         ::filesystems::MassStoragePartitions partitions(partition_allocator);
 

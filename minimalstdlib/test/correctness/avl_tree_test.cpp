@@ -12,9 +12,10 @@
 #include <fixed_string>
 #include <functional>
 
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <heap_allocator>
 #include <single_block_memory_heap>
-#include <stack_allocator>
 
 #include <memory>
 
@@ -103,18 +104,18 @@ namespace
 
     using avl_treeAllocator = minstd::allocator<avl_tree::node_type>;
     using avl_treeStaticHeapAllocator = minstd::heap_allocator<avl_tree::node_type>;
-    using avl_treeStackAllocator = minstd::stack_allocator<avl_tree::node_type, 24>;
+    using avl_treeMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree::node_type>;
 
     using avl_tree_move_only = minstd::avl_tree<uint32_t, move_only_test_element>;
 
     using avl_tree_move_onlyAllocator = minstd::allocator<avl_tree_move_only::node_type>;
     using avl_tree_move_onlyStaticHeapAllocator = minstd::heap_allocator<avl_tree_move_only::node_type>;
-    using avl_tree_move_onlyStackAllocator = minstd::stack_allocator<avl_tree_move_only::node_type, 24>;
+    using avl_tree_move_onlyMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree_move_only::node_type>;
 
     using avl_tree_unique_pointer = minstd::avl_tree<uint32_t, minstd::unique_ptr<test_element>>;
 
     using avl_tree_unique_pointerStaticHeapAllocator = minstd::heap_allocator<avl_tree_unique_pointer::node_type>;
-    using avl_tree_unique_pointerStackAllocator = minstd::stack_allocator<avl_tree_unique_pointer::node_type, 24>;
+    using avl_tree_unique_pointerMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree_unique_pointer::node_type>;
 
     bool operator==(const minstd::reference_wrapper<minstd::dynamic_string<128>> &lhs, const minstd::string &rhs)
     {
@@ -125,7 +126,7 @@ namespace
 
     using avl_tree_string_keyAllocator = minstd::allocator<avl_tree_string_key::node_type>;
     using avl_tree_string_keyStaticHeapAllocator = minstd::heap_allocator<avl_tree_string_key::node_type>;
-    using avl_tree_string_keyStackAllocator = minstd::stack_allocator<avl_tree_string_key::node_type, 24>;
+    using avl_tree_string_keyMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree_string_key::node_type>;
 
     void iterator_invariants(minstd::allocator<avl_tree::node_type> &allocator)
     {
@@ -672,10 +673,12 @@ namespace
         iterator_invariants(heap_allocator);
         basic_iterator_tests(heap_allocator);
 
-        avl_treeStackAllocator stack_allocator;
+        alignas(avl_tree::node_type) unsigned char monotonic_buffer[sizeof(avl_tree::node_type) * 24 + alignof(avl_tree::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        avl_treeMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-        iterator_invariants(stack_allocator);
-        basic_iterator_tests(stack_allocator);
+        iterator_invariants(monotonic_allocator);
+        basic_iterator_tests(monotonic_allocator);
     }
 
     TEST(avl_treeTests, Testavl_treeBasicOperations)
@@ -685,9 +688,11 @@ namespace
 
         basic_tests(heap_allocator);
 
-        avl_treeStackAllocator stack_allocator;
+        alignas(avl_tree::node_type) unsigned char monotonic_buffer[sizeof(avl_tree::node_type) * 24 + alignof(avl_tree::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        avl_treeMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-        basic_tests(stack_allocator);
+        basic_tests(monotonic_allocator);
     }
 
     TEST(avl_treeTests, Testavl_treeBasicOperationsWithMoveOnlyValueType)
@@ -702,9 +707,11 @@ namespace
 
         basic_tests_move_only(heap_allocator);
 
-        avl_tree_move_onlyStackAllocator stack_allocator;
+        alignas(avl_tree_move_only::node_type) unsigned char monotonic_buffer[sizeof(avl_tree_move_only::node_type) * 24 + alignof(avl_tree_move_only::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        avl_tree_move_onlyMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-        basic_tests_move_only(stack_allocator);
+        basic_tests_move_only(monotonic_allocator);
     }
 
     TEST(avl_treeTests, Testavl_treeWithUniquePointerTypeForLeaks)
@@ -771,9 +778,11 @@ namespace
 
         basic_tests_unique_pointer(heap_allocator, test_element_heap);
 
-        avl_treeStackAllocator stack_allocator;
+        alignas(avl_tree_unique_pointer::node_type) unsigned char monotonic_buffer[sizeof(avl_tree_unique_pointer::node_type) * 24 + alignof(avl_tree_unique_pointer::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        avl_tree_unique_pointerMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-        basic_tests_unique_pointer(heap_allocator, test_element_heap);
+        basic_tests_unique_pointer(monotonic_allocator, test_element_heap);
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
     }

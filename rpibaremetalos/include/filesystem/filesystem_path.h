@@ -169,7 +169,7 @@ namespace filesystems
 
         static constexpr char DIRECTORY_DELIMITER = '/';
 
-        const minstd::string &path_string_;
+        const minstd::fixed_string<MAX_FILESYSTEM_PATH_LENGTH> path_string_;
 
         const uint32_t length_;
 

@@ -8,7 +8,8 @@
 
 #include <minimalcstdlib.h>
 
-#include <stack_allocator>
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 
 #include "filesystem/fat32_directory_cluster.h"
 #include "filesystem/fat32_filenames.h"
@@ -339,8 +340,11 @@ namespace
                                            get_filesystem_result->BlockIOAdapter(),
                                            get_filesystem_result->BlockIOAdapter().RootDirectoryCluster());
 
-        minstd::stack_allocator<FAT32LongFilenameClusterEntry, 24> stack_allocator; //  Enough room for a 255 character filename
-        minstd::vector<FAT32LongFilenameClusterEntry> lfn_entries(stack_allocator);
+        constexpr size_t LFN_ENTRY_CAPACITY = 24;
+        alignas(FAT32LongFilenameClusterEntry) uint8_t lfn_entries_buffer[sizeof(FAT32LongFilenameClusterEntry) * LFN_ENTRY_CAPACITY + alignof(FAT32LongFilenameClusterEntry) * LFN_ENTRY_CAPACITY];
+        minstd::pmr::monotonic_buffer_resource lfn_entries_resource(lfn_entries_buffer, sizeof(lfn_entries_buffer), nullptr);
+        minstd::pmr::polymorphic_allocator<FAT32LongFilenameClusterEntry> lfn_entries_allocator(&lfn_entries_resource);
+        minstd::vector<FAT32LongFilenameClusterEntry> lfn_entries(lfn_entries_allocator);
 
         FAT32LongFilename long_filename("A diam maecenas sed enim ut sem.Pellentesque");
 

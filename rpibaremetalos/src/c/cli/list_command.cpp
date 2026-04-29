@@ -13,7 +13,8 @@
 
 #include <format>
 #include <list>
-#include <stack_allocator>
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 
 namespace cli::commands
 {
@@ -96,8 +97,11 @@ namespace cli::commands
 
         //  Get the list of filesystems
 
-        minstd::stack_allocator<minstd::list<UUID>::node_type, MAX_CLI_FILESYSTEMS_TO_LIST> uuid_list_stack_allocator;
-        minstd::list<UUID> filesystem_ids(uuid_list_stack_allocator);
+        using uuid_node_type = minstd::list<UUID>::node_type;
+        alignas(uuid_node_type) uint8_t uuid_list_buffer[sizeof(uuid_node_type) * MAX_CLI_FILESYSTEMS_TO_LIST + alignof(uuid_node_type) * MAX_CLI_FILESYSTEMS_TO_LIST];
+        minstd::pmr::monotonic_buffer_resource uuid_list_resource(uuid_list_buffer, sizeof(uuid_list_buffer), nullptr);
+        minstd::pmr::polymorphic_allocator<uuid_node_type> uuid_list_allocator(&uuid_list_resource);
+        minstd::list<UUID> filesystem_ids(uuid_list_allocator);
 
         GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, filesystem_ids);
 

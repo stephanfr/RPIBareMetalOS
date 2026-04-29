@@ -10,7 +10,6 @@
 
 #include <format>
 #include <list>
-#include <stack_allocator>
 
 namespace cli::commands
 {

@@ -41,7 +41,6 @@
 #include <heap_allocator>
 #include <memory>
 #include <single_block_memory_heap>
-#include <stack_allocator>
 #include <vector>
 #include <functional>
 
@@ -849,10 +848,6 @@ namespace
 
     TEST(TupleTests, TupleConversionToStdVector)
     {
-        using IntVectorStackAllocator = minstd::stack_allocator<minstd::vector<int>::element_type, 24>;
-
-        IntVectorStackAllocator stack_allocator;
-
         auto tup1 = tuple{1, 2, 3, 4, 5};
 
         minstd::array<int, 5> a = minstd::convert{tup1};

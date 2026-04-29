@@ -47,7 +47,6 @@
         "heap_allocator": "cpp",
         "map": "cpp",
         "avl_tree": "cpp",
-        "stack_allocator": "cpp",
         "memory_heap": "cpp",
         "stdint-gcc.h": "c",
         "minimalstdio_constants.h": "c",

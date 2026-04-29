@@ -6,9 +6,10 @@
 
 #include <minstdconfig.h>
 
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <forward_list>
 #include <heap_allocator>
-#include <stack_allocator>
 #include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
@@ -48,7 +49,7 @@ namespace
 
     using forward_list_allocator = minstd::allocator<test_element_forward_list::node_type>;
     using forward_list_static_heap_allocator = minstd::heap_allocator<test_element_forward_list::node_type>;
-    using forward_list_stack_allocator = minstd::stack_allocator<test_element_forward_list::node_type, 24>;
+    using forward_list_monotonic_allocator = minstd::pmr::polymorphic_allocator<test_element_forward_list::node_type>;
 
 
     void testInvariants(forward_list_allocator &allocator)
@@ -183,16 +184,18 @@ namespace
         CHECK(itr3 == list3.end());
     }
 
-    TEST(ForwardListTests, ForwardListWithStaticHeapAndStackAllocatorsIteratorInvariantsTest)
+    TEST(ForwardListTests, ForwardListWithStaticHeapAndMonotonicAllocatorsIteratorInvariantsTest)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
         forward_list_static_heap_allocator heap_allocator(test_heap);
 
         testInvariants(heap_allocator);
 
-        forward_list_stack_allocator stack_allocator;
+        alignas(test_element_forward_list::node_type) unsigned char monotonic_buffer[sizeof(test_element_forward_list::node_type) * 24 + alignof(test_element_forward_list::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        forward_list_monotonic_allocator monotonic_allocator(&monotonic_resource);
 
-        testInvariants(stack_allocator);
+        testInvariants(monotonic_allocator);
     }
 
     TEST(ForwardListTests, ForwardListWithStaticHeapAllocatorPositiveCases)
@@ -204,8 +207,10 @@ namespace
 
         CHECK(test_heap.blocks_reserved() == 15);
 
-        forward_list_stack_allocator stack_allocator;
+        alignas(test_element_forward_list::node_type) unsigned char monotonic_buffer[sizeof(test_element_forward_list::node_type) * 24 + alignof(test_element_forward_list::node_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        forward_list_monotonic_allocator monotonic_allocator(&monotonic_resource);
 
-        testListFunctionality(stack_allocator);
+        testListFunctionality(monotonic_allocator);
     }
 }

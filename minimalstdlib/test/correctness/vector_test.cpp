@@ -10,8 +10,9 @@
 
 #include <vector>
 
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <heap_allocator>
-#include <stack_allocator>
 #include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
@@ -51,13 +52,13 @@ namespace
 
     using uint32t_vectorAllocator = minstd::allocator<uint32t_vector::element_type>;
     using uint32t_vectorStaticHeapAllocator = minstd::heap_allocator<uint32t_vector::element_type>;
-    using uint32t_vectorStackAllocator = minstd::stack_allocator<uint32t_vector::element_type, 24>;
+    using uint32t_vectorMonotonicAllocator = minstd::pmr::polymorphic_allocator<uint32t_vector::element_type>;
 
     using test_element_vector = minstd::vector<test_element, 0, 6>;
 
     using test_element_vectorAllocator = minstd::allocator<test_element_vector::element_type>;
     using test_element_vectorStaticHeapAllocator = minstd::heap_allocator<test_element_vector::element_type>;
-    using test_element_vectorStackAllocator = minstd::stack_allocator<test_element_vector::element_type, 24>;
+    using test_element_vectorMonotonicAllocator = minstd::pmr::polymorphic_allocator<test_element_vector::element_type>;
 
 
     void iteratorInvariantsTest(uint32t_vectorAllocator &allocator)
@@ -303,9 +304,11 @@ namespace
 
         iteratorInvariantsTest(heap_allocator);
 
-        uint32t_vectorStackAllocator stack_allocator;
+        alignas(uint32t_vector::element_type) unsigned char monotonic_buffer[sizeof(uint32t_vector::element_type) * 24 + alignof(uint32t_vector::element_type) * 24];
+        minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+        uint32t_vectorMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-        iteratorInvariantsTest(stack_allocator);
+        iteratorInvariantsTest(monotonic_allocator);
     }
 
     TEST(VectorTests, PushAndPop)
@@ -316,9 +319,11 @@ namespace
 
             pushPopUintTest(heap_allocator);
 
-            uint32t_vectorStackAllocator stack_allocator;
+            alignas(uint32t_vector::element_type) unsigned char monotonic_buffer[sizeof(uint32t_vector::element_type) * 24 + alignof(uint32t_vector::element_type) * 24];
+            minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+            uint32t_vectorMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-            pushPopUintTest(stack_allocator);
+            pushPopUintTest(monotonic_allocator);
         }
 
         {
@@ -327,9 +332,11 @@ namespace
 
             pushPopTestElementTest(heap_allocator);
 
-            test_element_vectorStackAllocator stack_allocator;
+            alignas(test_element_vector::element_type) unsigned char monotonic_buffer[sizeof(test_element_vector::element_type) * 24 + alignof(test_element_vector::element_type) * 24];
+            minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+            test_element_vectorMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-            pushPopTestElementTest(stack_allocator);
+            pushPopTestElementTest(monotonic_allocator);
         }
     }
 
@@ -341,9 +348,11 @@ namespace
 
             basicUintTest(heap_allocator);
 
-            uint32t_vectorStackAllocator stack_allocator;
+            alignas(uint32t_vector::element_type) unsigned char monotonic_buffer[sizeof(uint32t_vector::element_type) * 24 + alignof(uint32t_vector::element_type) * 24];
+            minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+            uint32t_vectorMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-            basicUintTest(stack_allocator);
+            basicUintTest(monotonic_allocator);
         }
 
         {
@@ -352,9 +361,11 @@ namespace
 
             basicTestElementTest(heap_allocator);
 
-            test_element_vectorStackAllocator stack_allocator;
+            alignas(test_element_vector::element_type) unsigned char monotonic_buffer[sizeof(test_element_vector::element_type) * 24 + alignof(test_element_vector::element_type) * 24];
+            minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
+            test_element_vectorMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-            basicTestElementTest(stack_allocator);
+            basicTestElementTest(monotonic_allocator);
         }
     }
 
