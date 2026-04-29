@@ -675,6 +675,47 @@ void BCMGenetDriver::ConfigureUniMACSpeed()
 }
 
 // ---------------------------------------------------------------------------
+// Loopback control
+// ---------------------------------------------------------------------------
+
+EthernetResultCodes BCMGenetDriver::EnableMACLoopback(bool enable)
+{
+    uint32_t cmd = ReadReg(UMAC_CMD);
+
+    if (enable)
+    {
+        cmd |= CMD_LCL_LOOP_EN;
+    }
+    else
+    {
+        cmd &= ~CMD_LCL_LOOP_EN;
+    }
+
+    WriteReg(UMAC_CMD, cmd);
+    return EthernetResultCodes::SUCCESS;
+}
+
+EthernetResultCodes BCMGenetDriver::EnablePHYLoopback(bool enable)
+{
+    if (enable)
+    {
+        // Near-end PHY loopback at 10 Mbps full duplex.
+        // Setting the loopback bit implicitly disables auto-negotiation; the
+        // speed and duplex bits must be programmed explicitly to keep the
+        // RGMII interface clocked at the right rate.
+        // BMCR: bit14=loopback, bit8=full-duplex, speed[13:6]=00 → 10 Mbps
+        return MDIOWrite(GENET_PHY_ADDR, PHY_REG_BMCR,
+                         BMCR_LOOPBACK | BMCR_FULLDPLX);
+    }
+    else
+    {
+        // Restore auto-negotiation and restart the link at 10 Mbps.
+        return MDIOWrite(GENET_PHY_ADDR, PHY_REG_BMCR,
+                         BMCR_ANENABLE | BMCR_ANRESTART);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Global accessor (lazy singleton — matches the eMMC/UART device pattern)
 // ---------------------------------------------------------------------------
 

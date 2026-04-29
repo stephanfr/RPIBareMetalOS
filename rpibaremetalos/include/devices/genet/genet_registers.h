@@ -117,6 +117,7 @@ static constexpr uint32_t CMD_CRC_FWD         = (1U << 6);
 static constexpr uint32_t CMD_PAUSE_FWD       = (1U << 7);
 static constexpr uint32_t CMD_HD_EN           = (1U << 10);
 static constexpr uint32_t CMD_SW_RESET        = (1U << 13);
+static constexpr uint32_t CMD_LCL_LOOP_EN    = (1U << 15);  // MAC-level local loopback
 
 // UMAC_MDIO_CMD bits
 static constexpr uint32_t MDIO_START_BUSY     = (1U << 29);
@@ -246,6 +247,7 @@ static constexpr uint32_t PHY_REG_1000T_STAT   = 0x0A;  // 1000BASE-T Status
 // BMCR bits
 static constexpr uint16_t BMCR_SPEED1000       = (1U << 6);   // speed MSB (combined with BMCR_SPEED100)
 static constexpr uint16_t BMCR_FULLDPLX        = (1U << 8);
+static constexpr uint16_t BMCR_LOOPBACK        = (1U << 14);  // PHY near-end loopback
 static constexpr uint16_t BMCR_ANRESTART       = (1U << 9);   // restart auto-negotiation
 static constexpr uint16_t BMCR_ANENABLE        = (1U << 12);  // auto-negotiation enable
 static constexpr uint16_t BMCR_SPEED100        = (1U << 13);  // speed LSB

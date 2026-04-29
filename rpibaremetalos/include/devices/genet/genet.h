@@ -71,6 +71,12 @@ public:
     EthernetResultCodes SendFrame(const uint8_t *data, uint32_t length) override;
     ValueResult<EthernetResultCodes, uint32_t> ReceiveFrame(uint8_t *buffer, uint32_t buffer_size) override;
 
+    // Loopback control — intended for bring-up testing, not normal operation.
+    // MAC loopback folds TX back to RX inside the UniMAC (no PHY involvement).
+    // PHY loopback sends through the RGMII interface and loops inside the BCM54213.
+    EthernetResultCodes EnableMACLoopback(bool enable);
+    EthernetResultCodes EnablePHYLoopback(bool enable);
+
 private:
     volatile uint8_t *base_;
 
