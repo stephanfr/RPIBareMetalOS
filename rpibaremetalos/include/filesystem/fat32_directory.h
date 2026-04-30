@@ -202,7 +202,7 @@ namespace filesystems::fat32
                                                                                                                                      first_cluster,
                                                                                                                                      compact_name)
                                                                                                      .release()),
-                                                              __os_dynamic_heap);
+                                                              __os_dynamic_heap_resource);
 
             return directory;
         }
