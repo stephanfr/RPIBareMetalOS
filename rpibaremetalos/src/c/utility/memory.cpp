@@ -10,6 +10,8 @@ extern const unsigned int __static_heap_start;
 extern const unsigned int __static_heap_size_in_bytes;
 extern const unsigned int __dynamic_heap_start;
 extern const unsigned int __dynamic_heap_size_in_bytes;
+extern const unsigned int __filesystem_cache_heap_start;
+extern const unsigned int __filesystem_cache_heap_size_in_bytes;
 
 #define AARCH64_MEMORY_ALIGNMENT 8
 
@@ -31,13 +33,15 @@ protected:
 };
 
 DynamicHeapProxyResource __os_dynamic_resource_core_proxy;
+DynamicHeapProxyResource __os_filesystem_cache_resource_core_proxy;
 
 // We still export this pointer so modules dumping it (like show_diagnostics) can query it if they look for the real impl.
 minstd::pmr::lockfree_composite_single_arena_resource<>* __os_dynamic_resource_core = nullptr;
+minstd::pmr::lockfree_composite_single_arena_resource<>* __os_filesystem_cache_resource_core = nullptr;
 
 minstd::pmr::memory_resource& __os_dynamic_heap_resource = __os_dynamic_resource_core_proxy;
 minstd::pmr::memory_resource& __os_static_heap_resource = __os_static_resource_core;
-minstd::pmr::memory_resource& __os_filesystem_cache_heap_resource = __os_dynamic_resource_core_proxy;
+minstd::pmr::memory_resource& __os_filesystem_cache_heap_resource = __os_filesystem_cache_resource_core_proxy;
 
 dynamic_allocator<char> __dynamic_string_allocator;
 
@@ -56,6 +60,20 @@ extern "C" void initialize_dynamic_heap()
     );
 
     __os_dynamic_resource_core_proxy.impl_ = __os_dynamic_resource_core;
+
+    void* fs_cache_resource_memory = __os_static_resource_core.allocate(
+        sizeof(minstd::pmr::lockfree_composite_single_arena_resource<>),
+        alignof(minstd::pmr::lockfree_composite_single_arena_resource<>)
+    );
+
+    __os_filesystem_cache_resource_core = new (fs_cache_resource_memory) minstd::pmr::lockfree_composite_single_arena_resource<>(
+        (uint8_t *)&__filesystem_cache_heap_start,
+        FILESYSTEM_CACHE_HEAP_SIZE_IN_BYTES,
+        4,
+        4
+    );
+
+    __os_filesystem_cache_resource_core_proxy.impl_ = __os_filesystem_cache_resource_core;
 }
 
 

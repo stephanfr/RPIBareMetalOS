@@ -106,6 +106,21 @@ SECTIONS
 
     __dynamic_heap_size_in_bytes = __dynamic_heap_end - __dynamic_heap_start;
 
+    /*  Filesystem cache heap is a dedicated arena reserved for the kernel-side
+     *      filesystem cache (directory entries, file metadata, etc).  Eventually
+     *      this region is intended to be handed off to a userspace filesystem
+     *      service, so it is partitioned away from the general dynamic heap.
+     */
+
+    .filesystem_cache_heap : {
+        . = ALIGN(4);
+        __filesystem_cache_heap_start = .;
+        . = . + FILESYSTEM_CACHE_HEAP_SIZE_IN_BYTES;
+        __filesystem_cache_heap_end = .;
+    } > OS_RAM
+
+    __filesystem_cache_heap_size_in_bytes = __filesystem_cache_heap_end - __filesystem_cache_heap_start;
+
     /* There is probably a better way to do this, but I am just carving out enough space for MAX_CORES of
      * stack space to be used on boot-up for division amongst active cores.  If MAX_CORES == 16 but with only 4 active cores, then 12 cores
      * of stack space will be 'wasted' but this will be fixed when we add virtual memory. */

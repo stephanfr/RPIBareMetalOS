@@ -29,6 +29,10 @@ extern const unsigned int __dynamic_heap_start;
 extern const unsigned int __dynamic_heap_end;
 extern const unsigned int __dynamic_heap_size_in_bytes;
 
+extern const unsigned int __filesystem_cache_heap_start;
+extern const unsigned int __filesystem_cache_heap_end;
+extern const unsigned int __filesystem_cache_heap_size_in_bytes;
+
 extern const unsigned int __per_core_initialization_stack_bottom;
 extern const unsigned int __per_core_initialization_stack_top;
 extern const unsigned int __per_core_initialization_stack_size_in_bytes;

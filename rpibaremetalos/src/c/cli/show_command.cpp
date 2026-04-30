@@ -70,6 +70,11 @@ namespace cli::commands
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space Size: {}\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Start: {}\n", (void *)&__dynamic_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap End: {}\n", (void *)&__dynamic_heap_end);
+        context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Reserved Space Start: {}\n", (void *)&__filesystem_cache_heap_start);
+        context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Reserved Space End: {}\n", (void *)&__filesystem_cache_heap_end);
+        context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Reserved Space Size: {}\n", (uint32_t *)&__filesystem_cache_heap_size_in_bytes);
+        context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Start: {}\n", (void *)&__filesystem_cache_heap_start);
+        context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap End: {}\n", (void *)&__filesystem_cache_heap_end);
         context.output_stream_ << minstd::format(format_buffer, "Core Initialization Stack Top: {}\n", (void *)&__per_core_initialization_stack_top);
         context.output_stream_ << minstd::format(format_buffer, "Core Initialization Stack Bottom: {}\n", (void *)&__per_core_initialization_stack_bottom);
         context.output_stream_ << minstd::format(format_buffer, "Current Stack Location: {}\n", (void *)GetStackPointer());
