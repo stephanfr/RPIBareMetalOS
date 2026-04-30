@@ -424,7 +424,12 @@ namespace
     TEST(SkiplistTests, MultiThreadedStressThreadScaling)
     {
         using list_type = minstd::skip_list<uint32_t, uint32_t, SKIPLIST_STRESS_MAX_THREADS>;
-        const size_t iterations_per_thread = skiplist_scaling_iterations_per_thread();
+        // Correctness sweep across 1..MAX thread counts. Use the standard correctness
+        // iteration budget rather than the perf-scaled multiplier (which is reserved
+        // for the performance suite). The MultiThreadedStressInsertFindRemove and
+        // MultiThreadedStressOrderingAndContentCorrectness siblings use the same
+        // SKIPLIST_STRESS_ITERATIONS_PER_THREAD baseline.
+        const size_t iterations_per_thread = SKIPLIST_STRESS_ITERATIONS_PER_THREAD;
 
         for (size_t num_threads = 1; num_threads <= SKIPLIST_STRESS_MAX_THREADS; ++num_threads)
         {
