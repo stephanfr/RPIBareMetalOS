@@ -230,7 +230,7 @@ namespace
 
         for (size_t i = 1; i <= 6; ++i)
         {
-            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(i), test_heap))));
+            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap_resource.allocate(sizeof(test_element), alignof(test_element))) test_element(i), test_heap_resource))));
         }
 
         CHECK(!test_cache.empty());
@@ -246,10 +246,10 @@ namespace
 
         for (size_t i = 7; i <= 14; ++i)
         {
-            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(i), test_heap))));
+            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap_resource.allocate(sizeof(test_element), alignof(test_element))) test_element(i), test_heap_resource))));
         }
 
-        CHECK(!test_cache.add(14, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(14), test_heap))));
+        CHECK(!test_cache.add(14, minstd::move(minstd::unique_ptr<test_element>(new (test_heap_resource.allocate(sizeof(test_element), alignof(test_element))) test_element(14), test_heap_resource))));
 
         CHECK(!test_cache.find(1).has_value());
         CHECK(!test_cache.find(2).has_value());
@@ -347,7 +347,7 @@ namespace
 
         for (size_t i = 1; i <= 6; ++i)
         {
-            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap.allocate_block<test_element>(1)) test_element(i), test_heap))));
+            CHECK(test_cache.add(i, minstd::move(minstd::unique_ptr<test_element>(new (test_heap_resource.allocate(sizeof(test_element), alignof(test_element))) test_element(i), test_heap_resource))));
         }
 
         CHECK(!test_cache.empty());

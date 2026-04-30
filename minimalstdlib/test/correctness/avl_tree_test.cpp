@@ -12,6 +12,7 @@
 #include <fixed_string>
 #include <functional>
 
+#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
 #include <__memory_resource/tracking_memory_resource.h>
@@ -21,7 +22,7 @@
 
 #define TEST_BUFFER_SIZE 65536
 
-#define CREATE_TEST_ELEMENT_UNIQUE_PTR(key, value) avl_tree_unique_pointer::value_type(key, minstd::move(minstd::unique_ptr<test_element>(new (test_element_heap.allocate_block<test_element>(1)) test_element(value), test_element_heap)))
+#define CREATE_TEST_ELEMENT_UNIQUE_PTR(key, value) avl_tree_unique_pointer::value_type(key, minstd::move(minstd::unique_ptr<test_element>(new (test_element_heap_resource.allocate(sizeof(test_element), alignof(test_element))) test_element(value), test_element_heap_resource)))
 
 namespace
 {
@@ -459,7 +460,7 @@ namespace
         }
     }
 
-    void basic_tests_unique_pointer(minstd::allocator<avl_tree_unique_pointer::node_type> &allocator, minstd::single_block_memory_heap &test_element_heap)
+    void basic_tests_unique_pointer(minstd::allocator<avl_tree_unique_pointer::node_type> &allocator, minstd::pmr::memory_resource &test_element_heap_resource)
     {
         avl_tree_unique_pointer tree(allocator);
 
@@ -740,6 +741,7 @@ namespace
     TEST(avl_treeTests, Testavl_treeWithUniquePointerTypeForLeaks)
     {
         minstd::single_block_memory_heap test_element_heap(buffer2, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_element_heap_resource(test_element_heap);
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
@@ -794,6 +796,7 @@ namespace
     TEST(avl_treeTests, Testavl_treeBasicOperationsWithUniquePointerType)
     {
         minstd::single_block_memory_heap test_element_heap(buffer2, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_element_heap_resource(test_element_heap);
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
@@ -801,13 +804,13 @@ namespace
         minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
         avl_tree_unique_pointerStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
-        basic_tests_unique_pointer(heap_allocator, test_element_heap);
+        basic_tests_unique_pointer(heap_allocator, test_element_heap_resource);
 
         alignas(avl_tree_unique_pointer::node_type) unsigned char monotonic_buffer[sizeof(avl_tree_unique_pointer::node_type) * 24 + alignof(avl_tree_unique_pointer::node_type) * 24];
         minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);
         avl_tree_unique_pointerMonotonicAllocator monotonic_allocator(&monotonic_resource);
 
-        basic_tests_unique_pointer(monotonic_allocator, test_element_heap);
+        basic_tests_unique_pointer(monotonic_allocator, test_element_heap_resource);
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
     }

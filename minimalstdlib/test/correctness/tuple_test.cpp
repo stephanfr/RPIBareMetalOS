@@ -38,6 +38,7 @@
 #include <array>
 #include <fixed_string>
 #include <format>
+#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <memory>
 #include <single_block_memory_heap>
 #include <vector>
@@ -363,10 +364,11 @@ namespace
     TEST(TupleTests, AllMethodWithMove)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
-        auto tup = tuple{minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(10), test_heap),
-                         minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(20), test_heap),
-                         minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(30), test_heap)};
+        auto tup = tuple{minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(10), test_heap_resource),
+                         minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(20), test_heap_resource),
+                         minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(30), test_heap_resource)};
 
         auto is_valid_ref = [](auto &value)
         { return bool(value); };
@@ -393,9 +395,10 @@ namespace
     TEST(TupleTests, AnyMethodWithMove)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
-        auto tup = tuple{minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(10), test_heap),
-                         minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(20), test_heap)};
+        auto tup = tuple{minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(10), test_heap_resource),
+                         minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(20), test_heap_resource)};
 
         auto is_valid_ref = [](auto &value)
         { return bool(value); };
@@ -502,10 +505,11 @@ namespace
     TEST(TupleTests, Assign5)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
         tuple<minstd::unique_ptr<int>, minstd::fixed_string<64>> t, q;
 
-        t = {minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(69420), test_heap), "Hello, world!"};
+        t = {minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(69420), test_heap_resource), "Hello, world!"};
 
         q = minstd::move(t);
 
@@ -857,8 +861,9 @@ namespace
     TEST(TupleTests, TupleConversionResultsInMove)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
-        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(3), test_heap)};
+        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(3), test_heap_resource)};
 
         tuple<int, int, minstd::unique_ptr<int>> t2 = minstd::convert{minstd::move(tup1)};
 
@@ -925,8 +930,9 @@ namespace
     TEST(TupleTests, TupleAsConversionResultsInMove)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
-        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(3), test_heap)};
+        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(3), test_heap_resource)};
 
         auto t2 = minstd::move(tup1).as<tuple<int, int, minstd::unique_ptr<int>>>();
 
@@ -983,13 +989,14 @@ namespace
     TEST(TupleTests, TestThatfor_eachMovesValuesWhenGivenMoved)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
-        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(3), test_heap)};
+        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(3), test_heap_resource)};
 
         auto tup = tuple{
-            minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(10), test_heap),
-            minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(20), test_heap),
-            minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(30), test_heap)};
+            minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(10), test_heap_resource),
+            minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(20), test_heap_resource),
+            minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(30), test_heap_resource)};
 
         {
             CHECK(tup.all([](auto &val)
@@ -1045,15 +1052,17 @@ namespace
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
 
-        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(3), test_heap)};
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
-        auto tup = tuple{10, 20.4, "Hello, world"s, minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(10), test_heap)};
+        auto tup1 = tuple{1, 2, minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(3), test_heap_resource)};
+
+        auto tup = tuple{10, 20.4, "Hello, world"s, minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(10), test_heap_resource)};
 
         auto expected = tuple{
             10,
             20.4,
             "Hello, world"s,
-            minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(10), test_heap)};
+            minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(10), test_heap_resource)};
 
         auto fn = [](auto val)
         { return val; };
@@ -1095,10 +1104,11 @@ namespace
     TEST(TupleTests, CheckTupleDecompositionByMove)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
         auto tup = tuple{
             1,
-            minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(2), test_heap),
+            minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(2), test_heap_resource),
             minstd::fixed_string("Hello, world!")};
 
         // Check that moving a tuple moves the elements when
@@ -1124,9 +1134,11 @@ namespace
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
 
+        minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
+
         tuple<minstd::unique_ptr<int>, minstd::fixed_string<>, char, char, char>
             tup = minstd::tuple_cat(
-                tuple{minstd::unique_ptr<int>(new (test_heap.allocate_block<int>(1)) int(69420), test_heap)},
+                tuple{minstd::unique_ptr<int>(new (test_heap_resource.allocate(sizeof(int), alignof(int))) int(69420), test_heap_resource)},
                 tuple{minstd::fixed_string<>{"Hello, world!"}},
                 tuple{'a', 'b', 'c'});
 
