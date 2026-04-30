@@ -4,7 +4,6 @@
 
 #include "os_entity.h"
 
-#include <heap_allocator>
 #include <list>
 #include <map>
 #include <memory>
@@ -89,13 +88,13 @@ protected:
     }
 
 private:
-    using EntityByUUIDMapStaticHeapAllocator = minstd::heap_allocator<minstd::map<UUID, minstd::unique_ptr<OSEntity>>::node_type>;
-    using EntityUUIDByHashMapStaticHeapAllocator = minstd::heap_allocator<minstd::map<uint64_t, UUID>::node_type>;
+    using EntityByUUIDMapStaticHeapAllocator = minstd::pmr::polymorphic_allocator<minstd::map<UUID, minstd::unique_ptr<OSEntity>>::node_type>;
+    using EntityUUIDByHashMapStaticHeapAllocator = minstd::pmr::polymorphic_allocator<minstd::map<uint64_t, UUID>::node_type>;
 
-    EntityByUUIDMapStaticHeapAllocator entity_by_id_map_element_allocator_ = EntityByUUIDMapStaticHeapAllocator(__os_static_heap);
+    EntityByUUIDMapStaticHeapAllocator entity_by_id_map_element_allocator_ = EntityByUUIDMapStaticHeapAllocator(&__os_static_heap_resource);
     minstd::map<UUID, minstd::unique_ptr<OSEntity>> entity_by_id_ = minstd::map<UUID, minstd::unique_ptr<OSEntity>>(entity_by_id_map_element_allocator_);
 
-    EntityUUIDByHashMapStaticHeapAllocator entity_id_by_hash_element_allocator_ = EntityUUIDByHashMapStaticHeapAllocator(__os_static_heap);
+    EntityUUIDByHashMapStaticHeapAllocator entity_id_by_hash_element_allocator_ = EntityUUIDByHashMapStaticHeapAllocator(&__os_static_heap_resource);
     minstd::map<uint64_t, UUID> entity_id_by_name_hash_ = minstd::map<uint64_t, UUID>(entity_id_by_hash_element_allocator_);
     minstd::map<uint64_t, UUID> entity_id_by_alias_hash_ = minstd::map<uint64_t, UUID>(entity_id_by_hash_element_allocator_);
 

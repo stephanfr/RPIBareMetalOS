@@ -5,7 +5,6 @@
 #pragma once
 
 #include <forward_list>
-#include <heap_allocator>
 #include <map>
 #include <memory>
 
@@ -40,13 +39,13 @@ public:
 
 protected:
     using ISRPointerList = minstd::forward_list<InterruptServiceRoutine *>;
-    using ISRPointerListStaticHeapAllocator = minstd::heap_allocator<ISRPointerList::node_type>;
+    using ISRPointerListStaticHeapAllocator = minstd::pmr::polymorphic_allocator<ISRPointerList::node_type>;
 
     using ISRMap = minstd::map<Interrupts, ISRPointerList *>;
-    using ISRMapStaticHeapAllocator = minstd::heap_allocator<ISRMap::node_type>;
+    using ISRMapStaticHeapAllocator = minstd::pmr::polymorphic_allocator<ISRMap::node_type>;
 
-    ISRPointerListStaticHeapAllocator list_allocator_ = ISRPointerListStaticHeapAllocator(__os_static_heap);
-    ISRMapStaticHeapAllocator map_allocator_ = ISRMapStaticHeapAllocator(__os_static_heap);
+    ISRPointerListStaticHeapAllocator list_allocator_ = ISRPointerListStaticHeapAllocator(&__os_static_heap_resource);
+    ISRMapStaticHeapAllocator map_allocator_ = ISRMapStaticHeapAllocator(&__os_static_heap_resource);
 
     ISRMap isrs_ = ISRMap(map_allocator_);
 

@@ -11,8 +11,9 @@
 
 #include <__memory_resource/lockfree_composite_single_arena_resource.h>
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <avl_tree>
-#include <heap_allocator>
+#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <lockfree/__extensions/skiplist_statistics.h>
 #include <lockfree/skiplist>
 #include <single_block_memory_heap>
@@ -485,7 +486,7 @@ namespace
     struct rwlock_hash_map
     {
         using map_type = minstd::avl_tree<uint32_t, uint32_t>;
-        using node_allocator_type = minstd::heap_allocator<map_type::node_type>;
+        using node_allocator_type = minstd::pmr::polymorphic_allocator<map_type::node_type>;
 
         //  Allow for the full key space plus single_block_memory_heap block header overhead per node.
         static constexpr size_t HEAP_BUFFER_BYTES = SKIPLIST_STRESS_KEY_SPACE * 128;
@@ -502,6 +503,7 @@ namespace
         //  Members declared in strict construction order.
         heap_buffer_guard heap_buf_; //  first in, last out
         minstd::single_block_memory_heap heap_;
+        minstd::pmr::memory_heap_resource_adapter heap_resource_;
         node_allocator_type map_alloc_;
         map_type map_;
         pthread_rwlock_t rwlock_;
@@ -509,7 +511,8 @@ namespace
         rwlock_hash_map()
             : heap_buf_(HEAP_BUFFER_BYTES),
               heap_(heap_buf_.ptr, HEAP_BUFFER_BYTES),
-              map_alloc_(heap_),
+              heap_resource_(heap_),
+              map_alloc_(&heap_resource_),
               map_(map_alloc_)
         {
             pthread_rwlock_init(&rwlock_, nullptr);

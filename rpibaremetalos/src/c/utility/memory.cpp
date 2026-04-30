@@ -76,6 +76,7 @@ minstd::pmr::lockfree_composite_single_arena_resource<>* __os_dynamic_resource_c
 
 minstd::pmr::memory_resource& __os_dynamic_heap_resource = __os_dynamic_resource_core_proxy;
 minstd::pmr::memory_resource& __os_static_heap_resource = __os_static_resource_core;
+minstd::pmr::memory_resource& __os_filesystem_cache_heap_resource = __os_dynamic_resource_core_proxy;
 
 MemoryResourceHeapAdapter __os_static_heap_adapter(__os_static_resource_core);
 MemoryResourceHeapAdapter __os_dynamic_heap_adapter(__os_dynamic_resource_core_proxy);

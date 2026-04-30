@@ -444,13 +444,13 @@ namespace filesystems::fat32
             path += "/";
             path += filename;
 
-            minstd::unique_ptr<File> file(static_cast<File *>(make_dynamic_unique<FAT32File>(FilesystemUUID(), *file_entry, path, mode, 0, 0).release()), __os_dynamic_heap);
+            minstd::unique_ptr<File> file(static_cast<File *>(make_dynamic_unique<FAT32File>(FilesystemUUID(), *file_entry, path, mode, 0, 0).release()), __os_dynamic_heap_resource);
 
             auto file_ref = GetFileMap().AddFile(file);
 
             ReturnOnFailure(file_ref);
 
-            minstd::unique_ptr<File> file_wrapper(static_cast<File *>(make_dynamic_unique<FileWrapper>(minstd::move(*file_ref)).release()), __os_dynamic_heap);
+            minstd::unique_ptr<File> file_wrapper(static_cast<File *>(make_dynamic_unique<FileWrapper>(minstd::move(*file_ref)).release()), __os_dynamic_heap_resource);
 
             return Result::Success(file_wrapper);
         }
@@ -478,13 +478,13 @@ namespace filesystems::fat32
 
         ReturnOnFailure(fat32_file, LogDebug1("Error: %s attempting to create file named: %s\n", ErrorMessage(fat32_file.ResultCode()), filename.c_str()));
 
-        minstd::unique_ptr<File> file(dynamic_cast<File *>(fat32_file.Value().release()), __os_dynamic_heap);
+        minstd::unique_ptr<File> file(dynamic_cast<File *>(fat32_file.Value().release()), __os_dynamic_heap_resource);
 
         auto file_ref = GetFileMap().AddFile(file);
 
         ReturnOnFailure(file_ref);
 
-        minstd::unique_ptr<File> file_wrapper(static_cast<File *>(make_dynamic_unique<FileWrapper>(minstd::move(*file_ref)).release()), __os_dynamic_heap);
+        minstd::unique_ptr<File> file_wrapper(static_cast<File *>(make_dynamic_unique<FileWrapper>(minstd::move(*file_ref)).release()), __os_dynamic_heap_resource);
 
         return Result::Success(file_wrapper);
     }
@@ -518,7 +518,7 @@ namespace filesystems::fat32
         path += "/";
         path += filename;
 
-        minstd::unique_ptr<FAT32File> file(make_dynamic_unique<FAT32File>(FilesystemUUID(), *new_file_directory_entry, path, mode, 0, 0).release(), __os_dynamic_heap);
+        minstd::unique_ptr<FAT32File> file(make_dynamic_unique<FAT32File>(FilesystemUUID(), *new_file_directory_entry, path, mode, 0, 0).release(), __os_dynamic_heap_resource);
 
         return Result::Success(file);
     }

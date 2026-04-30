@@ -74,7 +74,7 @@ private:
 
     SpinLock memory_map_spinlock_{true};
 
-    minstd::heap_allocator<minstd::vector<uint8_t>::element_type> mem_map_allocator_;
+    minstd::pmr::polymorphic_allocator<minstd::vector<uint8_t>::element_type> mem_map_allocator_;
     minstd::vector<uint8_t> mem_map_;
 
     uint64_t PagesInBlock(uint64_t block_size) const

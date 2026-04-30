@@ -10,7 +10,7 @@
 
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
-#include <heap_allocator>
+#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <list>
 #include <single_block_memory_heap>
 
@@ -52,7 +52,7 @@ namespace
     using test_element_list = minstd::list<test_element>;
 
     using list_allocator = minstd::allocator<test_element_list::node_type>;
-    using list_static_heap_allocator = minstd::heap_allocator<test_element_list::node_type>;
+    using list_static_heap_allocator = minstd::pmr::polymorphic_allocator<test_element_list::node_type>;
     using list_monotonic_allocator = minstd::pmr::polymorphic_allocator<test_element_list::node_type>;
 
     void testListFunctionality(list_allocator &allocator)
@@ -531,7 +531,8 @@ namespace
     TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_push_pop_PositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, MAX_HEAP_ELEMENTS);
-        list_static_heap_allocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testListFunctionality(heap_allocator);
 
@@ -547,7 +548,8 @@ namespace
     TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_insert_erase_after_PositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        list_static_heap_allocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testInsertAfterFunctionality(heap_allocator);
 
@@ -563,7 +565,8 @@ namespace
     TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_move_front)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        list_static_heap_allocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testMoveFront(heap_allocator);
 
@@ -579,7 +582,8 @@ namespace
     TEST(ListTests, ListWithStaticHeapAndMonotonicAllocators_erase)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        list_static_heap_allocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testErase(heap_allocator);
 
@@ -595,13 +599,14 @@ namespace
     TEST(ListTests, TestMaxSize)
     {
         minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        list_static_heap_allocator heap_allocator(test_heap, MAX_HEAP_ELEMENTS);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         test_element_list list1(heap_allocator);
 
         CHECK(list1.empty());
         CHECK(list1.size() == 0);
-        CHECK(list1.max_size() == MAX_HEAP_ELEMENTS);
+        CHECK(list1.max_size() == heap_allocator.max_size());
     }
 
 }

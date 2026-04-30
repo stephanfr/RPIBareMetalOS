@@ -8,7 +8,8 @@
 
 #include <lru_cache>
 
-#include <heap_allocator>
+#include <__memory_resource/memory_heap_resource_adapter.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <single_block_memory_heap>
 
 #include <memory>
@@ -20,6 +21,7 @@ namespace
     static char buffer[TEST_BUFFER_SIZE];
 
     minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
+    minstd::pmr::memory_heap_resource_adapter test_heap_resource(test_heap);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
@@ -62,20 +64,20 @@ namespace
         char empty_space_[18];
     };
 
-    using test_element_allocator = minstd::heap_allocator<test_element>;
+    using test_element_allocator = minstd::pmr::polymorphic_allocator<test_element>;
 
     using lru_cache_with_elements = minstd::lru_cache<uint32_t, test_element>;
-    using lru_cache_with_elementsEntryHeapAllocator = minstd::heap_allocator<lru_cache_with_elements::list_entry_type>;
-    using lru_cache_with_elementsMapHeapAllocator = minstd::heap_allocator<lru_cache_with_elements::map_entry_type>;
+    using lru_cache_with_elementsEntryHeapAllocator = minstd::pmr::polymorphic_allocator<lru_cache_with_elements::list_entry_type>;
+    using lru_cache_with_elementsMapHeapAllocator = minstd::pmr::polymorphic_allocator<lru_cache_with_elements::map_entry_type>;
 
     using lru_cache_with_pointers = minstd::lru_cache<uint32_t, minstd::unique_ptr<test_element>>;
-    using lru_cache_with_pointersEntryHeapAllocator = minstd::heap_allocator<lru_cache_with_pointers::list_entry_type>;
-    using lru_cache_with_pointersMapHeapAllocator = minstd::heap_allocator<lru_cache_with_pointers::map_entry_type>;
+    using lru_cache_with_pointersEntryHeapAllocator = minstd::pmr::polymorphic_allocator<lru_cache_with_pointers::list_entry_type>;
+    using lru_cache_with_pointersMapHeapAllocator = minstd::pmr::polymorphic_allocator<lru_cache_with_pointers::map_entry_type>;
 
-    lru_cache_with_elementsEntryHeapAllocator cache_entry_allocator(test_heap);
-    lru_cache_with_elementsMapHeapAllocator map_entry_allocator(test_heap);
-    lru_cache_with_pointersEntryHeapAllocator cache_pointer_entry_allocator(test_heap);
-    lru_cache_with_pointersMapHeapAllocator map_pointer_entry_allocator(test_heap);
+    lru_cache_with_elementsEntryHeapAllocator cache_entry_allocator(&test_heap_resource);
+    lru_cache_with_elementsMapHeapAllocator map_entry_allocator(&test_heap_resource);
+    lru_cache_with_pointersEntryHeapAllocator cache_pointer_entry_allocator(&test_heap_resource);
+    lru_cache_with_pointersMapHeapAllocator map_pointer_entry_allocator(&test_heap_resource);
 
     TEST(LRUCacheTests, BasicTests)
     {

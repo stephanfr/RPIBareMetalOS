@@ -6,7 +6,8 @@
 
 #include <dynamic_string>
 #include <fixed_string>
-#include <heap_allocator>
+#include <__memory_resource/memory_heap_resource_adapter.h>
+#include <__memory_resource/polymorphic_allocator.h>
 #include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
@@ -22,10 +23,11 @@ namespace
     using dynamic_string16 = minstd::dynamic_string<16>;
     using dynamic_string128 = minstd::dynamic_string<128>;
 
-    using dynamic_string_heap_allocator = minstd::heap_allocator<char>;
+    using dynamic_string_heap_allocator = minstd::pmr::polymorphic_allocator<char>;
 
     minstd::single_block_memory_heap test_heap(buffer, 4096);
-    dynamic_string_heap_allocator heap_allocator(test_heap);
+    minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+    dynamic_string_heap_allocator heap_allocator(&heap_allocator_resource);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"

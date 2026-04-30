@@ -21,11 +21,11 @@ namespace filesystems::fat32
 {
 
     template <typename T>
-    class filesystem_cache_allocator : public minstd::heap_allocator<T>
+    class filesystem_cache_allocator : public minstd::pmr::polymorphic_allocator<T>
     {
     public:
         filesystem_cache_allocator()
-            : minstd::heap_allocator<T>(__os_filesystem_cache_heap)
+            : minstd::pmr::polymorphic_allocator<T>(&__os_filesystem_cache_heap_resource)
         {
         }
     };
@@ -33,8 +33,9 @@ namespace filesystems::fat32
     template <typename T, typename... Args>
     inline minstd::unique_ptr<T> make_filesystem_cache_unique(Args &&...args)
     {
-        T *temp = new (__os_dynamic_heap.allocate_block<T>(1)) T(minstd::forward<Args>(args)...);
-        return minstd::unique_ptr<T>(temp, __os_filesystem_cache_heap);
+        void *buffer = __os_filesystem_cache_heap_resource.allocate(sizeof(T), alignof(T));
+        T *temp = new (buffer) T(minstd::forward<Args>(args)...);
+        return minstd::unique_ptr<T>(temp, __os_filesystem_cache_heap_resource);
     }
 
     typedef enum class FAT32DirectoryCacheEntryType : uint32_t
@@ -277,11 +278,11 @@ namespace filesystems::fat32
 
     private:
         using EntryByFAT32ClusterIndexCache = minstd::lru_cache<FAT32ClusterIndex, minstd::unique_ptr<FAT32DirectoryCacheEntry>>;
-        using EntryByFAT32ClusterIndexListAllocator = minstd::heap_allocator<EntryByFAT32ClusterIndexCache::list_entry_type>;
-        using EntryByFAT32ClusterIndexMapAllocator = minstd::heap_allocator<EntryByFAT32ClusterIndexCache::map_entry_type>;
+        using EntryByFAT32ClusterIndexListAllocator = minstd::pmr::polymorphic_allocator<EntryByFAT32ClusterIndexCache::list_entry_type>;
+        using EntryByFAT32ClusterIndexMapAllocator = minstd::pmr::polymorphic_allocator<EntryByFAT32ClusterIndexCache::map_entry_type>;
 
         using FAT32ClusterIndexByPathHashMap = minstd::avl_tree<uint64_t, FAT32ClusterIndex>;
-        using FAT32ClusterIndexByPathHashMapAllocator = minstd::heap_allocator<FAT32ClusterIndexByPathHashMap::node_type>;
+        using FAT32ClusterIndexByPathHashMapAllocator = minstd::pmr::polymorphic_allocator<FAT32ClusterIndexByPathHashMap::node_type>;
 
         const MurmurHash64ASeed path_hash_seed_;
 
@@ -289,11 +290,11 @@ namespace filesystems::fat32
         uint64_t misses_{0};
         uint64_t collisions_{0};
 
-        EntryByFAT32ClusterIndexListAllocator cache_list_allocator_{__os_filesystem_cache_heap};
-        EntryByFAT32ClusterIndexMapAllocator cache_map_allocator_{__os_filesystem_cache_heap};
+        EntryByFAT32ClusterIndexListAllocator cache_list_allocator_{&__os_filesystem_cache_heap_resource};
+        EntryByFAT32ClusterIndexMapAllocator cache_map_allocator_{&__os_filesystem_cache_heap_resource};
         EntryByFAT32ClusterIndexCache cache_;
 
-        FAT32ClusterIndexByPathHashMapAllocator indices_by_path_hash_allocator_{__os_filesystem_cache_heap};
+        FAT32ClusterIndexByPathHashMapAllocator indices_by_path_hash_allocator_{&__os_filesystem_cache_heap_resource};
         FAT32ClusterIndexByPathHashMap indices_by_path_hash_{indices_by_path_hash_allocator_};
     };
 } // namespace filesystems::fat32

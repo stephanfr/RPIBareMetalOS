@@ -200,7 +200,7 @@ private:
 
 RandomNumberGenerator<RandomNumberGeneratorBase &, false> GetRandomNumberGenerator(RandomNumberGeneratorTypes type);
 
-minstd::unique_ptr<RandomNumberGeneratorBase> NewRandomNumberGenerator(minstd::memory_heap &heap = __os_dynamic_heap);
+minstd::unique_ptr<RandomNumberGeneratorBase> NewRandomNumberGenerator(minstd::pmr::memory_resource &resource = __os_dynamic_heap_resource);
 
 using RandomNumberGeneratorSingleThreaded = RandomNumberGenerator<minstd::unique_ptr<RandomNumberGeneratorBase>, true>;
 using RandomNumberGeneratorThreadUnsafe = RandomNumberGenerator<minstd::unique_ptr<RandomNumberGeneratorBase>, false>;

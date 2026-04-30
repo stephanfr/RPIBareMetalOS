@@ -12,7 +12,7 @@
 
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
-#include <heap_allocator>
+#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
@@ -51,13 +51,13 @@ namespace
     using uint32t_vector = minstd::vector<uint32_t, 0, 6>;
 
     using uint32t_vectorAllocator = minstd::allocator<uint32t_vector::element_type>;
-    using uint32t_vectorStaticHeapAllocator = minstd::heap_allocator<uint32t_vector::element_type>;
+    using uint32t_vectorStaticHeapAllocator = minstd::pmr::polymorphic_allocator<uint32t_vector::element_type>;
     using uint32t_vectorMonotonicAllocator = minstd::pmr::polymorphic_allocator<uint32t_vector::element_type>;
 
     using test_element_vector = minstd::vector<test_element, 0, 6>;
 
     using test_element_vectorAllocator = minstd::allocator<test_element_vector::element_type>;
-    using test_element_vectorStaticHeapAllocator = minstd::heap_allocator<test_element_vector::element_type>;
+    using test_element_vectorStaticHeapAllocator = minstd::pmr::polymorphic_allocator<test_element_vector::element_type>;
     using test_element_vectorMonotonicAllocator = minstd::pmr::polymorphic_allocator<test_element_vector::element_type>;
 
 
@@ -300,7 +300,8 @@ namespace
     TEST(VectorTests, IteratorInvariants)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        uint32t_vectorStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         iteratorInvariantsTest(heap_allocator);
 
@@ -315,7 +316,8 @@ namespace
     {
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
+            minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+            uint32t_vectorStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
             pushPopUintTest(heap_allocator);
 
@@ -328,7 +330,8 @@ namespace
 
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            test_element_vectorStaticHeapAllocator heap_allocator(test_heap);
+            minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+            test_element_vectorStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
             pushPopTestElementTest(heap_allocator);
 
@@ -344,7 +347,8 @@ namespace
     {
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
+            minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+            uint32t_vectorStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
             basicUintTest(heap_allocator);
 
@@ -357,7 +361,8 @@ namespace
 
         {
             minstd::single_block_memory_heap test_heap(buffer, 4096);
-            test_element_vectorStaticHeapAllocator heap_allocator(test_heap);
+            minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+            test_element_vectorStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
             basicTestElementTest(heap_allocator);
 
@@ -372,7 +377,8 @@ namespace
     TEST(VectorTests, Assignment)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        uint32t_vectorStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         uint32t_vector   vec1(heap_allocator);
         uint32t_vector   vec2(heap_allocator);
@@ -397,7 +403,8 @@ namespace
     TEST(VectorTests, BraceInitialization)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        uint32t_vectorStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        uint32t_vectorStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         uint32t_vector   vec1({0, 1, 2, 3, 4, 5}, heap_allocator);
 

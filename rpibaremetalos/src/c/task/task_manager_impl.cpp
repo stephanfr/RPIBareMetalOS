@@ -130,7 +130,8 @@ namespace task
     {
         if (!instance_.has_value())
         {
-            auto temp = minstd::unique_ptr<TaskManagerImpl>(new (__os_static_heap.allocate_block<TaskManagerImpl>(1)) TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t>(&__os_dynamic_heap_resource)), __os_static_heap);
+            void *buffer = __os_static_heap_resource.allocate(sizeof(TaskManagerImpl), alignof(TaskManagerImpl));
+            auto temp = minstd::unique_ptr<TaskManagerImpl>(new (buffer) TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t>(&__os_dynamic_heap_resource)), __os_static_heap_resource);
 
             instance_ = minstd::reference_wrapper<TaskManagerImpl>(*temp);
 

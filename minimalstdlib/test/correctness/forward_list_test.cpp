@@ -9,7 +9,7 @@
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
 #include <forward_list>
-#include <heap_allocator>
+#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
@@ -48,7 +48,7 @@ namespace
     using test_element_forward_list = minstd::forward_list<test_element>;
 
     using forward_list_allocator = minstd::allocator<test_element_forward_list::node_type>;
-    using forward_list_static_heap_allocator = minstd::heap_allocator<test_element_forward_list::node_type>;
+    using forward_list_static_heap_allocator = minstd::pmr::polymorphic_allocator<test_element_forward_list::node_type>;
     using forward_list_monotonic_allocator = minstd::pmr::polymorphic_allocator<test_element_forward_list::node_type>;
 
 
@@ -187,7 +187,8 @@ namespace
     TEST(ForwardListTests, ForwardListWithStaticHeapAndMonotonicAllocatorsIteratorInvariantsTest)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        forward_list_static_heap_allocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        forward_list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testInvariants(heap_allocator);
 
@@ -201,7 +202,8 @@ namespace
     TEST(ForwardListTests, ForwardListWithStaticHeapAllocatorPositiveCases)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        forward_list_static_heap_allocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        forward_list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testListFunctionality(heap_allocator);
 

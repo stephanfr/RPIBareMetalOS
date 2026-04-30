@@ -44,7 +44,6 @@
         "type_traits": "cpp",
         "allocator": "cpp",
         "functional": "cpp",
-        "heap_allocator": "cpp",
         "map": "cpp",
         "avl_tree": "cpp",
         "memory_heap": "cpp",

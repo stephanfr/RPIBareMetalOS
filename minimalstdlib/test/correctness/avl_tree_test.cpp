@@ -14,7 +14,7 @@
 
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
-#include <heap_allocator>
+#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <single_block_memory_heap>
 
 #include <memory>
@@ -103,18 +103,18 @@ namespace
     using avl_tree = minstd::avl_tree<uint32_t, test_element>;
 
     using avl_treeAllocator = minstd::allocator<avl_tree::node_type>;
-    using avl_treeStaticHeapAllocator = minstd::heap_allocator<avl_tree::node_type>;
+    using avl_treeStaticHeapAllocator = minstd::pmr::polymorphic_allocator<avl_tree::node_type>;
     using avl_treeMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree::node_type>;
 
     using avl_tree_move_only = minstd::avl_tree<uint32_t, move_only_test_element>;
 
     using avl_tree_move_onlyAllocator = minstd::allocator<avl_tree_move_only::node_type>;
-    using avl_tree_move_onlyStaticHeapAllocator = minstd::heap_allocator<avl_tree_move_only::node_type>;
+    using avl_tree_move_onlyStaticHeapAllocator = minstd::pmr::polymorphic_allocator<avl_tree_move_only::node_type>;
     using avl_tree_move_onlyMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree_move_only::node_type>;
 
     using avl_tree_unique_pointer = minstd::avl_tree<uint32_t, minstd::unique_ptr<test_element>>;
 
-    using avl_tree_unique_pointerStaticHeapAllocator = minstd::heap_allocator<avl_tree_unique_pointer::node_type>;
+    using avl_tree_unique_pointerStaticHeapAllocator = minstd::pmr::polymorphic_allocator<avl_tree_unique_pointer::node_type>;
     using avl_tree_unique_pointerMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree_unique_pointer::node_type>;
 
     bool operator==(const minstd::reference_wrapper<minstd::dynamic_string<128>> &lhs, const minstd::string &rhs)
@@ -125,7 +125,7 @@ namespace
     using avl_tree_string_key = minstd::avl_tree<minstd::reference_wrapper<minstd::dynamic_string<128>>, uint32_t>;
 
     using avl_tree_string_keyAllocator = minstd::allocator<avl_tree_string_key::node_type>;
-    using avl_tree_string_keyStaticHeapAllocator = minstd::heap_allocator<avl_tree_string_key::node_type>;
+    using avl_tree_string_keyStaticHeapAllocator = minstd::pmr::polymorphic_allocator<avl_tree_string_key::node_type>;
     using avl_tree_string_keyMonotonicAllocator = minstd::pmr::polymorphic_allocator<avl_tree_string_key::node_type>;
 
     void iterator_invariants(minstd::allocator<avl_tree::node_type> &allocator)
@@ -668,7 +668,8 @@ namespace
     TEST(avl_treeTests, Testavl_treeIteratorInvariants)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        avl_treeStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        avl_treeStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         iterator_invariants(heap_allocator);
         basic_iterator_tests(heap_allocator);
@@ -684,7 +685,8 @@ namespace
     TEST(avl_treeTests, Testavl_treeBasicOperations)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        avl_treeStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        avl_treeStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         basic_tests(heap_allocator);
 
@@ -695,6 +697,26 @@ namespace
         basic_tests(monotonic_allocator);
     }
 
+    TEST(avl_treeTests, TestInsertFailsGracefullyWhenAllocatorExhausted)
+    {
+        alignas(avl_tree::node_type) unsigned char constrained_buffer[sizeof(avl_tree::node_type) + alignof(avl_tree::node_type)];
+        minstd::pmr::monotonic_buffer_resource constrained_resource(constrained_buffer, sizeof(constrained_buffer), nullptr);
+        avl_treeMonotonicAllocator constrained_allocator(&constrained_resource);
+
+        avl_tree tree(constrained_allocator);
+
+        CHECK(get<1>(tree.insert(1, test_element(101))));
+        CHECK_EQUAL(1, tree.size());
+
+        auto failed_insert = tree.insert(2, test_element(102));
+
+        CHECK_FALSE(get<1>(failed_insert));
+        CHECK(get<0>(failed_insert) == tree.end());
+        CHECK_EQUAL(1, tree.size());
+        CHECK(tree.find(1) != tree.end());
+        CHECK(tree.find(2) == tree.end());
+    }
+
     TEST(avl_treeTests, Testavl_treeBasicOperationsWithMoveOnlyValueType)
     {
         move_only_test_element element1 = move_only_test_element(7654);
@@ -703,7 +725,8 @@ namespace
         CHECK_EQUAL(element2.value(), 7654);
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        avl_tree_move_onlyStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        avl_tree_move_onlyStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         basic_tests_move_only(heap_allocator);
 
@@ -721,7 +744,8 @@ namespace
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        avl_tree_unique_pointerStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        avl_tree_unique_pointerStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         // constructing an AVL tree
         {
@@ -774,7 +798,8 @@ namespace
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        avl_tree_unique_pointerStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        avl_tree_unique_pointerStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         basic_tests_unique_pointer(heap_allocator, test_element_heap);
 
@@ -790,10 +815,12 @@ namespace
     TEST(avl_treeTests, Testavl_treeWithStringKeyOperations)
     {
         minstd::single_block_memory_heap test_heap(buffer, 4096);
-        avl_tree_string_keyStaticHeapAllocator heap_allocator(test_heap);
+        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        avl_tree_string_keyStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         minstd::single_block_memory_heap string_test_heap(buffer2, 4096);
-        minstd::heap_allocator<char> string_allocator(string_test_heap);
+        minstd::pmr::memory_heap_resource_adapter string_allocator_resource(string_test_heap);
+        minstd::pmr::polymorphic_allocator<char> string_allocator(&string_allocator_resource);
 
         CHECK_EQUAL(0, test_heap.bytes_in_use());
         CHECK_EQUAL(0, string_test_heap.bytes_in_use());
