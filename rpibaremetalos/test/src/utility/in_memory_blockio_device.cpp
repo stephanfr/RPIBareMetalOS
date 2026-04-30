@@ -14,7 +14,7 @@ namespace ut_utility
     {
         if (in_memory_file_ != nullptr)
         {
-            __os_dynamic_heap.deallocate_block<Block>(in_memory_file_, size_in_blocks_);
+            __os_dynamic_heap_resource.deallocate(in_memory_file_, size_in_blocks_ * sizeof(Block), alignof(Block));
         }
     }
 
@@ -41,7 +41,7 @@ namespace ut_utility
 
         size_in_blocks_ = size_in_bytes_ / BlockSize();
 
-        in_memory_file_ = __os_dynamic_heap.allocate_block<Block>(size_in_blocks_);
+        in_memory_file_ = static_cast<Block *>(__os_dynamic_heap_resource.allocate(size_in_blocks_ * sizeof(Block), alignof(Block)));
 
         size_t blocks_read = fread(in_memory_file_, BlockSize(), size_in_blocks_, file_to_read);
 

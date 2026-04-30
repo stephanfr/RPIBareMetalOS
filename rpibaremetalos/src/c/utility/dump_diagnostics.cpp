@@ -52,12 +52,12 @@ void DumpDiagnostics()
     printf("Static Heap Reserved Space End: %p\n", (uint8_t *)&__static_heap_end);
     printf("Static Heap Reserved Space Size: %p\n", (uint32_t *)&__static_heap_size_in_bytes);
     printf("Static Heap Start: %p\n", (void *)&__static_heap_start);
-    printf("Static Heap End: %p\n", (void *)((uint8_t *)&__static_heap_start + __os_static_heap.bytes_reserved()));
+    printf("Static Heap End: %p\n", (void *)&__static_heap_end);
     printf("Dynamic Heap Reserved Space Start: %p\n", (uint8_t *)&__dynamic_heap_start);
     printf("Dynamic Heap Reserved Space End: %p\n", (uint8_t *)&__dynamic_heap_end);
     printf("Dynamic Heap Reserved Space Size: %p\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
     printf("Dynamic Heap Start: %p\n", (void *)&__dynamic_heap_start);
-    printf("Dynamic Heap End: %p\n", (void *)((uint8_t *)&__dynamic_heap_start + __os_dynamic_heap.bytes_reserved()));
+    printf("Dynamic Heap End: %p\n", (void *)&__dynamic_heap_end);
     printf("Core Initialization Stack Top: %p\n", (uint8_t *)&__per_core_initialization_stack_top);
     printf("Core Initialization Stack Bottom: %p\n", (uint8_t *)&__per_core_initialization_stack_bottom);
     printf("Current Stack Location: %p\n", (uint8_t *)GetStackPointer());

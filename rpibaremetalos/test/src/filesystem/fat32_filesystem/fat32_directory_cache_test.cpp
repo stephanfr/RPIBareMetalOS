@@ -19,14 +19,14 @@ namespace
     {
         void setup()
         {
-            LogInfo("Setup: Heap Bytes Allocated: %d\n", __os_dynamic_heap.bytes_in_use());
-            CHECK_EQUAL(0, __os_dynamic_heap.bytes_in_use());
+            LogInfo("Setup: Heap Bytes Allocated: %d\n", __os_dynamic_heap_core.bytes_in_use());
+            CHECK_EQUAL(0, __os_dynamic_heap_core.bytes_in_use());
         }
 
         void teardown()
         {
-            LogInfo("Teardown: Heap Bytes Allocated: %d\n", __os_dynamic_heap.bytes_in_use());
-            CHECK_EQUAL(0, __os_dynamic_heap.bytes_in_use());
+            LogInfo("Teardown: Heap Bytes Allocated: %d\n", __os_dynamic_heap_core.bytes_in_use());
+            CHECK_EQUAL(0, __os_dynamic_heap_core.bytes_in_use());
         }
     };
 #pragma GCC diagnostic pop

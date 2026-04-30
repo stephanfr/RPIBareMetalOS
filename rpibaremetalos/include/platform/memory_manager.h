@@ -11,6 +11,8 @@
 #include <strong_typedef>
 #include <vector>
 
+#include <__memory_resource/polymorphic_allocator.h>
+
 #include "asm_globals.h"
 #include "synchronization.h"
 

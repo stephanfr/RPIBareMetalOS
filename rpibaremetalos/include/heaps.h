@@ -12,12 +12,9 @@
 
 
 
-extern minstd::memory_heap &__os_static_heap;
-extern minstd::memory_heap &__os_dynamic_heap;
 extern minstd::pmr::memory_resource &__os_dynamic_heap_resource;
 extern minstd::pmr::memory_resource &__os_static_heap_resource;
 extern minstd::pmr::memory_resource &__os_filesystem_cache_heap_resource;
-extern minstd::memory_heap &__os_filesystem_cache_heap;
 
 template <typename T>
 class static_allocator : public minstd::pmr::polymorphic_allocator<T>
