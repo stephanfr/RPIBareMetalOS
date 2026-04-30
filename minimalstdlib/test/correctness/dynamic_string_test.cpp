@@ -6,9 +6,9 @@
 
 #include <dynamic_string>
 #include <fixed_string>
-#include <__memory_resource/memory_heap_resource_adapter.h>
+#include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
-#include <single_block_memory_heap>
+#include <__memory_resource/tracking_memory_resource.h>
 
 #define TEST_BUFFER_SIZE 65536
 
@@ -25,8 +25,8 @@ namespace
 
     using dynamic_string_heap_allocator = minstd::pmr::polymorphic_allocator<char>;
 
-    minstd::single_block_memory_heap test_heap(buffer, 4096);
-    minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+    minstd::pmr::monotonic_buffer_resource test_upstream_resource(buffer, sizeof(buffer), nullptr);
+    minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
     dynamic_string_heap_allocator heap_allocator(&heap_allocator_resource);
 
 #pragma GCC diagnostic push
@@ -35,12 +35,12 @@ namespace
     {
         void setup()
         {
-            CHECK_EQUAL(0, test_heap.bytes_in_use());
+            CHECK_EQUAL(0, heap_allocator_resource.bytes_in_use());
         }
 
         void teardown()
         {
-            CHECK_EQUAL(0, test_heap.bytes_in_use());
+            CHECK_EQUAL(0, heap_allocator_resource.bytes_in_use());
         }
     };
 #pragma GCC diagnostic pop

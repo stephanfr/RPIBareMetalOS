@@ -13,10 +13,8 @@
 #include <__memory_resource/malloc_free_wrapper_memory_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
 #include <avl_tree>
-#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <lockfree/__extensions/skiplist_statistics.h>
 #include <lockfree/skiplist>
-#include <single_block_memory_heap>
 
 #include "interrupt_simulation_test_helpers.h"
 
@@ -488,30 +486,16 @@ namespace
         using map_type = minstd::avl_tree<uint32_t, uint32_t>;
         using node_allocator_type = minstd::pmr::polymorphic_allocator<map_type::node_type>;
 
-        //  Allow for the full key space plus single_block_memory_heap block header overhead per node.
-        static constexpr size_t HEAP_BUFFER_BYTES = SKIPLIST_STRESS_KEY_SPACE * 128;
-
-        //  RAII guard for the malloc'd heap buffer.  Declared FIRST so it is constructed first
-        //  and destroyed LAST — after ~map_type() has returned all nodes to the heap.
-        struct heap_buffer_guard
-        {
-            uint8_t *const ptr;
-            explicit heap_buffer_guard(size_t size) : ptr(static_cast<uint8_t *>(malloc(size))) {}
-            ~heap_buffer_guard() { free(ptr); }
-        };
-
-        //  Members declared in strict construction order.
-        heap_buffer_guard heap_buf_; //  first in, last out
-        minstd::single_block_memory_heap heap_;
-        minstd::pmr::memory_heap_resource_adapter heap_resource_;
+        //  Members declared in strict construction order.  The map destructor runs
+        //  before heap_resource_ is torn down, returning all nodes to the upstream
+        //  malloc/free wrapper.
+        minstd::pmr::malloc_free_wrapper_memory_resource heap_resource_;
         node_allocator_type map_alloc_;
         map_type map_;
         pthread_rwlock_t rwlock_;
 
         rwlock_hash_map()
-            : heap_buf_(HEAP_BUFFER_BYTES),
-              heap_(heap_buf_.ptr, HEAP_BUFFER_BYTES),
-              heap_resource_(heap_),
+            : heap_resource_(),
               map_alloc_(&heap_resource_),
               map_(map_alloc_)
         {
@@ -521,7 +505,7 @@ namespace
         ~rwlock_hash_map()
         {
             //  pthread_rwlock destroyed first; member destructors then run in reverse
-            //  declaration order: map_ → map_alloc_ → heap_ → heap_buf_ (free).
+            //  declaration order: map_ → map_alloc_ → heap_resource_.
             pthread_rwlock_destroy(&rwlock_);
         }
 

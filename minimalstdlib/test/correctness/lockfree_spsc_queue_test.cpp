@@ -6,9 +6,8 @@
 
 #include <lockfree/spsc_queue>
 
-#include <__memory_resource/memory_heap_resource_adapter.h>
+#include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
-#include <single_block_memory_heap>
 
 #include <pthread.h>
 
@@ -89,8 +88,7 @@ namespace
 
     TEST(SingleProducerSingleConsumerLockfreeQueueTests, BasicTest)
     {
-        minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource heap_allocator_resource(buffer, TEST_BUFFER_SIZE, nullptr);
         queue_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         test_element_queue queue(heap_allocator, MAX_QUEUE_ELEMENTS);
@@ -117,8 +115,7 @@ namespace
 
     TEST(SingleProducerSingleConsumerLockfreeQueueTests, MultithreadedTest)
     {
-        minstd::single_block_memory_heap test_heap(buffer, TEST_BUFFER_SIZE);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource heap_allocator_resource(buffer, TEST_BUFFER_SIZE, nullptr);
         queue_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         test_element_queue queue(heap_allocator, MAX_QUEUE_ELEMENTS);

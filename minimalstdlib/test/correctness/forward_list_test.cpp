@@ -9,8 +9,6 @@
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
 #include <forward_list>
-#include <__memory_resource/memory_heap_resource_adapter.h>
-#include <single_block_memory_heap>
 
 #define TEST_BUFFER_SIZE 65536
 
@@ -186,8 +184,7 @@ namespace
 
     TEST(ForwardListTests, ForwardListWithStaticHeapAndMonotonicAllocatorsIteratorInvariantsTest)
     {
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource heap_allocator_resource(buffer, 4096, nullptr);
         forward_list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testInvariants(heap_allocator);
@@ -201,13 +198,10 @@ namespace
 
     TEST(ForwardListTests, ForwardListWithStaticHeapAllocatorPositiveCases)
     {
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource heap_allocator_resource(buffer, 4096, nullptr);
         forward_list_static_heap_allocator heap_allocator(&heap_allocator_resource);
 
         testListFunctionality(heap_allocator);
-
-        CHECK(test_heap.blocks_reserved() == 15);
 
         alignas(test_element_forward_list::node_type) unsigned char monotonic_buffer[sizeof(test_element_forward_list::node_type) * 24 + alignof(test_element_forward_list::node_type) * 24];
         minstd::pmr::monotonic_buffer_resource monotonic_resource(monotonic_buffer, sizeof(monotonic_buffer), nullptr);

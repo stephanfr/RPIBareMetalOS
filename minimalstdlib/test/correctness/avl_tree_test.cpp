@@ -14,7 +14,7 @@
 
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
-#include <__memory_resource/memory_heap_resource_adapter.h>
+#include <__memory_resource/tracking_memory_resource.h>
 #include <single_block_memory_heap>
 
 #include <memory>
@@ -667,8 +667,8 @@ namespace
 
     TEST(avl_treeTests, Testavl_treeIteratorInvariants)
     {
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource test_upstream_resource(buffer, 4096, nullptr);
+        minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
         avl_treeStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         iterator_invariants(heap_allocator);
@@ -684,8 +684,8 @@ namespace
 
     TEST(avl_treeTests, Testavl_treeBasicOperations)
     {
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource test_upstream_resource(buffer, 4096, nullptr);
+        minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
         avl_treeStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         basic_tests(heap_allocator);
@@ -724,8 +724,8 @@ namespace
 
         CHECK_EQUAL(element2.value(), 7654);
 
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource test_upstream_resource(buffer, 4096, nullptr);
+        minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
         avl_tree_move_onlyStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         basic_tests_move_only(heap_allocator);
@@ -743,8 +743,8 @@ namespace
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource test_upstream_resource(buffer, 4096, nullptr);
+        minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
         avl_tree_unique_pointerStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         // constructing an AVL tree
@@ -797,8 +797,8 @@ namespace
 
         CHECK_EQUAL(0, test_element_heap.bytes_in_use());
 
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource test_upstream_resource(buffer, 4096, nullptr);
+        minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
         avl_tree_unique_pointerStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
         basic_tests_unique_pointer(heap_allocator, test_element_heap);
@@ -814,16 +814,16 @@ namespace
 
     TEST(avl_treeTests, Testavl_treeWithStringKeyOperations)
     {
-        minstd::single_block_memory_heap test_heap(buffer, 4096);
-        minstd::pmr::memory_heap_resource_adapter heap_allocator_resource(test_heap);
+        minstd::pmr::monotonic_buffer_resource test_upstream_resource(buffer, 4096, nullptr);
+        minstd::pmr::tracking_memory_resource heap_allocator_resource(&test_upstream_resource);
         avl_tree_string_keyStaticHeapAllocator heap_allocator(&heap_allocator_resource);
 
-        minstd::single_block_memory_heap string_test_heap(buffer2, 4096);
-        minstd::pmr::memory_heap_resource_adapter string_allocator_resource(string_test_heap);
+        minstd::pmr::monotonic_buffer_resource string_upstream_resource(buffer2, 4096, nullptr);
+        minstd::pmr::tracking_memory_resource string_allocator_resource(&string_upstream_resource);
         minstd::pmr::polymorphic_allocator<char> string_allocator(&string_allocator_resource);
 
-        CHECK_EQUAL(0, test_heap.bytes_in_use());
-        CHECK_EQUAL(0, string_test_heap.bytes_in_use());
+        CHECK_EQUAL(0, heap_allocator_resource.bytes_in_use());
+        CHECK_EQUAL(0, string_allocator_resource.bytes_in_use());
 
         {
             avl_tree_string_key tree(heap_allocator);
@@ -863,7 +863,7 @@ namespace
             CHECK(itr == tree.end());
         }
 
-        CHECK_EQUAL(0, test_heap.bytes_in_use());
-        CHECK_EQUAL(0, string_test_heap.bytes_in_use());
+        CHECK_EQUAL(0, heap_allocator_resource.bytes_in_use());
+        CHECK_EQUAL(0, string_allocator_resource.bytes_in_use());
     }
 }

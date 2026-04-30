@@ -38,7 +38,6 @@
 #include <array>
 #include <fixed_string>
 #include <format>
-#include <__memory_resource/memory_heap_resource_adapter.h>
 #include <memory>
 #include <single_block_memory_heap>
 #include <vector>
