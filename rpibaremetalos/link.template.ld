@@ -52,6 +52,26 @@ SECTIONS
         __init_array_end = .;
     } > OS_RAM
 
+    /*
+     * Early page tables are here to provide a small, fixed section of mapped memory 
+     *     that will be used for a simple boot-time page table.  This allows the boot
+     *     sequence to enable the MMU, which is required for any atomic operations,
+     *     before the C++ statics initialization takes place.  Trying to execute an
+     *     aarch64 atomic operation without the MMU is undefined behavior.
+     */
+
+    .early_page_tables (NOLOAD) : {
+        . = ALIGN(4096);
+        __early_l1_page_table = .;
+        . = . + 4096;           /* 512 L1 entries x 8 bytes; we use 4 (covers 0-4GB) */
+        __early_l2_page_table = .;
+        . = . + (4096 * 4);     /* 4 sub-tables x 512 entries x 8 bytes = 16KB */
+        . = ALIGN(4096);
+        __early_page_tables_end = .;
+    } > OS_RAM
+
+    /* BSS is just the standard C BSS (Block Started by Symbol).  It is initialized to zero. */
+
     .bss (NOLOAD) : {
         . = ALIGN(4);
         __bss_start = .;
@@ -60,6 +80,11 @@ SECTIONS
         . = ALIGN(8);  /* BSS end has to be aligned on a double-word boundary b/c the zeroing routine sets double words */
         __bss_end = .;
     } > OS_RAM
+
+    /* Static heap is a section of memory for the kernel which is intended for data storage expected to last for the
+     *     lifetime of the OS.  Effectively, storage allocated during initialization that will be retained until
+     *     the OS halts.
+     */ 
 
     .static_heap : {
         . = ALIGN(4);
@@ -70,6 +95,8 @@ SECTIONS
 
     __static_heap_size_in_bytes = __static_heap_end - __static_heap_start;
 
+    /*  Dynamic heap is exactly that, a heap for use by the kernel within which objects with transitory lifetimes are allocated. */
+
     .dynamic_heap : {
         . = ALIGN(4);
         __dynamic_heap_start = .;
@@ -78,6 +105,21 @@ SECTIONS
     } > OS_RAM
 
     __dynamic_heap_size_in_bytes = __dynamic_heap_end - __dynamic_heap_start;
+
+    /*  Filesystem cache heap is a dedicated arena reserved for the kernel-side
+     *      filesystem cache (directory entries, file metadata, etc).  Eventually
+     *      this region is intended to be handed off to a userspace filesystem
+     *      service, so it is partitioned away from the general dynamic heap.
+     */
+
+    .filesystem_cache_heap : {
+        . = ALIGN(4);
+        __filesystem_cache_heap_start = .;
+        . = . + FILESYSTEM_CACHE_HEAP_SIZE_IN_BYTES;
+        __filesystem_cache_heap_end = .;
+    } > OS_RAM
+
+    __filesystem_cache_heap_size_in_bytes = __filesystem_cache_heap_end - __filesystem_cache_heap_start;
 
     /* There is probably a better way to do this, but I am just carving out enough space for MAX_CORES of
      * stack space to be used on boot-up for division amongst active cores.  If MAX_CORES == 16 but with only 4 active cores, then 12 cores

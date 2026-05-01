@@ -38,17 +38,6 @@ namespace MINIMAL_STD_NAMESPACE
             MINIMAL_STD_ASSERT(validate_pointer(ptr));
             MINIMAL_STD_ASSERT(num_elements_in_block(ptr) == num_elements);
 
-            //  If T is a class or struct type, then we want to insure we call the destructor
-            //      The constexpr if is effectively a 'static if'.
-
-            if constexpr (minstd::is_class_v<T>)
-            {
-                for (size_t i = 0; i < num_elements; i++)
-                {
-                    (ptr + i)->~T();
-                }
-            }
-
             deallocate_raw_block((void *)(ptr));
         }
 

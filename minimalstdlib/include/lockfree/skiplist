@@ -15,6 +15,11 @@
 #include "__extensions/skiplist_statistics.h"
 #include "epoch_policy"
 #include "epoch_reclaimer_core"
+#include "__memory_resource/memory_resource.h"
+
+#ifdef __MINIMAL_STD_TEST__
+#include <stdlib.h>
+#endif
 #define DEFAULT_MAX_LEVELS 16
 
 #ifndef MINIMAL_STD_SKIPLIST_MAX_SLOTS
@@ -83,6 +88,57 @@ namespace MINIMAL_STD_NAMESPACE
             static inline atomic<uint64_t> partially_free_blocks_{0};
             static inline atomic<slot_block *> unlinked_blocks_{nullptr};
 
+            //  Memory resource used for slot_block allocation/deallocation.
+            //  Set once per template instantiation by skip_list constructor.
+            //  When null (test-only default constructor path), falls back to malloc/free.
+            static inline pmr::memory_resource* block_memory_resource_ = nullptr;
+
+            static void set_block_memory_resource(pmr::memory_resource* mr)
+            {
+                block_memory_resource_ = mr;
+            }
+
+            static slot_block* new_block()
+            {
+                void* buf;
+                if (block_memory_resource_ != nullptr)
+                {
+                    buf = block_memory_resource_->allocate(sizeof(slot_block), alignof(slot_block));
+                }
+                else
+                {
+#ifdef __MINIMAL_STD_TEST__
+                    buf = malloc(sizeof(slot_block));
+#else
+                    return nullptr;  // production: a memory resource must always be provided
+#endif
+                }
+                if (buf == nullptr)
+                {
+                    return nullptr;
+                }
+                return new (buf) slot_block();
+            }
+
+            static void delete_block(slot_block* block)
+            {
+                if (block == nullptr)
+                {
+                    return;
+                }
+                block->~slot_block();
+                if (block_memory_resource_ != nullptr)
+                {
+                    block_memory_resource_->deallocate(block, sizeof(slot_block), alignof(slot_block));
+                }
+#ifdef __MINIMAL_STD_TEST__
+                else
+                {
+                    free(block);
+                }
+#endif
+            }
+
             static void retire_block(slot_block *block, uint32_t block_idx)
             {
                 uint32_t expected = 0;
@@ -138,20 +194,25 @@ namespace MINIMAL_STD_NAMESPACE
                     return current_block;
                 }
 
-                slot_block *new_block = new slot_block();
+                slot_block *new_block_ptr = new_block();
 
-                if (blocks_[block_index].compare_exchange_strong(current_block, new_block, memory_order_release, memory_order_acquire))
+                if (new_block_ptr == nullptr)
+                {
+                    return nullptr;
+                }
+
+                if (blocks_[block_index].compare_exchange_strong(current_block, new_block_ptr, memory_order_release, memory_order_acquire))
                 {
                     uint32_t observed_hw = high_water_block_.load(memory_order_relaxed);
                     while (observed_hw < block_index &&
                            !high_water_block_.compare_exchange_weak(observed_hw, block_index, memory_order_relaxed, memory_order_relaxed))
                     {
                     }
-                    return new_block;
+                    return new_block_ptr;
                 }
                 else
                 {
-                    delete new_block;
+                    delete_block(new_block_ptr);
                     return current_block;
                 }
             }
@@ -919,23 +980,46 @@ namespace MINIMAL_STD_NAMESPACE
 
 
             skip_list()
-                : epoch_reclaimer_(slot_policy_)
+                : skip_list(nullptr)
             {
-                NIL_ = new skip_node(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
-                head_ = new skip_node(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL_);
+            }
+
+            explicit skip_list(pmr::memory_resource *memory_resource)
+                : memory_resource_(memory_resource), epoch_reclaimer_(slot_policy_)
+            {
+                active_instance_count_.fetch_add(1, memory_order_relaxed);
+                forward_link_type::set_block_memory_resource(memory_resource_);
+
+                NIL_ = allocate_skip_node(std::numeric_limits<KeyType>::max(), MAX_LEVELS + 1, nullptr);
+
+                if (NIL_ == nullptr)
+                {
+                    return;
+                }
+
+                head_ = allocate_skip_node(std::numeric_limits<KeyType>::min(), MAX_LEVELS + 1, NIL_);
+
+                if (head_ == nullptr)
+                {
+                    destroy_skip_node(NIL_);
+                    NIL_ = nullptr;
+                }
             }
 
             ~skip_list()
             {
-                skip_node *current_node = head_->next_node[0].get_reference();
+                // Ensure any block frees during teardown route to this instance's allocator.
+                forward_link_type::set_block_memory_resource(memory_resource_);
 
-                while (current_node != NIL_)
+                skip_node *current_node = (head_ != nullptr) ? head_->next_node[0].get_reference() : nullptr;
+
+                while (current_node != nullptr && current_node != NIL_)
                 {
                     skip_node *next_node = current_node->next_node[0].get_reference();
 
                     if (!current_node->retirement_enqueued_.load(memory_order_acquire))
                     {
-                        delete current_node;
+                        destroy_skip_node(current_node);
                     }
 
                     current_node = next_node;
@@ -943,8 +1027,45 @@ namespace MINIMAL_STD_NAMESPACE
 
                 reclaim_all_retired_nodes();
 
-                delete head_;
-                delete NIL_;
+                destroy_skip_node(head_);
+                destroy_skip_node(NIL_);
+
+                //  head_ and NIL_ destructions may have retired their slot_blocks.
+                //  Drain again so all blocks are freed before the memory resource
+                //  that allocated them can be destroyed.
+                reclaim_all_retired_nodes();
+
+                // Last live instance of this template specialization performs a full
+                // static slot-state reset so no block ownership leaks across tests.
+                if (active_instance_count_.fetch_sub(1, memory_order_acq_rel) == 1)
+                {
+                    using slot_block = typename forward_link_type::slot_block;
+
+                    reclaim_all_retired_nodes();
+
+                    for (size_t i = 0; i < forward_link_type::MAX_BLOCKS; ++i)
+                    {
+                        slot_block *block = forward_link_type::blocks_[i].exchange(nullptr, memory_order_acq_rel);
+                        if (block != nullptr)
+                        {
+                            forward_link_type::delete_block(block);
+                        }
+                    }
+
+                    slot_block *unlinked = forward_link_type::extract_unlinked_blocks();
+                    while (unlinked != nullptr)
+                    {
+                        slot_block *next = unlinked->retired_next;
+                        forward_link_type::delete_block(unlinked);
+                        unlinked = next;
+                    }
+
+                    forward_link_type::partially_free_blocks_.store(0, memory_order_release);
+                    forward_link_type::high_water_slot_.store(0, memory_order_relaxed);
+                    forward_link_type::high_water_block_.store(0, memory_order_relaxed);
+                    forward_link_type::next_free_slot_.store(1, memory_order_release);
+                    forward_link_type::set_block_memory_resource(nullptr);
+                }
             };
 
             iterator find(const KeyType search_key)
@@ -1112,17 +1233,23 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (found == find_result::FOUND)
                     {
-                        delete new_node;
+                        destroy_skip_node(new_node);
                         return false;
                     }
                     else
                     {
                         if (new_node == nullptr)
                         {
-                            new_node = new skip_node(key, value, top_level);
+                            new_node = allocate_skip_node(key, value, top_level);
+
+                            if (new_node == nullptr)
+                            {
+                                return false;
+                            }
+
                             if (new_node->internal_slot_ == 0)
                             {
-                                delete new_node;
+                                destroy_skip_node(new_node);
                                 return false;
                             }
                         }
@@ -1150,7 +1277,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                             if (insert_level0_retry_count >= MAX_INSERT_LEVEL0_RETRIES)
                             {
-                                delete new_node;
+                                destroy_skip_node(new_node);
                                 return false;
                             }
 
@@ -1234,7 +1361,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                             if ((curr->key == key) || soft_deleted)
                             {
-                                delete new_node;
+                                destroy_skip_node(new_node);
                                 return false;
                             }
 
@@ -1547,8 +1674,11 @@ namespace MINIMAL_STD_NAMESPACE
             }
 
         private:
-            skip_node *head_;
-            skip_node *NIL_;
+            static inline atomic<size_t> active_instance_count_{0};
+
+            skip_node *head_ = nullptr;
+            skip_node *NIL_ = nullptr;
+            pmr::memory_resource *memory_resource_ = nullptr;
             mutable slot_policy_type slot_policy_{};
             mutable epoch_reclaimer_type epoch_reclaimer_;
             mutable array<atomic<typename forward_link_type::slot_block *>, NumCPUs> cpu_retired_blocks_{};
@@ -1590,29 +1720,11 @@ namespace MINIMAL_STD_NAMESPACE
                 NOT_FOUND
             };
 
-            void backoff(uint32_t &backoff_state, size_t cpu_slot)
+            void backoff(uint32_t &backoff_state, size_t /*cpu_slot*/)
             {
-                uint64_t state = slot_policy_.slot(cpu_slot).load_rng_state();
-
-                state ^= (state << 13);
-                state ^= (state >> 7);
-                state ^= (state << 17);
-
-                slot_policy_.slot(cpu_slot).store_rng_state(state);
-
-                const uint32_t base_spins = (backoff_state < BACKOFF_MAX_RELAX_SPINS) ? backoff_state : BACKOFF_MAX_RELAX_SPINS;
-                const uint32_t jitter_spins = static_cast<uint32_t>(state & 0x3u);
-                const uint32_t relax_spins = ((base_spins + jitter_spins) < BACKOFF_MAX_RELAX_SPINS) ? (base_spins + jitter_spins) : BACKOFF_MAX_RELAX_SPINS;
-
-                for (uint32_t spin = 0; spin < relax_spins; ++spin)
-                {
-                    pmr::platform::cpu_relax();
-                }
-
-                if (backoff_state < BACKOFF_MAX_RELAX_SPINS)
-                {
-                    ++backoff_state;
-                }
+                size_t retries = backoff_state;
+                pmr::platform::default_platform_provider::back_off(retries);
+                backoff_state = static_cast<uint32_t>((retries < BACKOFF_MAX_RELAX_SPINS) ? retries : BACKOFF_MAX_RELAX_SPINS);
             }
 
             void retire_node(skip_node *node, size_t cpu_slot)
@@ -1673,7 +1785,7 @@ namespace MINIMAL_STD_NAMESPACE
 
                     if (fully_unlinked && (current->retired_epoch_ <= reclaim_epoch))
                     {
-                        delete current;
+                        destroy_skip_node(current);
                         ++nodes_freed;
                         Statistics::node_reclaimed();
                     }
@@ -1745,7 +1857,7 @@ namespace MINIMAL_STD_NAMESPACE
                             slot_block *b_next = b_head->retired_next;
                             if (b_head->retired_epoch_ <= reclaim_epoch)
                             {
-                                delete b_head;
+                                forward_link_type::delete_block(b_head);
                                 Statistics::block_reclaimed();
                             }
                             else
@@ -1783,37 +1895,105 @@ namespace MINIMAL_STD_NAMESPACE
             void reclaim_all_retired_nodes()
             {
                 using slot_block = typename forward_link_type::slot_block;
-                slot_block *unlinked = forward_link_type::extract_unlinked_blocks();
-                while (unlinked != nullptr)
-                {
-                    slot_block *next = unlinked->retired_next;
-                    delete unlinked;
-                    unlinked = next;
-                }
 
-                for (size_t i = 0; i < NumCPUs; ++i)
+                while (true)
                 {
-                    skip_node *node = slot_policy_.slot(i).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+                    bool drained_any = false;
 
-                    while (node != nullptr)
+                    slot_block *unlinked = forward_link_type::extract_unlinked_blocks();
+                    while (unlinked != nullptr)
                     {
-                        skip_node *next = node->retired_next;
-                        delete node;
-                        node = next;
+                        drained_any = true;
+                        slot_block *next = unlinked->retired_next;
+                        forward_link_type::delete_block(unlinked);
+                        unlinked = next;
                     }
 
-                    slot_block *b_node = cpu_retired_blocks_[i].exchange(nullptr, memory_order_acq_rel);
-                    while (b_node != nullptr)
+                    for (size_t i = 0; i < NumCPUs; ++i)
                     {
-                        slot_block *next = b_node->retired_next;
-                        delete b_node;
-                        b_node = next;
+                        skip_node *node = slot_policy_.slot(i).local_retired_head_.exchange(nullptr, memory_order_acq_rel);
+
+                        if (node != nullptr)
+                        {
+                            drained_any = true;
+                        }
+
+                        while (node != nullptr)
+                        {
+                            skip_node *next = node->retired_next;
+                            destroy_skip_node(node);
+                            node = next;
+                        }
+
+                        slot_block *b_node = cpu_retired_blocks_[i].exchange(nullptr, memory_order_acq_rel);
+                        if (b_node != nullptr)
+                        {
+                            drained_any = true;
+                        }
+
+                        while (b_node != nullptr)
+                        {
+                            slot_block *next = b_node->retired_next;
+                            forward_link_type::delete_block(b_node);
+                            b_node = next;
+                        }
+                    }
+
+                    if (!drained_any)
+                    {
+                        break;
                     }
                 }
             }
 
             
         private:
+            template <typename... Args>
+            skip_node *allocate_skip_node(Args &&...args)
+            {
+                void *buffer;
+                if (memory_resource_ != nullptr)
+                {
+                    buffer = memory_resource_->allocate(sizeof(skip_node), alignof(skip_node));
+                }
+                else
+                {
+#ifdef __MINIMAL_STD_TEST__
+                    buffer = malloc(sizeof(skip_node));
+#else
+                    return nullptr;  // production: a memory resource must always be provided
+#endif
+                }
+
+                if (buffer == nullptr)
+                {
+                    return nullptr;
+                }
+
+                return new (buffer) skip_node(minstd::forward<Args>(args)...);
+            }
+
+            void destroy_skip_node(skip_node *node)
+            {
+                if (node == nullptr)
+                {
+                    return;
+                }
+
+                node->~skip_node();
+
+                if (memory_resource_ != nullptr)
+                {
+                    memory_resource_->deallocate(node, sizeof(skip_node), alignof(skip_node));
+                }
+#ifdef __MINIMAL_STD_TEST__
+                else
+                {
+                    free(node);
+                }
+#endif
+            }
+
             skip_node *find_lower_bound_after(const KeyType current_key) const
             {
                 bool is_tombstoned = false;

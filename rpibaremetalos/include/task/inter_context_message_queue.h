@@ -121,11 +121,11 @@ namespace task
     private:
         using TaskQueue = minstd::spsc_queue<InterContextMessage>;
         using TaskQueueAllocator = minstd::allocator<TaskQueue::value_type>;
-        using TaskQueueHeapAllocator = minstd::heap_allocator<TaskQueue::value_type>;
+        using TaskQueueHeapAllocator = minstd::pmr::polymorphic_allocator<TaskQueue::value_type>;
 
         //  The queue can go into the static heap as it is a fixed size
 
-        TaskQueueHeapAllocator queue_heap_allocator_{__os_static_heap};
+        TaskQueueHeapAllocator queue_heap_allocator_{&__os_static_heap_resource};
         TaskQueue queue_{queue_heap_allocator_, MAX_QUEUE_LENGTH};
     };
 } // namespace task

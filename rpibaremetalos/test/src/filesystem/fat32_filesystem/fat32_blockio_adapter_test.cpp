@@ -4,7 +4,8 @@
 
 #include "../../cpputest_support.h"
 
-#include <stack_allocator>
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 
 #include "../../utility/in_memory_blockio_device.h"
 
@@ -20,7 +21,9 @@ namespace
 
     minstd::unique_ptr<ut_utility::InMemoryFileBlockIODevice> test_device;
 
-    minstd::stack_allocator<MassStoragePartition, MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE> partition_allocator;
+    alignas(MassStoragePartition) uint8_t partition_buffer[sizeof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE + alignof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE];
+    minstd::pmr::monotonic_buffer_resource partition_resource(partition_buffer, sizeof(partition_buffer), nullptr);
+    minstd::pmr::polymorphic_allocator<MassStoragePartition> partition_allocator(&partition_resource);
 
     MassStoragePartitions partitions(partition_allocator);
 
@@ -30,8 +33,8 @@ namespace
     {
         void setup()
         {
-            LogInfo("Setup: Heap Bytes Allocated: %d\n", __os_dynamic_heap.bytes_in_use());
-            CHECK_EQUAL(0, __os_dynamic_heap.bytes_in_use());
+            LogInfo("Setup: Heap Bytes Allocated: %d\n", __os_dynamic_heap_core.bytes_in_use());
+            CHECK_EQUAL(0, __os_dynamic_heap_core.bytes_in_use());
 
             //  Load the empty 32MB FAT32 image
 
@@ -50,12 +53,12 @@ namespace
         {
             //  Insure the test device has been freed and the partitions have been cleared
 
-            __os_dynamic_heap.deallocate_block(test_device.release(), 1);
+            test_device = minstd::unique_ptr<ut_utility::InMemoryFileBlockIODevice>();
 
             partitions.clear();
 
-            LogInfo("Teardown: Heap Bytes Allocated: %d\n", __os_dynamic_heap.bytes_in_use());
-            CHECK_EQUAL(0, __os_dynamic_heap.bytes_in_use());
+            LogInfo("Teardown: Heap Bytes Allocated: %d\n", __os_dynamic_heap_core.bytes_in_use());
+            CHECK_EQUAL(0, __os_dynamic_heap_core.bytes_in_use());
         }
     };
 #pragma GCC diagnostic pop

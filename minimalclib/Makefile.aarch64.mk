@@ -17,7 +17,7 @@ C_SRC := $(wildcard $(C_SRC_DIR)/*.c)
 C_OBJ := $(C_SRC:$(C_SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 C_DEFINES := -D_LIBC_LIMITS_H_ -D__AARCH64_BUILD__
-INCLUDE_DIRS += -Iinclude
+INCLUDE_DIRS := -Iinclude $(INCLUDE_DIRS)
 
 
 $(LIB) : $(C_OBJ) $(ASM_OBJ)

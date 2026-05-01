@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-include Makefile.x64.mk
+include Makefile.native.mk
 
 CPP_TEST_SRC_DIR := test
 TEST_OBJ_DIR := test/build

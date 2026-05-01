@@ -8,3 +8,4 @@ gcc-cross
 **/*.dump
 minimalstdlib/tlaplus/tla2tools.jar
 *.log
+minimalstdlib/test/soak/*.status

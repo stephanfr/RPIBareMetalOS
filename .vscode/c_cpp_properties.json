@@ -5,21 +5,45 @@
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "linux-gcc-x64",
-            "configurationProvider": "ms-vscode.makefile-tools"
+            "configurationProvider": "ms-vscode.makefile-tools",
+            "includePath": [
+                "${workspaceFolder}/minimalstdlib",
+                "${workspaceFolder}/minimalclib/include",
+                "${workspaceFolder}/minimalstdio/include",
+                "${workspaceFolder}/minimalstdlib/include",
+                "${workspaceFolder}/minimalstdlib/test/shared",
+                "/home/steve/dev/third-party/cpputest/include"
+            ]
         },
         {
             "name": "ARM64 Host",
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "linux-gcc-arm64",
-            "configurationProvider": "ms-vscode.makefile-tools"
+            "configurationProvider": "ms-vscode.makefile-tools",
+            "includePath": [
+                "${workspaceFolder}/minimalstdlib",
+                "${workspaceFolder}/minimalclib/include",
+                "${workspaceFolder}/minimalstdio/include",
+                "${workspaceFolder}/minimalstdlib/include",
+                "${workspaceFolder}/minimalstdlib/test/shared",
+                "/home/steve/dev/third-party/cpputest/include"
+            ]
         },
         {
             "name": "x64 Host",
             "cStandard": "c17",
             "cppStandard": "c++20",
             "intelliSenseMode": "linux-gcc-x64",
-            "configurationProvider": "ms-vscode.makefile-tools"
+            "configurationProvider": "ms-vscode.makefile-tools",
+            "includePath": [
+                "${workspaceFolder}/minimalstdlib",
+                "${workspaceFolder}/minimalclib/include",
+                "${workspaceFolder}/minimalstdio/include",
+                "${workspaceFolder}/minimalstdlib/include",
+                "${workspaceFolder}/minimalstdlib/test/shared",
+                "/home/steve/dev/third-party/cpputest/include"
+            ]
         }
     ],
     "version": 4

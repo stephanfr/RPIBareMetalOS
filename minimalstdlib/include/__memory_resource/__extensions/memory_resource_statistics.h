@@ -55,6 +55,26 @@ namespace MINIMAL_STD_NAMESPACE
                     return current_bytes_allocated_.load(memory_order_acquire);
                 }
 
+                size_t aborted_deallocations() const
+                {
+                    return aborted_deallocations_.load(memory_order_acquire);
+                }
+
+                size_t aborted_deallocations_bad_index() const
+                {
+                    return aborted_deallocations_bad_index_.load(memory_order_acquire);
+                }
+
+                size_t aborted_deallocations_state_mismatch() const
+                {
+                    return aborted_deallocations_state_mismatch_.load(memory_order_acquire);
+                }
+
+                size_t aborted_deallocations_cas_race() const
+                {
+                    return aborted_deallocations_cas_race_.load(memory_order_acquire);
+                }
+
             protected:
                 alignas(64) atomic<size_t> total_allocations_ = 0;
                 alignas(64) atomic<size_t> total_deallocations_ = 0;
@@ -62,6 +82,10 @@ namespace MINIMAL_STD_NAMESPACE
                 alignas(64) atomic<size_t> peak_allocated_ = 0;
 
                 alignas(64) atomic<size_t> current_bytes_allocated_ = 0;
+                alignas(64) atomic<size_t> aborted_deallocations_ = 0;
+                alignas(64) atomic<size_t> aborted_deallocations_bad_index_ = 0;
+                alignas(64) atomic<size_t> aborted_deallocations_state_mismatch_ = 0;
+                alignas(64) atomic<size_t> aborted_deallocations_cas_race_ = 0;
 
                 void allocation_made(size_t size)
                 {
@@ -81,6 +105,24 @@ namespace MINIMAL_STD_NAMESPACE
                     current_allocated_.fetch_sub(1, memory_order_relaxed);
                     current_bytes_allocated_.fetch_sub(size, memory_order_relaxed);
                 }
+
+                void deallocation_aborted_bad_index()
+                {
+                    aborted_deallocations_.fetch_add(1, memory_order_relaxed);
+                    aborted_deallocations_bad_index_.fetch_add(1, memory_order_relaxed);
+                }
+
+                void deallocation_aborted_state_mismatch()
+                {
+                    aborted_deallocations_.fetch_add(1, memory_order_relaxed);
+                    aborted_deallocations_state_mismatch_.fetch_add(1, memory_order_relaxed);
+                }
+
+                void deallocation_aborted_cas_race()
+                {
+                    aborted_deallocations_.fetch_add(1, memory_order_relaxed);
+                    aborted_deallocations_cas_race_.fetch_add(1, memory_order_relaxed);
+                }
             };
 
             class null_memory_resource_statistics
@@ -97,11 +139,43 @@ namespace MINIMAL_STD_NAMESPACE
                 null_memory_resource_statistics &operator=(null_memory_resource_statistics &&) = delete;
 
             protected:
+                size_t aborted_deallocations() const
+                {
+                    return 0;
+                }
+
+                size_t aborted_deallocations_bad_index() const
+                {
+                    return 0;
+                }
+
+                size_t aborted_deallocations_state_mismatch() const
+                {
+                    return 0;
+                }
+
+                size_t aborted_deallocations_cas_race() const
+                {
+                    return 0;
+                }
+
                 void allocation_made(size_t size)
                 {
                 }
 
                 void deallocation_made(size_t size)
+                {
+                }
+
+                void deallocation_aborted_bad_index()
+                {
+                }
+
+                void deallocation_aborted_state_mismatch()
+                {
+                }
+
+                void deallocation_aborted_cas_race()
                 {
                 }
             };

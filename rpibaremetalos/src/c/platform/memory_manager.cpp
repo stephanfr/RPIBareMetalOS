@@ -19,7 +19,7 @@ MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
       mmio_base_(mmio_base),
       free_memory_start_((uint64_t)&__os_process_start),
       num_pages_(minstd::min(((uint64_t)mmio_base_ - free_memory_start_), total_memory_in_bytes_) / page_size_),
-      mem_map_allocator_(__os_static_heap),
+    mem_map_allocator_(&__os_static_heap_resource),
       mem_map_(mem_map_allocator_, num_pages_)
 {
     LogEntryAndExit("num_pages: %u\n", num_pages_);

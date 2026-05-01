@@ -35,11 +35,6 @@ namespace MINIMAL_STD_NAMESPACE
                 return __SIZE_MAX__ / sizeof(T);
             }
 
-            size_t current_size() const noexcept override
-            {
-                return 0; // memory_resource doesn't implicitly track size for a specific type
-            }
-
             T* allocate(size_t num_elements) override
             {
                 size_t alloc_bytes = num_elements * sizeof(T);

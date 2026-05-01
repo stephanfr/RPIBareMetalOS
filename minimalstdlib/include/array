@@ -107,7 +107,7 @@ namespace MINIMAL_STD_NAMESPACE
             return size() == 0;
         }
 
-        reference operator[](size_t index) noexcept
+        constexpr reference operator[](size_t index) noexcept
         {
             return elements_[index];
         }

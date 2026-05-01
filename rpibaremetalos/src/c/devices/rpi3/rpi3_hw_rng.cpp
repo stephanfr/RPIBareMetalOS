@@ -24,7 +24,20 @@ bool RPi3HardwareRandomNumberGenerator::Initialize()
 
     registers_->control_ |= 1;
 
-    return true;
+    //  Single probe: give the HW RNG a brief window to produce data
+
+    CPUTicksDelay(10000);
+
+    if ((registers_->status_ >> 24) != 0)
+    {
+        return true;
+    }
+
+    //  No data available - HW RNG is not functional, disable and return failure
+
+    registers_->control_ &= ~1u;
+
+    return false;
 }
 
 uint32_t RPi3HardwareRandomNumberGenerator::Next32BitValue() 

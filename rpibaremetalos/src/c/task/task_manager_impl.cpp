@@ -34,6 +34,14 @@ UUID GetCurrentTaskId(void)
 
 namespace task
 {
+
+    //  There are atomic loads and stores to state variables below to insure that
+    //      during start-up Core 0, which is handling startup, and the secondary cores
+    //      both have the same view of memory.  When Core 0 is running with its MMU but the
+    //      secondary cores are still running with their MMU off, they will not have the same
+    //      view of memory until the MMU is enabled on the secondary cores, so we need to use
+    //      atomic operations to make sure that the state changes are visible on both cores.
+
     minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> TaskManagerImpl::instance_;
 
     TaskManager &GetTaskManager(void)
@@ -50,7 +58,7 @@ namespace task
             {
                 uint32_t core_id = GetCoreID();
 
-                *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::ExecutingApplicationCode;
+                __core_state[core_id].store((uint32_t)CoreInitializationStates::ExecutingApplicationCode);
 
                 while (1)
                 {
@@ -87,23 +95,21 @@ namespace task
 
         extern "C" void SecondaryCoreMain()
         {
-            //  We need to serialize the creation of the secondary core main task as the UUID generator is not thread-reentrant,
-            //      but we are not in a task context (it will not exist until after the task itself is created and SetCoreMainTaskContext is called)
-            //      so use the __TasklessMutex.
-
             uint32_t core_id = GetCoreID();
 
             auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
-
+            
             task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
 
             //  Wait for an interrupt - this will be the first task switch message
 
             EnableIRQs();
 
-            *(((uint32_t *)__core_state) + core_id) = (uint32_t)CoreInitializationStates::WaitingInSecondaryMain;
+            __core_state[core_id].store((uint32_t)CoreInitializationStates::WaitingInSecondaryMain);
 
-            //  Keep the scheduler running - we should really never return here
+            //  StartSecondaryCores() sends a CORE_TASK_SWITCH IPI after observing WaitingInSecondaryMain.
+            //  That IPI fires SwitchToNextTask() which replaces this execution context entirely.
+            //  The loop below is a safety fallback that should never execute in normal operation.
 
             while (1)
             {
@@ -114,7 +120,9 @@ namespace task
     } // namespace internal
 
     TaskManagerImpl::TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc)
-        : number_of_cores_(GetPlatformInfo().GetNumberOfCores()), task_map_allocator_(alloc)
+                : number_of_cores_(GetPlatformInfo().GetNumberOfCores()),
+                    task_map_allocator_(alloc),
+                    task_map_(alloc.resource())
     {
     }
 
@@ -122,7 +130,8 @@ namespace task
     {
         if (!instance_.has_value())
         {
-            auto temp = minstd::unique_ptr<TaskManagerImpl>(new (__os_static_heap.allocate_block<TaskManagerImpl>(1)) TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t>(&__os_dynamic_heap_resource)), __os_static_heap);
+            void *buffer = __os_static_heap_resource.allocate(sizeof(TaskManagerImpl), alignof(TaskManagerImpl));
+            auto temp = minstd::unique_ptr<TaskManagerImpl>(new (buffer) TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t>(&__os_dynamic_heap_resource)), __os_static_heap_resource);
 
             instance_ = minstd::reference_wrapper<TaskManagerImpl>(*temp);
 
@@ -150,7 +159,7 @@ namespace task
 
         for (uint32_t core_id = 0; core_id < instance_->get().number_of_cores_; core_id++)
         {
-            // TODO LEAK LEAK LEAK LEAK
+            // BUG: idle_task_runnable is never freed — static_new does not register for cleanup.
 
             auto idle_task_runnable = static_new<internal::IdleTask>();
 
@@ -188,11 +197,13 @@ namespace task
 
             CPUTicksDelay(1000);
 
-            while (__core_state[core_id] != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain)
+            uint32_t current_state = __core_state[core_id].load();
+
+            while (current_state != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain && current_state != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
             {
                 CPUTicksDelay(1000);
 
-                SEND_EVENT; //  Send another SEV to nudge the core if it has gone into WFE
+                current_state = __core_state[core_id].load();
             }
 
             //  Ask the core to switch from the core main to the Idle Task
@@ -201,7 +212,7 @@ namespace task
 
             CPUTicksDelay(1000);
 
-            while (__core_state[core_id] != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
+            while (__core_state[core_id].load() != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
             {
                 CPUTicksDelay(1000);
             }
@@ -272,7 +283,6 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        //        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
 
         new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
@@ -324,7 +334,6 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        //        new_task->switched_out_last_ = 0;
         new_task->preempt_count_ = 1;
 
         new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
@@ -350,16 +359,31 @@ namespace task
     {
         TaskImpl &task_ref = *task.get();
 
+        //  Add the task to the task map
+
+        auto id = task_ref.ID();
+        task_map_.insert(id, task.release());
+
+        //  Determine which core to schedule the task on.
+        //  Validate first: if no core in [0, number_of_cores_) matches the mask, LogFatal now
+        //  rather than spinning forever.
+
+        bool found_valid_core = false;
+
+        for (uint32_t i = 0; i < number_of_cores_; i++)
         {
-            //  We need to single-thread actions on the task map
-
-
-            //  Add the task to the task map
-
-            task_map_.insert(task->ID(), task.release());
+            if (task_ref.CoreRestrictionMask().ContainsCore(i))
+            {
+                found_valid_core = true;
+                break;
+            }
         }
 
-        //  Determine which core to schedule the task on
+        if (!found_valid_core)
+        {
+            LogFatal("AddTask: CoreRestrictionMask has no valid core in [0, %u)\n", number_of_cores_);
+            ParkCore();
+        }
 
         uint32_t schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
 
@@ -399,12 +423,10 @@ namespace task
      */
     void TaskManagerImpl::PreemptiveSchedule()
     {
-        //  Signal all the cores to switch tasks
-
-        GetExceptionManager().SendInterprocessorInterrupt(0, InterprocessorInterrupts::CORE_TASK_SWITCH);
-        GetExceptionManager().SendInterprocessorInterrupt(1, InterprocessorInterrupts::CORE_TASK_SWITCH);
-        GetExceptionManager().SendInterprocessorInterrupt(2, InterprocessorInterrupts::CORE_TASK_SWITCH);
-        GetExceptionManager().SendInterprocessorInterrupt(3, InterprocessorInterrupts::CORE_TASK_SWITCH);
+        for (uint32_t core_id = 0; core_id < number_of_cores_; core_id++)
+        {
+            GetExceptionManager().SendInterprocessorInterrupt(core_id, InterprocessorInterrupts::CORE_TASK_SWITCH);
+        }
     }
 
     void TaskManagerImpl::SwitchToNextTask()

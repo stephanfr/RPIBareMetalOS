@@ -10,7 +10,8 @@
 #include "devices/log.h"
 
 #include <minimalcstdlib.h>
-#include <stack_allocator>
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
 
 namespace filesystems
 {
@@ -33,7 +34,9 @@ namespace filesystems
 
         //  Get the partitions on the SD card
 
-        minstd::stack_allocator<MassStoragePartition, MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE> partition_allocator;
+        alignas(MassStoragePartition) uint8_t partition_buffer[sizeof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE + alignof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE];
+        minstd::pmr::monotonic_buffer_resource partition_resource(partition_buffer, sizeof(partition_buffer), nullptr);
+        minstd::pmr::polymorphic_allocator<MassStoragePartition> partition_allocator(&partition_resource);
 
         MassStoragePartitions partitions(partition_allocator);
 
@@ -71,8 +74,11 @@ namespace filesystems
 
         //  Walk through the filesystems registered with the OS and find the one marked as boot
 
-        minstd::stack_allocator<minstd::list<UUID>::node_type, MAX_FILESYSTEMS> uuid_list_stack_allocator;
-        minstd::list<UUID> all_filesystems(uuid_list_stack_allocator);
+        using uuid_node_type = minstd::list<UUID>::node_type;
+        alignas(uuid_node_type) uint8_t uuid_list_buffer[sizeof(uuid_node_type) * MAX_FILESYSTEMS + alignof(uuid_node_type) * MAX_FILESYSTEMS];
+        minstd::pmr::monotonic_buffer_resource uuid_list_resource(uuid_list_buffer, sizeof(uuid_list_buffer), nullptr);
+        minstd::pmr::polymorphic_allocator<uuid_node_type> uuid_list_allocator(&uuid_list_resource);
+        minstd::list<UUID> all_filesystems(uuid_list_allocator);
 
         GetOSEntityRegistry().FindEntitiesByType(OSEntityTypes::FILESYSTEM, all_filesystems);
 

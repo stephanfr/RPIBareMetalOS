@@ -37,9 +37,7 @@
 #define SPSR_EL2_VALUE		(SPSR_EL2_MASK_ALL | SPSR_EL2_EL1h)
 
 
-//
 //  Register usage:
-//
 //  x0  - return value from function calls and local scratchpad register
 //  x9  - local scratchpad register
 //  x10 - local scratchpad register
@@ -56,14 +54,12 @@
 //  x24 - holds the number of cores available
 //  x25 - used for local variables that will not be changed by subroutine calls
 //  x26 - used for local variables that will not be changed by subroutine calls
-//
 
 .section ".text.boot"
 
 //  The standard ARMSTUB will move to eL2 and then spin cores 1->3 watching addresses in the table
 //      at 'armstub_el2_spin_table' until a non-zero address is found.  If the minimal ARMSTUB with this
 //      project is used, then all cores will enter here at EL3 and cores 1->3 will spin on the core jump table addresses.
-//
 //  I expect this to change when we get to RPIs with > 4 cores, as this table runs into the ARMSTUB magic number.
 
 .equ armstub_el2_spin_table, 0xd8
@@ -78,13 +74,6 @@ x23_arrivedInEL3 .req x23
 x24_numberOfCoresAvailable .req x24
 
 
-//.macro EnableIRQs
-//	msr	daifclr, #2
-//.endm
-
-//.macro DisableIRQs
-//	msr	daifset, #2
-//.endm
 
 .macro InitializeLocalRegisterVariables
     mrs     x19_coreNumber, MPIDR_EL1
@@ -131,31 +120,29 @@ x24_numberOfCoresAvailable .req x24
     str     x24_numberOfCoresAvailable, [x15]
 .endm
 
-//
 //  In the code below, be cautious about alignment for any points to which the code will jump.
 //      There are align directives inline before key locations, but if the code is modified with more jump points
 //      then additional align directives may be needed.  If this is tripped up, then the code will work fine when
 //      the jump points align correctly but then crash when a new instruction is added that throws off alignment.
-//
 //  The code is also pretty run-on, I have added macros and a couple subroutines but mostly this is just linear
 //      intialization code with various internal jump points.  I could break it up more but I doubt that would
 //      improve readability or flow.
-//
 //  There is a state machine, albeit a very simple one.  Core 0 does most of the heavy lifting, including bringing
 //      up the other cores.  Depending on the EL we enter, then either all secondary cores will arrive here in EL3
 //      or they will be spinning in EL2 and have to be released using a low memory location specified by the ARMSTUB
-//      to provide a jump address, when core 0 is ready to release them.  If all the cores arrive here in EL3, as a
-//      result of using a minimal ARMSTUB, then we skip the low memory location jump address and the cores will eventually
-//      spin in EL2 in this code. They then wait for core 0 to give them a jump address - which is currently an entry point for the
-//      cores to configure their stacks and complete control register initialization - before rendezvousing in spins in EL1
+//      to provide a jump address, when core 0 is ready to release them. Cores released from the ARMSTUB, or bypassing
+//      from EL3, will flow seamlessly into stack configuration and drop down to EL1. They rendezvous by spinning in EL1
 //      waiting for another jump address, this time most likely from a call to CoreExecute() in the C/C++ code.
-//
 //  Only Core 0 will make it to KernelMain, all other cores will spin in EL1 until they get a jump address to a different
 //      void() function in the C code.  The first part of KernelMain is also one-time initialization code.
-//
 //  In general all cores get the same control register configuration, the only real difference is that core 0
 //      initializes the C++ statics and bss space before moving the other cores to EL1 spin loops and going to KernelMain.
-//
+//  The kernel boot process uses a two-stage MMU strategy. First, an 'early MMU' setup is configured here in assembly
+//      to provide a minimal viable identity-mapped environment. This allows C/C++ static initialization and basic
+//      functionality to run safely. Later in the C++ kernel code, a 'full MMU' model is configured and enabled,
+//      which supersedes the early MMU configuration. Because of this transition, there are memory barriers (dmb, isb)
+//      placed throughout the initialization to ensure that the effects of MMU and cache state changes are visible
+//      before execution continues.
 
 .global _start
 
@@ -180,6 +167,12 @@ _start:
     bne     running_in_el2                         //  Not running on EL3, so skip to EL2 entry point
 
     //  Running at EL3 
+
+    InitializeLocalRegisterVariables
+
+    //  Update the core state
+
+    SetCoreState #CORE_STARTED_IN_EL3
 
     mov     x23_arrivedInEL3, #1                    //  Set flag to indicate we arrived in EL3
 
@@ -251,30 +244,12 @@ running_in_el2:
 
     //  Update the core state
 
+    GetCoreState x19_coreNumber
+    cmp     w0, #CORE_STARTED_IN_EL3
+    b.eq    skip_set_core_started_el2
+
     SetCoreState #CORE_STARTED_IN_EL2
-
-    //  Spin on all but Core 0
-
-    cbz     x19_coreNumber, configure_stacks_for_core                          //  Core zero will build the MMU tables.  The other cores will just point to them.
-
-    //  Spin on cores 1->3
-
-    SetCoreState #CORE_SPINNING_IN_EL2
-
-el2_spin:
-	wfe
-	ldr     x9, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
-	cbz     x9, el2_spin
-
-    //  Clear the jump table address for the current core - we will use it again to jump to the application code
-
-    mov     x10, #0
-	str     x10, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
-
-	br      x9
-
-.align 4                                                        //  Align the code to a 4 byte boundary
-configure_stacks_for_core :
+skip_set_core_started_el2:
 
     SetCoreState #CORE_CONFIGURING_STACKS_IN_EL2
 
@@ -320,8 +295,7 @@ configure_stacks_for_core :
 
     mov     x9, #0x0800
     movk    x9, #0x30d0, lsl #16
-	orr     x9, x9, #(0x1 << 2)                                 // Enable the data cache 
-	orr     x9, x9, #(0x1 << 12)                                // Enable the instruction cache
+	orr     x9, x9, #(0x1 << 12)                                // Enable the instruction cache (D-cache enabled with MMU below)
     msr     SCTLR_EL1, x9
 
     //  Change execution level to EL1
@@ -369,11 +343,10 @@ el1_spin:
 
     //  Enable the memory manager on the core
 
-    bl      EnableMMUForCore
-
-    //  Enable interrupts on the core
-
-    EnableIRQs
+    adrp    x0, __early_l1_page_table
+    add     x0, x0, :lo12:__early_l1_page_table
+    mov     x1, #0
+    bl      EnableMMUTables
 
     //  Mark the core as having jumped to application code
 
@@ -389,7 +362,9 @@ el1_spin:
 	mov     x6, #0
 	mov     x7, #0
 
-	ldr     x9, [x22_coreJumpTableAddress, x19_coreNumber, lsl #3]
+	//  x9 was trashed by the bl EnableMMUTables above (x9 is caller-saved per AAPCS64), so re-fetch the jump address.
+	add     x15, x22_coreJumpTableAddress, x19_coreNumber, lsl #3
+	ldr     x9, [x15]
 	br      x9
 
     //  We should never get here, but if we do, park the core
@@ -402,7 +377,10 @@ continue_on_core0:
 
     SetCoreState #CORE_INITIALIZING_KERNEL
 
-    //  Save the board HW type in a global C variable so the C code may access it.
+    //  Save BEFORE GetBootTimeSettings: that function reads __hw_board_type from memory
+    //  to select the MMIO base address.  Without this, __hw_board_type is 0 and the
+    //  function calls park_core_on_error, producing no output.
+    //  Note: BSS clear below will zero these globals again; they are re-saved afterwards.
 
     SaveBoardHWType
     SaveNumberOfCoresAvailable
@@ -411,19 +389,39 @@ continue_on_core0:
 
     bl GetBootTimeSettings
 
+    //  Enable the MMU before clearing BSS or running any C++ static constructors.
+    //  Conservative 1:1 identity map (see SetupEarlyPageTables in mmu.S for region breakdown).
+    //  InitializePlatform() will replace these tables with final platform-specific ones.
+
+    bl      SetupEarlyPageTables
+
+    adrp    x0, __early_l1_page_table
+    add     x0, x0, :lo12:__early_l1_page_table
+    mov     x1, #0                                              //  TTBR1 unused; TTBR0 covers all
+    bl      EnableMMUTables
+    //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
+
     //  Clear bss
     //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length
 
     adrp    x9, __bss_start
     add     x9, x9, :lo12:__bss_start
     ldr     w10, =__bss_size_in_double_words
-    cbz     w10, initialize_cpp_statics                         //  Skip the loop if the bss section is zero length
+    cbz     w10, restore_globals_after_bss                      //  Skip the loop if the bss section is zero length
 
 loop_for_bss_clear:
 
     str     xzr, [x9], #8                                       //  Set 8 bytes at a time - the section in the linker script must match
     sub     w10, w10, #1
     cbnz    w10, loop_for_bss_clear
+
+restore_globals_after_bss:
+    //  BSS clear zeroed __hw_board_type and __number_of_cores_available (both live in BSS).
+    //  Restore from preserved registers: x20 = board HW id, x24 = number of cores.
+    //  CoreExecute() reads __number_of_cores_available directly — must be non-zero.
+
+    SaveBoardHWType
+    SaveNumberOfCoresAvailable
 
     //  Initialize the C++ statics
     //      Use registers x25 and x26 to hold the start and end addresses of the C++ statics to be initialized
@@ -455,13 +453,21 @@ loop_for_next_static_initializer:
 
 start_additional_cores:
 
-    mov x19, #1                                                 //  Start with core 1
+    mov x9, #1                                                 //  Start with core 1
 
 start_next_core:
-    mov x0, x19
-    bl StartCore
-    add x19, x19, #1
-    cmp x19, x24_numberOfCoresAvailable                         //  Loop until all cores are started
+    cmp     x23_arrivedInEL3, #1
+    b.eq    wait_core_ack
+    mov     x10, #armstub_el2_spin_table
+    ldr     x11, =running_in_el2
+    str     x11, [x10, x9, lsl #3]
+    sev
+wait_core_ack:
+    GetCoreState x9
+    cmp     w0, #CORE_SPINNING_IN_EL1
+    bne     wait_core_ack
+    add x9, x9, #1
+    cmp x9, x24_numberOfCoresAvailable                         //  Loop until all cores are started
     b.lo start_next_core
 
     //  Initialize the platform
@@ -478,31 +484,5 @@ start_next_core:
 
     b       ParkCore
 
-//
-//  Function to start a secondary core
-//
 
-.global StartCore
-StartCore:
-
-    mov     x9, x0                                                  //  Copy the core number to a local register
-
-    cmp     x23_arrivedInEL3, #1                                    //  If we arrived in EL3, then we do not need to release cores from the standard ARMSTUB
-    b.eq    wait_core_ack
-
-    mov     x10, #armstub_el2_spin_table					        //  Armstub EL2 spin table
-	ldr     x11, =running_in_el2				                    //  Function pointer
-	str	    x11, [x10, x9, lsl #3]				                    //  Store the function address to core to start
-	sev										                        //  Wake up core
-
-wait_core_ack:
-	GetCoreState x9
-	cmp	    w0, #CORE_SPINNING_IN_EL2			                    //  Wait for the core to be spinning in the startup code in EL2
-	bne	    wait_core_ack
-
-	ldr     x11, = configure_stacks_for_core	                    //  We want to configure the stacks next
-	str	    x11, [x22_coreJumpTableAddress, x9, lsl #3]             //  Store the function address to the core
-	sev										                        //  Wake up core
-
-    ret                                                             //  Return
 

@@ -1342,7 +1342,7 @@ namespace filesystems::fat32
                                const FAT32DirectoryEntryAddress &current_entry)
             : directory_cluster_(directory_cluster),
               location_(location),
-              buffer_(__os_dynamic_heap, buffer_size),
+              buffer_(__os_dynamic_heap_resource, buffer_size),
               buffer_is_empty_(true),
               current_entry_(current_entry),
               directory_entries_(buffer_.data())

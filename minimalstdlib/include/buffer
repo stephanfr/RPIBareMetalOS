@@ -10,7 +10,7 @@
 
 #include <algorithm>
 #include <memory>
-#include <memory_heap>
+#include <__memory_resource/memory_resource.h>
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -127,16 +127,21 @@ namespace MINIMAL_STD_NAMESPACE
     class heap_buffer : public buffer<T>
     {
     public:
-        heap_buffer(memory_heap &heap, size_t size)
-            : heap_(heap),
+        heap_buffer(pmr::memory_resource &resource, size_t size)
+            : resource_(resource),
               buffer_size_(size),
               size_(0),
-              buffer_(heap_.allocate_block<T>(buffer_size_), heap_)
+              buffer_(static_cast<T *>(resource_.allocate(sizeof(T) * size, alignof(T))))
         {
         }
 
         virtual ~heap_buffer()
         {
+            if (buffer_ != nullptr)
+            {
+                resource_.deallocate(buffer_, sizeof(T) * buffer_size_, alignof(T));
+                buffer_ = nullptr;
+            }
         }
 
         size_t buffer_size() const override
@@ -161,22 +166,22 @@ namespace MINIMAL_STD_NAMESPACE
 
         T *data() override
         {
-            return buffer_.get();
+            return buffer_;
         }
 
         const T *data() const override
         {
-            return buffer_.get();
+            return buffer_;
         }
 
         T &operator[](size_t index) override
         {
-            return buffer_.get()[index];
+            return buffer_[index];
         }
 
         const T &operator[](size_t index) const override
         {
-            return buffer_.get()[index];
+            return buffer_[index];
         }
 
         size_t append(T element_to_append) override
@@ -188,7 +193,7 @@ namespace MINIMAL_STD_NAMESPACE
         {
             size_t bytes_appended = min(buffer_size_ - size_, elements_to_append);
 
-            memcpy((buffer_.get()) + size_, block_to_append, bytes_appended);
+            memcpy(buffer_ + size_, block_to_append, bytes_appended);
 
             size_ += bytes_appended;
 
@@ -204,10 +209,10 @@ namespace MINIMAL_STD_NAMESPACE
         }
 
     private:
-        memory_heap &heap_;
+        pmr::memory_resource &resource_;
         size_t buffer_size_;
         size_t size_;
 
-        minstd::unique_ptr<T> buffer_;
+        T *buffer_;
     };
 } // namespace minstd

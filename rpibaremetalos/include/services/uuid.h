@@ -39,6 +39,8 @@ public:
         return *this;
     }
 
+    static void SeedRNG(uint64_t seed);
+
     static UUID GenerateUUID(Versions version);
 
     static const UUID NIL;

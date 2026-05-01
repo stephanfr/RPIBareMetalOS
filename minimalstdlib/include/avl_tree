@@ -344,10 +344,16 @@ namespace MINIMAL_STD_NAMESPACE
             if (subtree_root == nullptr)
             {
                 //  Sub tree is empty, so we found the insert point.
+                node_type *new_node_block = allocator_.allocate(1);
+
+                if (new_node_block == nullptr)
+                {
+                    return nullptr;
+                }
 
                 size_++;
 
-                return new (allocator_.allocate(1)) node_type(key, minstd::move(value));
+                return new (new_node_block) node_type(key, minstd::move(value));
             }
 
             //  Work down the tree recursively to insert the new node.
@@ -470,7 +476,8 @@ namespace MINIMAL_STD_NAMESPACE
                         }
                     }
 
-                    allocator_.deallocate(temp, 1); //  Allocator will invoke delete
+                    temp->~node_type();
+                    allocator_.deallocate(temp, 1);
                     size_--;
                 }
                 else
@@ -893,7 +900,14 @@ namespace MINIMAL_STD_NAMESPACE
             return minstd::pair<iterator, bool>(existing_element, false);
         }
 
+        size_t initial_size = size_;
+
         root_ = insert_recursive(root_, get<0>(value), get<1>(value));
+
+        if (root_ == nullptr || size_ == initial_size)
+        {
+            return minstd::pair<iterator, bool>(end(), false);
+        }
 
         root_->left_reverse_ = nullptr;
         root_->right_reverse_ = nullptr;
@@ -916,7 +930,14 @@ namespace MINIMAL_STD_NAMESPACE
             return minstd::pair<iterator, bool>(existing_element, false);
         }
 
+        size_t initial_size = size_;
+
         root_ = insert_recursive(root_, get<0>(value), minstd::move(get<1>(value)));
+
+        if (root_ == nullptr || size_ == initial_size)
+        {
+            return minstd::pair<iterator, bool>(end(), false);
+        }
 
         root_->left_reverse_ = nullptr;
         root_->right_reverse_ = nullptr;

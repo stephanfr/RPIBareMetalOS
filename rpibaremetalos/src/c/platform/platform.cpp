@@ -30,7 +30,10 @@
 
 #include "platform/mmu_manager.h"
 
+#include "services/uuid.h"
 #include "services/xoroshiro128plusplus.h"
+
+#include "devices/physical_timer.h"
 
 
 //  Global flag to indicate if the platform has been initialized
@@ -165,18 +168,28 @@ void InitializePlatform()
     switch (__hw_board_type)
     {
     case RPI_BOARD_ENUM_RPI3:
+    {
         __platform_info = static_new<RPI3PlatformInfo>();
         __exception_manager = static_new<BCM2837ExceptionManager>();
-        __hw_random_number_generator = static_new<RPi3HardwareRandomNumberGenerator>(*__platform_info);
-        ((RPi3HardwareRandomNumberGenerator *)__hw_random_number_generator)->Initialize();
+        auto *rpi3_rng = static_new<RPi3HardwareRandomNumberGenerator>(*__platform_info);
+        if (rpi3_rng->Initialize())
+        {
+            __hw_random_number_generator = rpi3_rng;
+        }
         break;
+    }
 
     case RPI_BOARD_ENUM_RPI4:
+    {
         __platform_info = static_new<RPI4PlatformInfo>();
         __exception_manager = static_new<BCM2711ExceptionManager>();
-        __hw_random_number_generator = static_new<RPi4HardwareRandomNumberGenerator>(*__platform_info);
-        ((RPi4HardwareRandomNumberGenerator *)__hw_random_number_generator)->Initialize();
+        auto *rpi4_rng = static_new<RPi4HardwareRandomNumberGenerator>(*__platform_info);
+        if (rpi4_rng->Initialize())
+        {
+            __hw_random_number_generator = rpi4_rng;
+        }
         break;
+    }
 
         //  If we do not identify the correct board, then park the core.
 
@@ -184,6 +197,22 @@ void InitializePlatform()
         ParkCore();
         break;
     }
+
+    //  If HW RNG is not available (e.g. QEMU), fall back to a SW RNG seeded from the CPU timer and board serial number
+
+    if (__hw_random_number_generator == nullptr)
+    {
+        uint64_t ticks = PhysicalTimer::CurrentTicks();
+        uint64_t serial = __platform_info->GetBoardSerialNumber();
+        __hw_random_number_generator = static_new<Xoroshiro128PlusPlusRNG>(
+            Xoroshiro128PlusPlusRNG::Seed(ticks ^ 0x9E3779B97F4A7C15ULL,
+                                          serial ^ 0x6A09E667F3BCC908ULL));
+    }
+
+    //  Seed UUID generation before entities/tasks are created on additional cores.
+
+//    UUID::SeedRNG(__hw_random_number_generator->Next64BitValue());
+UUID::SeedRNG(88172645463325252ULL);
 
     //  Initialize the platform software RNGs from the HW RNG
 

@@ -2,7 +2,7 @@
 # Use of this source code is governed by a BSD-style
 # license that can be found in the LICENSE file.
 
-include ../Makefile.x64.mk
+include ../Makefile.native.mk
 
 SRC_ROOT := src
 CPP_TEST_SRC_ROOT := test/src
@@ -40,8 +40,8 @@ TEST_OBJ := $(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(TEST_BUILD_ROOT)/%.o,$(CPP_T
 TEST_EXE := $(TEST_OBJ_DIR)/cpputest_main.exe
 
 INCLUDE_DIRS := -Iinclude -I../minimalstdio/include -I../minimalclib/include -I../minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include 
-LDFLAGS += -L../minimalclib/lib/x64 -L../minimalstdio/lib/x64 -L../minimalstdlib/lib/x64 -L$(CPPUTEST_PATH)/lib
-LDLIBS = -lminimalclib -lminimalstdio -lminimalstdlib -lCppUTest -lCppUTestExt
+LDFLAGS += -L../minimalclib/lib/$(NATIVE_BUILD_DIR) -L../minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
+LDLIBS = -lCppUTest -lCppUTestExt -lminimalclib -lminimalstdio -lminimalstdlib
 
 CDEFINES += -D__NO_LOGGING__
 

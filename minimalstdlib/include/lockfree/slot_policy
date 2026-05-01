@@ -8,14 +8,6 @@
 #include <limits>
 #include <minstdconfig.h>
 
-#ifdef __MINIMAL_STD_TEST__
-#include <sys/types.h>
-#include <unistd.h>
-#ifdef __linux__
-#include <sys/syscall.h>
-#endif
-#endif
-
 namespace MINIMAL_STD_NAMESPACE
 {
 
@@ -199,60 +191,5 @@ namespace MINIMAL_STD_NAMESPACE
     private:
         mutable array<slot_state_type, NUM_SLOTS> slots_{};
     };
-
-#ifdef __MINIMAL_STD_TEST__
-    template <typename NodeType, size_t NUM_SLOTS, uint32_t THROTTLE_INITIAL = 100, uint32_t THROTTLE_MIN = 10>
-    class linux_thread_local_slot_policy
-    {
-    private:
-        static constexpr uint32_t INVALID_SLOT_OWNER = std::numeric_limits<uint32_t>::max();
-
-    public:
-        using node_type = NodeType;
-        using slot_state_type = cpu_slot_policy_state<NodeType, THROTTLE_INITIAL, THROTTLE_MIN>;
-
-        linux_thread_local_slot_policy()
-        {
-            for (size_t i = 0; i < NUM_SLOTS; ++i)
-            {
-                slots_[i].initialize(INVALID_SLOT_OWNER, 0x9e3779b97f4a7c15ull ^ (static_cast<uint64_t>(i) * 0xbf58476d1ce4e5b9ull));
-            }
-        }
-
-        size_t acquire_slot() const
-        {
-            uint64_t thread_id = static_cast<uint64_t>(pmr::platform::get_cpu_id());
-
-#ifdef __linux__
-            thread_id = static_cast<uint64_t>(::syscall(SYS_gettid));
-#endif
-
-            return static_cast<size_t>(thread_id % NUM_SLOTS);
-        }
-
-        slot_state_type &slot(size_t slot_index)
-        {
-            return slots_[slot_index];
-        }
-
-        const slot_state_type &slot(size_t slot_index) const
-        {
-            return slots_[slot_index];
-        }
-
-        const array<slot_state_type, NUM_SLOTS> &slots() const
-        {
-            return slots_;
-        }
-
-        array<slot_state_type, NUM_SLOTS> &slots()
-        {
-            return slots_;
-        }
-
-    private:
-        mutable array<slot_state_type, NUM_SLOTS> slots_{};
-    };
-#endif
 
 } // namespace MINIMAL_STD_NAMESPACE

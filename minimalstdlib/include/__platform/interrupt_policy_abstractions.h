@@ -5,7 +5,6 @@
 #pragma once
 
 #include "minstdconfig.h"
-#include "__platform/os_interrupt_abstractions.h"
 
 #include <stdint.h>
 
@@ -84,23 +83,8 @@ namespace MINIMAL_STD_NAMESPACE
                 }
             };
 
-            struct userspace_signal_mask_interrupt_policy
-            {
-                using interrupt_state_t = uint64_t;
-
-                static inline interrupt_state_t disable_interrupts()
-                {
-                    return os_interrupt_abstractions::enter_critical_section();
-                }
-
-                static inline void restore_interrupts(interrupt_state_t /* state */)
-                {
-                    os_interrupt_abstractions::leave_critical_section();
-                }
-            };
-
 #if defined(__MINIMAL_STD_TEST__)
-            using default_interrupt_policy = userspace_signal_mask_interrupt_policy;
+            using default_interrupt_policy = noop_interrupt_policy;
 #else
             using default_interrupt_policy = real_interrupt_policy;
 #endif

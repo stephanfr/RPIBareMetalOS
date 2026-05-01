@@ -97,17 +97,17 @@ $(LINKER_SCRIPT):
 
 define make-asm-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.S
-	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -g -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -g3 -c $$< -o $$@
 endef
 
 define make-c-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.c
-	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -g $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 define make-cpp-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.cpp
-	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -g $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 

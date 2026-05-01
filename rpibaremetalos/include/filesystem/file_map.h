@@ -75,14 +75,14 @@ namespace filesystems
 
     private:
         using FileByAbsolutePathMap = minstd::map<minstd::reference_wrapper<const minstd::string>, minstd::unique_ptr<File>>;
-        using FileByAbsolutePathMapAllocator = minstd::heap_allocator<FileByAbsolutePathMap::node_type>;
+        using FileByAbsolutePathMapAllocator = minstd::pmr::polymorphic_allocator<FileByAbsolutePathMap::node_type>;
         using FileByUUIDMap = minstd::map<UUID, minstd::reference_wrapper<File>>;
-        using FileByUUIDAllocator = minstd::heap_allocator<FileByUUIDMap::node_type>;
+        using FileByUUIDAllocator = minstd::pmr::polymorphic_allocator<FileByUUIDMap::node_type>;
 
-        FileByAbsolutePathMapAllocator file_by_absolute_path_map_allocator_{__os_dynamic_heap};
+        FileByAbsolutePathMapAllocator file_by_absolute_path_map_allocator_{&__os_dynamic_heap_resource};
         FileByAbsolutePathMap file_by_absolute_path_map_{file_by_absolute_path_map_allocator_};
 
-        FileByUUIDAllocator file_by_uuid_allocator_{__os_dynamic_heap};
+        FileByUUIDAllocator file_by_uuid_allocator_{&__os_dynamic_heap_resource};
         FileByUUIDMap file_by_uuid_map_{file_by_uuid_allocator_};
     };
 

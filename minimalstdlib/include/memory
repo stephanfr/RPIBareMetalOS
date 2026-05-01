@@ -13,8 +13,7 @@
 #include "minstdconfig.h"
 #include "utility"
 
-#include "heap_allocator"
-#include "single_block_memory_heap"
+#include "__memory_resource/memory_resource.h"
 
 namespace MINIMAL_STD_NAMESPACE
 {
@@ -27,47 +26,39 @@ namespace MINIMAL_STD_NAMESPACE
         {
         }
 
-        explicit unique_ptr(T *pointer_to_wrap, minstd::memory_heap &heap)
+        explicit unique_ptr(T *pointer_to_wrap, minstd::pmr::memory_resource &resource)
             : wrapped_pointer_(pointer_to_wrap),
-              heap_(&heap)
+              resource_(&resource)
         {
         }
 
         unique_ptr(unique_ptr &pointer_to_copy)
             : wrapped_pointer_(pointer_to_copy.wrapped_pointer_),
-              heap_(pointer_to_copy.heap_)
+              resource_(pointer_to_copy.resource_)
         {
             pointer_to_copy.wrapped_pointer_ = nullptr;
         }
 
         unique_ptr(unique_ptr &&pointer_to_copy)
             : wrapped_pointer_(pointer_to_copy.wrapped_pointer_),
-              heap_(pointer_to_copy.heap_)
+              resource_(pointer_to_copy.resource_)
         {
             pointer_to_copy.wrapped_pointer_ = nullptr;
         }
 
         ~unique_ptr()
         {
-            if (wrapped_pointer_ != nullptr)
-            {
-                //  If T is a class, the destructor is called in deallocate_block
-                heap_->deallocate_block(wrapped_pointer_, 1);
-            }
+            destroy_wrapped_pointer();
         }
 
         unique_ptr &operator=(unique_ptr &pointer_to_copy) = delete;
 
         unique_ptr &operator=(unique_ptr &&pointer_to_move)
         {
-            if (wrapped_pointer_ != nullptr)
-            {
-                //  If T is a class, the destructor is called in deallocate_block
-                heap_->deallocate_block(wrapped_pointer_, 1);
-            }
+            destroy_wrapped_pointer();
 
             wrapped_pointer_ = pointer_to_move.wrapped_pointer_;
-            heap_ = pointer_to_move.heap_;
+            resource_ = pointer_to_move.resource_;
             pointer_to_move.wrapped_pointer_ = nullptr;
 
             return *this;
@@ -113,7 +104,24 @@ namespace MINIMAL_STD_NAMESPACE
         }
 
     private:
+        void destroy_wrapped_pointer()
+        {
+            if (wrapped_pointer_ == nullptr)
+            {
+                return;
+            }
+
+            wrapped_pointer_->~T();
+
+            if (resource_ != nullptr)
+            {
+                resource_->deallocate(wrapped_pointer_, sizeof(T), alignof(T));
+            }
+
+            wrapped_pointer_ = nullptr;
+        }
+
         T *wrapped_pointer_ = nullptr;
-        minstd::memory_heap *heap_ = nullptr;
+        minstd::pmr::memory_resource *resource_ = nullptr;
     };
 }   //  namespace MINSTD

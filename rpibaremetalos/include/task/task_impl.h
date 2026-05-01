@@ -134,20 +134,21 @@ namespace task
 
         void Exit() override
         {
-            state_ = Task::ExecutionState::ZOMBIE;
-            zombie_timestamp_ = PhysicalTimer::Now();
-
-            if (stack_ != 0)
-            {
-                GetMemoryManager().ReleaseBlock(stack_, stack_size_in_bytes_);
-            }
+            //  We cannot free our own stack here because we are still executing on it.
+            //  The stack must be freed by a background cleanup/reaper task or during FindNextTask
+            //  when the ZOMBIE task is completely removed.
 
             preempt_count_ = 0;
             counter_ = 0;
+            
+            zombie_timestamp_ = PhysicalTimer::Now();
+            state_ = Task::ExecutionState::ZOMBIE;
 
             GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
-            LogError("Returned from SwitchToNextTask - should never be here: %s\n", name_.c_str());
+            while(true)
+            {
+            }
         }
 
         void Join() override
