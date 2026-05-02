@@ -69,8 +69,8 @@ CPP_SRC := $(foreach sdir,$(CPP_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
 OBJ := $(patsubst $(SRC_ROOT)/asm/%.S,$(BUILD_ROOT)/asm/%.o,$(ASM_SRC)) $(patsubst $(SRC_ROOT)/c/%.c,$(BUILD_ROOT)/c/%.o,$(C_SRC)) $(patsubst $(SRC_ROOT)/c/%.cpp,$(BUILD_ROOT)/c/%.o,$(CPP_SRC))
 
-INCLUDE_DIRS := -I../minimalclib/include -I../minimalstdio/include -I../minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
-LDFLAGS += -L../minimalclib/lib/aarch64 -L../minimalstdio/lib/aarch64 -L../minimalstdlib/lib/aarch64 
+INCLUDE_DIRS := -I../deps/minimalclib/include -I../deps/minimalstdio/include -I../deps/minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
+LDFLAGS += -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64 
 LDLIBS = -lminimalstdio -lminimalclib -lminimalstdlib
 
 LINKER_SCRIPT_TEMPLATE=link.template.ld

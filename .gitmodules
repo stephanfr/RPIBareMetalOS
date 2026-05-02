@@ -1,0 +1,9 @@
+[submodule "deps/minimalclib"]
+	path = deps/minimalclib
+	url = https://github.com/stephanfr/minimalclib.git
+[submodule "deps/minimalstdio"]
+	path = deps/minimalstdio
+	url = https://github.com/stephanfr/minimalstdio.git
+[submodule "deps/minimalstdlib"]
+	path = deps/minimalstdlib
+	url = https://github.com/stephanfr/minimalstdlib.git

@@ -39,8 +39,8 @@ TEST_OBJ := $(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(TEST_BUILD_ROOT)/%.o,$(CPP_T
 
 TEST_EXE := $(TEST_OBJ_DIR)/cpputest_main.exe
 
-INCLUDE_DIRS := -Iinclude -I../minimalstdio/include -I../minimalclib/include -I../minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include 
-LDFLAGS += -L../minimalclib/lib/$(NATIVE_BUILD_DIR) -L../minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
+INCLUDE_DIRS := -Iinclude -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include 
+LDFLAGS += -L../deps/minimalclib/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
 LDLIBS = -lCppUTest -lCppUTestExt -lminimalclib -lminimalstdio -lminimalstdlib
 
 CDEFINES += -D__NO_LOGGING__
