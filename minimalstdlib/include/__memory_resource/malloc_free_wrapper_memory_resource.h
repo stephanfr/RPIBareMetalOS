@@ -19,6 +19,8 @@ namespace MINIMAL_STD_NAMESPACE
         class malloc_free_wrapper_memory_resource : public memory_resource
         {
             public :
+                malloc_free_wrapper_memory_resource() = default;
+
                 malloc_free_wrapper_memory_resource(memory_resource *upstream_resource)
                 {
                 }
