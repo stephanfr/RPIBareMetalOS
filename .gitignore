@@ -1,5 +1,6 @@
 sd.img
 gcc-cross
+.venv/
 **/image
 **/build
 **/coverage

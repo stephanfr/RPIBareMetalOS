@@ -12,7 +12,7 @@
                 "${workspaceFolder}/minimalstdio/include",
                 "${workspaceFolder}/minimalstdlib/include",
                 "${workspaceFolder}/minimalstdlib/test/shared",
-                "/home/steve/dev/third-party/cpputest/include"
+                "/opt/cpputest/include"
             ]
         },
         {
@@ -27,7 +27,7 @@
                 "${workspaceFolder}/minimalstdio/include",
                 "${workspaceFolder}/minimalstdlib/include",
                 "${workspaceFolder}/minimalstdlib/test/shared",
-                "/home/steve/dev/third-party/cpputest/include"
+                "/opt/cpputest/include"
             ]
         },
         {
@@ -42,7 +42,7 @@
                 "${workspaceFolder}/minimalstdio/include",
                 "${workspaceFolder}/minimalstdlib/include",
                 "${workspaceFolder}/minimalstdlib/test/shared",
-                "/home/steve/dev/third-party/cpputest/include"
+                "/opt/cpputest/include"
             ]
         }
     ],
