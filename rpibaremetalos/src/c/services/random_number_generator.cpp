@@ -30,7 +30,7 @@ minstd::unique_ptr<RandomNumberGeneratorBase> NewRandomNumberGenerator(minstd::p
     void *buffer = resource.allocate(sizeof(Xoroshiro128PlusPlusRNG), alignof(Xoroshiro128PlusPlusRNG));
 
     return minstd::unique_ptr<RandomNumberGeneratorBase>(
-        (RandomNumberGeneratorBase *)new (buffer) Xoroshiro128PlusPlusRNG(GetXoroshiro128PlusPlusRootRandomNumberGenerator().Fork()),
+        (RandomNumberGeneratorBase *)new (buffer) Xoroshiro128PlusPlusRNG(GetXoroshiro128PlusPlusRootRandomNumberGenerator().fork()),
         resource);
 }
 

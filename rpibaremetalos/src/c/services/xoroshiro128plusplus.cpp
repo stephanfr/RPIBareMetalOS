@@ -42,5 +42,5 @@ Xoroshiro128PlusPlusRNG Xoroshiro128PlusPlusRNG::Fork(void) //	jump in the xoros
         }
     }
 
-    return Xoroshiro128PlusPlusRNG(Seed(s0, s1));
+    return Xoroshiro128PlusPlusRNG(seed_type(s0, s1));
 }

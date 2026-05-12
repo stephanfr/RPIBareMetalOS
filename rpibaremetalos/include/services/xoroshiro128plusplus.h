@@ -9,9 +9,9 @@
 class Xoroshiro128PlusPlusRNG : public RandomNumberGeneratorBase
 {
 public:
-    struct Seed
+    struct seed_type
     {
-        Seed(uint64_t low, uint64_t high)
+        seed_type(uint64_t low, uint64_t high)
             : low(low),
               high(high)
         {
@@ -24,7 +24,7 @@ public:
     Xoroshiro128PlusPlusRNG() = delete;
     explicit Xoroshiro128PlusPlusRNG(const Xoroshiro128PlusPlusRNG &) = default;
 
-    Xoroshiro128PlusPlusRNG(const Seed &seed)
+    Xoroshiro128PlusPlusRNG(const seed_type &seed)
         : state_(seed),
           next_32bit_value_(0),
           has_next_32bit_value_(0)
@@ -60,7 +60,7 @@ public:
     Xoroshiro128PlusPlusRNG Fork(void);
 
 private:
-    Seed state_;
+    seed_type state_;
 
     uint32_t next_32bit_value_ = 0;
     bool has_next_32bit_value_ = false;

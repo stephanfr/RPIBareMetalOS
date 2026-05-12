@@ -20,7 +20,7 @@ static MurmurHash64ASeed __os_entity_hash_seed{0};
 //  Function to initialize SW random number genertors
 
 void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_seed,
-                                        Xoroshiro128PlusPlusRNG::Seed xoroshiro_seed)
+                                        Xoroshiro128PlusPlusRNG::seed_type xoroshiro_seed)
 {
     __os_entity_hash_seed = os_entity_hash_seed;
 

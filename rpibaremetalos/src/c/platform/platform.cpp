@@ -53,7 +53,7 @@ static RandomNumberGeneratorBase *__hw_random_number_generator = nullptr;
 //  To initialize SW RNG - implementation in 'platform_sw_rngs.cpp' but I do not want to expose in header.
 
 extern void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_seed,
-                                               Xoroshiro128PlusPlusRNG::Seed xoroshiro_seed);
+                                               Xoroshiro128PlusPlusRNG::seed_type xoroshiro_seed);
 
 //  Function to setup serial console
 
@@ -205,7 +205,7 @@ void InitializePlatform()
         uint64_t ticks = PhysicalTimer::CurrentTicks();
         uint64_t serial = __platform_info->GetBoardSerialNumber();
         __hw_random_number_generator = static_new<Xoroshiro128PlusPlusRNG>(
-            Xoroshiro128PlusPlusRNG::Seed(ticks ^ 0x9E3779B97F4A7C15ULL,
+            Xoroshiro128PlusPlusRNG::seed_type(ticks ^ 0x9E3779B97F4A7C15ULL,
                                           serial ^ 0x6A09E667F3BCC908ULL));
     }
 
@@ -217,7 +217,7 @@ UUID::SeedRNG(88172645463325252ULL);
     //  Initialize the platform software RNGs from the HW RNG
 
     InitializeSWRandomNumberGenerators(MurmurHash64ASeed(__hw_random_number_generator->Next64BitValue()),
-                                       Xoroshiro128PlusPlusRNG::Seed(__hw_random_number_generator->Next64BitValue(),
+                                       Xoroshiro128PlusPlusRNG::seed_type(__hw_random_number_generator->Next64BitValue(),
                                                                      __hw_random_number_generator->Next64BitValue()));
 
     //  Setup the serial console
