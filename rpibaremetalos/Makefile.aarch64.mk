@@ -8,6 +8,9 @@ SRC_ROOT := src
 BUILD_ROOT := build
 IMAGE_DIR   := image
 
+QEMU                  := qemu-system-aarch64
+QEMU_REGRESSION_SCRIPT := test/tools/qemu_regression_test.py
+
 BUILD_DIRS := $(IMAGE_DIR) $(BUILD_ROOT) \
 $(BUILD_ROOT)/asm \
 $(BUILD_ROOT)/c \
@@ -161,4 +164,15 @@ $(ARMSTUB_DIRS):
 
 armstub_clean:
 	/bin/rm armstub/build/*.* armstub/image/*.* > /dev/null 2> /dev/null || true
+
+
+#
+#       QEMU regression test
+#
+
+qemu-regression: all
+	python3 $(QEMU_REGRESSION_SCRIPT) \
+		--qemu $(QEMU) \
+		--kernel $(BUILD_ROOT)/kernel8.elf \
+		--sdimage $(IMAGE_DIR)/sd.img
 	
