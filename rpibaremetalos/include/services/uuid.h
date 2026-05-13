@@ -137,13 +137,3 @@ namespace FMT_FORMATTERS_NAMESPACE
 {
     DECLARE_TYPE_FORMATTER(const UUID&, UUIDFormatter, DEFAULT_STRING_FORMAT)
 }
-
-#include <limits>
-
-namespace std {
-    template <>
-    struct numeric_limits<UUID> {
-        static UUID min() { return UUID::NIL; }
-        static UUID max() { return UUID::MAX; }
-    };
-}

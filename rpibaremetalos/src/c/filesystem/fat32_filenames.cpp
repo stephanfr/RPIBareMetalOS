@@ -3,7 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include <ctype.h>
-#include <minimalcstdlib.h>
+#include <charconv>
 
 #include "filesystem/fat32_filenames.h"
 
@@ -66,7 +66,10 @@ namespace filesystems::fat32
             return;
         }
 
-        numeric_tail_ = strtol(&(name_[front_of_number + 1]), NULL, 10, NULL);
+        const char *tail_start = &(name_[front_of_number + 1]);
+        uint32_t tail_value = 0;
+        minstd::from_chars(tail_start, tail_start + name_.length() - (front_of_number + 1), tail_value);
+        numeric_tail_ = tail_value;
         name_.erase(front_of_number);
     }
 

@@ -6,8 +6,8 @@
 
 #include <array>
 #include <atomic>
+#include <charconv>
 #include <format>
-#include <minimalcstdlib.h>
 
 #include "devices/physical_timer.h"
 #include "task/tasks.h"
@@ -307,13 +307,13 @@ namespace cli::commands
 
             if (strncmp(token, "--threads=", 10) == 0)
             {
-                int rcode = 0;
-                thread_count = (uint32_t)strtol(token + 10, nullptr, 10, &rcode);
+                const char *p = token + 10;
+                minstd::from_chars(p, p + strnlen(p, 32), thread_count);
             }
             else if (strncmp(token, "--target=", 9) == 0)
             {
-                int rcode = 0;
-                prime_target = (uint32_t)strtol(token + 9, nullptr, 10, &rcode);
+                const char *p = token + 9;
+                minstd::from_chars(p, p + strnlen(p, 32), prime_target);
             }
             else
             {
