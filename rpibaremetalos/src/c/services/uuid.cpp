@@ -4,23 +4,16 @@
 
 #include "services/uuid.h"
 
-#include <atomic>
 #include <minimalstdio.h>
 #include "__random/fast_lockfree_low_quality_rng.h"
 
 namespace
 {
     static constexpr uint64_t DEFAULT_UUID_SEED = 88172645463325252ULL;
-    static minstd::atomic<uint64_t> uuid_seed_{DEFAULT_UUID_SEED};
-
-    uint64_t uuid_seed_provider()
-    {
-        return uuid_seed_.load(minstd::memory_order_relaxed);
-    }
 
     minstd::fast_lockfree_low_quality_rng &uuid_rng()
     {
-        static minstd::fast_lockfree_low_quality_rng instance(uuid_seed_provider);
+        static minstd::fast_lockfree_low_quality_rng instance(DEFAULT_UUID_SEED);
 
         return instance;
     }
@@ -31,7 +24,7 @@ const UUID UUID::MAX(0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF);
 
 void UUID::SeedRNG(uint64_t seed)
 {
-    uuid_seed_.store(seed == 0 ? DEFAULT_UUID_SEED : seed, minstd::memory_order_relaxed);
+    uuid_rng().seed(seed == 0 ? DEFAULT_UUID_SEED : seed);
 }
 
 UUID UUID::GenerateUUID(Versions version)
