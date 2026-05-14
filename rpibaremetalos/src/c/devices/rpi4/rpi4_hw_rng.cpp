@@ -48,19 +48,9 @@ bool RPi4HardwareRandomNumberGenerator::Initialize()
     return false;
 }
 
-uint32_t RPi4HardwareRandomNumberGenerator::Next32BitValue()
+RPi4HardwareRandomNumberGenerator::result_type RPi4HardwareRandomNumberGenerator::operator()()
 {
     return Next32BitValueInternal();
-}
-
-uint64_t RPi4HardwareRandomNumberGenerator::Next64BitValue()
-{
-    uint64_t full_value;
-
-    full_value = Next32BitValueInternal();
-    full_value = (full_value << 32) | Next32BitValueInternal();
-
-    return full_value;
 }
 
 uint32_t RPi4HardwareRandomNumberGenerator::Next32BitValueInternal()

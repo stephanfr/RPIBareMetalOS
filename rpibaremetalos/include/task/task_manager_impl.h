@@ -26,7 +26,8 @@
 #include "task/task_impl.h"
 #include "task/task_execution_context.h"
 
-#include "services/random_number_generator.h"
+#include <random>
+#include "platform/platform_sw_rngs.h"
 
 #include "asm_utility.h"
 
@@ -99,7 +100,7 @@ namespace task
 
         minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
 
-        RandomNumberGeneratorSingleThreaded random_generator_{NewRandomNumberGenerator()};
+        minstd::fast_lockfree_low_quality_rng random_generator_{GetGeneralRNG()()};
 
         //  Put the task map in the kernel dynamic heap
 

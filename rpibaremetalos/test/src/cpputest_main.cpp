@@ -10,7 +10,6 @@
 #include "single_block_memory_heap"
 
 #include "platform/platform_sw_rngs.h"
-#include "services/xoroshiro128plusplus.h"
 
 #undef EOF
 #include <stdio.h>
@@ -36,7 +35,7 @@ extern "C"
 //  To initialize SW RNGs
 
 extern void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_seed,
-                                               Xoroshiro128PlusPlusRNG::seed_type xoroshiro_seed);
+                                               minstd::xoroshiro128_plus_plus::seed_type xoroshiro_seed);
 
 //
 //  Define heaps and allocators for tests
@@ -110,7 +109,7 @@ int main(int argc, char **argv)
 {
     //  Initialize the software RNGs - needed for UUIDs which are used everywhere.
 
-    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(1), Xoroshiro128PlusPlusRNG::seed_type(2, 3));
+    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(1), minstd::xoroshiro128_plus_plus::seed_type(2, 3));
 
     //  Run the tests
 

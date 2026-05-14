@@ -5,10 +5,10 @@
 
 #include "platform/platform_info.h"
 
-#include "services/random_number_generator.h"
+#include <random>
 
 
-class RPi4HardwareRandomNumberGenerator : public RandomNumberGeneratorBase
+class RPi4HardwareRandomNumberGenerator : public minstd::random_device
 {
     static constexpr uint32_t HW_RNG_REGISTER_OFFSET = 0x00104000;
 
@@ -22,15 +22,11 @@ public:
 
     ~RPi4HardwareRandomNumberGenerator() {}
 
-    RandomNumberGeneratorTypes Type() const noexcept override
-    {
-        return RandomNumberGeneratorTypes::HARDWARE;
-    }
-
     bool Initialize();
 
-    uint32_t Next32BitValue() override;
-    uint64_t Next64BitValue() override;
+    result_type operator()() override;
+
+    double entropy() const noexcept override { return 32.0; }
 
 private:
     typedef struct RPI4HWRandomNumberGeneratorRegisters

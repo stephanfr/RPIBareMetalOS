@@ -109,7 +109,7 @@ namespace filesystems::fat32
     class FAT32DirectoryCache
     {
     public:
-        FAT32DirectoryCache(size_t max_size, MurmurHash64ASeed seed = MurmurHash64ASeed(GetGeneralRNG().Next64BitValue()))
+        FAT32DirectoryCache(size_t max_size, MurmurHash64ASeed seed = MurmurHash64ASeed(GetGeneralRNG()()))
             : path_hash_seed_(seed),
               cache_(max_size, cache_list_allocator_, cache_map_allocator_),
               indices_by_path_hash_(indices_by_path_hash_allocator_)

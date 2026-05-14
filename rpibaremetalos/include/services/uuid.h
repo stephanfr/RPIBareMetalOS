@@ -137,3 +137,23 @@ namespace FMT_FORMATTERS_NAMESPACE
 {
     DECLARE_TYPE_FORMATTER(const UUID&, UUIDFormatter, DEFAULT_STRING_FORMAT)
 }
+
+//
+//  minstd::numeric_limits specialization for UUID.
+//  Required by skiplist and other ordered containers using UUID as a key.
+//
+
+#include <limits>
+
+namespace minstd
+{
+    template <>
+    class numeric_limits<UUID>
+    {
+    public:
+        static constexpr bool is_specialized = true;
+
+        static UUID min() noexcept { return UUID::NIL; }
+        static UUID max() noexcept { return UUID::MAX; }
+    };
+}

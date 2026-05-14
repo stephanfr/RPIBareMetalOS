@@ -16,7 +16,6 @@ C_SRC   :=
 CPP_SRC :=  src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
-			src/c/services/xoroshiro128plusplus.cpp \
 			src/c/services/uuid.cpp \
 			src/c/filesystem/filesystem_errors.cpp \
 			src/c/filesystem/master_boot_record.cpp \
