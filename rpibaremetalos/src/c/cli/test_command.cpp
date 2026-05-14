@@ -308,12 +308,20 @@ namespace cli::commands
             if (strncmp(token, "--threads=", 10) == 0)
             {
                 const char *p = token + 10;
-                minstd::from_chars(p, p + strnlen(p, 32), thread_count);
+                if (!minstd::from_chars(p, p + strnlen(p, 32), thread_count))
+                {
+                    context << minstd::format(buffer, "Invalid value for --threads: '{}'\n", p);
+                    return;
+                }
             }
             else if (strncmp(token, "--target=", 9) == 0)
             {
                 const char *p = token + 9;
-                minstd::from_chars(p, p + strnlen(p, 32), prime_target);
+                if (!minstd::from_chars(p, p + strnlen(p, 32), prime_target))
+                {
+                    context << minstd::format(buffer, "Invalid value for --target: '{}'\n", p);
+                    return;
+                }
             }
             else
             {

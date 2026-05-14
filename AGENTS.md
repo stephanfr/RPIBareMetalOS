@@ -62,6 +62,12 @@ private:
 ### Reference Files
 - `lockfree_single_arena_resource.h`, `avl_tree`, `list`, `forward_list`
 
+## Git Workflow
+
+### Rules
+- **Always work in a branch**: Never commit directly to `main`. Create a feature branch for every set of changes so that all work flows through a GitHub pull request.
+- **Never commit unless explicitly told to**: Do not stage or commit changes without an explicit instruction from the user to do so. Building, testing, and editing files is fine at any time; committing is not.
+
 ## Pre-Commit Cleanup
 
 Always remove temporary, debug, and junk files before creating any commit.
