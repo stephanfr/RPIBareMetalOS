@@ -1,7 +1,7 @@
 {
     "name": "RPIBareMetalOS",
     "image": "ghcr.io/stephanfr/aarch64-bare-metal-toolchain:13.3.rel1",
-    "postCreateCommand": "apt-get install -y git-lfs mtools python3 python3-pexpect qemu-system-aarch64 && git lfs install && git lfs pull",
+    "postCreateCommand": "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git-lfs mtools python3 python3-pexpect qemu-system-aarch64 gdb gdb-multiarch valgrind strace ltrace && git lfs install && git lfs pull",
     "remoteEnv": {
         "TOOLS": "/opt",
         "THIRD_PARTY": "/opt",
