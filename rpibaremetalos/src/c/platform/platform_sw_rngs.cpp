@@ -6,12 +6,11 @@
 
 #include "heaps.h"
 #include "services/murmur_hash.h"
-#include "services/xoroshiro128plusplus.h"
+#include <random>
 
 
-static Xoroshiro128PlusPlusRNG *__root_xoroshiro128plusplus_random_number_generator = nullptr;
-static Xoroshiro128PlusPlusRNG *__general_rng = nullptr;
-static Xoroshiro128PlusPlusRNG *__uuid_generator_rng = nullptr;
+static minstd::xoroshiro128_plus_plus *__root_xoroshiro128plusplus_random_number_generator = nullptr;
+static minstd::xoroshiro128_plus_plus *__general_rng = nullptr;
 
 //  OS Entity hash seed
 
@@ -20,36 +19,20 @@ static MurmurHash64ASeed __os_entity_hash_seed{0};
 //  Function to initialize SW random number genertors
 
 void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_seed,
-                                        Xoroshiro128PlusPlusRNG::seed_type xoroshiro_seed)
+                                        minstd::xoroshiro128_plus_plus::seed_type xoroshiro_seed)
 {
     __os_entity_hash_seed = os_entity_hash_seed;
 
     //  Initialize the root Xoroshiro128plusplus RNG
 
-    __root_xoroshiro128plusplus_random_number_generator = static_new<Xoroshiro128PlusPlusRNG>(xoroshiro_seed);
+    __root_xoroshiro128plusplus_random_number_generator = static_new<minstd::xoroshiro128_plus_plus>(xoroshiro_seed);
 
-    __general_rng = static_new<Xoroshiro128PlusPlusRNG>(__root_xoroshiro128plusplus_random_number_generator->Fork());
-
-    __uuid_generator_rng = static_new<Xoroshiro128PlusPlusRNG>(__root_xoroshiro128plusplus_random_number_generator->Fork());
+    __general_rng = static_new<minstd::xoroshiro128_plus_plus>(__root_xoroshiro128plusplus_random_number_generator->fork());
 }
 
-//
-//  Global to return the Platform Xoroshiro generator
-//
-
-Xoroshiro128PlusPlusRNG &GetXoroshiro128PlusPlusRootRandomNumberGenerator()
-{
-    return *__root_xoroshiro128plusplus_random_number_generator;
-}
-
-RandomNumberGeneratorBase &GetGeneralRNG()
+minstd::xoroshiro128_plus_plus &GetGeneralRNG()
 {
     return *__general_rng;
-}
-
-RandomNumberGeneratorBase &GetUUIDGeneratorRNG()
-{
-    return *__uuid_generator_rng;
 }
 
 MurmurHash64ASeed GetOSEntityHashSeed()

@@ -31,7 +31,6 @@
 #include "platform/mmu_manager.h"
 
 #include "services/uuid.h"
-#include "services/xoroshiro128plusplus.h"
 
 #include "devices/physical_timer.h"
 
@@ -48,12 +47,35 @@ static MemoryManager *__memory_manager = nullptr;
 
 //  Global for HW RNG generator
 
-static RandomNumberGeneratorBase *__hw_random_number_generator = nullptr;
+static minstd::random_device *__hw_random_number_generator = nullptr;
+
+//  SW RNG fallback for when no hardware RNG is available (e.g. under QEMU).
+//  Wraps minstd::xoroshiro128_plus_plus to satisfy the minstd::random_device interface.
+
+namespace
+{
+    class xoroshiro_random_device : public minstd::random_device
+    {
+    public:
+        explicit xoroshiro_random_device(const minstd::xoroshiro128_plus_plus::seed_type &seed) noexcept
+            : rng_(seed)
+        {
+        }
+
+        result_type operator()() override
+        {
+            return static_cast<result_type>(rng_());
+        }
+
+    private:
+        minstd::xoroshiro128_plus_plus rng_;
+    };
+}
 
 //  To initialize SW RNG - implementation in 'platform_sw_rngs.cpp' but I do not want to expose in header.
 
 extern void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_seed,
-                                               Xoroshiro128PlusPlusRNG::seed_type xoroshiro_seed);
+                                               minstd::xoroshiro128_plus_plus::seed_type xoroshiro_seed);
 
 //  Function to setup serial console
 
@@ -204,9 +226,9 @@ void InitializePlatform()
     {
         uint64_t ticks = PhysicalTimer::CurrentTicks();
         uint64_t serial = __platform_info->GetBoardSerialNumber();
-        __hw_random_number_generator = static_new<Xoroshiro128PlusPlusRNG>(
-            Xoroshiro128PlusPlusRNG::seed_type(ticks ^ 0x9E3779B97F4A7C15ULL,
-                                          serial ^ 0x6A09E667F3BCC908ULL));
+        __hw_random_number_generator = static_new<xoroshiro_random_device>(
+            minstd::xoroshiro128_plus_plus::seed_type(ticks ^ 0x9E3779B97F4A7C15ULL,
+                                                      serial ^ 0x6A09E667F3BCC908ULL));
     }
 
     //  Seed UUID generation before entities/tasks are created on additional cores.
@@ -216,9 +238,9 @@ UUID::SeedRNG(88172645463325252ULL);
 
     //  Initialize the platform software RNGs from the HW RNG
 
-    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(__hw_random_number_generator->Next64BitValue()),
-                                       Xoroshiro128PlusPlusRNG::seed_type(__hw_random_number_generator->Next64BitValue(),
-                                                                     __hw_random_number_generator->Next64BitValue()));
+    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()),
+                                       minstd::xoroshiro128_plus_plus::seed_type(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)(),
+                                                                                  ((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()));
 
     //  Setup the serial console
 
@@ -270,9 +292,4 @@ ExceptionManager &GetExceptionManager()
 MemoryManager &GetMemoryManager()
 {
     return *__memory_manager;
-}
-
-RandomNumberGeneratorBase &GetHWRandomNumberGenerator()
-{
-    return *__hw_random_number_generator;
 }

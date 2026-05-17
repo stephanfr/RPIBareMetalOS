@@ -362,9 +362,9 @@ public:
         return PointerResult(ResultCodeType::SUCCESS);
     }
 
-    static PointerResult<ResultCodeType, T> Success(minstd::unique_ptr<T> &return_value)
+    static PointerResult<ResultCodeType, T> Success(minstd::unique_ptr<T> &&return_value)
     {
-        return PointerResult(ResultCodeType::SUCCESS, return_value);
+        return PointerResult(ResultCodeType::SUCCESS, minstd::move(return_value));
     }
 
     static PointerResult<ResultCodeType, T> Failure(ResultCodeType failure_code)
@@ -419,9 +419,9 @@ public:
 
 private:
     PointerResult(ResultCodeType result_code,
-                  minstd::unique_ptr<T> &return_pointer)
+                                    minstd::unique_ptr<T> &&return_pointer)
         : result_code_(result_code),
-          optional_return_pointer_(return_pointer)
+                    optional_return_pointer_(minstd::move(return_pointer))
     {
     }
 

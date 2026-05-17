@@ -6,11 +6,10 @@
 
 #include <stdint.h>
 
-#include "services/random_number_generator.h"
+#include <random>
 #include "services/murmur_hash.h"
 
-RandomNumberGeneratorBase &GetGeneralRNG();
-RandomNumberGeneratorBase &GetUUIDGeneratorRNG();
+minstd::xoroshiro128_plus_plus &GetGeneralRNG();
 
 MurmurHash64ASeed GetOSEntityHashSeed();
 

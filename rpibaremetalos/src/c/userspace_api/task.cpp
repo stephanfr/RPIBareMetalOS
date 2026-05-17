@@ -18,7 +18,7 @@ namespace user::task
     {
         void UserspaceRunnableWrapper(minstd::unique_ptr<Runnable> *runnable)
         {
-            minstd::unique_ptr<Runnable> local_runnable = *runnable;
+            minstd::unique_ptr<Runnable> local_runnable = minstd::move(*runnable);
             local_runnable->Run();
         }
     } // namespace internal

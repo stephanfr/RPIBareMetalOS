@@ -385,11 +385,11 @@ namespace task
             ParkCore();
         }
 
-        uint32_t schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
+        uint32_t schedule_on_core = static_cast<uint32_t>(random_generator_()) % number_of_cores_;
 
         while (!task_ref.CoreRestrictionMask().ContainsCore(schedule_on_core))
         {
-            schedule_on_core = random_generator_.Next32BitValue() % number_of_cores_;
+            schedule_on_core = static_cast<uint32_t>(random_generator_()) % number_of_cores_;
         }
 
         task_ref.schedule_on_core_ = schedule_on_core;
