@@ -4,9 +4,4 @@
 
 #pragma once
 
-#define CONCAT_(prefix, suffix) prefix##suffix
-#define CONCAT(prefix, suffix) CONCAT_(prefix, suffix)
-#define MAKE_UNIQUE_VARIABLE_NAME(prefix) CONCAT(prefix##_, __LINE__)
-
-#define GET_MACRO2(_1,_2,NAME,...) NAME
-#define GET_MACRO3(_1,_2,_3,NAME,...) NAME
+#include "baremetal_base/macros.h"

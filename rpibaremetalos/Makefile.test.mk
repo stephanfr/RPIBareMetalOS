@@ -16,7 +16,6 @@ C_SRC   :=
 CPP_SRC :=  src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
-			src/c/services/uuid.cpp \
 			src/c/filesystem/filesystem_errors.cpp \
 			src/c/filesystem/master_boot_record.cpp \
 			src/c/filesystem/filesystem_path.cpp \
@@ -38,9 +37,11 @@ TEST_OBJ := $(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(TEST_BUILD_ROOT)/%.o,$(CPP_T
 
 TEST_EXE := $(TEST_OBJ_DIR)/cpputest_main.exe
 
-INCLUDE_DIRS := -Iinclude -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include 
-LDFLAGS += -L../deps/minimalclib/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
-LDLIBS = -lCppUTest -lCppUTestExt -lminimalclib -lminimalstdio -lminimalstdlib
+INCLUDE_DIRS := -I../deps/baremetalbase/include -Iinclude -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include 
+LDFLAGS += -L../deps/baremetalbase/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalclib/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
+LDLIBS = -lCppUTest -lCppUTestExt -lbaremetalbase -lminimalclib -lminimalstdio -lminimalstdlib
+
+BAREMETALBASE_LIB := ../deps/baremetalbase/lib/$(NATIVE_BUILD_DIR)/libbaremetalbase.a
 
 CDEFINES += -D__NO_LOGGING__
 
@@ -53,9 +54,12 @@ CDEFINES += -D__NO_LOGGING__
 
 test: clean checkdirs $(TEST_EXE)
 
-$(TEST_EXE) : $(TEST_OBJ) $(OBJ)
+$(TEST_EXE) : $(TEST_OBJ) $(OBJ) $(BAREMETALBASE_LIB)
 	$(LD) $(OBJ) $(TEST_OBJ) $(LDFLAGS) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
 	-./$(TEST_EXE)
+
+$(BAREMETALBASE_LIB):
+	$(MAKE) -C ../deps/baremetalbase native
 
 
 define make-c-goal
@@ -100,7 +104,7 @@ test-coverage : clean checkdirs $(COVERAGE_EXE)
 	lcov --remove $(COVERAGE_OBJ_DIR)/test_coverage.info '/usr/include/*' '$(CPPUTEST_PATH)/*' --output-file $(COVERAGE_OBJ_DIR)/test_coverage_filtered.info
 	genhtml $(COVERAGE_OBJ_DIR)/test_coverage_filtered.info --output-directory $(COVERAGE_OBJ_DIR)/coverage_report
 
-$(COVERAGE_EXE) : $(COVERAGE_TEST_OBJ) $(COVERAGE_OBJ) 
+$(COVERAGE_EXE) : $(COVERAGE_TEST_OBJ) $(COVERAGE_OBJ) $(BAREMETALBASE_LIB)
 	$(LD) $(COVERAGE_OBJ) $(COVERAGE_TEST_OBJ) $(LDFLAGS) $(LDLIBS) $(TEST_LIB) -lgcov -o $(COVERAGE_EXE)
 	./$(COVERAGE_EXE)
 

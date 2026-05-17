@@ -7,3 +7,6 @@
 [submodule "deps/minimalstdlib"]
 	path = deps/minimalstdlib
 	url = https://github.com/stephanfr/minimalstdlib.git
+[submodule "deps/baremetalbase"]
+	path = deps/baremetalbase
+	url = https://github.com/stephanfr/baremetalbase.git

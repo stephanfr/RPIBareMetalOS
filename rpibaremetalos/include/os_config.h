@@ -11,35 +11,10 @@
 
 #ifdef __cplusplus
 
+#include "baremetal_base/base_config.h"
+
 #include <stddef.h>
 #include <stdint.h>
-
-//
-//  The ALIGN define can be used to force alignment consistently across the project.
-//
-
-#define ALIGN alignas(8)
-#define PACKED __attribute__ ((packed))
-
-//
-//  Some conversion values
-//
-
-constexpr uint64_t BYTES_1K = 1024;
-constexpr uint64_t BYTES_4K = 4 * BYTES_1K;
-constexpr uint64_t BYTES_16K = 16 * BYTES_1K;
-constexpr uint64_t BYTES_1M = BYTES_1K * BYTES_1K;
-constexpr uint64_t BYTES_4M = 4 * BYTES_1M;
-constexpr uint64_t BYTES_1G = BYTES_1K * BYTES_1M;
-
-//
-//  Some timing symbols
-//
-
-constexpr uint32_t FREQUENCY_500MHZ = 500000000;
-constexpr uint32_t FREQUENCY_400MHZ = 400000000;
-constexpr uint32_t FREQUENCY_250MHZ = 250000000;
-constexpr uint32_t FREQUENCY_4MHZ = 4000000;
 
 //
 //  Structre sizes shared with assembly code
