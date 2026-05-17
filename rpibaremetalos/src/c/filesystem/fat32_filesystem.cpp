@@ -51,7 +51,7 @@ namespace filesystems::fat32
             new_filesystem = make_dynamic_unique<FAT32Filesystem>(permanent, name, alias, boot, *adapter, partition.Name());
         }
 
-        return Result::Success(new_filesystem);
+        return Result::Success(minstd::move(new_filesystem));
     }
 
     PointerResult<FilesystemResultCodes, FilesystemDirectory> FAT32Filesystem::GetRootDirectory()
@@ -66,7 +66,7 @@ namespace filesystems::fat32
                                                                                                 block_io_adapter_.RootDirectoryCluster(),
                                                                                                 FAT32Compact8Dot3Filename("/", "")));
 
-        return Result::Success(directory);
+        return Result::Success(minstd::move(directory));
     }
 
     PointerResult<FilesystemResultCodes, FilesystemDirectory> FAT32Filesystem::GetDirectory(const minstd::string &path)
@@ -93,7 +93,7 @@ namespace filesystems::fat32
                                                                                                     block_io_adapter_.RootDirectoryCluster(),
                                                                                                     FAT32Compact8Dot3Filename("/", "")));
 
-            return Result::Success(directory);
+            return Result::Success(minstd::move(directory));
         }
 
         //  Find the cluster index
@@ -135,7 +135,7 @@ namespace filesystems::fat32
                                                                                                 directory_cluster,
                                                                                                 compact_name));
 
-        return Result::Success(directory);
+        return Result::Success(minstd::move(directory));
     }
 
     ValueResult<FilesystemResultCodes, FAT32DirectoryCluster::directory_entry_const_iterator> FAT32Filesystem::FindDirectoryEntry(const FilesystemPath &path)

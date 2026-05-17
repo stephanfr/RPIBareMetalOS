@@ -112,7 +112,7 @@ namespace filesystems::fat32
                                                                                 first_cluster_,
                                                                                 FAT32Compact8Dot3Filename(".", "")));
 
-        return Result::Success(directory);
+        return Result::Success(minstd::move(directory));
     }
 
     PointerResult<FilesystemResultCodes, FilesystemDirectory> FAT32Directory::GetDotDotEntry(FAT32BlockIOAdapter &block_io_adapter) const
@@ -165,7 +165,7 @@ namespace filesystems::fat32
                                                                                 GetOpaqueData(*dot_dot_entry).FirstCluster(),
                                                                                 FAT32Compact8Dot3Filename("..", "")));
 
-        return Result::Success(directory);
+        return Result::Success(minstd::move(directory));
     }
 
     PointerResult<FilesystemResultCodes, FilesystemDirectory> FAT32Directory::GetDirectory(const minstd::string &directory_name)
@@ -229,7 +229,7 @@ namespace filesystems::fat32
                                                                                     cache_entry.value().get().FirstClusterId(),
                                                                                     cache_entry.value().get().CompactName()));
 
-            return Result::Success(directory);
+            return Result::Success(minstd::move(directory));
         }
 
         //  We need to search the directory cluster for the directory
@@ -254,7 +254,7 @@ namespace filesystems::fat32
                                                                                 GetOpaqueData(*directory_entry).FirstCluster(),
                                                                                 GetOpaqueData(*directory_entry).directory_entry_.CompactName()));
 
-        return Result::Success(directory);
+        return Result::Success(minstd::move(directory));
     }
 
     PointerResult<FilesystemResultCodes, FilesystemDirectory> FAT32Directory::CreateDirectory(const minstd::string &new_directory_name)
@@ -345,7 +345,7 @@ namespace filesystems::fat32
 
         //  Return the new directory
 
-        return Result::Success(new_directory);
+        return Result::Success(minstd::move(new_directory));
     }
 
     FilesystemResultCodes FAT32Directory::RemoveDirectory()
@@ -446,13 +446,13 @@ namespace filesystems::fat32
 
             minstd::unique_ptr<File> file(static_cast<File *>(make_dynamic_unique<FAT32File>(FilesystemUUID(), *file_entry, path, mode, 0, 0).release()), __os_dynamic_heap_resource);
 
-            auto file_ref = GetFileMap().AddFile(file);
+            auto file_ref = GetFileMap().AddFile(minstd::move(file));
 
             ReturnOnFailure(file_ref);
 
             minstd::unique_ptr<File> file_wrapper(static_cast<File *>(make_dynamic_unique<FileWrapper>(minstd::move(*file_ref)).release()), __os_dynamic_heap_resource);
 
-            return Result::Success(file_wrapper);
+            return Result::Success(minstd::move(file_wrapper));
         }
 
         //  File does not exist, so we need to create it.
@@ -480,13 +480,13 @@ namespace filesystems::fat32
 
         minstd::unique_ptr<File> file(dynamic_cast<File *>(fat32_file.Value().release()), __os_dynamic_heap_resource);
 
-        auto file_ref = GetFileMap().AddFile(file);
+        auto file_ref = GetFileMap().AddFile(minstd::move(file));
 
         ReturnOnFailure(file_ref);
 
         minstd::unique_ptr<File> file_wrapper(static_cast<File *>(make_dynamic_unique<FileWrapper>(minstd::move(*file_ref)).release()), __os_dynamic_heap_resource);
 
-        return Result::Success(file_wrapper);
+        return Result::Success(minstd::move(file_wrapper));
     }
 
     PointerResult<FilesystemResultCodes, FAT32File> FAT32Directory::CreateFile(FAT32BlockIOAdapter &block_io_adapter, const minstd::string &filename, FileModes mode)
@@ -520,7 +520,7 @@ namespace filesystems::fat32
 
         minstd::unique_ptr<FAT32File> file(make_dynamic_unique<FAT32File>(FilesystemUUID(), *new_file_directory_entry, path, mode, 0, 0).release(), __os_dynamic_heap_resource);
 
-        return Result::Success(file);
+        return Result::Success(minstd::move(file));
     }
 
     FilesystemResultCodes FAT32Directory::SetDirectoryEntryFirstCluster(FAT32BlockIOAdapter &block_io_adapter, const FAT32DirectoryEntryAddress &address, FAT32ClusterIndex first_cluster)

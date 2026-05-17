@@ -322,7 +322,7 @@ namespace filesystems::fat32
         alignas(FAT32LongFilenameClusterEntry) uint8_t lfn_entries_buffer[sizeof(FAT32LongFilenameClusterEntry) * LFN_ENTRY_CAPACITY + alignof(FAT32LongFilenameClusterEntry) * LFN_ENTRY_CAPACITY];
         minstd::pmr::monotonic_buffer_resource lfn_entries_resource(lfn_entries_buffer, sizeof(lfn_entries_buffer), nullptr);
         minstd::pmr::polymorphic_allocator<FAT32LongFilenameClusterEntry> lfn_entries_allocator(&lfn_entries_resource);
-        minstd::vector<FAT32LongFilenameClusterEntry> lfn_entries(lfn_entries_allocator);
+        minstd::vector<FAT32LongFilenameClusterEntry> lfn_entries(lfn_entries_allocator, LFN_ENTRY_CAPACITY);
 
         //  Two cases: 1) Long file name is 8.3 compliant, so no LFN sequence is required or
         //             2) Long file name is not 8.3 compliant, so we need to create an LFN sequence.

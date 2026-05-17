@@ -48,7 +48,7 @@ namespace filesystems
 
             path->parsed_path_[0] = 0x00;
 
-            return Result::Success(path);
+            return Result::Success(minstd::move(path));
         }
 
         //  Determine if this is a relative path or not
@@ -78,6 +78,6 @@ namespace filesystems
 
         //  If we are down here, the path is legit
 
-        return Result::Success(path);
+        return Result::Success(minstd::move(path));
     }
 } // namespace filesystems

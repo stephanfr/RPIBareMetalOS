@@ -19,7 +19,7 @@ namespace filesystems
     public:
         FileMap() = default;
 
-        ReferenceResult<FilesystemResultCodes, File> AddFile(minstd::unique_ptr<File> file)
+        ReferenceResult<FilesystemResultCodes, File> AddFile(minstd::unique_ptr<File> &&file)
         {
             using Result = ReferenceResult<FilesystemResultCodes, File>;
 
