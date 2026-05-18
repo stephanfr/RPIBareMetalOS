@@ -72,11 +72,12 @@ CPP_SRC := $(foreach sdir,$(CPP_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
 OBJ := $(patsubst $(SRC_ROOT)/asm/%.S,$(BUILD_ROOT)/asm/%.o,$(ASM_SRC)) $(patsubst $(SRC_ROOT)/c/%.c,$(BUILD_ROOT)/c/%.o,$(C_SRC)) $(patsubst $(SRC_ROOT)/c/%.cpp,$(BUILD_ROOT)/c/%.o,$(CPP_SRC))
 
-INCLUDE_DIRS := -I../deps/baremetalbase/include -I../deps/minimalclib/include -I../deps/minimalstdio/include -I../deps/minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
-LDFLAGS += -L../deps/baremetalbase/lib/aarch64 -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64 
-LDLIBS = -lbaremetalbase -lminimalstdio -lminimalclib -lminimalstdlib
+INCLUDE_DIRS := -I../deps/fat32filesystem/include -I../deps/baremetalbase/include -I../deps/minimalclib/include -I../deps/minimalstdio/include -I../deps/minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
+LDFLAGS += -L../deps/fat32filesystem/lib/aarch64 -L../deps/baremetalbase/lib/aarch64 -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64 
+LDLIBS = -lfat32filesystem -lbaremetalbase -lminimalstdio -lminimalclib -lminimalstdlib
 
 BAREMETALBASE_LIB := ../deps/baremetalbase/lib/aarch64/libbaremetalbase.a
+FAT32FILESYSTEM_LIB := ../deps/fat32filesystem/lib/aarch64/libfat32filesystem.a
 
 LINKER_SCRIPT_TEMPLATE=link.template.ld
 LINKER_SCRIPT=$(BUILD_ROOT)/link.ld
@@ -94,11 +95,14 @@ $(IMG): $(ELF)
 	/bin/cp resources/*.txt image/.
 	/bin/cp resources/sd.img image/.
 
-$(ELF): $(OBJ) $(LINKER_SCRIPT) $(BAREMETALBASE_LIB)
+$(ELF): $(OBJ) $(LINKER_SCRIPT) $(BAREMETALBASE_LIB) $(FAT32FILESYSTEM_LIB)
 	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -g -T $(LINKER_SCRIPT) -o $(ELF)
 
 $(BAREMETALBASE_LIB):
 	$(MAKE) -C ../deps/baremetalbase lib
+
+$(FAT32FILESYSTEM_LIB):
+	$(MAKE) -C ../deps/fat32filesystem lib
 
 $(LINKER_SCRIPT): 
 	$(CPREPROCESSOR) -Iinclude  $(LINKER_SCRIPT_TEMPLATE) -o $(LINKER_SCRIPT)

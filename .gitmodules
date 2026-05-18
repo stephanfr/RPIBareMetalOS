@@ -10,3 +10,6 @@
 [submodule "deps/baremetalbase"]
 	path = deps/baremetalbase
 	url = https://github.com/stephanfr/baremetalbase.git
+[submodule "deps/fat32filesystem"]
+	path = deps/fat32filesystem
+	url = https://github.com/stephanfr/fat32filesystem.git
