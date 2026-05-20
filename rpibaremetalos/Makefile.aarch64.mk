@@ -10,6 +10,14 @@ IMAGE_DIR   := image
 
 QEMU                  := qemu-system-aarch64
 QEMU_REGRESSION_SCRIPT := test/tools/qemu_regression_test.py
+QEMU_CLI_SOAK_SCRIPT   := test/tools/qemu_cli_soak_test.py
+
+SOAK_DURATION_SECONDS          ?= 3600
+SOAK_MIN_INTERVAL_SECONDS      ?= 0.2
+SOAK_MAX_INTERVAL_SECONDS      ?= 1.0
+SOAK_PROGRESS_INTERVAL_SECONDS ?= 30
+SOAK_SEED                      ?=
+SOAK_EXTRA_ARGS                ?=
 
 BUILD_DIRS := $(IMAGE_DIR) $(BUILD_ROOT) \
 $(BUILD_ROOT)/asm \
@@ -175,4 +183,16 @@ qemu-regression: all
 		--qemu $(QEMU) \
 		--kernel $(BUILD_ROOT)/kernel8.elf \
 		--sdimage $(IMAGE_DIR)/sd.img
+
+qemu-cli-soak: all
+	python3 $(QEMU_CLI_SOAK_SCRIPT) \
+		--qemu $(QEMU) \
+		--kernel $(BUILD_ROOT)/kernel8.elf \
+		--sdimage $(IMAGE_DIR)/sd.img \
+		--duration-seconds $(SOAK_DURATION_SECONDS) \
+		--min-interval-seconds $(SOAK_MIN_INTERVAL_SECONDS) \
+		--max-interval-seconds $(SOAK_MAX_INTERVAL_SECONDS) \
+		--progress-interval-seconds $(SOAK_PROGRESS_INTERVAL_SECONDS) \
+		$(if $(SOAK_SEED),--seed $(SOAK_SEED),) \
+		$(SOAK_EXTRA_ARGS)
 	
