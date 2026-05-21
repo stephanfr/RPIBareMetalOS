@@ -29,7 +29,7 @@ namespace filesystems::fat32::test
 
         minstd::unique_ptr<ut_utility::InMemoryFileBlockIODevice> test_device = make_dynamic_unique<ut_utility::InMemoryFileBlockIODevice>("IN_MEMORY_TEST_DEVICE");
 
-        CHECK(test_device->Open("./test/data/test_fat32.img"));
+        CHECK(test_device->Open("../deps/fat32filesystem/test/data/test_fat32.img"));
 
         //  Load the partition - there should be just one
 

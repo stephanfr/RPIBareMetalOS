@@ -4,6 +4,10 @@
 
 include ../Makefile.native.mk
 
+ifneq ($(wildcard /opt/cpputest/include/CppUTest/TestHarness.h),)
+CPPUTEST_PATH := /opt/cpputest
+endif
+
 SRC_ROOT := src
 CPP_TEST_SRC_ROOT := test/src
 TEST_BUILD_ROOT := test/build
@@ -51,7 +55,12 @@ CDEFINES += -D__NO_LOGGING__
 # 		file in the C_SRC or CPP_SRC list.
 #
 
-test: clean checkdirs $(TEST_EXE)
+fat32-library-tests:
+	$(MAKE) -C ../deps/fat32filesystem -f Makefile.test.mk test CPPUTEST_PATH=$(CPPUTEST_PATH)
+
+test-local: clean checkdirs $(TEST_EXE)
+
+test: fat32-library-tests test-local
 
 $(TEST_EXE) : $(TEST_OBJ) $(OBJ)
 	$(LD) $(OBJ) $(TEST_OBJ) $(LDFLAGS) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
