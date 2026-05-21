@@ -71,7 +71,7 @@ namespace
 
         //  Compare with equality with the reference file
 
-        ut_utility::FILE_EQUAL("./test/data/Lorem_ipsum_dolor_sit_amet.txt", buffer);
+        ut_utility::FILE_EQUAL("../deps/fat32filesystem/test/data/Lorem_ipsum_dolor_sit_amet.txt", buffer);
 
         //  Close and Delete the file and check it is gone
 
@@ -109,7 +109,7 @@ namespace
 
         //  Compare with equality with the reference file
 
-        ut_utility::FILE_EQUAL("./test/data/A_diam_maecenas_sed_enim_ut sem.Pellentesque", buffer);
+        ut_utility::FILE_EQUAL("../deps/fat32filesystem/test/data/A_diam_maecenas_sed_enim_ut sem.Pellentesque", buffer);
 
         //  Close and Delete the file and check it is gone
 
@@ -219,7 +219,7 @@ namespace
 
             //  Read the data file from the test data directory
 
-            ut_utility::ReadFile("./test/data/long_test_file.txt", reference_buffer);
+            ut_utility::ReadFile("../deps/fat32filesystem/test/data/long_test_file.txt", reference_buffer);
 
             //  Append the large buffer to the file twice
 
@@ -584,7 +584,7 @@ namespace
 
             //  Read the data file from the test data directory
 
-            ut_utility::ReadFile("./test/data/long_test_file.txt", reference_buffer);
+            ut_utility::ReadFile("../deps/fat32filesystem/test/data/long_test_file.txt", reference_buffer);
 
             //  Append the large buffer to the file twice
 

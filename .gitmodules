@@ -7,3 +7,6 @@
 [submodule "deps/minimalstdlib"]
 	path = deps/minimalstdlib
 	url = https://github.com/stephanfr/minimalstdlib.git
+[submodule "deps/fat32filesystem"]
+	path = deps/fat32filesystem
+	url = https://github.com/stephanfr/fat32filesystem.git
