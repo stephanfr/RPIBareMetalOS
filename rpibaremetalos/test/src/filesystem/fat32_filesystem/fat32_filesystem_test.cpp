@@ -4,9 +4,15 @@
 
 #include "../../cpputest_support.h"
 
+#include <__memory_resource/monotonic_buffer_resource.h>
+#include <__memory_resource/polymorphic_allocator.h>
+
+#include "../../utility/in_memory_blockio_device.h"
+
 #include "filesystem/fat32_directory_cluster.h"
 #include "filesystem/fat32_filesystem.h"
 #include "filesystem/filesystems.h"
+#include "filesystem/master_boot_record.h"
 
 #include "devices/log.h"
 
@@ -147,6 +153,87 @@ namespace
         CHECK(get_filesystem_result->GetDirectory(minstd::fixed_string<>("/subdir1/Lorem ipsum dolor sit amet.text")).Failed());
         CHECK(get_filesystem_result->GetDirectory(minstd::fixed_string<>("/subdir2/subdir2_2/subdir_2_2_1/subdir_2_2_1_")).Failed());
         CHECK(get_filesystem_result->GetDirectory(minstd::fixed_string<>("/subdir2/subdir2_5/subdir_2_1_1/subdir_2_1_1_3")).Failed());
+    }
+
+    TEST(FAT32Filesystem, GetRootDirectoryTest)
+    {
+        auto get_filesystem_result = GetOSEntityRegistry().GetEntityByName<FAT32Filesystem>("test_fat32");
+        CHECK(get_filesystem_result.Successful());
+
+        auto root_dir_result = get_filesystem_result->GetRootDirectory();
+        CHECK(root_dir_result.Successful());
+        CHECK(root_dir_result->AbsolutePath() == "/");
+    }
+
+    TEST(FAT32Filesystem, GetDirectoryInvalidPathNegativeTest)
+    {
+        auto get_filesystem_result = GetOSEntityRegistry().GetEntityByName<FAT32Filesystem>("test_fat32");
+        CHECK(get_filesystem_result.Successful());
+
+        //  Empty path must fail ParsePathString
+        CHECK(get_filesystem_result->GetDirectory(minstd::fixed_string<>("")).Failed());
+
+        //  Path with trailing whitespace must also fail
+        CHECK(get_filesystem_result->GetDirectory(minstd::fixed_string<>("/subdir1 ")).Failed());
+    }
+
+    TEST(FAT32Filesystem, MountNonFAT32PartitionNegativeTest)
+    {
+        ut_utility::InMemoryFileBlockIODevice test_device("NON_FAT32_TEST_DEVICE");
+        CHECK(test_device.Open("../deps/fat32filesystem/test/data/test_fat32.img"));
+
+        //  Build a partition whose type is not FAT32
+        uint8_t opaque_data[64] = {};
+        MassStoragePartition non_fat32_partition("non_fat32", "NON_FAT32", FilesystemTypes::UNKNOWN, false, opaque_data, sizeof(opaque_data));
+
+        auto result = FAT32Filesystem::Mount(false, "non_fat32_test", "NON_FAT32", false, test_device, non_fat32_partition);
+
+        CHECK(result.Failed());
+        CHECK_EQUAL(FilesystemResultCodes::FAT32_NOT_A_FAT32_FILESYSTEM, result.ResultCode());
+    }
+
+    TEST(FAT32Filesystem, MountAdapterReadFailureNegativeTest)
+    {
+        alignas(MassStoragePartition) uint8_t partition_buffer[sizeof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE + alignof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE];
+        minstd::pmr::monotonic_buffer_resource partition_resource(partition_buffer, sizeof(partition_buffer), nullptr);
+        minstd::pmr::polymorphic_allocator<MassStoragePartition> partition_allocator(&partition_resource);
+        MassStoragePartitions partitions(partition_allocator);
+
+        ut_utility::InMemoryFileBlockIODevice test_device("FAIL_MOUNT_TEST_DEVICE");
+        CHECK(test_device.Open("../deps/fat32filesystem/test/data/test_fat32.img"));
+
+        //  Read partitions successfully before triggering the error
+        CHECK(GetPartitions(test_device, partitions) == FilesystemResultCodes::SUCCESS);
+        CHECK_EQUAL(1, partitions.size());
+
+        //  The next read will fail — this is the read FAT32BlockIOAdapter::Mount issues
+        test_device.SimulateReadError();
+
+        auto result = FAT32Filesystem::Mount(false, "fail_mount_test", "FAILMOUNT", false, test_device, partitions[0]);
+
+        CHECK(result.Failed());
+    }
+
+    TEST(FAT32Filesystem, MountPermanentFilesystemTest)
+    {
+        alignas(MassStoragePartition) uint8_t partition_buffer[sizeof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE + alignof(MassStoragePartition) * MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE];
+        minstd::pmr::monotonic_buffer_resource partition_resource(partition_buffer, sizeof(partition_buffer), nullptr);
+        minstd::pmr::polymorphic_allocator<MassStoragePartition> partition_allocator(&partition_resource);
+        MassStoragePartitions partitions(partition_allocator);
+
+        ut_utility::InMemoryFileBlockIODevice test_device("PERM_MOUNT_TEST_DEVICE");
+        CHECK(test_device.Open("../deps/fat32filesystem/test/data/test_fat32.img"));
+        CHECK(GetPartitions(test_device, partitions) == FilesystemResultCodes::SUCCESS);
+        CHECK_EQUAL(1, partitions.size());
+
+        //  Mount as permanent — exercises the make_static_unique path in Mount()
+        auto result = FAT32Filesystem::Mount(true, "perm_test_fat32", "PERMTEST", false, test_device, partitions[0]);
+
+        CHECK(result.Successful());
+
+        //  Verify the mounted filesystem is usable
+        auto root_dir = result->GetDirectory(minstd::fixed_string<>("/"));
+        CHECK(root_dir.Successful());
     }
 
     TEST(FAT32Filesystem, TestDirectoryCreation)
