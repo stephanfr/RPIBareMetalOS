@@ -104,9 +104,8 @@ COVERAGE_EXE := $(COVERAGE_OBJ_DIR)/coverage.exe
 
 test-coverage : clean checkdirs $(COVERAGE_EXE)
 	cd $(COVERAGE_OBJ_DIR)
-	gcov ../cpputest_main.cpp --object-directory .
-	lcov --capture --directory . --output-file $(COVERAGE_OBJ_DIR)/test_coverage.info
-	lcov --remove $(COVERAGE_OBJ_DIR)/test_coverage.info '/usr/include/*' '$(CPPUTEST_PATH)/*' --output-file $(COVERAGE_OBJ_DIR)/test_coverage_filtered.info
+	lcov --branch-coverage --capture --directory . --output-file $(COVERAGE_OBJ_DIR)/test_coverage.info --ignore-errors mismatch
+	lcov --branch-coverage --remove $(COVERAGE_OBJ_DIR)/test_coverage.info '/usr/include/*' '$(CPPUTEST_PATH)/*' --ignore-errors unused --output-file $(COVERAGE_OBJ_DIR)/test_coverage_filtered.info
 	genhtml $(COVERAGE_OBJ_DIR)/test_coverage_filtered.info --output-directory $(COVERAGE_OBJ_DIR)/coverage_report
 
 $(COVERAGE_EXE) : $(COVERAGE_TEST_OBJ) $(COVERAGE_OBJ) 
