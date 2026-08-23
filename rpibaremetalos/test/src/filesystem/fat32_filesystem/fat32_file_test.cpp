@@ -295,6 +295,103 @@ namespace
         CHECK_EQUAL(0, read_buffer.size());
     }
 
+    TEST(FAT32File, SeekEndOnEmptyFile)
+    {
+        auto filesystem = GetOSEntityRegistry().GetEntityByName<FAT32Filesystem>("test_fat32");
+
+        CHECK(filesystem.Successful());
+
+        auto directory = filesystem->GetDirectory(minstd::fixed_string<>((const char *)"/file testing"));
+
+        CHECK(directory.Successful());
+
+        auto new_file = directory->OpenFile(minstd::fixed_string<>("empty seek file.txt"), FileModes::CREATE | FileModes::READ_WRITE_APPEND);
+
+        CHECK(new_file.Successful());
+
+        CHECK(Successful(new_file->SeekEnd()));
+
+        minstd::stack_buffer<uint8_t, 16384> read_buffer;
+
+        CHECK(Successful(new_file->Read(read_buffer)));
+        CHECK_EQUAL(0, read_buffer.size());
+    }
+
+    TEST(FAT32File, SeekBeyondEOF)
+    {
+        auto filesystem = GetOSEntityRegistry().GetEntityByName<FAT32Filesystem>("test_fat32");
+
+        CHECK(filesystem.Successful());
+
+        auto directory = filesystem->GetDirectory(minstd::fixed_string<>((const char *)"/file testing"));
+
+        CHECK(directory.Successful());
+
+        auto new_file = directory->OpenFile(minstd::fixed_string<>("seek beyond eof.txt"), FileModes::CREATE | FileModes::READ_WRITE_APPEND);
+
+        CHECK(new_file.Successful());
+
+        minstd::stack_buffer<uint8_t, 1024> buffer_to_append;
+        buffer_to_append.append((uint8_t *)"0123456789", 10);
+
+        CHECK(Successful(new_file->Append(buffer_to_append)));
+        CHECK(Successful(new_file->Close()));
+
+        auto reopen_file = directory->OpenFile(minstd::fixed_string<>("seek beyond eof.txt"), FileModes::READ_WRITE_APPEND);
+
+        CHECK(reopen_file.Successful());
+
+        CHECK(Successful(reopen_file->Seek(1000)));
+
+        minstd::stack_buffer<uint8_t, 1024> read_buffer;
+        CHECK(Successful(reopen_file->Read(read_buffer)));
+        CHECK_EQUAL(0, read_buffer.size());
+    }
+
+    TEST(FAT32File, SeekBackwardWithinFile)
+    {
+        auto filesystem = GetOSEntityRegistry().GetEntityByName<FAT32Filesystem>("test_fat32");
+
+        CHECK(filesystem.Successful());
+
+        auto directory = filesystem->GetDirectory(minstd::fixed_string<>((const char *)"/file testing"));
+
+        CHECK(directory.Successful());
+
+        auto new_file = directory->OpenFile(minstd::fixed_string<>("seek backward file.txt"), FileModes::CREATE | FileModes::READ_WRITE_APPEND);
+
+        CHECK(new_file.Successful());
+
+        uint8_t file_contents[1000];
+        memset(file_contents, 'A', sizeof(file_contents));
+
+        minstd::stack_buffer<uint8_t, 1024> append_buffer;
+        append_buffer.append(file_contents, sizeof(file_contents));
+
+        CHECK(Successful(new_file->Append(append_buffer)));
+        CHECK_EQUAL(1000, *(new_file->Size()));
+
+        CHECK(Successful(new_file->Seek(500)));
+
+        minstd::stack_buffer<uint8_t, 1> write_buffer;
+        write_buffer.append((const uint8_t *)"B", 1);
+
+        CHECK(Successful(new_file->Write(write_buffer)));
+
+        CHECK(Successful(new_file->Seek(0)));
+
+        minstd::stack_buffer<uint8_t, 1000> read_buffer;
+        CHECK(Successful(new_file->Read(read_buffer)));
+
+        CHECK_EQUAL(1000, read_buffer.size());
+        CHECK_EQUAL('A', ((char *)read_buffer.data())[0]);
+        CHECK_EQUAL('B', ((char *)read_buffer.data())[500]);
+        CHECK_EQUAL('A', ((char *)read_buffer.data())[999]);
+
+        CHECK(Successful(new_file->Close()));
+        CHECK(Successful(directory->DeleteFile(minstd::fixed_string<>("seek backward file.txt"))));
+    }
+
     TEST(FAT32File, Seek)
     {
         auto filesystem = GetOSEntityRegistry().GetEntityByName<FAT32Filesystem>("test_fat32");

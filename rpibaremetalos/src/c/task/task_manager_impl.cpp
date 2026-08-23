@@ -260,8 +260,6 @@ namespace task
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
-        NonPreemptableSection non_preemptable_section;
-
         MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock(task_definition.stack_size_in_bytes_);
 
         if (free_block == 0)
@@ -307,8 +305,6 @@ namespace task
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::CloneTask(const TaskDefinition &task_definition, MemoryPagePointer stack)
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
-
-        NonPreemptableSection non_preemptable_section;
 
         MemoryPagePointer free_block = GetMemoryManager().GetFreeBlock(task_definition.stack_size_in_bytes_);
 

@@ -59,6 +59,16 @@ namespace filesystems::fat32
 
         position = minstd::min(position, directory_entry_.Size());
 
+        //  If the target position is before the current position, reset to the file start.
+        //  This ensures absolute seeks move backwards as well as forwards.
+
+        if (position < byte_offset_into_file_)
+        {
+            current_cluster_ = first_cluster_;
+            byte_offset_into_cluster_ = 0;
+            byte_offset_into_file_ = 0;
+        }
+
         //  Read from the current cluster and offset and append to the buffer until the buffer is full.
 
         uint32_t bytes_in_block = block_io_adapter.BytesPerCluster();

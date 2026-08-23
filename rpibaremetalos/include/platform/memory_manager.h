@@ -6,15 +6,12 @@
 
 #include <os_config.h>
 
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <strong_typedef>
-#include <vector>
-
-#include <__memory_resource/polymorphic_allocator.h>
 
 #include "asm_globals.h"
-#include "synchronization.h"
 
 #include "os_entity.h"
 
@@ -74,10 +71,7 @@ private:
     uint64_t free_memory_start_ = 0;
     uint64_t num_pages_ = 0;
 
-    SpinLock memory_map_spinlock_{true};
-
-    minstd::pmr::polymorphic_allocator<minstd::vector<uint8_t>::element_type> mem_map_allocator_;
-    minstd::vector<uint8_t> mem_map_;
+    minstd::atomic<uint8_t> *page_map_ = nullptr;
 
     uint64_t PagesInBlock(uint64_t block_size) const
     {
