@@ -6,7 +6,7 @@
 
 #include "task/task_impl.h"
 
-#include <lockfree/spsc_queue>
+#include <lockfree/mp_sc_growable_ring_queue>
 
 #include "asm_utility.h"
 
@@ -94,7 +94,7 @@ namespace task
     class InterContextMessageQueue
     {
     public:
-        static constexpr size_t MAX_QUEUE_LENGTH = 64;
+        static constexpr size_t MAX_QUEUE_LENGTH = 256;
 
         InterContextMessageQueue() = default;
 
@@ -109,7 +109,7 @@ namespace task
             {
                 //  Spin until we can add the message
                 LogWarning("InterContextMessageQueue::SendMessage - Queue full, spinning\n");
-                CPUTicksDelay(1000);
+                CPUTicksDelay(100);
             }
         }
 
@@ -119,13 +119,10 @@ namespace task
         }
 
     private:
-        using TaskQueue = minstd::spsc_queue<InterContextMessage>;
-        using TaskQueueAllocator = minstd::allocator<TaskQueue::value_type>;
-        using TaskQueueHeapAllocator = minstd::pmr::polymorphic_allocator<TaskQueue::value_type>;
+        using TaskQueue = minstd::mp_sc_growable_ring_queue<InterContextMessage>;
+        using TaskQueueHeapAllocator = minstd::pmr::polymorphic_allocator<TaskQueue::slot_type>;
 
-        //  The queue can go into the static heap as it is a fixed size
-
-        TaskQueueHeapAllocator queue_heap_allocator_{&__os_static_heap_resource};
-        TaskQueue queue_{queue_heap_allocator_, MAX_QUEUE_LENGTH};
+        TaskQueueHeapAllocator queue_allocator_{&__os_static_heap_resource};
+        TaskQueue queue_{queue_allocator_, MAX_QUEUE_LENGTH};
     };
 } // namespace task
