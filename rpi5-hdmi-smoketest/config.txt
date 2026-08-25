@@ -1,0 +1,8 @@
+core_freq_min=500
+arm_64bit=1
+kernel=kernel8.img
+
+# Deliberately no 'armstub=' line: this lets the firmware's own default
+# armstub run, which is what parks CPU cores 1-3 in a spin loop and hands
+# control to kernel8.img on core 0 only at EL2. See README.md and
+# src/start.S for why that matters here.
