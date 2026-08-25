@@ -29,8 +29,14 @@ framebuffer writes.
 
 ## Build
 
-Requires the same `arm-gnu-toolchain-13.3.rel1-*-aarch64-none-elf` toolchain
-the main project uses, under `~/dev_tools` (or pass `TOOLS=...`).
+Uses the same `arm-gnu-toolchain-13.3.rel1-*-aarch64-none-elf` toolchain
+layout the main project expects, under `~/dev_tools` (or pass `TOOLS=...`).
+Any `aarch64-none-elf-*` or `aarch64-linux-gnu-*` cross-toolchain works --
+e.g. Ubuntu/Debian's `gcc-aarch64-linux-gnu` package is a fine substitute;
+point `TOOLS` at a directory laid out like
+`$(TOOLS)/arm-gnu-toolchain-13.3.rel1-<host-arch>-aarch64-none-elf/bin/` with
+`aarch64-none-elf-{gcc,ld,objcopy}` in it (symlinks to the `aarch64-linux-gnu-*`
+binaries are enough).
 
 ```
 make BOARD=rpi4    # build the known-good baseline first
@@ -39,12 +45,16 @@ make BOARD=rpi5    # then the actual target
 
 Each produces `image/<board>/kernel8.img`.
 
-**This has not been build-tested in the session that wrote it** -- there
-was no aarch64 cross-toolchain available in that sandbox. The C sources
-were syntax-checked with a native host compiler (`-fsyntax-only`), and the
-assembly/linker script were reviewed by hand, but `make` itself needs to be
-run for the first time on a machine with the real toolchain installed
-before trusting the output.
+Both configurations have been built successfully (with `gcc-aarch64-linux-gnu`
+13.3.0 standing in for `aarch64-none-elf-gcc`), confirming the sources
+compile and link cleanly, the linker script's symbol arithmetic
+(`__bss_size_in_double_words`, `__stack_top`, etc.) resolves correctly, and
+the Pi 5 mailbox base address constant is emitted as expected in the
+compiled code. **What this build check cannot confirm is anything about
+actual hardware behavior** -- whether the firmware accepts the mailbox
+message, whether the returned framebuffer address needs the `0x3FFFFFFF`
+mask, or whether pixels actually land on screen. Those still need a real
+board and a monitor.
 
 ## Try it on Pi 4 first
 

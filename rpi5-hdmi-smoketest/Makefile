@@ -36,6 +36,12 @@ CC      := $(GCC_TOOLS_PATH)aarch64-none-elf-gcc
 LD      := $(GCC_TOOLS_PATH)aarch64-none-elf-ld
 OBJCOPY := $(GCC_TOOLS_PATH)aarch64-none-elf-objcopy
 
+# -nostdinc below drops libc's headers (correctly -- we're freestanding) but
+# also drops GCC's own bundled freestanding headers (stdint.h etc.) unless
+# we add that directory back explicitly, same as the main project's
+# Makefile.toolchain.aarch64.mk does for its toolchain.
+GCC_FREESTANDING_INCLUDE := $(shell $(CC) -print-file-name=include)
+
 BUILD_ROOT := build/$(BOARD)
 IMAGE_DIR  := image/$(BOARD)
 
@@ -43,7 +49,7 @@ ASM_FLAGS := -Wall -Og -ffreestanding -mcpu=$(MCPU) -mstrict-align $(BOARD_DEFIN
 C_FLAGS   := -std=c17 -Wall -Og -ffreestanding -fno-stack-protector \
              -nostdinc -nostdlib -nostartfiles -fno-exceptions \
              -mcpu=$(MCPU) -mstrict-align -mno-outline-atomics \
-             $(BOARD_DEFINE) -Iinclude
+             $(BOARD_DEFINE) -Iinclude -I$(GCC_FREESTANDING_INCLUDE)
 
 LDFLAGS := -nostdlib -static
 
