@@ -131,11 +131,15 @@ int fb_allocate(fb_info_t *out)
     mbox_buf[i++] = 0; // total size in bytes, fixed up below
     mbox_buf[i++] = 0; // request code
 
+    int phys_tag_index = i;
+
     mbox_buf[i++] = MBOX_TAG_SET_PHYS_WH;
     mbox_buf[i++] = 8;
     mbox_buf[i++] = 0;
     mbox_buf[i++] = width;
     mbox_buf[i++] = height;
+
+    int virt_tag_index = i;
 
     mbox_buf[i++] = MBOX_TAG_SET_VIRT_WH;
     mbox_buf[i++] = 8;
@@ -212,9 +216,28 @@ int fb_allocate(fb_info_t *out)
     out->framebuffer_addr = fb_addr_raw & 0x3FFFFFFFu;
     out->framebuffer_size = fb_size;
     out->pitch = pitch;
-    out->width = width;
-    out->height = height;
     out->depth = 32;
+
+    out->requested_width = width;
+    out->requested_height = height;
+
+    //  Per the mailbox property-interface docs: "the response may not be
+    //      the same as the request so it must be checked" -- read back what
+    //      the firmware actually applied instead of assuming our request
+    //      was honored verbatim. Using the un-corrected request values here
+    //      was the bug behind a stretched/wrong-aspect-ratio image on Pi 5:
+    //      our own pixel math stayed internally consistent, but consistent
+    //      with a resolution the firmware never actually applied.
+
+    out->width = mbox_buf[phys_tag_index + 3];
+    out->height = mbox_buf[phys_tag_index + 4];
+    out->virtual_width = mbox_buf[virt_tag_index + 3];
+    out->virtual_height = mbox_buf[virt_tag_index + 4];
+
+    if (out->width == 0 || out->height == 0)
+    {
+        return 0;
+    }
 
     return 1;
 }

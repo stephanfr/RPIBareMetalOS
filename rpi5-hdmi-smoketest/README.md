@@ -82,13 +82,45 @@ whether the corrected mailbox base address is right.
 ## What you should see
 
 - The screen clears to black.
-- Green text: a banner naming the board, followed by "see color bars for
-  confirmation".
+- Green text: a banner naming the board, then four lines of numbers --
+  what `GET_PHYSICAL_WIDTH_HEIGHT` reported, what the firmware actually
+  applied to the physical and virtual size requests, and the pitch. Compare
+  "Applied physical" against your monitor's real native resolution.
 - A row of five color bars (red, green, blue, yellow, white) partway down
   the screen.
 - A small red square in the top-left corner that blinks on/off roughly
   once a second (proof the core is still alive and looping, not just that
   one frame got drawn and then it hung or crashed).
+
+## Known issue: stretched / wrong aspect ratio on Pi 5
+
+Confirmed on real Pi 5 hardware: the image displays (right colors, right
+text, core stays alive) but looks stretched -- e.g. the heartbeat square
+isn't square. Pi 4 does not show this.
+
+Root cause found and fixed: `fb_allocate()` in `src/mailbox.c` was sending
+`SET_PHYSICAL_WIDTH_HEIGHT`/`SET_VIRTUAL_WIDTH_HEIGHT` requests but never
+reading back what the firmware actually applied -- it just trusted the
+requested values, even though the property-interface docs explicitly warn
+"the response may not be the same as the request." `fb_info_t` now carries
+both the requested and applied width/height, and the on-screen banner
+prints all of them.
+
+If the image is still stretched after this fix, the *next* thing to check
+using the new banner numbers: does "Applied physical" match your monitor's
+actual native resolution?
+- If it doesn't match, the firmware is reporting one thing via
+  `GET_PHYSICAL_WIDTH_HEIGHT`/`SET_PHYSICAL_WIDTH_HEIGHT` while actually
+  scanning out a different mode -- plausible on Pi 5's newer HVS-based
+  display pipeline, where the mailbox's idea of "physical size" may not
+  drive the real output timing the way it does on Pi3/4. The fix in that
+  case is to stop trusting the query/response entirely and instead force a
+  specific mode in `config.txt` (`hdmi_group`/`hdmi_mode`, or
+  `hdmi_cvt`/`hdmi_timings` for an exact custom timing) that matches a
+  resolution you then hardcode in `fb_allocate()`.
+- If it matches, the stretching is happening downstream of what this code
+  controls -- e.g. the monitor itself scaling a correctly-sized signal (a
+  cable/EDID/monitor-settings problem, not a firmware or code one).
 
 ## If nothing shows up
 

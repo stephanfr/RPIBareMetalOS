@@ -16,9 +16,13 @@
 
 typedef struct
 {
-    uint32_t width;
+    uint32_t requested_width;  // what GET_PHYSICAL_WIDTH_HEIGHT reported (or the fallback), before SET
+    uint32_t requested_height;
+    uint32_t width;             // physical width/height the firmware actually applied (SET_PHYSICAL_WIDTH_HEIGHT response)
     uint32_t height;
-    uint32_t pitch;            // bytes per scanline
+    uint32_t virtual_width;     // virtual width/height actually applied (SET_VIRTUAL_WIDTH_HEIGHT response)
+    uint32_t virtual_height;
+    uint32_t pitch;             // bytes per scanline, as actually applied
     uint32_t depth;             // bits per pixel (always 32 here)
     uint32_t framebuffer_addr;  // ARM-side physical address of the framebuffer
     uint32_t framebuffer_size;  // bytes
