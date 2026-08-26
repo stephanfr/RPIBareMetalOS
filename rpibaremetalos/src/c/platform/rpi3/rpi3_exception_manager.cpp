@@ -39,67 +39,44 @@ void BCM2837ExceptionManager::HandleInterrupt()
     LogEntryAndExit("Entering HandleInterrupt\n");
 
     uint32_t core_id = GetCoreID();
-
-    //  We have two different interrupt types to handle.  Core mailboxes are used for inter-processor interrupts
-    //      and the GPU interrupt is used for system timer interrupts.  GPU interrupts are always routed to
-    //      core 0, whereas core mailboxes are routed to the core written to when triggering the interrupt.
-    //
-    //  The local interrupt source register is read to determine the source of the interrupt, core mailbox zero
-    //      for ipi interrupts and the GPU interrupt for GPU peripherals.
-    //
-    //  The different interrupt types are 'normalized' to a common Interrupts enum type to allow for a single
-    //      ISR model for both interrupt types.
-
     uint32_t interrupt_source = GetCoreLocalInterruptSource(core_id);
-
-    Interrupts interrupt = Interrupts::NO_SUCH_INTERRUPT;
-
-    if ((interrupt_source & static_cast<BCM2837ARMLocalInterruptSources>((uint32_t)BCM2837ARMLocalInterruptSources::MAILBOX_0 << IPI_MAILBOX_ID)) != BCM2837ARMLocalInterruptSources::NONE)
-    {
-        interrupt = ExceptionManager::AsInterrupt(static_cast<InterprocessorInterrupts>(GetCoreMailbox(core_id, IPI_MAILBOX_ID)));
-        ResetCoreMailbox(core_id, IPI_MAILBOX_ID, 0xFFFFFFFF); //  Reset the mailbox value otherwise the interrupt will be triggered again
-    }
-    else if ((interrupt_source & BCM2837ARMLocalInterruptSources::GPU_INTERRUPT) != BCM2837ARMLocalInterruptSources::NONE)
-    {
-        interrupt = AsInterrupt(static_cast<BCM2837Interrupts>(GetRegister(BCM2837ARMCInterruptRequestRegisters::REQUEST_PENDING_1)));
-    }
-
-    //  If we do not have an interrupt type, then return now.
-
-    if (interrupt == Interrupts::NO_SUCH_INTERRUPT)
-    {
-        LogWarning("Unhandled interrupt source: %d\n", interrupt_source);
-        return;
-    }
-
-    //  Get the ISRs for the interrupt type and execute
-
-    ISRPointerList *isrs = GetISRs(interrupt);
-
-    //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
 
     InterruptServiceRoutine *core_task_switch_isr = nullptr;
 
-    if (isrs != nullptr)
+    if ((interrupt_source & static_cast<BCM2837ARMLocalInterruptSources>((uint32_t)BCM2837ARMLocalInterruptSources::MAILBOX_0 << IPI_MAILBOX_ID)) != BCM2837ARMLocalInterruptSources::NONE)
     {
-        for (InterruptServiceRoutine *current_isr : *isrs)
+        uint32_t ipi_payload = GetCoreMailbox(core_id, IPI_MAILBOX_ID);
+
+        //  Clear by writing back exactly the bits that were read, which is
+        //      what the mailbox's write-high-to-clear register expects.
+
+        ResetCoreMailbox(core_id, IPI_MAILBOX_ID, ipi_payload);
+
+        Interrupts interrupt = DecodeIPIMailboxPayload(core_id, ipi_payload);
+
+        bool recognized_any = DispatchIPIMailboxPayload(ipi_payload, [&](Interrupts interrupt)
         {
-            if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
-            {
-                core_task_switch_isr = current_isr;
-            }
-            else
-            {
-                current_isr->HandleInterrupt();
-            }
+            DispatchInterruptType(interrupt, core_task_switch_isr);
+        });
+
+        if (!recognized_any)
+        {
+            LogWarning("Unhandled IPI mailbox payload: %u\n", ipi_payload);
         }
     }
-    else
+    else if ((interrupt_source & BCM2837ARMLocalInterruptSources::GPU_INTERRUPT) != BCM2837ARMLocalInterruptSources::NONE)
     {
-        LogError("No ISRs found for Interrupt: %s\n", ToString(interrupt));
-    }
+        Interrupts interrupt = AsInterrupt(static_cast<BCM2837Interrupts>(GetRegister(BCM2837ARMCInterruptRequestRegisters::REQUEST_PENDING_1)));
 
-    //  Execute the task scheduler now if we have one.
+        if (interrupt == Interrupts::NO_SUCH_INTERRUPT)
+        {
+            LogWarning("Unhandled interrupt source: %d\n", interrupt_source);
+        }
+        else if (!DispatchInterruptType(interrupt, core_task_switch_isr))
+        {
+            LogError("No ISRs found for Interrupt: %s\n", ToString(interrupt));
+        }
+    }
 
     if (core_task_switch_isr != nullptr)
     {

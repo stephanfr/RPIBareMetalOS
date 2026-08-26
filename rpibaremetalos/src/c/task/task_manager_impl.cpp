@@ -181,9 +181,36 @@ namespace task
         return TaskResultCodes::SUCCESS;
     }
 
+    namespace
+    {
+        uint64_t DeadlineFromNow(uint64_t timeout_in_microseconds)
+        {
+            uint64_t counter_frequency;
+
+            asm volatile("mrs %0, cntfrq_el0" : "=r"(counter_frequency));
+
+            uint64_t ticks_per_microsecond = counter_frequency / 1000000;
+
+            if (ticks_per_microsecond == 0)
+            {
+                ticks_per_microsecond = 1;
+            }
+
+            return PhysicalTimer::CurrentTicks() + (ticks_per_microsecond * timeout_in_microseconds);
+        }
+    }
+
     TaskResultCodes TaskManagerImpl::StartSecondaryCores()
     {
         LogEntryAndExit("Starting %d secondary cores\n", number_of_cores_);
+
+        //  Both waits below are bounded. Previously they were unbounded, so a
+        //      secondary core that never reached the expected state hung the
+        //      boot silently with no indication of which core or which stage
+        //      was stuck. Reporting and continuing single-core is strictly
+        //      better than hanging: the OS still reaches a usable CLI.
+
+        constexpr uint64_t CORE_STATE_TIMEOUT_IN_MICROSECONDS = 1000000; //  1 second
 
         for (uint32_t core_id = 1; core_id < number_of_cores_; core_id++)
         {
@@ -197,10 +224,21 @@ namespace task
 
             CPUTicksDelay(1000);
 
+            //  Wait for the core to reach SecondaryCoreMain
+
+            uint64_t deadline = DeadlineFromNow(CORE_STATE_TIMEOUT_IN_MICROSECONDS);
+
             uint32_t current_state = __core_state[core_id].load();
 
-            while (current_state != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain && current_state != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
+            while ((current_state != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain) &&
+                   (current_state != (uint32_t)CoreInitializationStates::ExecutingApplicationCode))
             {
+                if (PhysicalTimer::CurrentTicks() >= deadline)
+                {
+                    LogFatal("Core %d never reached SecondaryCoreMain -- last state: %d\n", core_id, current_state);
+                    return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
+                }
+
                 CPUTicksDelay(1000);
 
                 current_state = __core_state[core_id].load();
@@ -212,15 +250,29 @@ namespace task
 
             CPUTicksDelay(1000);
 
-            while (__core_state[core_id].load() != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
+            //  Wait for the core to act on the IPI and pick up the Idle Task
+
+            deadline = DeadlineFromNow(CORE_STATE_TIMEOUT_IN_MICROSECONDS);
+
+            current_state = __core_state[core_id].load();
+
+            while (current_state != (uint32_t)CoreInitializationStates::ExecutingApplicationCode)
             {
+                if (PhysicalTimer::CurrentTicks() >= deadline)
+                {
+                    LogFatal("Core %d did not act on the CORE_TASK_SWITCH IPI -- last state: %d\n", core_id, current_state);
+                    return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
+                }
+
                 CPUTicksDelay(1000);
+
+                current_state = __core_state[core_id].load();
             }
         }
 
         return TaskResultCodes::SUCCESS;
     }
-
+    
     void TaskManagerImpl::SetCoreMainTaskContext(minstd::unique_ptr<TaskImpl> &task)
     {
         kernel_main_tasks_[GetCoreID()] = task.get();

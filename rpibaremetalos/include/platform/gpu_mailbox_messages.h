@@ -371,13 +371,7 @@ public:
 //      https://github.com/raspberrypi/firmware/wiki/Mailbox-property-interface
 //
 //  IMPORTANT: several of these tags' responses are NOT guaranteed to match
-//      the request -- the firmware may clamp or otherwise adjust what was
-//      asked for. This was confirmed as a real, hardware-observed bug (a
-//      stretched/wrong-aspect-ratio image on Raspberry Pi 5) during the
-//      standalone rpi5-hdmi-smoketest bring-up project. Always read values
-//      back via each tag's GetApplied*()/Get*() accessor after
-//      sendMessage() -- never assume the constructor's arguments are what
-//      actually applied.
+//      the request -- the firmware may clamp or otherwise adjust what was requested.
 //
 
 //
@@ -440,11 +434,6 @@ public:
     {
         return "SetPhysicalWidthHeightTag";
     }
-
-    //  NOTE: the mailbox docs warn the applied value may differ from what
-    //      was requested (e.g. firmware clamping to a supported mode).
-    //      Callers MUST use these, not the constructor arguments, when
-    //      computing pixel offsets / pitch / console dimensions.
 
     uint32_t GetAppliedWidth() const
     {
@@ -659,12 +648,10 @@ public:
     //      top bits used as a cache-alias selector (e.g. 0xC0000000 for an
     //      uncached alias of physical RAM) rather than a plain ARM
     //      physical address. Masking them off (e.g. '& 0x3FFFFFFF') is the
-    //      standard convention in Pi3/4 bare-metal code and was confirmed
-    //      necessary on Pi 5 too during the rpi5-hdmi-smoketest bring-up.
-    //      That masking is a decision for the caller (it depends on the
-    //      board and the MMU/GPU address-translation model in use, c.f.
-    //      MMUManager::ARMToGPUAddress) -- this tag just returns the raw
-    //      value the firmware sent back.
+    //      standard convention.  The masking is a decision for the caller
+    //      (it depends on the board and the MMU/GPU address-translation
+    //      model in use, i.e. MMUManager::ARMToGPUAddress) -- this tag just
+    //      returns the raw value the firmware sent back.
 
     uint32_t GetBaseAddress() const
     {

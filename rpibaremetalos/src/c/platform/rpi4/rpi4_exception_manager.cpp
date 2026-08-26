@@ -77,38 +77,41 @@ void BCM2711ExceptionManager::HandleInterrupt()
     uint32_t irq_ack_reg = GetGICRegister(BCM2711GenericInterruptControllerRegisters::INTERRUPT_ACKNOWLEDGE);
     uint32_t irq = irq_ack_reg & 0x000003FF;
 
-    Interrupts interrupt = GetInterruptType(irq);
-    ISRPointerList *isrs = GetISRs(interrupt);
+    InterruptServiceRoutine *core_task_switch_isr = nullptr;
 
-    //  The task switch ISR is special as it may never return.  Therefore, trap it and we execute it last.
+    //  Mailbox 3 is used exclusively for IPIs and its payload may combine
+    //      multiple pending IPI bits -- every other interrupt source maps
+    //      to exactly one Interrupts value via GetInterruptType().
 
-    ALIGN InterruptServiceRoutine *core_task_switch_isr = nullptr;
-
-    if (isrs != nullptr)
+    if ((irq >= 0x20) && (irq <= 0x2F) && ((irq & 0x03) == 3))
     {
-        for (ALIGN InterruptServiceRoutine *current_isr : *isrs)
+        uint32_t mailbox_value = ReadCoreMailbox(GetCoreID(), 3);
+        ResetCoreMailbox(GetCoreID(), 3, mailbox_value);
+
+        bool recognized_any = DispatchIPIMailboxPayload(mailbox_value, [&](Interrupts interrupt)
         {
-            if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
-            {
-                core_task_switch_isr = current_isr;
-            }
-            else
-            {
-                current_isr->HandleInterrupt();
-            }
+            DispatchInterruptType(interrupt, core_task_switch_isr);
+        });
+
+        if (!recognized_any)
+        {
+            LogWarning("Unhandled IPI mailbox payload: %u\n", mailbox_value);
         }
     }
     else
     {
-        LogError("No ISRs found for Interrupt: %u\n", irq);
+        Interrupts interrupt = GetInterruptType(irq);
+
+        if (!DispatchInterruptType(interrupt, core_task_switch_isr))
+        {
+            LogError("No ISRs found for Interrupt: %u\n", irq);
+        }
     }
 
     //  Let the GIC know we have serviced the interrupt.  End of interrupt ordering MUST mirror the acknowledge ordering,
     //      this needs to be enforced even with nested interrupts.
 
     SetGICRegister(BCM2711GenericInterruptControllerRegisters::END_OF_INTERRUPT, irq_ack_reg);
-
-    //  Interrupt has been acknowledged and all other ISRs handled, execute the task scheduler now if we have one.
 
     if (core_task_switch_isr != nullptr)
     {

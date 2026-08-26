@@ -5,6 +5,7 @@
 #include "platform/gpu_mailbox.h"
 
 #include "asm_utility.h"
+#include "devices/physical_timer.h"
 #include "devices/log.h"
 
 #include "platform/mmu_manager.h"
@@ -50,30 +51,70 @@ void GPUMailboxPropertyMessage::ReturnTags(volatile const char *response_buffer)
     }
 }
 
+namespace
+{
+    //  Wall-clock timeouts, not spin counts. The same iteration count is a
+    //      very different amount of real time on a 1.2GHz Pi 3 versus a
+    //      1.5GHz Pi 4 or a Pi 5. ALLOCATE_FRAMEBUFFER, which
+    //      makes the firmware allocate GPU memory and potentially reprogram
+    //      the HDMI output -- routinely tens of milliseconds, so a simple
+    //      looping retry counter is not sufficient. The GPU may also be busy with
+    //      other work, so we need to wait for a response for a generous amount of time.
+
+    constexpr uint64_t MAILBOX_AVAILABLE_TIMEOUT_IN_MICROSECONDS = 100000;  //  100ms
+    constexpr uint64_t MAILBOX_RESPONSE_TIMEOUT_IN_MICROSECONDS = 2000000;  //  2s -- generous, this is a boot-time path
+
+    uint64_t TimeoutInTimerTicks(uint64_t timeout_in_microseconds)
+    {
+        uint64_t counter_frequency;
+
+        asm volatile("mrs %0, cntfrq_el0" : "=r"(counter_frequency));
+
+        uint64_t ticks_per_microsecond = counter_frequency / 1000000;
+
+        //  Guard against a zero/unset counter frequency leaving us with a
+        //      zero-length deadline, which would time out instantly.
+
+        if (ticks_per_microsecond == 0)
+        {
+            ticks_per_microsecond = 1;
+        }
+
+        return ticks_per_microsecond * timeout_in_microseconds;
+    }
+}
+
 bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 {
-    const uint32_t MAX_RETRIES = 10000;
-
     //  Append the 'Last Tag' to the message
 
     message.AddLastTag();
 
+    //  Drain any stale response left behind by an earlier request that timed
+    //      out. The GPU may answer a request we already gave up on, and since
+    //      every property request uses the same channel, that late response
+    //      would otherwise be matched to -- and silently accepted for -- this
+    //      request. Anything sitting in the mailbox before we have sent
+    //      ours is by definition not ours.
+
+    while (!(Register(MailboxRegister::STATUS) & MBOX_STATUS_EMPTY))
+    {
+        (void)Register(MailboxRegister::READ);
+    }
+
     //  Wait until we can write to the mailbox
 
-    uint32_t retries = 0;
+    uint64_t deadline = PhysicalTimer::CurrentTicks() + TimeoutInTimerTicks(MAILBOX_AVAILABLE_TIMEOUT_IN_MICROSECONDS);
 
-    do
+    while (Register(MailboxRegister::STATUS) & MBOX_STATUS_FULL)
     {
-        CPUTicksDelay(50);
-        retries++;
-    } while ((Register(MailboxRegister::STATUS) & MBOX_STATUS_FULL) && (retries < MAX_RETRIES));
+        if (PhysicalTimer::CurrentTicks() >= deadline)
+        {
+            LogError("Timeout waiting for GPUMailbox to become available\n");
+            return false;
+        }
 
-    //  Error if we have exceeded the max retries
-
-    if (retries >= MAX_RETRIES)
-    {
-        LogError("Timeout waiting for GPUMailbox to become available\n");
-        return false;
+        CPUTicksDelay(50); //  Ease off the peripheral bus between polls
     }
 
     //  Write the address of our message to the mailbox with channel identifier.
@@ -93,26 +134,26 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 
     Register(MailboxRegister::WRITE) = (uint32_t) reinterpret_cast<uint64_t>(MMUManager::Instance().ARMToGPUAddress(message_ARM_address));
 
-    //  Now wait for the response.  Timeout if we have to wait too long.
+    //  Now wait for the response. The deadline covers the whole wait, including
+    //      any messages we read and discard from other channels -- unlike the
+    //      previous retry counter, which was never reset across those and so
+    //      shrank the remaining budget each time one arrived.
 
-    retries = 0;
+    deadline = PhysicalTimer::CurrentTicks() + TimeoutInTimerTicks(MAILBOX_RESPONSE_TIMEOUT_IN_MICROSECONDS);
 
     while (true)
     {
         //  Wait for a response
 
-        do
+        while (Register(MailboxRegister::STATUS) & MBOX_STATUS_EMPTY)
         {
+            if (PhysicalTimer::CurrentTicks() >= deadline)
+            {
+                LogError("Timeout waiting for GPUMailbox response\n");
+                return false;
+            }
+
             CPUTicksDelay(50);
-            retries++;
-        } while ((Register(MailboxRegister::STATUS) & MBOX_STATUS_EMPTY) && (retries < MAX_RETRIES));
-
-        //  Error if we have exceeded the max retries
-
-        if (retries >= MAX_RETRIES)
-        {
-            LogError("Timeout waiting for GPUMailbox response\n");
-            return false;
         }
 
         //  Loop until we read a response on the property channel.
@@ -134,19 +175,12 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 
         if (response_message[1] == MBOX_STATUS_RESPONSE_SUCCESS)
         {
-            //  If it is a successful response, then return the tag responses and reset the message so it can be re-used.
-            //      We ought to exit here 99.9999% of the time.
-
             message.ReturnTags((const char *)response_message);
 
             message.Reset();
 
             return true;
         }
-
-        //  It was an unsuccessful response, usually it will be a parsing error.
-        //      Parsing errors seem to be associated with a mismatch between the request and
-        //      reply structures and the requested operation.
 
         if (response_message[1] == MBOX_STATUS_REQUEST_PARSING_ERROR)
         {

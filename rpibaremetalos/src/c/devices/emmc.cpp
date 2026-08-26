@@ -703,7 +703,7 @@ namespace EmmcImpl
 
         //  Get the current EMMC clock rate from the mailbox service
 
-        GPUMailbox mbox(GetPlatformInfo().GetMMIOBase());
+        GPUMailbox mbox(GetPlatformInfo().GetMailboxRegisterBase());
 
         GetClockRateTag getEMMCClockRateTag(MailboxClockIdentifiers(1));
 
