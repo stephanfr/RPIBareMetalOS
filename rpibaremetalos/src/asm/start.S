@@ -335,27 +335,18 @@ running_in_el1:
     mov     x10, x22_coreJumpTableAddress
     add     x10, x10, x19_coreNumber, lsl #3        //  Compute the address of the correct jump table slot, we need this in a register for the cache line invalidation  
 
-    //  Test before sleeping, and barrier after the invalidate before the
-    //      dependent load -- the same requirement CoreExecute documents when
-    //      it reads __core_state. Without the DSB the load can return a stale
-    //      zero; the core then returns to WFE with the SEV already consumed
-    //      and sleeps forever, leaving it stuck at CORE_SPINNING_IN_EL1.
-
 el1_spin:
-    dc      civac, x10                               //  Invalidate the cache line containing the jump address as it is written by the master core
-    dsb     sy                                       //  ARM ARM requires DSB after DC CIVAC before a dependent load
-    ldr     x9, [x10]
-    cbnz    x9, el1_got_jump_address
-    wfe
-    b       el1_spin
+	wfe
+    dc 		civac, x10                               //  Invalidate the cache line containing the jump address as it is written by the master core
+	ldr     x9, [x10]
+	cbz     x9, el1_spin
 
-    //  Enable the memory manager on the core using the platform page tables,
-    //      not the early boot tables.  Core 0 already switched to the platform
-    //      tables in MMUManager::Initialize(), which ran long before any secondary
-    //      core is released here.
+    //  Enable the memory manager on the core
 
-el1_got_jump_address:
-    bl      EnableMMUForCore
+    adrp    x0, __early_l1_page_table
+    add     x0, x0, :lo12:__early_l1_page_table
+    mov     x1, #0
+    bl      EnableMMUTables
 
     //  Mark the core as having jumped to application code
 
