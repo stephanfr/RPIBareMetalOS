@@ -51,3 +51,9 @@ extern uint32_t __board_version;
 extern uint32_t __videocore_memory_base;
 extern uint32_t __videocore_memory_size_in_bytes;
 extern char __kernel_command_line;
+
+//  Base address of the final, platform specific translation tables.  Published by
+//      AARCH64PlatformMemoryManager::PublishKernelPageTableBase() and read by the secondary
+//      core startup path in start.S.  See global_variables.S for why it exists.
+
+extern uint64_t __kernel_page_table_base;

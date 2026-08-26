@@ -63,7 +63,11 @@ void ConsoleVideoFrameBuffer::putc(unsigned int c)
         return;
     }
 
-    LockGuard guard(lock_);
+    //  The console is reachable from printf() and the Log* macros, which the exception
+    //      managers call from interrupt context, so this cannot be a plain LockGuard - see
+    //      InterruptLockGuard in synchronization.h.
+
+    InterruptLockGuard guard(lock_);
 
     if (c == '\n')
     {

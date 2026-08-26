@@ -107,6 +107,52 @@ private:
     ALIGN uint32_t lock_ = State::UNLOCKED;
 };
 
+//
+//  Guard for locks that may also be taken from interrupt context.
+//
+//  Anything reachable from printf() or the Log* macros qualifies, because the exception
+//      managers log from inside HandleInterrupt().  A plain LockGuard is not safe there: if an
+//      interrupt lands on a core that is already inside the critical section, the handler spins
+//      on a lock its own core holds and that core never comes back.  Masking interrupts for the
+//      duration of the critical section makes it atomic with respect to the local core, leaving
+//      the lock itself to arbitrate only between cores.
+//
+//  The previous interrupt mask is saved and restored rather than unconditionally re-enabling
+//      interrupts, so this is safe to use in code that already runs with interrupts masked.
+//
+//  Keep critical sections guarded this way short - interrupts are held off for their duration.
+//
+
+class InterruptLockGuard
+{
+public:
+    InterruptLockGuard(LockableObject &lockable_object)
+        : lockable_object_(lockable_object)
+    {
+        asm volatile("mrs %0, daif" : "=r"(saved_interrupt_mask_));
+        asm volatile("msr daifset, #2" ::: "memory");
+
+        lockable_object_.Lock();
+    }
+
+    ~InterruptLockGuard()
+    {
+        lockable_object_.Unlock();
+
+        asm volatile("msr daif, %0" ::"r"(saved_interrupt_mask_) : "memory");
+    }
+
+    InterruptLockGuard(const InterruptLockGuard &) = delete;
+    InterruptLockGuard(InterruptLockGuard &&) = delete;
+    InterruptLockGuard &operator=(const InterruptLockGuard &) = delete;
+    InterruptLockGuard &operator=(InterruptLockGuard &&) = delete;
+
+private:
+    LockableObject &lockable_object_;
+
+    uint64_t saved_interrupt_mask_;
+};
+
 /**
  * @class LockGuard
  * @brief A simple RAII class for locking and unlocking a LockableObject.

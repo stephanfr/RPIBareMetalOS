@@ -131,6 +131,25 @@ public:
     }
 
 protected:
+
+    //  Publishes the translation tables this core is about to install so that the secondary
+    //      cores can install exactly the same ones as they come out of their EL1 spin loop in
+    //      start.S.  Without this they stay on the early tables, which map the Videocore and
+    //      DMA regions as ordinary write back RAM rather than NORMAL_NO_CACHING - the same
+    //      physical addresses carrying different memory attributes on different cores, which
+    //      the architecture does not guarantee to be coherent.
+    //
+    //  A secondary core reads this with its MMU and caches off, so the value has to be pushed
+    //      out to DRAM rather than left sitting in this core's caches.
+
+    static void PublishKernelPageTableBase(uint64_t page_table_base)
+    {
+        __kernel_page_table_base = page_table_base;
+
+        asm volatile("dc civac, %0" ::"r"(&__kernel_page_table_base) : "memory");
+        asm volatile("dsb sy" ::: "memory");
+    }
+
     MemoryModelTypes memory_model_;
 
     uint32_t board_revision_;

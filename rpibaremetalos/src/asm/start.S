@@ -341,10 +341,33 @@ el1_spin:
 	ldr     x9, [x10]
 	cbz     x9, el1_spin
 
-    //  Enable the memory manager on the core
+    //  Enable the memory manager on the core.
+    //
+    //  Install the final, platform specific tables core 0 built in InitializePlatform() rather
+    //      than the early ones.  The early tables map the Videocore and DMA regions as ordinary
+    //      write back RAM where the platform tables map them NORMAL_NO_CACHING, and the
+    //      architecture makes no coherency guarantee for the same physical address carrying
+    //      different memory attributes on different cores.  Concretely, framebuffer writes made
+    //      on a core running the early tables sat in that core's D-cache and never reached the
+    //      display.
+    //
+    //  __kernel_page_table_base is zero until core 0 publishes it, so fall back to the early
+    //      tables in that case.  The MMU and caches are off here, so the value has to come from
+    //      DRAM rather than from anything this core has cached - the same reason the jump table
+    //      read above is preceded by a 'dc civac'.
+
+    adrp    x11, __kernel_page_table_base
+    add     x11, x11, :lo12:__kernel_page_table_base
+    dc      civac, x11
+    dsb     sy
+    ldr     x0, [x11]
+    cbnz    x0, use_page_tables_on_secondary_core
 
     adrp    x0, __early_l1_page_table
     add     x0, x0, :lo12:__early_l1_page_table
+
+use_page_tables_on_secondary_core:
+
     mov     x1, #0
     bl      EnableMMUTables
 

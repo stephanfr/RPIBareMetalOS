@@ -100,3 +100,23 @@ __kernel_command_line:                                      .space S_MAX_KERNEL_
                                                             .word 0                                         //  End Tag - must be zero
                                                             .word 0
 
+
+//  Global variable holding the base address of the final, platform specific translation
+//      tables built by core 0 in InitializePlatform().  Secondary cores read this as they
+//      come out of their EL1 spin loop so that every core runs on the same tables.  Running
+//      the secondary cores on the early tables instead gives the same physical addresses
+//      different memory attributes on different cores - the Videocore and DMA regions are
+//      NORMAL_NO_CACHING in the platform tables but ordinary write back RAM in the early
+//      tables - which the architecture does not guarantee to be coherent.  In practice
+//      framebuffer writes made on a secondary core sat in that core's D-cache and never
+//      reached the display.
+//
+//  Zero until core 0 publishes the tables, in which case a secondary core falls back to the
+//      early tables.  Given a 64 byte alignment it owns a cache line of its own, so a core
+//      running with its caches off can pull it from DRAM with a single 'dc civac'.
+
+.global __kernel_page_table_base
+.data
+.balign 64
+
+__kernel_page_table_base : .quad 0
