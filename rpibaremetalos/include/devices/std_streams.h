@@ -8,7 +8,5 @@
 
 extern CharacterIODevice *stdout;
 extern CharacterIODevice *stdin;
-extern CharacterIODevice *secondary_stdout;
 
 void SetStandardStreams( CharacterIODevice* new_stdout, CharacterIODevice* new_stdin );
-void SetSecondaryStdout( CharacterIODevice* device );

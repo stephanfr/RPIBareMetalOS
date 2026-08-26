@@ -63,6 +63,8 @@ void ConsoleVideoFrameBuffer::putc(unsigned int c)
         return;
     }
 
+    LockGuard guard(lock_);
+
     if (c == '\n')
     {
         cursor_column_ = 0;

@@ -4,6 +4,8 @@
 
 #pragma once
 
+#include <synchronization.h>
+
 #include "devices/video/video_framebuffer.h"
 #include "devices/character_io.h"
 
@@ -32,6 +34,8 @@ public:
     unsigned int getc(void) override;
 
 private:
+    SpinLock lock_;
+
     static constexpr uint32_t GLYPH_WIDTH = 8;
     static constexpr uint32_t GLYPH_HEIGHT = 8;
 

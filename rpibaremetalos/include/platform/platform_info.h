@@ -77,7 +77,7 @@ public:
     void DecodeBoardRevision(minstd::string &buffer) const;
 
 protected:
-    void GetPlatformDetails(uint8_t *mmio_base);
+    void GetPlatformDetails(uint8_t *mailbox_register_base);
 
 private:
     uint32_t board_model_number_;

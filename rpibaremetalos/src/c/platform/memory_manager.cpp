@@ -8,6 +8,7 @@
 #include "heaps.h"
 
 #include "platform/platform_info.h"
+#include "platform/mmu_manager.h"
 
 #include "devices/log.h"
 
@@ -18,10 +19,10 @@ MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
       total_memory_in_bytes_(total_memory_in_bytes),
       mmio_base_(mmio_base),
       free_memory_start_((uint64_t)&__os_process_start),
-      num_pages_(minstd::min(((uint64_t)mmio_base_ - free_memory_start_), total_memory_in_bytes_) / page_size_),
+      num_pages_((minstd::min(minstd::min(((uint64_t)mmio_base_ - free_memory_start_), total_memory_in_bytes_),
+                 (MMUManager::Instance().ReservedMemoryBase() - free_memory_start_)) / page_size_)),
       page_map_(static_cast<minstd::atomic<uint8_t> *>(
-          __os_static_heap_resource.allocate(num_pages_ * sizeof(minstd::atomic<uint8_t>),
-                                             alignof(minstd::atomic<uint8_t>))))
+                 __os_static_heap_resource.allocate(num_pages_ * sizeof(minstd::atomic<uint8_t>), alignof(minstd::atomic<uint8_t>))))
 {
     LogEntryAndExit("num_pages: %u\n", num_pages_);
 

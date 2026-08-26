@@ -30,9 +30,9 @@ typedef union RevisionCodeWithUint
     RevisionCode revisionCode;
 } RevisionCodeWithUint;
 
-void PlatformInfo::GetPlatformDetails(uint8_t *mmio_base)
+void PlatformInfo::GetPlatformDetails(uint8_t *mailbox_register_base)
 {
-    GPUMailbox mbox(mmio_base);
+    GPUMailbox mbox(mailbox_register_base);
 
     GetBoardModelTag getBoardModelTag;
     GetBoardRevisionTag getBoardRevisionTag;

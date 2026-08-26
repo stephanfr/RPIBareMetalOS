@@ -8,7 +8,6 @@
 
 CharacterIODevice *stdout = nullptr;
 CharacterIODevice *stdin = nullptr;
-CharacterIODevice *secondary_stdout = nullptr;
 
 
 void SetStandardStreams( CharacterIODevice* new_stdout, CharacterIODevice* new_stdin )
@@ -16,12 +15,6 @@ void SetStandardStreams( CharacterIODevice* new_stdout, CharacterIODevice* new_s
     stdout = new_stdout;
     stdin = new_stdin;
 }
-
-void SetSecondaryStdout( CharacterIODevice* device )
-{
-    secondary_stdout = device;
-}
-
 //
 //  putchar_ is required for the minimalstdio implementation of 'printf' to output characters.
 //
@@ -31,11 +24,6 @@ extern "C" void putchar_(char c)
     if (stdout != NULL)
     {
         stdout->putc(c);
-    }
-
-    if (secondary_stdout != NULL)
-    {
-        secondary_stdout->putc(c);
     }
 }
 

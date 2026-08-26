@@ -6,7 +6,7 @@
 
 RPI4PlatformInfo::RPI4PlatformInfo()
 {
-    GetPlatformDetails(GetMMIOBase());
+    GetPlatformDetails(GetMailboxRegisterBase());
 }
 
 RPIBoardType RPI4PlatformInfo::GetBoardType() const

@@ -125,6 +125,11 @@ public:
         return memory_model_;
     }
 
+    uint64_t ReservedMemoryBase() const override
+    {
+        return page_table_block_ * level1_blocksize_;
+    }
+
 protected:
     MemoryModelTypes memory_model_;
 
