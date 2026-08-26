@@ -47,7 +47,10 @@ void BCM2837ExceptionManager::HandleInterrupt()
     {
         uint32_t ipi_payload = GetCoreMailbox(core_id, IPI_MAILBOX_ID);
 
-        ResetCoreMailbox(core_id, IPI_MAILBOX_ID, 0xFFFFFFFF); //  Reset the mailbox value otherwise the interrupt will be triggered again
+        //  Clear by writing back exactly the bits that were read, which is
+        //      what the mailbox's write-high-to-clear register expects.
+
+        ResetCoreMailbox(core_id, IPI_MAILBOX_ID, ipi_payload);
 
         Interrupts interrupt = DecodeIPIMailboxPayload(core_id, ipi_payload);
 
