@@ -29,6 +29,11 @@ uint8_t *RPI4PlatformInfo::GetMMIOBase() const
     return const_cast<uint8_t *>(BCM2711_IO_BASE);
 }
 
+uint8_t *RPI4PlatformInfo::GetMailboxRegisterBase() const
+{
+    return const_cast<uint8_t *>(BCM2711_MAILBOX_REGISTER_BASE);
+}
+
 uint8_t *RPI4PlatformInfo::GetEMMCBase() const
 {
     return const_cast<uint8_t *>(BCM2711_EMMC_BASE);

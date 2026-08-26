@@ -8,12 +8,18 @@
 
 CharacterIODevice *stdout = nullptr;
 CharacterIODevice *stdin = nullptr;
+CharacterIODevice *secondary_stdout = nullptr;
 
 
 void SetStandardStreams( CharacterIODevice* new_stdout, CharacterIODevice* new_stdin )
 {
     stdout = new_stdout;
     stdin = new_stdin;
+}
+
+void SetSecondaryStdout( CharacterIODevice* device )
+{
+    secondary_stdout = device;
 }
 
 //
@@ -25,6 +31,11 @@ extern "C" void putchar_(char c)
     if (stdout != NULL)
     {
         stdout->putc(c);
+    }
+
+    if (secondary_stdout != NULL)
+    {
+        secondary_stdout->putc(c);
     }
 }
 

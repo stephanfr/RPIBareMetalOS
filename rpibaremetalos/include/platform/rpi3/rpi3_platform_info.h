@@ -17,6 +17,7 @@ public:
     const char *GetBoardTypeName() const override;
     uint8_t *GetARMLocalBase() const override;
     uint8_t *GetMMIOBase() const override;
+    uint8_t *GetMailboxRegisterBase() const override;
     uint8_t *GetEMMCBase() const override;
     uint32_t GetGPUClockRate() const override;
     uint32_t GetNumberOfCores() const override;
@@ -24,6 +25,7 @@ public:
 private:
     const uint8_t *ARM_LOCAL_BASE = reinterpret_cast<const uint8_t *>(0x40000000);
     const uint8_t *BCM2837_IO_BASE = reinterpret_cast<const uint8_t *>(0x3F000000);
+    const uint8_t *BCM2837_MAILBOX_REGISTER_BASE = reinterpret_cast<const uint8_t *>(BCM2837_IO_BASE + 0x0000B880);
     const uint8_t *BCM2837_EMMC_BASE = reinterpret_cast<const uint8_t *>(BCM2837_IO_BASE + 0x00300000);
     const uint32_t BCM2837_SYSTEM_CLOCK = FREQUENCY_400MHZ;
 };

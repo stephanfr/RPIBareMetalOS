@@ -29,6 +29,7 @@ $(BUILD_ROOT)/c/platform/rpi4 \
 $(BUILD_ROOT)/c/devices \
 $(BUILD_ROOT)/c/devices/rpi3 \
 $(BUILD_ROOT)/c/devices/rpi4 \
+$(BUILD_ROOT)/c/devices/video \
 $(BUILD_ROOT)/c/isr \
 $(BUILD_ROOT)/c/filesystem \
 $(BUILD_ROOT)/c/services \
@@ -45,6 +46,7 @@ C_DIRS     := c \
 			  c/devices \
 			  c/devices/rpi3 \
 			  c/devices/rpi4 \
+			  c/devices/video \
 			  c/isr \
 			  c/filesystem \
 			  c/services \
@@ -59,6 +61,7 @@ CPP_DIRS   := c \
 			  c/devices \
 			  c/devices/rpi3 \
 			  c/devices/rpi4 \
+			  c/devices/video \
 			  c/isr \
 			  c/filesystem \
 			  c/services \

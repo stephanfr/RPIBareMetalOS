@@ -132,3 +132,33 @@ private:
     minstd::character_io_interface<unsigned int> &input_device_;
     minstd::character_io_interface<unsigned int> &output_device_;
 };
+
+//  Fans output (putc) out to two CharacterIODevices; input (getc) comes
+//      only from the primary device, since a secondary output-only sink
+//      (e.g. ConsoleVideoFrameBuffer) has no way to produce input.
+
+class TeeCharacterIODevice : public CharacterIODevice
+{
+public:
+    TeeCharacterIODevice(CharacterIODevice &primary, CharacterIODevice &secondary, const char *alias)
+        : CharacterIODevice(true, "TeeCharacterIODevice", alias),
+          primary_(primary),
+          secondary_(secondary)
+    {
+    }
+
+    void putc(unsigned int c) override
+    {
+        primary_.putc(c);
+        secondary_.putc(c);
+    }
+
+    unsigned int getc(void) override
+    {
+        return primary_.getc();
+    }
+
+private:
+    CharacterIODevice &primary_;
+    CharacterIODevice &secondary_;
+};

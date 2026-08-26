@@ -28,6 +28,8 @@
 #include "devices/uart0.h"
 #include "devices/uart1.h"
 
+#include "devices/video/console_video_framebuffer.h"
+
 #include "platform/mmu_manager.h"
 
 #include "services/uuid.h"
@@ -165,6 +167,29 @@ bool SetupSerialConsole()
     return true;
 }
 
+//  Function to set up an HDMI framebuffer console, best-effort.
+//      Unlike SetupSerialConsole(), failure here is an ordinary, expected
+//      outcome (no monitor attached, running under QEMU with no display)
+//      -- it must NOT ParkCore(); the caller just skips mirroring to it.
+
+bool SetupFrameBufferConsole(ConsoleVideoFrameBuffer *&out_frame_buffer_console)
+{
+    auto fb_console = make_static_unique<ConsoleVideoFrameBuffer>("HDMI",
+                                                                  VideoFrameBuffer::PackColor(0x00, 0xFF, 0x00),
+                                                                  VideoFrameBuffer::PackColor(0x00, 0x00, 0x00));
+
+    if (!fb_console->IsAllocated())
+    {
+        return false;
+    }
+
+    out_frame_buffer_console = fb_console.get();
+
+    GetOSEntityRegistry().AddEntity(fb_console);
+
+    return true;
+}
+
 //  Function to setup platform specific code
 //      Declare it as 'extern "C"' so that it is not mangled and we can call it from the startup assembly code.
 
@@ -233,8 +258,8 @@ void InitializePlatform()
 
     //  Seed UUID generation before entities/tasks are created on additional cores.
 
-//    UUID::SeedRNG(__hw_random_number_generator->Next64BitValue());
-UUID::SeedRNG(88172645463325252ULL);
+    //    UUID::SeedRNG(__hw_random_number_generator->Next64BitValue());
+    UUID::SeedRNG(88172645463325252ULL);
 
     //  Initialize the platform software RNGs from the HW RNG
 
@@ -249,6 +274,30 @@ UUID::SeedRNG(88172645463325252ULL);
         ParkCore();
     }
 
+    //  Best-effort: mirror console output onto an HDMI framebuffer console
+    //      if one can be allocated. stdin stays serial-only -- the
+    //      framebuffer console has no input device behind it.
+
+    ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
+
+    if (SetupFrameBufferConsole(frame_buffer_console))
+    {
+        auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+
+        if (!console_lookup.Failed())
+        {
+            CharacterIODevice &serial_console = *console_lookup;
+
+            auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_console, "STDOUT_TEE");
+
+            CharacterIODevice *tee_ptr = tee.get();
+
+            GetOSEntityRegistry().AddEntity(tee);
+
+            SetStandardStreams(tee_ptr, &serial_console);
+        }
+    }
+    
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
     //    if ((__number_of_cores_available > MAX_CORES) ||

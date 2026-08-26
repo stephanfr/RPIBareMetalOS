@@ -12,6 +12,7 @@
 #include "devices/character_io.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
+#include "devices/video/console_video_framebuffer.h"
 #include "devices/system_timer.h"
 
 #include "isr/core_task_switch_isr.h"
@@ -39,6 +40,24 @@ extern "C" void kernel_main()
     // The dynamic heap requires thread-aware mechanisms and complex allocations
     // that clash with global static init loops. So we lazily initialize it immediately on boot.
     initialize_dynamic_heap();
+
+    {
+        auto video_console = make_static_unique<ConsoleVideoFrameBuffer>(
+            "VIDEO_CONSOLE",
+            VideoFrameBuffer::PackColor(255, 255, 255),
+            VideoFrameBuffer::PackColor(0, 0, 0));
+
+        if (video_console->IsAllocated())
+        {
+            GetOSEntityRegistry().AddEntity(video_console);
+
+            auto registered = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("VIDEO_CONSOLE");
+            if (!registered.Failed())
+            {
+                SetSecondaryStdout(&(*registered));
+            }
+        }
+    }
 
     printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
