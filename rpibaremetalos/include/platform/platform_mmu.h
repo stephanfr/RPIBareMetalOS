@@ -125,6 +125,11 @@ public:
         return memory_model_;
     }
 
+    uint64_t ReservedMemoryBase() const override
+    {
+        return page_table_block_ * level1_blocksize_;
+    }
+
 protected:
     MemoryModelTypes memory_model_;
 
@@ -145,4 +150,15 @@ protected:
 
     uint64_t *kernel_page_table_1_to_1_;
     VMSAv8_64_DESCRIPTOR *Stage2map1to1_;
+
+    //  A secondary core reads this with its MMU and caches off, so the value has to be
+    //      pushed out to DRAM rather than left sitting in this core's caches.
+
+    static void PublishKernelPageTableBase(uint64_t page_table_base)
+    {
+        __kernel_page_table_base = page_table_base;
+
+        asm volatile("dc civac, %0" ::"r"(&__kernel_page_table_base) : "memory");
+        asm volatile("dsb sy" ::: "memory");
+    }
 };

@@ -51,3 +51,5 @@ extern uint32_t __board_version;
 extern uint32_t __videocore_memory_base;
 extern uint32_t __videocore_memory_size_in_bytes;
 extern char __kernel_command_line;
+
+extern uint64_t __kernel_page_table_base;

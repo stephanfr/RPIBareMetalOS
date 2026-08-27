@@ -8,6 +8,8 @@
 
 #include "devices/gpio.h"
 
+#include "task/tasks.h"
+
 #include "platform/gpu_mailbox_messages.h"
 
 #define DELAY_LOOPS 200
@@ -101,18 +103,16 @@ unsigned int UART0::getc()
 {
     char r;
 
-    //  Wait for a character to arrive in the buffer
+    //  Yield rather than spin -- this wait is unbounded (it ends only when a character
+    //      arrives), and holding a core in a tight poll for it starves everything else
+    //      scheduled there, including the recurring system timer.
 
-    do
+    while (GetRegister(PL011Registers::UART0_FR) & 0x10)
     {
-        asm volatile("nop");
-    } while (GetRegister(PL011Registers::UART0_FR) & 0x10);
-
-    //  Read it and return
+        task::Task::GetTask().Yield();
+    }
 
     r = (char)GetRegister(PL011Registers::UART0_DR);
-
-    //  Convert carrige return to newline
 
     return r == '\r' ? '\n' : r;
 }

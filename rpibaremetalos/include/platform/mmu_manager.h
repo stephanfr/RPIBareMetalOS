@@ -38,6 +38,8 @@ public:
 
     virtual void *ARMToGPUAddress(void *ARMaddress) const = 0;
 
+    virtual uint64_t ReservedMemoryBase() const = 0;
+
     virtual MemoryModelTypes MemoryModel() const = 0;
 
     static bool IsMMUEnabled()

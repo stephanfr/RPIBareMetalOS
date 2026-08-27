@@ -141,3 +141,38 @@ private:
     LockableObject &lockable_object_;
 };
 
+//  For locks that may also be taken from interrupt context.  Masking interrupts for the
+//      duration makes the section atomic against the local core, leaving the spin lock to
+//      arbitrate only between cores.  The previous mask is restored rather than interrupts
+//      being unconditionally re-enabled, so this is safe where interrupts are already masked.
+
+class InterruptLockGuard
+{
+public:
+    InterruptLockGuard(LockableObject &lockable_object)
+        : lockable_object_(lockable_object)
+    {
+        asm volatile("mrs %0, daif" : "=r"(saved_interrupt_mask_));
+        asm volatile("msr daifset, #2" ::: "memory");
+
+        lockable_object_.Lock();
+    }
+
+    ~InterruptLockGuard()
+    {
+        lockable_object_.Unlock();
+
+        asm volatile("msr daif, %0" ::"r"(saved_interrupt_mask_) : "memory");
+    }
+
+    InterruptLockGuard(const InterruptLockGuard &) = delete;
+    InterruptLockGuard(InterruptLockGuard &&) = delete;
+    InterruptLockGuard &operator=(const InterruptLockGuard &) = delete;
+    InterruptLockGuard &operator=(InterruptLockGuard &&) = delete;
+
+private:
+    LockableObject &lockable_object_;
+
+    uint64_t saved_interrupt_mask_;
+};
+

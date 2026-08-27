@@ -6,7 +6,7 @@
 
 RPI3PlatformInfo::RPI3PlatformInfo()
 {
-    GetPlatformDetails(GetMMIOBase());
+    GetPlatformDetails(GetMailboxRegisterBase());
 }
 
 RPIBoardType RPI3PlatformInfo::GetBoardType() const
@@ -27,6 +27,11 @@ uint8_t *RPI3PlatformInfo::GetARMLocalBase() const
 uint8_t *RPI3PlatformInfo::GetMMIOBase() const
 {
     return const_cast<uint8_t *>(BCM2837_IO_BASE);
+}
+
+uint8_t *RPI3PlatformInfo::GetMailboxRegisterBase() const
+{
+    return const_cast<uint8_t *>(BCM2837_MAILBOX_REGISTER_BASE);
 }
 
 uint8_t *RPI3PlatformInfo::GetEMMCBase() const

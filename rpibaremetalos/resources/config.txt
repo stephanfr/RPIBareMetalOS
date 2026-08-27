@@ -3,3 +3,4 @@ armstub=armstub_minimal.bin
 kernel=kernel8.img
 
 core_freq_min=500
+hdmi_force_hotplug=1

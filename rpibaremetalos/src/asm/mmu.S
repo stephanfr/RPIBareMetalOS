@@ -37,10 +37,10 @@
 // L1 table descriptor: NSTable=1 (bit 63, stored as top 16-bit word for movk), EntryType=TABLE(3)
 .equ EARLY_L1_TABLE_FLAGS_HI, 0x8000
 // L2 region boundaries (2MB block indices)
-.equ EARLY_DEVICE_1_START, (0x3F000000 / 0x200000)   // 504:  RPi3 peripherals start
-.equ EARLY_NORMAL_2_START, (0x40000000 / 0x200000)   // 512:  RAM above 1GB starts
-.equ EARLY_DEVICE_2_START, (0xFC000000 / 0x200000)   // 2016: RPi4 peripherals start
-.equ EARLY_L2_ENTRY_COUNT, (4 * 512)                 // 2048: covers 0-4GB
+.equ EARLY_DEVICE_1_START, (0x3F000000 / 0x200000)   				// 504:  RPi3 peripherals start
+.equ EARLY_NORMAL_2_START, ((0x40000000 + 0x200000) / 0x200000)   	// 513:  RAM above 1GB starts
+.equ EARLY_DEVICE_2_START, (0xFC000000 / 0x200000)   				// 2016: RPi4 peripherals start
+.equ EARLY_L2_ENTRY_COUNT, (4 * 512)                 				// 2048: covers 0-4GB
 .equ MAIR1VAL, ( (0x00ul << (MT_DEVICE_NGNRNE * 8)) |\
                  (0x04ul << (MT_DEVICE_NGNRE * 8)) |\
 				 (0x0cul << (MT_DEVICE_GRE * 8)) |\

@@ -213,19 +213,14 @@ private:
         {
             switch (interrupt & 0x03)
             {
-            case 0:
-                return Interrupts::CORE_MAILBOX_0;
+                case 0:
+                    return Interrupts::CORE_MAILBOX_0;
 
-            case 1:
-                return Interrupts::CORE_MAILBOX_1;
+                case 1:
+                    return Interrupts::CORE_MAILBOX_1;
 
-            case 2:
-                return Interrupts::CORE_MAILBOX_2;
-
-            case 3:
-                uint32_t mailbox_value = ReadCoreMailbox(GetCoreID(), 3); //  Mailbox 3 is used exclusively for IPIs.  The value is the IPI type
-                ResetCoreMailbox(GetCoreID(), 3, mailbox_value);
-                return ExceptionManager::AsInterrupt(static_cast<InterprocessorInterrupts>(mailbox_value));
+                case 2:
+                    return Interrupts::CORE_MAILBOX_2;
             }
         }
 

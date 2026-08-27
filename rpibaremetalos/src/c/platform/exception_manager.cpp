@@ -91,3 +91,27 @@ bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
 
     return true;
 }
+
+bool ExceptionManager::DispatchInterruptType(Interrupts interrupt, InterruptServiceRoutine *&core_task_switch_isr)
+{
+    ISRPointerList *isrs = GetISRs(interrupt);
+
+    if (isrs == nullptr)
+    {
+        return false;
+    }
+
+    for (InterruptServiceRoutine *current_isr : *isrs)
+    {
+        if (current_isr->ISRType() == InterruptServiceRoutineType::IMPERATIVE_CORE_TASK_SWITCH)
+        {
+            core_task_switch_isr = current_isr;
+        }
+        else
+        {
+            current_isr->HandleInterrupt();
+        }
+    }
+
+    return true;
+}

@@ -15,7 +15,6 @@ void SetStandardStreams( CharacterIODevice* new_stdout, CharacterIODevice* new_s
     stdout = new_stdout;
     stdin = new_stdin;
 }
-
 //
 //  putchar_ is required for the minimalstdio implementation of 'printf' to output characters.
 //

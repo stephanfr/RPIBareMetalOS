@@ -465,12 +465,12 @@ class GPUMailbox
 {
 public:
     GPUMailbox()
-        : mmio_base_(GetPlatformInfo().GetMMIOBase())
+        : mailbox_register_base_(GetPlatformInfo().GetMailboxRegisterBase())
     {
     }
 
-    GPUMailbox(uint8_t *mmio_base)
-        : mmio_base_(mmio_base)
+    GPUMailbox(uint8_t *mailbox_register_base)
+        : mailbox_register_base_(mailbox_register_base)
     {
     }
 
@@ -479,12 +479,12 @@ public:
 private:
     typedef enum class MailboxRegister
     {
-        READ = 0x0000B880,
-        POLL = 0x0000B880 + 0x10,
-        SENDER = 0x0000B880 + 0x14,
-        STATUS = 0x0000B880 + 0x18,
-        CONFIG = 0x0000B880 + 0x1C,
-        WRITE = 0x0000B880 + 0x20
+        READ = 0x00,
+        POLL = 0x10,
+        SENDER = 0x14,
+        STATUS = 0x18,
+        CONFIG = 0x1C,
+        WRITE = 0x20
     } MailboxRegister;
 
     const uint32_t MBOX_STATUS_RESPONSE_SUCCESS = 0x80000000;
@@ -492,10 +492,10 @@ private:
     const uint32_t MBOX_STATUS_FULL = 0x80000000;
     const uint32_t MBOX_STATUS_EMPTY = 0x40000000;
 
-    const uint8_t *mmio_base_;
+    const uint8_t *mailbox_register_base_;
 
     volatile uint32_t &Register(MailboxRegister reg)
     {
-        return *((volatile uint32_t *)(mmio_base_ + (uint32_t)reg));
+        return *((volatile uint32_t *)(mailbox_register_base_ + (uint32_t)reg));
     }
 };

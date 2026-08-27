@@ -29,6 +29,7 @@ public:
     virtual const char *GetBoardTypeName() const = 0;
     virtual uint8_t *GetARMLocalBase() const = 0;
     virtual uint8_t *GetMMIOBase() const = 0;
+    virtual uint8_t *GetMailboxRegisterBase() const = 0;
     virtual uint8_t *GetEMMCBase() const = 0;
     virtual uint32_t GetGPUClockRate() const = 0;
     virtual uint32_t GetNumberOfCores() const = 0;
@@ -76,7 +77,7 @@ public:
     void DecodeBoardRevision(minstd::string &buffer) const;
 
 protected:
-    void GetPlatformDetails(uint8_t *mmio_base);
+    void GetPlatformDetails(uint8_t *mailbox_register_base);
 
 private:
     uint32_t board_model_number_;
