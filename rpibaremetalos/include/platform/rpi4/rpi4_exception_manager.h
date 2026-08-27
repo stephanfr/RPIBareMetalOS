@@ -221,18 +221,6 @@ private:
 
                 case 2:
                     return Interrupts::CORE_MAILBOX_2;
-
-                case 3:
-                    {
-                        //  Mailbox 3 is used exclusively for IPIs.  The value is the IPI type
-
-                        uint32_t ipi_core_id = GetCoreID();
-                        uint32_t mailbox_value = ReadCoreMailbox(ipi_core_id, 3);
-
-                        ResetCoreMailbox(ipi_core_id, 3, mailbox_value);
-
-                        return DecodeIPIMailboxPayload(ipi_core_id, mailbox_value);
-                    }
             }
         }
 

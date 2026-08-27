@@ -88,18 +88,6 @@ protected:
         return Interrupts::NO_SUCH_INTERRUPT;
     }
 
-    //  Decodes a raw IPI mailbox payload into an Interrupts value, logging
-    //      the offending value (and the core that received it) when it does
-    //      not correspond to a known IPI. Every board delivers IPIs through
-    //      a core mailbox, so they share this decode and this diagnostic.
-    //
-    //  Deliberately separate from AsInterrupt(): some callers pass values
-    //      that are not IPI payloads at all (e.g. the BCM2711 GIC IRQ
-    //      number fallthrough in GetInterruptType), and those must not be
-    //      reported as bad IPI payloads.
-
-    Interrupts DecodeIPIMailboxPayload(uint32_t core_id, uint32_t mailbox_payload);
-
     //  Runs every registered ISR for 'interrupt', except for a single
     //      IMPERATIVE_CORE_TASK_SWITCH ISR, which is instead written into
     //      'core_task_switch_isr' (only if found) so the caller can defer

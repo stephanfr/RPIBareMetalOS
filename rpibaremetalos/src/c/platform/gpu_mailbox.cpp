@@ -90,18 +90,6 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 
     message.AddLastTag();
 
-    //  Drain any stale response left behind by an earlier request that timed
-    //      out. The GPU may answer a request we already gave up on, and since
-    //      every property request uses the same channel, that late response
-    //      would otherwise be matched to -- and silently accepted for -- this
-    //      request. Anything sitting in the mailbox before we have sent
-    //      ours is by definition not ours.
-
-    while (!(Register(MailboxRegister::STATUS) & MBOX_STATUS_EMPTY))
-    {
-        (void)Register(MailboxRegister::READ);
-    }
-
     //  Wait until we can write to the mailbox
 
     uint64_t deadline = PhysicalTimer::CurrentTicks() + TimeoutInTimerTicks(MAILBOX_AVAILABLE_TIMEOUT_IN_MICROSECONDS);
@@ -122,7 +110,7 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
     //      adjust the address of the block so the GPU can see it.
     //
     //  DSB ensures all prior writes (the memcpy) are globally visible before the GPU reads
-    //  the buffer. ISB is insufficient here — it only flushes the instruction pipeline.
+    //      the buffer. ISB is insufficient here — it only flushes the instruction pipeline.
 
     void *uncached_memory_base = MMUManager::Instance().DMAUncachedMemoryBase();
 

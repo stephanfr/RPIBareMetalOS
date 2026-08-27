@@ -92,18 +92,6 @@ bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
     return true;
 }
 
-Interrupts ExceptionManager::DecodeIPIMailboxPayload(uint32_t core_id, uint32_t mailbox_payload)
-{
-    Interrupts interrupt = AsInterrupt(static_cast<InterprocessorInterrupts>(mailbox_payload));
-
-    if (interrupt == Interrupts::NO_SUCH_INTERRUPT)
-    {
-        LogWarning("Core %u: unrecognized IPI mailbox payload: %u\n", core_id, mailbox_payload);
-    }
-
-    return interrupt;
-}
-
 bool ExceptionManager::DispatchInterruptType(Interrupts interrupt, InterruptServiceRoutine *&core_task_switch_isr)
 {
     ISRPointerList *isrs = GetISRs(interrupt);

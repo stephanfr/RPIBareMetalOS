@@ -52,8 +52,6 @@ void BCM2837ExceptionManager::HandleInterrupt()
 
         ResetCoreMailbox(core_id, IPI_MAILBOX_ID, ipi_payload);
 
-        Interrupts interrupt = DecodeIPIMailboxPayload(core_id, ipi_payload);
-
         bool recognized_any = DispatchIPIMailboxPayload(ipi_payload, [&](Interrupts interrupt)
         {
             DispatchInterruptType(interrupt, core_task_switch_isr);

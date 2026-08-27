@@ -8,9 +8,7 @@
 
 #include <character_io>
 
-#include "asm_utility.h"
 #include "heaps.h"
-#include "devices/log.h"
 
 #include "cli/change_command.h"
 #include "cli/create_command.h"
@@ -99,8 +97,6 @@ namespace cli
 
     void CommandLineInterface::Run()
     {
-        LogWarning("CLI Run() entered on core %u\n", GetCoreID());
-
         session_context_ << "Command Line Interface\n";
 
         while (true)
