@@ -4,12 +4,11 @@
 
 #include "os_config.h"
 
-#include "asm_utility.h"
-
 #include "devices/uart0.h"
 
 #include "devices/gpio.h"
-#include "devices/log.h"
+
+#include "task/tasks.h"
 
 #include "platform/gpu_mailbox_messages.h"
 
@@ -104,27 +103,16 @@ unsigned int UART0::getc()
 {
     char r;
 
-    //  TEMPORARY DIAGNOSTIC
+    //  Yield rather than spin -- this wait is unbounded (it ends only when a character
+    //      arrives), and holding a core in a tight poll for it starves everything else
+    //      scheduled there, including the recurring system timer.
 
-    volatile uint32_t *fr     = (volatile uint32_t *)(platform_info_.GetMMIOBase() + 0x00201018);
-    volatile uint32_t *rsrecr = (volatile uint32_t *)(platform_info_.GetMMIOBase() + 0x00201004);
-    volatile uint32_t *cr     = (volatile uint32_t *)(platform_info_.GetMMIOBase() + 0x00201030);
-
-    uint32_t spins = 0;
-
-    while (*fr & 0x10)
+    while (GetRegister(PL011Registers::UART0_FR) & 0x10)
     {
-        if (++spins >= 20000000)
-        {
-            LogWarning("core %u waiting on UART0 RX -- FR: 0x%X  RSRECR: 0x%X  CR: 0x%X\n",
-                       GetCoreID(), *fr, *rsrecr, *cr);
-            spins = 0;
-        }
+        task::Task::GetTask().Yield();
     }
 
     r = (char)GetRegister(PL011Registers::UART0_DR);
-
-    LogWarning("core %u UART0 RX: 0x%X\n", GetCoreID(), (uint32_t)(unsigned char)r);
 
     return r == '\r' ? '\n' : r;
 }

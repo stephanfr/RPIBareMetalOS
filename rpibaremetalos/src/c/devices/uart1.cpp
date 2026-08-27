@@ -6,6 +6,8 @@
 
 #include "devices/gpio.h"
 
+#include "task/tasks.h"
+
 #define DELAY_LOOPS 200
 
 UART1::UART1( BaudRates  baud_rate, const char* alias )
@@ -85,18 +87,16 @@ unsigned int UART1::getc()
 {
     char c;
 
-    //  Wait until something is in the buffer
+    //  Yield rather than spin: this wait ends only when a character arrives, so holding a
+    //      core in a tight poll for it starves everything else scheduled there, including
+    //      the recurring system timer.
 
-    do
+    while (!(GetRegister(UART1AuxRegisters::AUX_MU_LSR) & 0x01))
     {
-        asm volatile("nop");
-    } while (!GetRegister(UART1AuxRegisters::AUX_MU_LSR) & 0x01);
-    
-    //  Read it and return
+        task::Task::GetTask().Yield();
+    }
 
     c = (char)GetRegister(UART1AuxRegisters::AUX_MU_IO);
-
-    //  Convert carriage return to newline
 
     return c == '\r' ? '\n' : c;
 }

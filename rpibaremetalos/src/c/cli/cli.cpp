@@ -107,11 +107,7 @@ namespace cli
         {
             session_context_ << "\n> ";
 
-            LogWarning("CLI blocking for input on core %u\n", GetCoreID());
-
             const char *first_token = command_parser_.GetNextLine();
-
-            LogWarning("CLI got line on core %u\n", GetCoreID());
 
             if (first_token == nullptr)
             {

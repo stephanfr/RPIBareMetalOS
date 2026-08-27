@@ -6,8 +6,8 @@
 #include "devices/video/fonts/basic_8x8.h"
 
 ConsoleVideoFrameBuffer::ConsoleVideoFrameBuffer(const char *alias, uint32_t foreground_color, uint32_t background_color)
-    : VideoFrameBuffer(),
-      CharacterIODevice(true, "ConsoleVideoFrameBuffer", alias),
+    : CharacterIODevice(true, "ConsoleVideoFrameBuffer", alias),
+      VideoFrameBuffer(),
       foreground_color_(foreground_color),
       background_color_(background_color)
 {

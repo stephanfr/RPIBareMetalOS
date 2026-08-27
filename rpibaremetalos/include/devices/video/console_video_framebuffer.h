@@ -23,7 +23,7 @@
 //      always returns 0 immediately rather than blocking, since nothing
 //      produces input for it.
 
-class ConsoleVideoFrameBuffer : public VideoFrameBuffer, public CharacterIODevice
+class ConsoleVideoFrameBuffer : public CharacterIODevice, public VideoFrameBuffer 
 {
 public:
     ConsoleVideoFrameBuffer(const char *alias, uint32_t foreground_color, uint32_t background_color);
