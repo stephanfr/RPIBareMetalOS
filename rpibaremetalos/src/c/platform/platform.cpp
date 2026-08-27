@@ -20,9 +20,11 @@
 
 #include "platform/rpi3/rpi3_platform_info.h"
 #include "platform/rpi4/rpi4_platform_info.h"
+#include "platform/rpi5/rpi5_platform_info.h"
 
 #include "devices/rpi3/rpi3_hw_rng.h"
 #include "devices/rpi4/rpi4_hw_rng.h"
+#include "devices/rpi5/rpi5_hw_rng.h"
 
 #include "devices/std_streams.h"
 #include "devices/uart0.h"
@@ -238,7 +240,23 @@ void InitializePlatform()
         break;
     }
 
-        //  If we do not identify the correct board, then park the core.
+    case RPI_BOARD_ENUM_RPI5:
+    {
+        __platform_info = static_new<RPI5PlatformInfo>();
+        //  No exception manager yet -- polled framebuffer output doesn't need
+        //  one (GIC-400 refactor is deferred to the RP1/GPIO-UART work).
+        //  HW RNG probe always fails today (register layout not yet
+        //  confirmed -- see rpi5_hw_rng.h); falls through to the SW RNG
+        //  fallback below, same as QEMU already does.
+        auto *rpi5_rng = static_new<RPi5HardwareRandomNumberGenerator>(*__platform_info);
+        if (rpi5_rng->Initialize())
+        {
+            __hw_random_number_generator = rpi5_rng;
+        }
+        break;
+    }
+
+    //  If we do not identify the correct board, then park the core.
 
     default:
         ParkCore();

@@ -15,7 +15,8 @@ typedef enum class RPIBoardType : uint32_t
 {
     UNKNOWN = RPI_BOARD_ENUM_UNKNOWN,
     RPI3 = RPI_BOARD_ENUM_RPI3,
-    RPI4 = RPI_BOARD_ENUM_RPI4
+    RPI4 = RPI_BOARD_ENUM_RPI4,
+    RPI5 = RPI_BOARD_ENUM_RPI5
 } RPIBoardType;
 
 class PlatformInfo
@@ -42,6 +43,11 @@ public:
     bool IsRPI4() const
     {
         return GetBoardType() == RPIBoardType::RPI4;
+    }
+
+    bool IsRPI5() const
+    {
+        return GetBoardType() == RPIBoardType::RPI5;
     }
 
     uint32_t GetBoardModelNumber() const

@@ -31,16 +31,18 @@
 
 // Early page table descriptor templates — indices must match MAIR1VAL byte slots above.
 // NORMAL block: AttrIndx=4(MT_NORMAL), AP=EL1-RW(0), SH=InnerShareable(3), AF=1, BlockDesc(1)
-.equ EARLY_NORMAL_DESC,    ((MT_NORMAL << 2) | (3 << 8) | (1 << 10) | 1)
-// DEVICE block: AttrIndx=0(MT_DEVICE_NGNRNE), SH=NonShareable(0), AF=1, BlockDesc(1)
-.equ EARLY_DEVICE_DESC,    ((MT_DEVICE_NGNRNE << 2) | (1 << 10) | 1)
-// L1 table descriptor: NSTable=1 (bit 63, stored as top 16-bit word for movk), EntryType=TABLE(3)
-.equ EARLY_L1_TABLE_FLAGS_HI, 0x8000
-// L2 region boundaries (2MB block indices)
-.equ EARLY_DEVICE_1_START, (0x3F000000 / 0x200000)   				// 504:  RPi3 peripherals start
-.equ EARLY_NORMAL_2_START, ((0x40000000 + 0x200000) / 0x200000)   	// 513:  RAM above 1GB starts
-.equ EARLY_DEVICE_2_START, (0xFC000000 / 0x200000)   				// 2016: RPi4 peripherals start
-.equ EARLY_L2_ENTRY_COUNT, (4 * 512)                 				// 2048: covers 0-4GB
+
+.equ EARLY_NORMAL_DESC,    ((MT_NORMAL << 2) | (3 << 8) | (1 << 10) | 1)	// DEVICE block: AttrIndx=0(MT_DEVICE_NGNRNE), SH=NonShareable(0), AF=1, BlockDesc(1)
+.equ EARLY_DEVICE_DESC,    ((MT_DEVICE_NGNRNE << 2) | (1 << 10) | 1)		// L1 table descriptor: NSTable=1 (bit 63, stored as top 16-bit word for movk), EntryType=TABLE(3)
+.equ EARLY_L1_TABLE_FLAGS_HI, 0x8000										// L2 region boundaries (2MB block indices)
+.equ EARLY_DEVICE_1_START, (0x3F000000 / 0x200000)   						// 504:  RPi3 peripherals start
+.equ EARLY_NORMAL_2_START, ((0x40000000 + 0x200000) / 0x200000)   			// 513:  RAM above 1GB starts
+.equ EARLY_DEVICE_2_START, (0xFC000000 / 0x200000)   						// 2016: RPi4 peripherals start
+.equ EARLY_L2_ENTRY_COUNT, (4 * 512)                 						// 2048: covers 0-4GB
+.equ EARLY_RPI5_PERIPHERAL_L1_INDEX, 65    									// 0x10_7c000000-0x10_7fffffff: system timer, L1 intc, power mgr, GIC, mailbox
+.equ EARLY_RPI5_RP1_WINDOW_L1_START, 124   									// 0x1F_00000000-0x1F_FFFFFFFF: RP1 PCIe outbound window (~4GB)
+.equ EARLY_RPI5_RP1_WINDOW_L1_END,   128
+
 .equ MAIR1VAL, ( (0x00ul << (MT_DEVICE_NGNRNE * 8)) |\
                  (0x04ul << (MT_DEVICE_NGNRE * 8)) |\
 				 (0x0cul << (MT_DEVICE_GRE * 8)) |\
@@ -48,8 +50,8 @@
 				 (0xfful << (MT_NORMAL * 8)) )
 
    // Specify mapping characteristics in translate control register
-#define TCREL1VAL  ( (0b00LL << 37) |   /* TBI=0, no tagging */\
-					 (0b000LL << 32) |  /* IPS= 32 bit ... 000 = 32bit, 001 = 36bit, 010 = 40bit */\
+#define TCREL1VAL  ( (0b00LL << 37)  |  /* TBI=0, no tagging */\
+					 (0b010LL << 32) |  /* IPS= 40 bit (0b010), widened for RPi5's ~128GiB GIC/peripheral addresses */\
 					 (0b10LL << 30)  |  /* TG1=4k ... options are 10=4KB, 01=16KB, 11=64KB ... take care differs from TG0 */\
 					 (0b11LL << 28)  |  /* SH1=3 inner ... options 00 = Non-shareable, 01 = INVALID, 10 = Outer Shareable, 11 = Inner Shareable */\
 					 (0b01LL << 26)  |  /* ORGN1=1 write back .. options 00 = Non-cacheable, 01 = Write back cacheable, 10 = Write thru cacheable, 11 = Write Back Non-cacheable */\
@@ -111,7 +113,8 @@ EnableMMUTables:
 
 //	uint32_t ARMaddrToGPUaddr (void* ARMaddress);
 .align	4
-.globl ARMaddrToGPUaddr;		
+.globl ARMaddrToGPUaddr;
+
 ARMaddrToGPUaddr:
 	mov x1, #0xC0000000						//	ARM to VC conversion value
 	orr x0, x0, x1							//	Create bus address
@@ -121,7 +124,8 @@ ARMaddrToGPUaddr:
 
 //	void* GPUaddrToARMaddr (uint32_t GPUaddress);
 .align	4
-.globl GPUaddrToARMaddr;		
+.globl GPUaddrToARMaddr;
+
 GPUaddrToARMaddr:
 	mov x1, ~0xC0000000						//	ARM to VC conversion value	
 	and x0, x0, x1							//	Create arm address
@@ -132,6 +136,7 @@ GPUaddrToARMaddr:
 //	uint64_t GetPhysicalAddress (uint64_t virtualAddress);
 .align	4
 .global GetPhysicalAddress
+
 GetPhysicalAddress:
 	mov		x1, x0
 	at		S1E1R, x0
@@ -145,23 +150,31 @@ GetPhysicalAddress:
 
 // void SetupEarlyPageTables(void)
 //
-// Builds a conservative 1:1 identity-mapped page table covering 0-4GB before any
-// C++ code runs.  Memory map (2MB blocks):
+// Builds a conservative 1:1 identity-mapped page table before any C++ code
+// 	runs.  Memory map (2MB blocks unless noted):
+//
 //   [0x000, 0x1F8): NORMAL  0x00000000-0x3EFFFFFF  (RAM, both boards)
 //   [0x1F8, 0x200): DEVICE  0x3F000000-0x3FFFFFFF  (RPi3 peripherals)
 //   [0x200, 0x7E0): NORMAL  0x40000000-0xFBFFFFFF  (RAM above 1GB on RPi4)
 //   [0x7E0, 0x800): DEVICE  0xFC000000-0xFFFFFFFF  (RPi4 peripherals)
+//   L1[65]:         DEVICE  0x10_40000000-0x10_7FFFFFFF (1GB block, RPi5 legacy
+//                    peripherals/GIC/mailbox -- real registers start at 0x10_7c000000,
+//                    inside this block, not at its start)
+//   L1[124-127]:    DEVICE  0x1F_00000000-0x1F_FFFFFFFF (4x 1GB blocks, RPi5 RP1
+//                    PCIe outbound window)
 //
-// Leaf function: uses x0-x6, preserves x19-x30.
-//
+// Leaf function: uses x0-x8, preserves x19-x30.
+
 .global SetupEarlyPageTables
 .align 4
+
 SetupEarlyPageTables:
     // Zero both tables (L1 + L2)
     adrp    x0, __early_l1_page_table
     add     x0, x0, :lo12:__early_l1_page_table
     adrp    x1, __early_page_tables_end
     add     x1, x1, :lo12:__early_page_tables_end
+
 .Lzero_early_tables:
     str     xzr, [x0], #8
     cmp     x0, x1
@@ -173,6 +186,7 @@ SetupEarlyPageTables:
     mov     x3, #EARLY_NORMAL_DESC                  // x3 = NORMAL descriptor template
     mov     x4, #EARLY_DEVICE_DESC                  // x4 = DEVICE descriptor template
     mov     x5, #0                                  // x5 = entry index i
+
 .Ll2_entry_loop:
     cmp     x5, #EARLY_DEVICE_1_START               // i < 0x1F8?
     b.lo    .Ll2_use_normal
@@ -181,11 +195,14 @@ SetupEarlyPageTables:
     cmp     x5, #EARLY_DEVICE_2_START               // i < 0x7E0?
     b.lo    .Ll2_use_normal
     b       .Ll2_use_device
+
 .Ll2_use_normal:
     mov     x6, x3
     b       .Ll2_build_entry
+
 .Ll2_use_device:
     mov     x6, x4
+
 .Ll2_build_entry:
     orr     x6, x6, x5, lsl #21                    // insert physical address (i * 2MB) at bits[47:21]
     str     x6, [x0, x5, lsl #3]                   // store to L2[i]
@@ -195,22 +212,43 @@ SetupEarlyPageTables:
 
     // Build 4 L1 entries pointing to consecutive 512-entry L2 sub-tables
     adrp    x0, __early_l1_page_table
-    add     x0, x0, :lo12:__early_l1_page_table    // x0 = L1 table base
+    add     x0, x0, :lo12:__early_l1_page_table    	// x0 = L1 table base
     adrp    x2, __early_l2_page_table
-    add     x2, x2, :lo12:__early_l2_page_table    // x2 = first L2 sub-table address
+    add     x2, x2, :lo12:__early_l2_page_table    	// x2 = first L2 sub-table address
     mov     x3, #3                                  // bits[1:0] = 0b11 (table descriptor)
-    movk    x3, #EARLY_L1_TABLE_FLAGS_HI, lsl #48  // bit[63] = NSTable = 1
+    movk    x3, #EARLY_L1_TABLE_FLAGS_HI, lsl #48  	// bit[63] = NSTable = 1
     mov     x4, #0                                  // x4 = L1 entry index
+
 .Ll1_entry_loop:
-    orr     x5, x3, x2                             // L1[i] = flags | L2 sub-table phys addr
+    orr     x5, x3, x2                             	// L1[i] = flags | L2 sub-table phys addr
     str     x5, [x0, x4, lsl #3]
-    add     x2, x2, #4096                          // next sub-table (512 entries * 8 bytes)
+    add     x2, x2, #4096                         // next sub-table (512 entries * 8 bytes)
     add     x4, x4, #1
     cmp     x4, #4
     b.lo    .Ll1_entry_loop
+	
+	// RPi5-specific 1GB L1 BLOCK descriptors -- bypass the 2MB L2 scheme
+    // entirely for these; covering ~1TiB of address space at 2MB granularity
+    // would need an impractically large table. Harmless for RPi3/RPi4: they
+    // never generate an access anywhere near these physical addresses, and
+    // x0 here still holds the L1 table base from the loop just above.
+
+    mov     x6, #EARLY_DEVICE_DESC                       // x6 = DEVICE descriptor template (block, L1 granule)
+
+    mov     x7, #EARLY_RPI5_PERIPHERAL_L1_INDEX
+    orr     x8, x6, x7, lsl #30                          // insert physical base (65 << 30) at bits[47:30]
+    str     x8, [x0, x7, lsl #3]                         // L1[65] = legacy-peripheral/GIC/mailbox block
+
+    mov     x7, #EARLY_RPI5_RP1_WINDOW_L1_START
+
+.Lrp1_window_loop:
+    orr     x8, x6, x7, lsl #30
+    str     x8, [x0, x7, lsl #3]
+    add     x7, x7, #1
+    cmp     x7, #EARLY_RPI5_RP1_WINDOW_L1_END
+    b.lo    .Lrp1_window_loop
 
     dsb     sy                                      // ensure all table writes complete before caller enables MMU
     ret
 .ltorg
-
 
