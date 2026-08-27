@@ -8,7 +8,9 @@
 
 #include <character_io>
 
+#include "asm_utility.h"
 #include "heaps.h"
+#include "devices/log.h"
 
 #include "cli/change_command.h"
 #include "cli/create_command.h"
@@ -97,13 +99,19 @@ namespace cli
 
     void CommandLineInterface::Run()
     {
+        LogWarning("CLI Run() entered on core %u\n", GetCoreID());
+
         session_context_ << "Command Line Interface\n";
 
         while (true)
         {
             session_context_ << "\n> ";
 
+            LogWarning("CLI blocking for input on core %u\n", GetCoreID());
+
             const char *first_token = command_parser_.GetNextLine();
+
+            LogWarning("CLI got line on core %u\n", GetCoreID());
 
             if (first_token == nullptr)
             {

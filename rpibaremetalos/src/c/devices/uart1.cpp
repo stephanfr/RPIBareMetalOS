@@ -91,7 +91,7 @@ unsigned int UART1::getc()
     {
         asm volatile("nop");
     } while (!GetRegister(UART1AuxRegisters::AUX_MU_LSR) & 0x01);
-
+    
     //  Read it and return
 
     c = (char)GetRegister(UART1AuxRegisters::AUX_MU_IO);

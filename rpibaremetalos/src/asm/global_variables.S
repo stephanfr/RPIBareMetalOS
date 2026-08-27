@@ -100,3 +100,14 @@ __kernel_command_line:                                      .space S_MAX_KERNEL_
                                                             .word 0                                         //  End Tag - must be zero
                                                             .word 0
 
+//  Base address of the final, platform specific translation tables built by core 0 in
+//      InitializePlatform().  Secondary cores read this as they come out of their EL1 spin
+//      loop so that every core runs on the same tables.  Zero until core 0 publishes it.
+//      64 byte aligned so it owns a cache line and a core running with its caches off can
+//      pull it from DRAM with a single 'dc civac'.
+
+.global __kernel_page_table_base
+.data
+.balign 64
+
+__kernel_page_table_base : .quad 0

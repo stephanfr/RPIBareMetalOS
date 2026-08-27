@@ -63,7 +63,7 @@ void ConsoleVideoFrameBuffer::putc(unsigned int c)
         return;
     }
 
-    LockGuard guard(lock_);
+    InterruptLockGuard guard(lock_);
 
     if (c == '\n')
     {
