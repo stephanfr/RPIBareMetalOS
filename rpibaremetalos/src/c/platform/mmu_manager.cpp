@@ -11,8 +11,9 @@
 
 #include "platform/kernel_command_line.h"
 
-#include "platform/rpi4/rpi4_memory_manager.h"
 #include "platform/rpi3/rpi3_memory_manager.h"
+#include "platform/rpi4/rpi4_memory_manager.h"
+#include "platform/rpi5/rpi5_memory_manager.h"
 
 #include "devices/log.h"
 
@@ -21,6 +22,7 @@ union platform_specific_mmu_union
 {
     RPI3BPlusMemoryManager rpi3;
     RPI4BMemoryManager rpi4;
+    RPI5MemoryManager rpi5;
 };
 
 uint8_t __mmu_manager_storage[sizeof(platform_specific_mmu_union) + 16] __attribute__((aligned(16)));
@@ -64,6 +66,10 @@ void MMUManager::Initialize()
 
         case RPI_BOARD_ENUM_RPI4 :
             platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI4BMemoryManager(memory_model);
+            break;
+
+        case RPI_BOARD_ENUM_RPI5 :
+            platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI5MemoryManager(memory_model);
             break;
 
         default:

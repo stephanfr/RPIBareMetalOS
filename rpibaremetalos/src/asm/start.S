@@ -536,8 +536,6 @@ start_additional_cores:
     mov     w0, #6
     bl      RPI5Marker
 
-start_additional_cores:
-
     //  Nothing to do when only one core is available.  The loop below is a
     //      do-while: it falls into wait_core_ack for core 1 BEFORE ever testing
     //      x24_numberOfCoresAvailable, so without this guard a single-core
