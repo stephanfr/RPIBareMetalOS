@@ -17,6 +17,7 @@
 
 #include "platform/rpi3/rpi3_exception_manager.h"
 #include "platform/rpi4/rpi4_exception_manager.h"
+#include "platform/rpi5/rpi5_exception_manager.h"
 
 #include "platform/rpi3/rpi3_platform_info.h"
 #include "platform/rpi4/rpi4_platform_info.h"
@@ -243,11 +244,11 @@ void InitializePlatform()
     case RPI_BOARD_ENUM_RPI5:
     {
         __platform_info = static_new<RPI5PlatformInfo>();
-        //  No exception manager yet -- polled framebuffer output doesn't need
-        //  one (GIC-400 refactor is deferred to the RP1/GPIO-UART work).
-        //  HW RNG probe always fails today (register layout not yet
-        //  confirmed -- see rpi5_hw_rng.h); falls through to the SW RNG
-        //  fallback below, same as QEMU already does.
+        __exception_manager = static_new<RPI5ExceptionManager>();
+
+        //  Stub only -- GIC-400 refactor is deferred to the RP1/GPIO-UART
+        //  work. This exists so GetExceptionManager() has a non-null target.
+        
         auto *rpi5_rng = static_new<RPi5HardwareRandomNumberGenerator>(*__platform_info);
         if (rpi5_rng->Initialize())
         {
@@ -300,8 +301,9 @@ void InitializePlatform()
 
     if (SetupFrameBufferConsole(frame_buffer_console))
     {
-        auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+        LogError("FB DIAG: SetupFrameBufferConsole succeeded\n");
 
+        auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
         if (!console_lookup.Failed())
         {
             CharacterIODevice &serial_console = *console_lookup;
@@ -315,7 +317,11 @@ void InitializePlatform()
             SetStandardStreams(tee_ptr, &serial_console);
         }
     }
-    
+    else
+    {
+        LogError("FB DIAG: SetupFrameBufferConsole FAILED\n");
+    }
+
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
     //    if ((__number_of_cores_available > MAX_CORES) ||

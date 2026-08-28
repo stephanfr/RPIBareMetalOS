@@ -2,5 +2,17 @@ arm_64bit=1
 armstub=armstub_minimal.bin
 kernel=kernel8.img
 
+#  Raspberry Pi 5 ONLY: without this the firmware assumes it is booting Linux,
+#      loads/runs the kernel from 0x200000 instead of 0x80000, and requires a
+#      device tree blob.  This OS is linked for 0x80000 (link.template.ld) and is
+#      not position-independent -- it mixes absolute (ldr =symbol) with
+#      PC-relative (adrp) addressing, which resolve to different places if the
+#      load address moves, so it dies before executing any of its own code.
+#      Harmless on RPi3/RPi4, which load at 0x80000 regardless.
+os_check=0
+
+#  Specify the load address explicitly.
+kernel_address=0x80000
+
 core_freq_min=500
 hdmi_force_hotplug=1

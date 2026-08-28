@@ -7,7 +7,6 @@
 #include "os_memory_config.h"
 #include "enable_disable_irqs.h"
 
-
 #define BIT(x) (1 << (x))
 
 #define SCR_RW			    BIT(10)
@@ -148,13 +147,13 @@ x24_numberOfCoresAvailable .req x24
 
 _start:
 
-    //
+    mov     x23_arrivedInEL3, #0
+
     //  Set move to EL1
     //
     //      This will require some config at EL3 and EL2, which is dependent on the EL level when we enter this code.
     //      The default armstub configures EL3 and then jumps to this code in EL2.
     //      The armstub_base.bin with this project does not change the EL at all, so we will enter here at EL3.
-    //
 
     //  Determine if we are running at EL3 - this can occur if the default ARMSTUB is replaced
 
@@ -176,12 +175,30 @@ _start:
 
     mov     x23_arrivedInEL3, #1                    //  Set flag to indicate we arrived in EL3
 
+    //  L2CTLR_EL1 (S3_1_C11_C0_2) and CPUECTLR_EL1 (S3_1_C15_C2_1) below are the
+    //      Cortex-A53/A72 IMPLEMENTATION DEFINED encodings.  The Cortex-A76 in the
+    //      RPi5 implements NEITHER at those encodings -- it relocates CPUECTLR_EL1
+    //      to S3_0_C15_C1_4 and has no L2CTLR_EL1 equivalent (confirmed against ARM
+    //      Trusted Firmware's include/lib/cpus/aarch64/cortex_a{72,76}.h).  Executing
+    //      them on an A76 raises an Undefined Instruction exception, and VBAR_EL3 is
+    //      not set yet here -- so there is no vector to take it to and the core dies
+    //      silently, before board detection, the MMU, or any console exists.
+    //
+    //      Neither is needed on the A76: SMPEN is an A53/A72 bit (A76 cache coherency
+    //      is always on, which is why TF-A's own A76 reset handler never touches it),
+    //      and the L2 latency setting is A72-specific tuning.
+
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.eq    skip_a53_a72_imp_def_registers
+
 	// Set L2 read/write cache latency to 3
 
 	mrs     x9, L2CTLR_EL1
 	mov     x10, #0x22
 	orr     x9, x9, x10
 	msr     L2CTLR_EL1, x9
+
+skip_a53_a72_imp_def_registers:
 
 	//  Enable Floating point instruction set and SIMD instructions
 
@@ -197,10 +214,15 @@ _start:
 	mov     x9, #ACTLR_VAL
 	msr     ACTLR_EL3, x9
 
-	//  Set SMPEN
+	//  Set SMPEN -- A53/A72 only, see the comment above
+
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.eq    skip_smpen
 
 	mov     x9, #CPUECTLR_EL1_SMPEN
 	msr     CPUECTLR_EL1, x9
+
+skip_smpen:
 
     //  Identify the board type and then setup the physical timer
 
@@ -209,15 +231,26 @@ _start:
 
     bl      SetupPhysicalTimer                                  //  Board HW id must be passed in x0
 
-    //  If we are on a platform that supports the Generic Interrupt Controller, configure it now
-    //      Register 3 contains the board type copied above. 
+    //  RPi3 has no GIC-400 at all.  RPi5 HAS one, but at 0x10_7FFF9000 -- not
+    //      ConfigureGIC400's hardcoded RPi4 constants (0xFF841000/0xFF842000).
+    //      Calling it on RPi5 writes to an address BCM2712 does not implement as a
+    //      GIC, with the MMU off and no exception vectors -- skip until the GIC-400
+    //      refactor parameterizes the base per board.
+    //
+    //  NOTE: x0 does NOT still hold the board type here -- SetupPhysicalTimer above
+    //      returns its own status code in x0 -- so reload it from x20, which
+    //      ConfigureGIC400's own internal board check needs.
 
     cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI3
-    b.eq    rpi3_skip_gic_config
+    b.eq    skip_gic_config
 
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.eq    skip_gic_config
+
+    mov     x0, x20_boardHWId
     bl      ConfigureGIC400
 	
-rpi3_skip_gic_config:
+skip_gic_config:
 
     //  Set up SCTLR_EL2
 	//      All set bits below are res1. LE, no WXN/I/SA/C/A/M
@@ -404,6 +437,12 @@ continue_on_core0:
     //  Get the board version, VC memory start, and kernel command line
 
     bl GetBootTimeSettings
+
+    //  TEMPORARY DIAGNOSTIC -- MMU still off here (mailbox works), and sp is
+    //      already valid (SP_EL1 configured during the EL2 stack setup above),
+    //      so unlike the _start diagnostic this needs no stack of its own.
+
+    bl RPI5BootValuesDiagnostic
 
     //  Enable the MMU before clearing BSS or running any C++ static constructors.
     //  Conservative 1:1 identity map (see SetupEarlyPageTables in mmu.S for region breakdown).

@@ -4,6 +4,8 @@
 
 #include "devices/video/video_framebuffer.h"
 
+#include "devices/log.h"     //  TEMPORARY -- remove once framebuffer diagnosis is complete
+
 bool VideoFrameBuffer::Allocate()
 {
     GPUMailbox mbox;
@@ -17,13 +19,20 @@ bool VideoFrameBuffer::Allocate()
     uint32_t requested_width = DEFAULT_FALLBACK_WIDTH;
     uint32_t requested_height = DEFAULT_FALLBACK_HEIGHT;
 
-    if (mbox.sendMessage(getPhysicalSizeMessage) &&
+    bool query_ok = mbox.sendMessage(getPhysicalSizeMessage);
+
+    LogError("FB DIAG: physical-size query sendMessage=%u W=%u H=%u\n",
+             query_ok, getPhysicalWidthHeightTag.GetWidth(), getPhysicalWidthHeightTag.GetHeight());
+
+    if (query_ok &&
         (getPhysicalWidthHeightTag.GetWidth() != 0) &&
         (getPhysicalWidthHeightTag.GetHeight() != 0))
     {
         requested_width = getPhysicalWidthHeightTag.GetWidth();
         requested_height = getPhysicalWidthHeightTag.GetHeight();
     }
+
+    LogError("FB DIAG: requesting %ux%u\n", requested_width, requested_height);
 
     //  One combined message: set physical/virtual size, offset, depth,
     //      pixel order, allocate the buffer, and read back the pitch.
@@ -44,7 +53,11 @@ bool VideoFrameBuffer::Allocate()
                                               allocateFrameBufferTag,
                                               getPitchTag);
 
-    if (!mbox.sendMessage(allocateMessage))
+    bool allocate_ok = mbox.sendMessage(allocateMessage);
+
+    LogError("FB DIAG: allocate sendMessage=%u\n", allocate_ok);
+
+    if (!allocate_ok)
     {
         return false;
     }
@@ -60,12 +73,16 @@ bool VideoFrameBuffer::Allocate()
     uint32_t size_in_bytes = allocateFrameBufferTag.GetSizeInBytes();
     uint32_t pitch = getPitchTag.GetPitch();
 
+    LogError("FB DIAG: applied W=%u H=%u ADDR=0x%x SIZE=%u PITCH=%u\n",
+             applied_width, applied_height, base_address_raw, size_in_bytes, pitch);
+
     if ((applied_width == 0) ||
         (applied_height == 0) ||
         (base_address_raw == 0) ||
         (size_in_bytes == 0) ||
         (pitch == 0))
     {
+        LogError("FB DIAG: one or more applied values were zero -- returning false\n");
         return false;
     }
 
@@ -80,6 +97,8 @@ bool VideoFrameBuffer::Allocate()
     pitch_ = pitch;
     width_ = applied_width;
     height_ = applied_height;
+
+    LogError("FB DIAG: Allocate() succeeded, base_address_=%p\n", (void *)base_address_);
 
     return true;
 }
