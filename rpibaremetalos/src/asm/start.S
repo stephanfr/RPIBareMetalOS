@@ -147,6 +147,21 @@ x24_numberOfCoresAvailable .req x24
 
 _start:
 
+    //  TEMPORARY MARKER 1 -- proves the image executes.  MMU off, core 0 only.
+    //      Stack is an absolute movz constant, independent of the linker script.
+
+    mrs     x9, MPIDR_EL1
+    and     x9, x9, #3
+    cbnz    x9, skip_marker_1
+
+    movz    x9, #0x0008, lsl #16                //  sp = 0x00080000, grows down
+    mov     sp, x9
+
+    mov     w0, #1
+    bl      RPI5Marker
+
+skip_marker_1:
+
     mov     x23_arrivedInEL3, #0
 
     //  Set move to EL1
@@ -436,8 +451,13 @@ continue_on_core0:
 
     //  Get the board version, VC memory start, and kernel command line
 
-    bl GetBootTimeSettings
+    //  TEMPORARY MARKER 2 -- proves we reached GetBootTimeSettings.
 
+    mov     w0, #2
+    bl      RPI5Marker
+
+    bl GetBootTimeSettings
+    
     //  TEMPORARY DIAGNOSTIC -- MMU still off here (mailbox works), and sp is
     //      already valid (SP_EL1 configured during the EL2 stack setup above),
     //      so unlike the _start diagnostic this needs no stack of its own.
@@ -456,6 +476,9 @@ continue_on_core0:
     bl      EnableMMUTables
     //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
 
+    mov     w0, #4                  //  <-- MMU is now ON; this marker only works with the flush above
+    bl      RPI5Marker
+
     //  Clear bss
     //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length
 
@@ -469,6 +492,9 @@ loop_for_bss_clear:
     str     xzr, [x9], #8                                       //  Set 8 bytes at a time - the section in the linker script must match
     sub     w10, w10, #1
     cbnz    w10, loop_for_bss_clear
+
+    mov     w0, #5
+    bl      RPI5Marker
 
 restore_globals_after_bss:
     //  BSS clear zeroed __hw_board_type and __number_of_cores_available (both live in BSS).
@@ -507,6 +533,22 @@ loop_for_next_static_initializer:
     //  Bring the other cores out of their spin loops
 
 start_additional_cores:
+    mov     w0, #6
+    bl      RPI5Marker
+
+start_additional_cores:
+
+    //  Nothing to do when only one core is available.  The loop below is a
+    //      do-while: it falls into wait_core_ack for core 1 BEFORE ever testing
+    //      x24_numberOfCoresAvailable, so without this guard a single-core
+    //      configuration blocks forever waiting on a core that was never
+    //      started.  RPi5 currently reports 1 core (see number_of_cores.cpp) --
+    //      whether BCM2712 firmware releases cores 1-3 to a custom armstub, and
+    //      whether the RPi3/RPi4 armstub_el2_spin_table convention applies, are
+    //      both still unverified on that board.
+
+    cmp     x24_numberOfCoresAvailable, #1
+    b.ls    additional_cores_started
 
     mov x9, #1                                                 //  Start with core 1
 
@@ -525,7 +567,12 @@ wait_core_ack:
     cmp x9, x24_numberOfCoresAvailable                         //  Loop until all cores are started
     b.lo start_next_core
 
+additional_cores_started:
+
     //  Initialize the platform
+
+    mov     w0, #7
+    bl      RPI5Marker
 
     bl      InitializePlatform
 

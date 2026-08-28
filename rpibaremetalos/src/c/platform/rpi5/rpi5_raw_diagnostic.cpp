@@ -39,11 +39,31 @@ namespace
         return freq ? freq : 1;
     }
 
+    //  Clean+invalidate to the point of coherency.  MANDATORY once the MMU and
+    //      D-cache are enabled: without it the GPU never sees our mailbox
+    //      message and the display controller never sees our pixels, so every
+    //      marker placed after EnableMMUTables silently does nothing.
+
+    void CleanAndInvalidateRange(const volatile void *start, uint64_t length)
+    {
+        uintptr_t addr = reinterpret_cast<uintptr_t>(start) & ~static_cast<uintptr_t>(63);
+        uintptr_t end  = reinterpret_cast<uintptr_t>(start) + length;
+
+        for (; addr < end; addr += 64)
+        {
+            asm volatile("dc civac, %0" :: "r"(addr) : "memory");
+        }
+
+        asm volatile("dsb sy" ::: "memory");
+    }
+
     bool RawMailboxCall(volatile uint32_t *mbox, uint8_t channel)
     {
         uint32_t message_addr = (static_cast<uint32_t>(reinterpret_cast<uintptr_t>(mbox)) & ~0xFu) | (channel & 0xFu);
 
         asm volatile("dsb sy" ::: "memory");
+
+        CleanAndInvalidateRange(mbox, 256);          //  <-- ADD: push message to memory
 
         uint64_t deadline = ReadCounterTicks() + TicksPerSecond() * 2;
 
@@ -66,6 +86,8 @@ namespace
             if ((response & 0xF) != channel) continue;
 
             asm volatile("dsb sy" ::: "memory");
+
+            CleanAndInvalidateRange(mbox, 256);          //  <-- ADD: push message to memory
 
             return mbox[1] == MBOX_RESPONSE_SUCCESS;
         }
@@ -269,6 +291,8 @@ namespace
         g_cursor_x = 0;
         g_cursor_y = 0;
 
+        CleanAndInvalidateRange(g_fb, static_cast<uint64_t>(g_pitch) * 200);
+
         return true;
     }
 }
@@ -289,6 +313,8 @@ extern "C" void RPI5RawFramebufferDiagnostic()
     DrawString("BYTES/PX "); DrawUInt(pitch / width);      DrawChar('\n');
     DrawString("ADDR ");     DrawHex(fb_addr_raw);         DrawChar('\n');
     DrawString("SIZE ");     DrawHex(fb_size);             DrawChar('\n');
+
+    CleanAndInvalidateRange(g_fb, static_cast<uint64_t>(g_pitch) * 200);
 }
 
 //  Called immediately after GetBootTimeSettings in start.S, MMU still off.
@@ -311,4 +337,20 @@ extern "C" void RPI5BootValuesDiagnostic()
     DrawString(memory_field == 2 || memory_field == 4 || memory_field == 5 ? "  (handled)\n" : "  *** PARKS ***\n");
     DrawString("VCBASE ");    DrawHex(__videocore_memory_base);           DrawChar('\n');
     DrawString("VCSIZE ");    DrawHex(__videocore_memory_size_in_bytes);  DrawChar('\n');
+
+    CleanAndInvalidateRange(g_fb, static_cast<uint64_t>(g_pitch) * 200);
+}
+
+//  Progress marker.  Each call re-allocates and clears the framebuffer, so
+//      whatever is on screen at the end is the FURTHEST point reached.
+
+extern "C" void RPI5Marker(uint32_t id)
+{
+    uint32_t width, height, pitch, depth, fb_addr_raw, fb_size;
+
+    if (!SetupFramebufferForText(width, height, pitch, depth, fb_addr_raw, fb_size)) return;
+
+    DrawString("RPI5 MARKER ");
+    DrawUInt(id);
+    DrawChar('\n');
 }

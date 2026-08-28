@@ -197,9 +197,12 @@ bool SetupFrameBufferConsole(ConsoleVideoFrameBuffer *&out_frame_buffer_console)
 //      Declare it as 'extern "C"' so that it is not mangled and we can call it from the startup assembly code.
 
 extern "C" void InitializePlatform() __attribute__((used));
+extern "C" void RPI5Marker(uint32_t id);
 
 void InitializePlatform()
 {
+    RPI5Marker(8);      //  first line of InitializePlatform
+
     //  TODO - figure out how to signal error messages
 
     if (__platform_initialized)
@@ -211,6 +214,8 @@ void InitializePlatform()
     //      The GPU Mailbox assumes that the MMU is enabled, so we need to do this first.
 
     MMUManager::Initialize();
+
+    RPI5Marker(9);      //  after the TTBR0 swap to RPI5MemoryManager's tables
 
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.

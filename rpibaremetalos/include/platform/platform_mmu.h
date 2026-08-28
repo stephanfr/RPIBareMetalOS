@@ -95,23 +95,41 @@ public:
 
         switch (memory)
         {
+        case 0:
+            platform_memory_in_bytes_ = 256ULL * BYTES_1M;
+            break;
+
+        case 1:
+            platform_memory_in_bytes_ = 512ULL * BYTES_1M;
+            break;
+
         case 2:
             platform_memory_in_bytes_ = BYTES_1G;
             break;
 
+        case 3:
+            platform_memory_in_bytes_ = 2ULL * BYTES_1G;
+            break;
+
         case 4:
-            platform_memory_in_bytes_ = 4 * BYTES_1G;
+            platform_memory_in_bytes_ = 4ULL * BYTES_1G;
             break;
 
         case 5:
-            platform_memory_in_bytes_ = 8 * BYTES_1G;
+            platform_memory_in_bytes_ = 8ULL * BYTES_1G;
             break;
+
+        case 6:
+            platform_memory_in_bytes_ = 16ULL * BYTES_1G;
+            break;
+
+            //  7 is not currently assigned by the revision-code spec.
 
         default:
             ParkCore();
             break;
         }
-
+        
         //  Get the start of videocore memory and its size
 
         videocore_memory_start_ = (uint8_t *)((uint64_t)__videocore_memory_base);

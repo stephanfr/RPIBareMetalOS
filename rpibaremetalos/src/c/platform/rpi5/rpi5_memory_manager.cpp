@@ -24,14 +24,34 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
 
     videocore_memory_start_block_ = (uint64_t)videocore_memory_start_ / level1_blocksize_;
 
-    //  Reserve a couple 'special purpose' blocks, same convention as RPi3/RPi4:
-    //  one 2MB block for the page tables, one 2MB block of uncached memory for
-    //  GPU-to-ARM communication (mailboxes/framebuffers), both placed just
-    //  below Videocore memory.
+    //  The VideoCore can only reach the low 1GB of physical RAM: BCM2712's
+    //      dma-ranges map bus 0xC0000000-0xFFFFFFFF onto physical 0-0x40000000,
+    //      which is exactly the aliasing ARMToGPUAddress()'s "| 0xC0000000"
+    //      assumes.  RPi5 reports videocore memory at ~0xFDB00000 (~3.96GB), so
+    //      the RPi3/RPi4 convention of placing these blocks just below videocore
+    //      memory puts the DMA block at ~0xFD800000 -- an address that ALREADY
+    //      has bits 30 and 31 set, making the OR a no-op.  The GPU then decodes
+    //      that bus address as physical 0x3D800000, 0xC0000000 bytes from where
+    //      the message was actually written, and every mailbox call fails.
+    //
+    //      Cap the reservation inside the GPU-addressable window instead,
+    //      leaving the space above it in the low 1GB free for the firmware's own
+    //      framebuffer allocations (1920x1080x32bpp is ~8MB; the framebuffer
+    //      observed on this board landed at 0x3F800000).
+    //
+    //      NOTE: this also caps MemoryManager's allocatable RAM at ~896MB, since
+    //      ReservedMemoryBase() is page_table_block_-derived.  Only the DMA block
+    //      strictly needs to be GPU-addressable -- decoupling the page-table
+    //      block so it can live high, and teaching MemoryManager to exclude the
+    //      low DMA block, is a worthwhile follow-up on an 8GB board.
 
-    dma_block_ = videocore_memory_start_block_ - 1;
+    const uint64_t gpu_addressable_top_block = (896 * BYTES_1M) / level1_blocksize_;
+
+    const uint64_t reservation_top_block = minstd::min(videocore_memory_start_block_, gpu_addressable_top_block);
+
+    dma_block_ = reservation_top_block - 1;
     page_table_block_ = dma_block_ - 1;
-
+    
     kernel_page_table_1_to_1_ = (uint64_t *)(page_table_block_ * level1_blocksize_);
     Stage2map1to1_ = (VMSAv8_64_DESCRIPTOR *)(kernel_page_table_1_to_1_ + number_of_pagetable_entries_);
 
