@@ -51,7 +51,7 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
 
     dma_block_ = reservation_top_block - 1;
     page_table_block_ = dma_block_ - 1;
-    
+
     kernel_page_table_1_to_1_ = (uint64_t *)(page_table_block_ * level1_blocksize_);
     Stage2map1to1_ = (VMSAv8_64_DESCRIPTOR *)(kernel_page_table_1_to_1_ + number_of_pagetable_entries_);
 
@@ -101,6 +101,35 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
             .MemAttr = MemoryAttribute::NORMAL,
             .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
             .SH = Stage2Sharability::INNER_SHAREABLE,
+            .AF = AccessFlag::ACCESSED,
+            .Address = (uintptr_t)i << granule_size_shift_,
+        };
+    }
+
+    //  Map the GPU allocation window uncached.
+    //
+    //      The firmware allocates the framebuffer inside the low-1GB
+    //      GPU-addressable window (it landed at 0x3F800000 on this board).
+    //      Unlike RPi3/RPi4 -- where the framebuffer falls inside the reported
+    //      videocore range and is therefore already NORMAL_NO_CACHING -- RPi5
+    //      reports videocore memory at ~0xFDB00000, nowhere near where the
+    //      framebuffer actually lands.  Left as NORMAL cacheable, every pixel
+    //      write sits in the D-cache where the display controller never sees
+    //      it: the screen clears (an 8MB fill forces writeback) but no text
+    //      ever appears (small glyph writes stay resident in cache).
+    //
+    //      This is exactly the region left free above our own reservation, so
+    //      it does not overlap the page-table or DMA blocks.
+
+    const uint64_t gpu_window_first_block = reservation_top_block;
+    const uint64_t gpu_window_last_block  = BYTES_1G / level1_blocksize_;
+
+    for (uint64_t i = gpu_window_first_block; i < gpu_window_last_block; i++)
+    {
+        Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
+            .EntryType = TableType::BLOCK_TABLE,
+            .MemAttr = MemoryAttribute::NORMAL_NO_CACHING,
+            .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
             .AF = AccessFlag::ACCESSED,
             .Address = (uintptr_t)i << granule_size_shift_,
         };

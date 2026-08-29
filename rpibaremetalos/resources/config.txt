@@ -1,6 +1,6 @@
 arm_64bit=1
-armstub=armstub_minimal.bin
 kernel=kernel8.img
+armstub=armstub_minimal.bin
 
 #  Raspberry Pi 5 ONLY: without this the firmware assumes it is booting Linux,
 #      loads/runs the kernel from 0x200000 instead of 0x80000, and requires a

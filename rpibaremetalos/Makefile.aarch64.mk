@@ -89,6 +89,11 @@ CPP_SRC := $(foreach sdir,$(CPP_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
 OBJ := $(patsubst $(SRC_ROOT)/asm/%.S,$(BUILD_ROOT)/asm/%.o,$(ASM_SRC)) $(patsubst $(SRC_ROOT)/c/%.c,$(BUILD_ROOT)/c/%.o,$(C_SRC)) $(patsubst $(SRC_ROOT)/c/%.cpp,$(BUILD_ROOT)/c/%.o,$(CPP_SRC))
 
+#  Auto-generated header dependency files (one .d per .o). -MMD emits them during
+#  compilation; the -include at the bottom of this file pulls them back in so that
+#  editing a header rebuilds every object that includes it (e.g. inline GetCoreID).
+DEPS := $(OBJ:.o=.d)
+
 INCLUDE_DIRS := -I../deps/minimalclib/include -I../deps/minimalstdio/include -I../deps/minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
 LDFLAGS += -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64 
 LDLIBS = -lminimalstdio -lminimalclib -lminimalstdlib
@@ -117,23 +122,26 @@ $(LINKER_SCRIPT):
 
 define make-asm-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.S
-	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -g3 -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -MMD -MP -g3 -c $$< -o $$@
 endef
 
 define make-c-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.c
-	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -MMD -MP -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 define make-cpp-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.cpp
-	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -MMD -MP -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 
 $(foreach bdir,$(ASM_DIRS), $(eval $(call make-asm-goal,$(bdir))))
 $(foreach bdir,$(C_DIRS), $(eval $(call make-c-goal,$(bdir))))
 $(foreach bdir,$(CPP_DIRS), $(eval $(call make-cpp-goal,$(bdir))))
+
+#  Pull in auto-generated header dependencies so header edits trigger rebuilds.
+-include $(DEPS)
 
 
 checkdirs: $(BUILD_DIRS)

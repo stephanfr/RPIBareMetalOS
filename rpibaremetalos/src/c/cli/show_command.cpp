@@ -8,6 +8,7 @@
 #include "asm_utility.h"
 
 #include "platform/platform_info.h"
+#include "processor_cores.h"
 
 #include "platform/kernel_command_line.h"
 
@@ -83,6 +84,22 @@ namespace cli::commands
 
         context.output_stream_ << "\nIO Mapping:\n";
         context.output_stream_ << minstd::format(format_buffer, "STDOUT mapped to: {}\n", (const char *)stdout->Name());
+
+        context.output_stream_ << "\nCore Status:\n";
+        context.output_stream_ << minstd::format(format_buffer, "Cores Available: {}\n", __number_of_cores_available);
+
+        static constexpr const char *state_names[] = {
+            "NotStarted", "StartedInEL3", "StartedInEL2", "ConfiguringStacks",
+            "SpinningInEL1", "InitializingKernel", "JumpedToKernelMain",
+            "JumpedToSecondaryMain", "WaitingInSecondaryMain", "ExecutingApp", "Parked"
+        };
+
+        for (uint32_t core = 0; core < __number_of_cores_available; core++)
+        {
+            uint32_t state = __core_state[core].load();
+            const char *name = (state < 11) ? state_names[state] : "Unknown";
+            context.output_stream_ << minstd::format(format_buffer, "  Core {}: {} ({})\n", core, name, state);
+        }
 
         context.output_stream_ << "\n\n";
     }

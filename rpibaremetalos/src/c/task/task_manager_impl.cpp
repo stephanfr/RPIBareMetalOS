@@ -7,6 +7,8 @@
 #include <string.h>
 
 #include "processor_cores.h"
+#include "cpu_part_nums.h"
+#include "asm_globals.h"
 #include "task/system_calls.h"
 
 #include "devices/log.h"
@@ -107,9 +109,25 @@ namespace task
 
             __core_state[core_id].store((uint32_t)CoreInitializationStates::WaitingInSecondaryMain);
 
-            //  StartSecondaryCores() sends a CORE_TASK_SWITCH IPI after observing WaitingInSecondaryMain.
-            //  That IPI fires SwitchToNextTask() which replaces this execution context entirely.
-            //  The loop below is a safety fallback that should never execute in normal operation.
+            //  RPi5 has no GIC driver yet (RPI5ExceptionManager is a stub), so core 0's
+            //  CORE_TASK_SWITCH IPI never arrives and there are no timer interrupts to
+            //  preempt this core.  Drive scheduling cooperatively instead: SwitchToNextTask()
+            //  is the exact call the IPI handler makes and is safe from normal context
+            //  (syscall::Yield() uses it identically).  The first switch enters this core's
+            //  Idle Task, whose Run() advances the core to ExecutingApplicationCode.
+            if (__hw_board_type == RPI_BOARD_ENUM_RPI5)
+            {
+                while (1)
+                {
+                    DisableIRQs();
+                    task::TaskManagerImpl::Instance().SwitchToNextTask();
+                    EnableIRQs();
+                }
+            }
+
+            //  RPi3/4: the CORE_TASK_SWITCH IPI drives the first switch and replaces this
+            //  execution context entirely.  The loop below is a safety fallback that should
+            //  never execute in normal operation.
 
             while (1)
             {

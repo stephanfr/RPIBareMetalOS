@@ -75,10 +75,21 @@ x24_numberOfCoresAvailable .req x24
 
 
 .macro InitializeLocalRegisterVariables
-    mrs     x19_coreNumber, MPIDR_EL1
-    and     x19_coreNumber, x19_coreNumber, #3
     bl      IdentifyBoardType
     mov     x20_boardHWId, x0
+    mrs     x19_coreNumber, MPIDR_EL1
+    //  Core index location depends on the CPU topology:
+    //    A53 (RPi3) / A72 (RPi4): legacy layout, core index in Aff0 (bits 1:0).
+    //    A76 (RPi5): DynamIQ, core index in Aff1 (bits 15:8); Aff0 is the thread.
+    //  Extracting Aff0 on RPi5 yields 0 for every core, so secondary cores would
+    //      all masquerade as core 0.
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.eq    99f
+    and     x19_coreNumber, x19_coreNumber, #3
+    b       98f
+99:
+    ubfx    x19_coreNumber, x19_coreNumber, #8, #8
+98:
     bl      DetermineNumberOfCores
     mov     x24_numberOfCoresAvailable, x0
     adrp    x21_coreStateTableAddress, __core_state
@@ -149,9 +160,15 @@ _start:
 
     //  TEMPORARY MARKER 1 -- proves the image executes.  MMU off, core 0 only.
     //      Stack is an absolute movz constant, independent of the linker script.
+    //
+    //  A53/A72: core index in Aff0 (bits 1:0); secondaries have bits[15:0] != 0.
+    //  A76 (RPi5, DynamIQ): core index in Aff1 (bits 15:8); Aff0=0 for EVERY core,
+    //      so checking only bits[1:0] returns 0 for all 4 cores -- all would race
+    //      to set the same stack pointer and simultaneously call RPI5Marker.
+    //      Masking bits[15:0] gives 0 only for core 0 on both topologies.
 
     mrs     x9, MPIDR_EL1
-    and     x9, x9, #3
+    and     x9, x9, #0xFFFF             //  bits[15:0]: Aff1|Aff0; 0 only for core 0
     cbnz    x9, skip_marker_1
 
     movz    x9, #0x0008, lsl #16                //  sp = 0x00080000, grows down
@@ -220,8 +237,13 @@ skip_a53_a72_imp_def_registers:
 	msr     CPTR_EL3, xzr
 
 	//  Set up SCR
-	
+
     mov     x9, #SCR_VAL
+    //  RPi5: clear SMD so SMC from EL1 routes to EL3 firmware (required for PSCI CPU_ON)
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.ne    set_scr_el3
+    bic     x9, x9, #SCR_SMD
+set_scr_el3:
 	msr     SCR_EL3, x9
 
 	//  Set up ACTLR
@@ -376,6 +398,12 @@ running_in_el1:
 
     cbz x19_coreNumber, continue_on_core0
 
+    //  Marker: secondary core reached EL1.  Fires as 11/12/13 for cores 1/2/3.
+    //      Visible on RPi3/4 (EL3 path) and on RPi5 after the spin-table fix.
+    //      Absence on RPi5 before the fix confirms firmware holds secondary cores in EL2.
+    add     w0, w19, #10
+    bl      RPI5Marker
+
     //  Spin on the other cores until they get a jump address - probably from CoreExecute
 
     SetCoreState #CORE_SPINNING_IN_EL1
@@ -384,6 +412,7 @@ running_in_el1:
     add     x10, x10, x19_coreNumber, lsl #3        //  Compute the address of the correct jump table slot, we need this in a register for the cache line invalidation  
 
 el1_spin:
+    SetCoreState #CORE_SPINNING_IN_EL1               //  re-assert: BSS clear may have wiped it
 	wfe
     dc 		civac, x10                               //  Invalidate the cache line containing the jump address as it is written by the master core
 	ldr     x9, [x10]
@@ -539,11 +568,7 @@ start_additional_cores:
     //  Nothing to do when only one core is available.  The loop below is a
     //      do-while: it falls into wait_core_ack for core 1 BEFORE ever testing
     //      x24_numberOfCoresAvailable, so without this guard a single-core
-    //      configuration blocks forever waiting on a core that was never
-    //      started.  RPi5 currently reports 1 core (see number_of_cores.cpp) --
-    //      whether BCM2712 firmware releases cores 1-3 to a custom armstub, and
-    //      whether the RPi3/RPi4 armstub_el2_spin_table convention applies, are
-    //      both still unverified on that board.
+    //      configuration blocks forever waiting on a core that was never started.
 
     cmp     x24_numberOfCoresAvailable, #1
     b.ls    additional_cores_started
@@ -551,16 +576,61 @@ start_additional_cores:
     mov x9, #1                                                 //  Start with core 1
 
 start_next_core:
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.ne    check_el2_spin_table
+
+    //  Marker 18 = EL3 arrival: all cores started by armstub; fall through to shared EL3 wait path.
+    //  Marker 19 = EL2-only arrival: only core 0 in EL3; secondary cores need PSCI.
+    mov     w0, #19
+    cbz     x23_arrivedInEL3, psci_el_show
+    mov     w0, #18
+psci_el_show:
+    bl      RPI5Marker
+    cbnz    x23_arrivedInEL3, check_el2_spin_table   //  EL3: same wait as RPi3/4
+
+    //  EL2-only: secondary cores held by firmware; start via PSCI CPU_ON
+    ldr     x0, =0xC4000003
+    lsl     x1, x9, #8                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
+    ldr     x2, =running_in_el2
+    mov     x3, #0
+    smc     #0
+    mov     w25, w0
+    mov     w0, #20
+    cbz     w25, psci_diag_show
+    mov     w0, #21
+psci_diag_show:
+    bl      RPI5Marker
+    cbnz    w25, next_core
+    mrs     x13, cntpct_el0
+    ldr     x14, =270000000
+    add     x14, x14, x13
+rpi5_wait_core_ack:
+    GetCoreState x9
+    cmp     w0, #CORE_SPINNING_IN_EL1
+    b.eq    next_core
+    mrs     x13, cntpct_el0
+    cmp     x13, x14
+    b.lo    rpi5_wait_core_ack
+    b       next_core
+
+check_el2_spin_table:
     cmp     x23_arrivedInEL3, #1
-    b.eq    wait_core_ack
+    b.ne    write_spin_table
+    sev                                                 //  wake secondary cores: after BSS clear they re-assert CORE_SPINNING_IN_EL1
+    b       wait_core_ack
+write_spin_table:
     mov     x10, #armstub_el2_spin_table
     ldr     x11, =running_in_el2
-    str     x11, [x10, x9, lsl #3]
+    add     x12, x10, x9, lsl #3
+    str     x11, [x12]
+    dc      civac, x12                                          //  flush: MMU is on when this runs
+    dsb     sy
     sev
 wait_core_ack:
     GetCoreState x9
     cmp     w0, #CORE_SPINNING_IN_EL1
     bne     wait_core_ack
+next_core:
     add x9, x9, #1
     cmp x9, x24_numberOfCoresAvailable                         //  Loop until all cores are started
     b.lo start_next_core
