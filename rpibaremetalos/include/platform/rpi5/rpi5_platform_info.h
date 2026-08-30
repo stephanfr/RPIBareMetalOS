@@ -26,7 +26,7 @@ private:
 
     const uint8_t *BCM2712_IO_BASE = reinterpret_cast<const uint8_t *>(0x000000107c000000ULL);
     const uint8_t *BCM2712_ARM_LOCAL_BASE = reinterpret_cast<const uint8_t *>(0x0000107CD00000ULL);
-    const uint8_t *BCM2712_EMMC_BASE = reinterpret_cast<const uint8_t *>(0x000010000FFF000ULL);
+    const uint8_t *BCM2712_EMMC_BASE = reinterpret_cast<const uint8_t *>(0x0000001000FFF000ULL);
     const uint8_t *BCM2712_MAILBOX_REGISTER_BASE = reinterpret_cast<const uint8_t *>(BCM2712_IO_BASE + 0x00013880);
     const uint32_t BCM2712_SYSTEM_CLOCK = FREQUENCY_500MHZ;
 };

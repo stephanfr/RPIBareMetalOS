@@ -7,8 +7,6 @@
 #include <string.h>
 
 #include "processor_cores.h"
-#include "cpu_part_nums.h"
-#include "asm_globals.h"
 #include "task/system_calls.h"
 
 #include "devices/log.h"
@@ -109,25 +107,9 @@ namespace task
 
             __core_state[core_id].store((uint32_t)CoreInitializationStates::WaitingInSecondaryMain);
 
-            //  RPi5 has no GIC driver yet (RPI5ExceptionManager is a stub), so core 0's
-            //  CORE_TASK_SWITCH IPI never arrives and there are no timer interrupts to
-            //  preempt this core.  Drive scheduling cooperatively instead: SwitchToNextTask()
-            //  is the exact call the IPI handler makes and is safe from normal context
-            //  (syscall::Yield() uses it identically).  The first switch enters this core's
-            //  Idle Task, whose Run() advances the core to ExecutingApplicationCode.
-            if (__hw_board_type == RPI_BOARD_ENUM_RPI5)
-            {
-                while (1)
-                {
-                    DisableIRQs();
-                    task::TaskManagerImpl::Instance().SwitchToNextTask();
-                    EnableIRQs();
-                }
-            }
-
-            //  RPi3/4: the CORE_TASK_SWITCH IPI drives the first switch and replaces this
-            //  execution context entirely.  The loop below is a safety fallback that should
-            //  never execute in normal operation.
+            //  StartSecondaryCores() sends a CORE_TASK_SWITCH IPI after observing WaitingInSecondaryMain.
+            //  That IPI fires SwitchToNextTask() which replaces this execution context entirely.
+            //  The loop below is a safety fallback that should never execute in normal operation.
 
             while (1)
             {
@@ -235,7 +217,7 @@ namespace task
             if (!CoreExecute(core_id, &task::internal::SecondaryCoreMain))
             {
                 LogFatal("Failed to start core %d\n", core_id);
-                return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
+                continue;   //  attempt the remaining cores so all are reported
             }
 
             //  Delay briefly to allow the other core to get started and change its state
@@ -254,12 +236,19 @@ namespace task
                 if (PhysicalTimer::CurrentTicks() >= deadline)
                 {
                     LogFatal("Core %d never reached SecondaryCoreMain -- last state: %d\n", core_id, current_state);
-                    return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
+                    break;
                 }
 
                 CPUTicksDelay(1000);
 
                 current_state = __core_state[core_id].load();
+            }
+
+            //  If the core never reached SecondaryCoreMain, skip the IPI and try the next core.
+            if ((current_state != (uint32_t)CoreInitializationStates::WaitingInSecondaryMain) &&
+                (current_state != (uint32_t)CoreInitializationStates::ExecutingApplicationCode))
+            {
+                continue;
             }
 
             //  Ask the core to switch from the core main to the Idle Task
@@ -278,8 +267,8 @@ namespace task
             {
                 if (PhysicalTimer::CurrentTicks() >= deadline)
                 {
-                    LogFatal("Core %d did not act on the CORE_TASK_SWITCH IPI -- last state: %d\n", core_id, current_state);
-                    return TaskResultCodes::UNABLE_TO_START_SECONDARY_CORES;
+                    LogFatal("Core %d did not act on the CORE_TASK_SWITCH IPI -- last state: %d (expected on RPi5: no GIC/IPI yet)\n", core_id, current_state);
+                    break;   //  expected on RPi5; continue to the next core
                 }
 
                 CPUTicksDelay(1000);

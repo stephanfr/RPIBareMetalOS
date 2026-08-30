@@ -148,7 +148,7 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
 
     //  Map the kernel 1:1 tables into the stage-2 map -- this only needs to
     //  cover actual installed RAM (a handful of entries), nowhere near the
-    //  RPi5-specific indices (65, 124-127) written directly below.
+    //  RPi5-specific indices (64-65, 124-127) written directly below.
 
     for (uint64_t i = 0; i < number_of_pagetable_entries_ / entries_per_level1_block; i++)
     {
@@ -164,26 +164,29 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
     //  windows. Assumes installed RAM never reaches index 65 (i.e. < 32GB) --
     //  true for every currently-shipping RPi5 board (max 8GB).
     //
-    //  Legacy peripheral/GIC/mailbox block: 0x10_7c000000-0x10_7fffffff, L1
-    //  index 65 (this block's base is 0x10_40000000 -- the real peripherals
-    //  sit partway into it, which is fine for a block descriptor; see the
-    //  comment in mmu.S).
-    //  RP1 PCIe outbound window: 0x1F_00000000-0x1F_FFFFFFFF (~4GB), L1
-    //  indices 124-127.
+    //  SoC-local peripheral windows, two direct 1GB device BLOCK descriptors:
+    //    index 64 (0x10_00000000-0x10_3FFFFFFF): SD/EMMC (0x10_00FFF000), DMA, PCIe, USB.
+    //    index 65 (0x10_40000000-0x10_7FFFFFFF): legacy peripheral/GIC/mailbox block
+    //      (base 0x10_40000000; the real peripherals sit partway in, fine for a block).
+    //  RP1 PCIe outbound window: 0x1F_00000000-0x1F_FFFFFFFF (~4GB), L1 indices 124-127.
 
-    constexpr uint64_t RPI5_PERIPHERAL_L1_INDEX = 65;
+    constexpr uint64_t RPI5_PERIPHERAL_L1_INDEX_FIRST = 64;
+    constexpr uint64_t RPI5_PERIPHERAL_L1_INDEX_LAST = 65;
     constexpr uint64_t RPI5_RP1_WINDOW_L1_START = 124;
     constexpr uint64_t RPI5_RP1_WINDOW_L1_END = 128;
 
-    VMSAv8_64_DESCRIPTOR peripheral_block_descriptor = (VMSAv8_64_DESCRIPTOR){
-        .EntryType = TableType::BLOCK_TABLE,
-        .MemAttr = MemoryAttribute::DEVICE_NO_GATHER_NO_REORDER_NO_EARLY_WRITE_ACK,
-        .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
-        .AF = AccessFlag::ACCESSED,
-        .Address = RPI5_PERIPHERAL_L1_INDEX << 18,   //  (index << 30) >> 12, see Address field's bit offset
-    };
+    for (uint64_t peripheral_index = RPI5_PERIPHERAL_L1_INDEX_FIRST; peripheral_index <= RPI5_PERIPHERAL_L1_INDEX_LAST; peripheral_index++)
+    {
+        VMSAv8_64_DESCRIPTOR peripheral_block_descriptor = (VMSAv8_64_DESCRIPTOR){
+            .EntryType = TableType::BLOCK_TABLE,
+            .MemAttr = MemoryAttribute::DEVICE_NO_GATHER_NO_REORDER_NO_EARLY_WRITE_ACK,
+            .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
+            .AF = AccessFlag::ACCESSED,
+            .Address = peripheral_index << 18,   //  (index << 30) >> 12, see Address field's bit offset
+        };
 
-    kernel_page_table_1_to_1_[RPI5_PERIPHERAL_L1_INDEX] = peripheral_block_descriptor.Raw64;
+        kernel_page_table_1_to_1_[peripheral_index] = peripheral_block_descriptor.Raw64;
+    }
 
     for (uint64_t rp1_index = RPI5_RP1_WINDOW_L1_START; rp1_index < RPI5_RP1_WINDOW_L1_END; rp1_index++)
     {

@@ -45,6 +45,8 @@ void ConsoleVideoFrameBuffer::DrawGlyph(unsigned char c)
             PutPixel(origin_x + col, origin_y + row, color);
         }
     }
+
+    FlushRect(origin_x, origin_y, GLYPH_WIDTH, GLYPH_HEIGHT);
 }
 
 void ConsoleVideoFrameBuffer::AdvanceCursorAfterGlyph()
@@ -92,5 +94,8 @@ void ConsoleVideoFrameBuffer::putc(unsigned int c)
 
 unsigned int ConsoleVideoFrameBuffer::getc(void)
 {
-    return 0;
+    for (;;)
+    {
+        asm volatile("wfe");
+    }
 }

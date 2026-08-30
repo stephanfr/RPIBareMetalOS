@@ -291,40 +291,50 @@ void InitializePlatform()
                                        minstd::xoroshiro128_plus_plus::seed_type(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)(),
                                                                                   ((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()));
 
-    //  Setup the serial console
+    //  Setup the console.
+    //
+    //  RPi5: no accessible SoC UART yet (serial requires the RP1 south-bridge driver which is
+    //      not yet implemented).  The HDMI framebuffer IS the console -- use it as both stdout
+    //      and stdin, where input blocks until a real input device exists.
+    //
+    //  RPi3/4: serial console primary, framebuffer tee'd on top if HDMI is available.
 
-    if (!SetupSerialConsole())
+    if (__platform_info->IsRPI5())
     {
-        ParkCore();
-    }
+        ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
 
-    //  Best-effort: mirror console output onto an HDMI framebuffer console
-    //      if one can be allocated. stdin stays serial-only -- the
-    //      framebuffer console has no input device behind it.
-
-    ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
-
-    if (SetupFrameBufferConsole(frame_buffer_console))
-    {
-        LogError("FB DIAG: SetupFrameBufferConsole succeeded\n");
-
-        auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
-        if (!console_lookup.Failed())
+        if (!SetupFrameBufferConsole(frame_buffer_console))
         {
-            CharacterIODevice &serial_console = *console_lookup;
-
-            auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_console, "STDOUT_TEE");
-
-            CharacterIODevice *tee_ptr = tee.get();
-
-            GetOSEntityRegistry().AddEntity(tee);
-
-            SetStandardStreams(tee_ptr, &serial_console);
+            ParkCore();
         }
+
+        SetStandardStreams(frame_buffer_console, frame_buffer_console);
     }
     else
     {
-        LogError("FB DIAG: SetupFrameBufferConsole FAILED\n");
+        if (!SetupSerialConsole())
+        {
+            ParkCore();
+        }
+
+        ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
+
+        if (SetupFrameBufferConsole(frame_buffer_console))
+        {
+            auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+            if (!console_lookup.Failed())
+            {
+                CharacterIODevice &serial_console = *console_lookup;
+
+                auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_console, "STDOUT_TEE");
+
+                CharacterIODevice *tee_ptr = tee.get();
+
+                GetOSEntityRegistry().AddEntity(tee);
+
+                SetStandardStreams(tee_ptr, &serial_console);
+            }
+        }
     }
 
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform

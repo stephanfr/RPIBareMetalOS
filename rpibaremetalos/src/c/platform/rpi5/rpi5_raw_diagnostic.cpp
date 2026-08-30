@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "asm_globals.h"
+#include "cpu_part_nums.h"
 #include "devices/video/fonts/basic_8x8.h"
 
 namespace
@@ -206,6 +207,18 @@ namespace
                                  uint32_t &pitch, uint32_t &depth,
                                  uint32_t &fb_addr_raw, uint32_t &fb_size)
     {
+        //  These raw diagnostics poke the RPi5 mailbox at a fixed 40-bit address.  On any other
+        //      board (or under QEMU) that access reads back garbage/zero and RawMailboxCall spins,
+        //      hanging the boot before the serial console exists.  Only proceed on Cortex-A76 (RPi5).
+        {
+            uint64_t midr;
+            asm volatile("mrs %0, midr_el1" : "=r"(midr));
+            if ((midr & 0x0000FFF0u) != MIDR_EL1_PARTNUM_CORTEX_A76)
+            {
+                return false;
+            }
+        }
+
         uint32_t native_width  = 0;
         uint32_t native_height = 0;
 

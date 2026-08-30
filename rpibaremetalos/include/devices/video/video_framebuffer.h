@@ -78,6 +78,8 @@ public:
                 dest_row[col] = color;
             }
         }
+
+        FlushRect(x, y, x_end - x, y_end - y);
     }
 
     void Clear(uint32_t color)
@@ -88,6 +90,30 @@ public:
 protected:
 
     void ScrollUp(uint32_t rows, uint32_t fill_color);
+
+    void FlushRect(uint32_t x, uint32_t y, uint32_t rect_width, uint32_t rect_height) const
+    {
+        if (!IsAllocated() || (rect_width == 0) || (rect_height == 0))
+        {
+            return;
+        }
+
+        uint32_t x_end = (x + rect_width > width_) ? width_ : (x + rect_width);
+        uint32_t y_end = (y + rect_height > height_) ? height_ : (y + rect_height);
+
+        for (uint32_t row = y; row < y_end; row++)
+        {
+            uintptr_t start = reinterpret_cast<uintptr_t>(RowAt(row) + x) & ~static_cast<uintptr_t>(63);
+            uintptr_t end = reinterpret_cast<uintptr_t>(RowAt(row) + x_end);
+
+            for (uintptr_t addr = start; addr < end; addr += 64)
+            {
+                asm volatile("dc civac, %0" :: "r"(addr) : "memory");
+            }
+        }
+
+        asm volatile("dsb sy" ::: "memory");
+    }
 
     volatile uint32_t *RowAt(uint32_t y) const
     {

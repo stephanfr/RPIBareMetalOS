@@ -683,16 +683,48 @@ namespace EmmcImpl
 
     BlockIOResultCodes SDCardController::ResetCard()
     {
-        registers_->control[1] = ControlReg1ResetHost;
+        if (platform_info_.IsRPI5())
+        {
+            //  BCM2712 "brcm,bcm2712-sdhci": non-standard SDIO_CFG block at host_base + 0x400.
+            //      Route the controller to the SD-card pins and force card-detect present (we
+            //      boot from the card).  Mirrors Linux sdhci-brcmstb cfginit_2712/set_clock.
+            volatile uint32_t *cfg = reinterpret_cast<volatile uint32_t *>(reinterpret_cast<uint8_t *>(registers_) + 0x400);
+
+            uint32_t cfg_ctrl = cfg[0x00 / 4];
+            cfg_ctrl &= ~(1u << 30); //  SDCD_N_TEST_LEV = 0 (card present, active-low)
+            cfg_ctrl |= (1u << 31);  //  SDCD_N_TEST_EN
+            cfg[0x00 / 4] = cfg_ctrl;
+
+            uint32_t pin_sel = cfg[0x44 / 4];
+            pin_sel &= ~0x3u;
+            pin_sel |= (1u << 1); //  SDIO_CFG_SD_PIN_SEL_SD
+            cfg[0x44 / 4] = pin_sel;
+        }
+
+        if (platform_info_.IsRPI5())
+        {
+            //  bcm2712 needs the internal clock running for the reset state machine to
+            //      complete, so write ONLY the software-reset byte (host_base + 0x2F) and
+            //      leave Clock Control intact.  The 32-bit write used below for RPi3/4 zeroes
+            //      Clock Control, starving the reset so SRST_ALL never self-clears (seen as a
+            //      reset timeout even though cap1/clock show the controller is alive).
+            //      Matches Linux sdhci_reset's 8-bit SDHCI_SOFTWARE_RESET write.
+            reinterpret_cast<volatile uint8_t *>(&registers_->control[1])[3] = 0x01;
+        }
+        else
+        {
+            registers_->control[1] = ControlReg1ResetHost;
+        }
 
         if (!WaitForInterrupt(registers_->control[1], ControlReg1ResetAll, false, 2000))
         {
             return BlockIOResultCodes::EMMC_TIMEOUT_FOR_CARD_RESET;
         }
 
-        if (platform_info_.IsRPI4())
+        if (platform_info_.IsRPI4() || platform_info_.IsRPI5())
         {
-            //  For the RPI4, we need to enable VDD1 bus power for the SD card
+            //  Enable SD Bus Power + select 3.3V.  Without this the RPi5 leaves SD Bus Power off
+            //      (Power Control byte = 0), Command Inhibit stays stuck and CMD0 is never driven.
 
             uint32_t c0 = registers_->control[0];
             c0 |= 0x0F << 8;
@@ -769,7 +801,11 @@ namespace EmmcImpl
         relative_card_address_register_ = 0;
         offset_in_blocks_ = 0;
 
-        ConfigureGPIO();
+        if (!platform_info_.IsRPI5())
+        {
+            //  RPi5 microSD uses dedicated SD pads routed via SDIO_CFG, not the RPi3/4 GPIO mux.
+            ConfigureGPIO();
+        }
 
         BlockIOResultCodes last_reset_result;
 
@@ -783,7 +819,7 @@ namespace EmmcImpl
             }
 
             PhysicalTimer::Wait(milliseconds(100));
-            LogWarning("EMMC_WARN: Failed to reset card, trying again...\n");
+            LogDebug1("EMMC: init failed, result=%d, retrying...\n", (int)last_reset_result);
         }
 
         LogDebug1("%s", last_reset_result == BlockIOResultCodes::SUCCESS ? "SD Card Initialized\n" : "SD Card Initialization Failed\n");

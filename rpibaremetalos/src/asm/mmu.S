@@ -39,7 +39,8 @@
 .equ EARLY_NORMAL_2_START, ((0x40000000 + 0x200000) / 0x200000)   			// 513:  RAM above 1GB starts
 .equ EARLY_DEVICE_2_START, (0xFC000000 / 0x200000)   						// 2016: RPi4 peripherals start
 .equ EARLY_L2_ENTRY_COUNT, (4 * 512)                 						// 2048: covers 0-4GB
-.equ EARLY_RPI5_PERIPHERAL_L1_INDEX, 65    									// 0x10_7c000000-0x10_7fffffff: system timer, L1 intc, power mgr, GIC, mailbox
+.equ EARLY_RPI5_PERIPHERAL_L1_START, 64    									// 0x10_00000000-0x10_3FFFFFFF: SD/EMMC, DMA, PCIe, USB
+.equ EARLY_RPI5_PERIPHERAL_L1_END,   66    									// exclusive; index 65 = 0x10_40000000-0x10_7FFFFFFF: system timer, L1 intc, power mgr, GIC, mailbox
 .equ EARLY_RPI5_RP1_WINDOW_L1_START, 124   									// 0x1F_00000000-0x1F_FFFFFFFF: RP1 PCIe outbound window (~4GB)
 .equ EARLY_RPI5_RP1_WINDOW_L1_END,   128
 
@@ -235,9 +236,14 @@ SetupEarlyPageTables:
 
     mov     x6, #EARLY_DEVICE_DESC                       // x6 = DEVICE descriptor template (block, L1 granule)
 
-    mov     x7, #EARLY_RPI5_PERIPHERAL_L1_INDEX
-    orr     x8, x6, x7, lsl #30                          // insert physical base (65 << 30) at bits[47:30]
-    str     x8, [x0, x7, lsl #3]                         // L1[65] = legacy-peripheral/GIC/mailbox block
+    mov     x7, #EARLY_RPI5_PERIPHERAL_L1_START
+
+.Lperipheral_window_loop:
+    orr     x8, x6, x7, lsl #30                          // insert physical base (index << 30) at bits[47:30]
+    str     x8, [x0, x7, lsl #3]                         // L1[index] = SoC peripheral device block (64=SD/DMA/PCIe, 65=GIC/mailbox)
+    add     x7, x7, #1
+    cmp     x7, #EARLY_RPI5_PERIPHERAL_L1_END
+    b.lo    .Lperipheral_window_loop
 
     mov     x7, #EARLY_RPI5_RP1_WINDOW_L1_START
 

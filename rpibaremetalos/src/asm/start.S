@@ -268,25 +268,34 @@ skip_smpen:
 
     bl      SetupPhysicalTimer                                  //  Board HW id must be passed in x0
 
-    //  RPi3 has no GIC-400 at all.  RPi5 HAS one, but at 0x10_7FFF9000 -- not
-    //      ConfigureGIC400's hardcoded RPi4 constants (0xFF841000/0xFF842000).
-    //      Calling it on RPi5 writes to an address BCM2712 does not implement as a
-    //      GIC, with the MMU off and no exception vectors -- skip until the GIC-400
-    //      refactor parameterizes the base per board.
+//  RPi3 has no GIC-400 at all, so skip it there.  RPi4 configures on all cores.
+    //
+    //  RPi5 DIAGNOSTIC (Option A): only core 0 attempts the GIC config in EL3,
+    //      bracketed by Marker 50 (before) and Marker 51 (after).
+    //        50 but no 51  => the 40-bit GIC access at EL3/MMU-off itself faults.
+    //        50 and 51 ok  => the earlier no-output was the OTHER cores racing here.
+    //      Secondary cores skip entirely (they have no valid EL3 stack for RPI5Marker
+    //      and we want core 0 isolated).
     //
     //  NOTE: x0 does NOT still hold the board type here -- SetupPhysicalTimer above
     //      returns its own status code in x0 -- so reload it from x20, which
     //      ConfigureGIC400's own internal board check needs.
 
-    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI3
-    b.eq    skip_gic_config
+    //  RPi3 has no GIC-400, so skip it there.  RPi4 and RPi5 both configure it on
+    //      every core: ConfigureGIC400 internally restricts the shared distributor
+    //      setup to core 0 and lets each core enable its own (banked) CPU interface.
+    //      Verified on RPi5 hardware that the core-0 GIC access succeeds (Marker 51);
+    //      the earlier no-output was all four cores writing the shared distributor.
+    //
+    //  NOTE: x0 does NOT still hold the board type here -- SetupPhysicalTimer above
+    //      returns its own status code in x0 -- so reload it from x20.
 
-    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI3
     b.eq    skip_gic_config
 
     mov     x0, x20_boardHWId
     bl      ConfigureGIC400
-	
+
 skip_gic_config:
 
     //  Set up SCTLR_EL2

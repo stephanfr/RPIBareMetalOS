@@ -129,4 +129,6 @@ void VideoFrameBuffer::ScrollUp(uint32_t rows, uint32_t fill_color)
         base[i] = fill_color;
         i++;
     }
+
+    FlushRect(0, 0, width_, height_);
 }
