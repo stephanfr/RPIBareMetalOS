@@ -30,6 +30,7 @@
 #include "devices/std_streams.h"
 #include "devices/uart0.h"
 #include "devices/uart1.h"
+#include "devices/rpi5/rpi5_rp1_uart0.h"
 
 #include "devices/video/console_video_framebuffer.h"
 
@@ -38,7 +39,6 @@
 #include "services/uuid.h"
 
 #include "devices/physical_timer.h"
-
 
 //  Global flag to indicate if the platform has been initialized
 
@@ -141,7 +141,12 @@ bool SetupSerialConsole()
 
     //  We should have valid console and baud rate - so set them
 
-    if (console_uart == "UART0")
+    if (GetPlatformInfo().IsRPI5())
+    {
+        auto rp1_uart0 = make_static_unique<RP1UART0>(baud_rate, "CONSOLE");
+        GetOSEntityRegistry().AddEntity(rp1_uart0);
+    }
+    else if (console_uart == "UART0")
     {
         auto uart0 = make_static_unique<UART0>(baud_rate, "CONSOLE");
         GetOSEntityRegistry().AddEntity(uart0);
@@ -197,12 +202,9 @@ bool SetupFrameBufferConsole(ConsoleVideoFrameBuffer *&out_frame_buffer_console)
 //      Declare it as 'extern "C"' so that it is not mangled and we can call it from the startup assembly code.
 
 extern "C" void InitializePlatform() __attribute__((used));
-extern "C" void RPI5Marker(uint32_t id);
 
 void InitializePlatform()
 {
-    RPI5Marker(8);      //  first line of InitializePlatform
-
     //  TODO - figure out how to signal error messages
 
     if (__platform_initialized)
@@ -215,58 +217,56 @@ void InitializePlatform()
 
     MMUManager::Initialize();
 
-    RPI5Marker(9);      //  after the TTBR0 swap to RPI5MemoryManager's tables
-
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
 
     switch (__hw_board_type)
     {
-    case RPI_BOARD_ENUM_RPI3:
-    {
-        __platform_info = static_new<RPI3PlatformInfo>();
-        __exception_manager = static_new<BCM2837ExceptionManager>();
-        auto *rpi3_rng = static_new<RPi3HardwareRandomNumberGenerator>(*__platform_info);
-        if (rpi3_rng->Initialize())
+        case RPI_BOARD_ENUM_RPI3:
         {
-            __hw_random_number_generator = rpi3_rng;
+            __platform_info = static_new<RPI3PlatformInfo>();
+            __exception_manager = static_new<BCM2837ExceptionManager>();
+            auto *rpi3_rng = static_new<RPi3HardwareRandomNumberGenerator>(*__platform_info);
+            if (rpi3_rng->Initialize())
+            {
+                __hw_random_number_generator = rpi3_rng;
+            }
+            break;
         }
-        break;
-    }
 
-    case RPI_BOARD_ENUM_RPI4:
-    {
-        __platform_info = static_new<RPI4PlatformInfo>();
-        __exception_manager = static_new<BCM2711ExceptionManager>();
-        auto *rpi4_rng = static_new<RPi4HardwareRandomNumberGenerator>(*__platform_info);
-        if (rpi4_rng->Initialize())
+        case RPI_BOARD_ENUM_RPI4:
         {
-            __hw_random_number_generator = rpi4_rng;
+            __platform_info = static_new<RPI4PlatformInfo>();
+            __exception_manager = static_new<BCM2711ExceptionManager>();
+            auto *rpi4_rng = static_new<RPi4HardwareRandomNumberGenerator>(*__platform_info);
+            if (rpi4_rng->Initialize())
+            {
+                __hw_random_number_generator = rpi4_rng;
+            }
+            break;
         }
-        break;
-    }
 
-    case RPI_BOARD_ENUM_RPI5:
-    {
-        __platform_info = static_new<RPI5PlatformInfo>();
-        __exception_manager = static_new<RPI5ExceptionManager>();
-
-        //  Stub only -- GIC-400 refactor is deferred to the RP1/GPIO-UART
-        //  work. This exists so GetExceptionManager() has a non-null target.
-        
-        auto *rpi5_rng = static_new<RPi5HardwareRandomNumberGenerator>(*__platform_info);
-        if (rpi5_rng->Initialize())
+        case RPI_BOARD_ENUM_RPI5:
         {
-            __hw_random_number_generator = rpi5_rng;
+            __platform_info = static_new<RPI5PlatformInfo>();
+            __exception_manager = static_new<RPI5ExceptionManager>();
+
+            //  Stub only -- GIC-400 refactor is deferred to the RP1/GPIO-UART
+            //  work. This exists so GetExceptionManager() has a non-null target.
+            
+            auto *rpi5_rng = static_new<RPi5HardwareRandomNumberGenerator>(*__platform_info);
+            if (rpi5_rng->Initialize())
+            {
+                __hw_random_number_generator = rpi5_rng;
+            }
+            break;
         }
-        break;
-    }
 
-    //  If we do not identify the correct board, then park the core.
+        //  If we do not identify the correct board, then park the core.
 
-    default:
-        ParkCore();
-        break;
+        default:
+            ParkCore();
+            break;
     }
 
     //  If HW RNG is not available (e.g. QEMU), fall back to a SW RNG seeded from the CPU timer and board serial number
@@ -291,50 +291,40 @@ void InitializePlatform()
                                        minstd::xoroshiro128_plus_plus::seed_type(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)(),
                                                                                   ((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()));
 
-    //  Setup the console.
-    //
-    //  RPi5: no accessible SoC UART yet (serial requires the RP1 south-bridge driver which is
-    //      not yet implemented).  The HDMI framebuffer IS the console -- use it as both stdout
-    //      and stdin, where input blocks until a real input device exists.
-    //
-    //  RPi3/4: serial console primary, framebuffer tee'd on top if HDMI is available.
+    //  Setup the console, and if it fails, park the core -- we cannot continue without a console.
 
-    if (__platform_info->IsRPI5())
+    if (!SetupSerialConsole())
     {
-        ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
+        ParkCore();
+    }
 
-        if (!SetupFrameBufferConsole(frame_buffer_console))
-        {
-            ParkCore();
-        }
+    //  Ditto with the framebuffer console -- if it fails, park the core.
 
-        SetStandardStreams(frame_buffer_console, frame_buffer_console);
+    ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
+    bool have_frame_buffer = SetupFrameBufferConsole(frame_buffer_console);
+
+    if (!have_frame_buffer)
+    {
+        ParkCore();
+    }
+
+    auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+
+    if (!console_lookup.Failed() && have_frame_buffer)
+    {
+        CharacterIODevice &serial_console = *console_lookup;
+
+        auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_console, "STDOUT_TEE");
+
+        CharacterIODevice *tee_ptr = tee.get();
+
+        GetOSEntityRegistry().AddEntity(tee);
+
+        SetStandardStreams(tee_ptr, &serial_console);
     }
     else
     {
-        if (!SetupSerialConsole())
-        {
-            ParkCore();
-        }
-
-        ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
-
-        if (SetupFrameBufferConsole(frame_buffer_console))
-        {
-            auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
-            if (!console_lookup.Failed())
-            {
-                CharacterIODevice &serial_console = *console_lookup;
-
-                auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_console, "STDOUT_TEE");
-
-                CharacterIODevice *tee_ptr = tee.get();
-
-                GetOSEntityRegistry().AddEntity(tee);
-
-                SetStandardStreams(tee_ptr, &serial_console);
-            }
-        }
+        ParkCore();
     }
 
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform

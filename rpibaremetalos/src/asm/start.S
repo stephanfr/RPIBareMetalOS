@@ -158,27 +158,6 @@ x24_numberOfCoresAvailable .req x24
 
 _start:
 
-    //  TEMPORARY MARKER 1 -- proves the image executes.  MMU off, core 0 only.
-    //      Stack is an absolute movz constant, independent of the linker script.
-    //
-    //  A53/A72: core index in Aff0 (bits 1:0); secondaries have bits[15:0] != 0.
-    //  A76 (RPi5, DynamIQ): core index in Aff1 (bits 15:8); Aff0=0 for EVERY core,
-    //      so checking only bits[1:0] returns 0 for all 4 cores -- all would race
-    //      to set the same stack pointer and simultaneously call RPI5Marker.
-    //      Masking bits[15:0] gives 0 only for core 0 on both topologies.
-
-    mrs     x9, MPIDR_EL1
-    and     x9, x9, #0xFFFF             //  bits[15:0]: Aff1|Aff0; 0 only for core 0
-    cbnz    x9, skip_marker_1
-
-    movz    x9, #0x0008, lsl #16                //  sp = 0x00080000, grows down
-    mov     sp, x9
-
-    mov     w0, #1
-    bl      RPI5Marker
-
-skip_marker_1:
-
     mov     x23_arrivedInEL3, #0
 
     //  Set move to EL1
@@ -268,24 +247,9 @@ skip_smpen:
 
     bl      SetupPhysicalTimer                                  //  Board HW id must be passed in x0
 
-//  RPi3 has no GIC-400 at all, so skip it there.  RPi4 configures on all cores.
-    //
-    //  RPi5 DIAGNOSTIC (Option A): only core 0 attempts the GIC config in EL3,
-    //      bracketed by Marker 50 (before) and Marker 51 (after).
-    //        50 but no 51  => the 40-bit GIC access at EL3/MMU-off itself faults.
-    //        50 and 51 ok  => the earlier no-output was the OTHER cores racing here.
-    //      Secondary cores skip entirely (they have no valid EL3 stack for RPI5Marker
-    //      and we want core 0 isolated).
-    //
-    //  NOTE: x0 does NOT still hold the board type here -- SetupPhysicalTimer above
-    //      returns its own status code in x0 -- so reload it from x20, which
-    //      ConfigureGIC400's own internal board check needs.
-
     //  RPi3 has no GIC-400, so skip it there.  RPi4 and RPi5 both configure it on
     //      every core: ConfigureGIC400 internally restricts the shared distributor
     //      setup to core 0 and lets each core enable its own (banked) CPU interface.
-    //      Verified on RPi5 hardware that the core-0 GIC access succeeds (Marker 51);
-    //      the earlier no-output was all four cores writing the shared distributor.
     //
     //  NOTE: x0 does NOT still hold the board type here -- SetupPhysicalTimer above
     //      returns its own status code in x0 -- so reload it from x20.
@@ -314,7 +278,7 @@ skip_gic_config:
 
     //  Running at EL2 - processor will be in EL2 on entry with the default ARMSTUB
 
-.align 4                                                        //  Align the code to a 4 byte boundary
+.align 4
 running_in_el2:
 
     //  Setup the local registers holding the core number, etc
@@ -328,6 +292,7 @@ running_in_el2:
     b.eq    skip_set_core_started_el2
 
     SetCoreState #CORE_STARTED_IN_EL2
+
 skip_set_core_started_el2:
 
     SetCoreState #CORE_CONFIGURING_STACKS_IN_EL2
@@ -407,12 +372,6 @@ running_in_el1:
 
     cbz x19_coreNumber, continue_on_core0
 
-    //  Marker: secondary core reached EL1.  Fires as 11/12/13 for cores 1/2/3.
-    //      Visible on RPi3/4 (EL3 path) and on RPi5 after the spin-table fix.
-    //      Absence on RPi5 before the fix confirms firmware holds secondary cores in EL2.
-    add     w0, w19, #10
-    bl      RPI5Marker
-
     //  Spin on the other cores until they get a jump address - probably from CoreExecute
 
     SetCoreState #CORE_SPINNING_IN_EL1
@@ -421,6 +380,7 @@ running_in_el1:
     add     x10, x10, x19_coreNumber, lsl #3        //  Compute the address of the correct jump table slot, we need this in a register for the cache line invalidation  
 
 el1_spin:
+
     SetCoreState #CORE_SPINNING_IN_EL1               //  re-assert: BSS clear may have wiped it
 	wfe
     dc 		civac, x10                               //  Invalidate the cache line containing the jump address as it is written by the master core
@@ -489,18 +449,7 @@ continue_on_core0:
 
     //  Get the board version, VC memory start, and kernel command line
 
-    //  TEMPORARY MARKER 2 -- proves we reached GetBootTimeSettings.
-
-    mov     w0, #2
-    bl      RPI5Marker
-
     bl GetBootTimeSettings
-    
-    //  TEMPORARY DIAGNOSTIC -- MMU still off here (mailbox works), and sp is
-    //      already valid (SP_EL1 configured during the EL2 stack setup above),
-    //      so unlike the _start diagnostic this needs no stack of its own.
-
-    bl RPI5BootValuesDiagnostic
 
     //  Enable the MMU before clearing BSS or running any C++ static constructors.
     //  Conservative 1:1 identity map (see SetupEarlyPageTables in mmu.S for region breakdown).
@@ -514,11 +463,7 @@ continue_on_core0:
     bl      EnableMMUTables
     //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
 
-    mov     w0, #4                  //  <-- MMU is now ON; this marker only works with the flush above
-    bl      RPI5Marker
-
-    //  Clear bss
-    //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length
+    //  Clear BSS -this code assumes BSS segments are a multiple of 8 bytes in length
 
     adrp    x9, __bss_start
     add     x9, x9, :lo12:__bss_start
@@ -530,9 +475,6 @@ loop_for_bss_clear:
     str     xzr, [x9], #8                                       //  Set 8 bytes at a time - the section in the linker script must match
     sub     w10, w10, #1
     cbnz    w10, loop_for_bss_clear
-
-    mov     w0, #5
-    bl      RPI5Marker
 
 restore_globals_after_bss:
     //  BSS clear zeroed __hw_board_type and __number_of_cores_available (both live in BSS).
@@ -571,8 +513,6 @@ loop_for_next_static_initializer:
     //  Bring the other cores out of their spin loops
 
 start_additional_cores:
-    mov     w0, #6
-    bl      RPI5Marker
 
     //  Nothing to do when only one core is available.  The loop below is a
     //      do-while: it falls into wait_core_ack for core 1 BEFORE ever testing
@@ -585,16 +525,13 @@ start_additional_cores:
     mov x9, #1                                                 //  Start with core 1
 
 start_next_core:
+
     cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
     b.ne    check_el2_spin_table
 
-    //  Marker 18 = EL3 arrival: all cores started by armstub; fall through to shared EL3 wait path.
-    //  Marker 19 = EL2-only arrival: only core 0 in EL3; secondary cores need PSCI.
-    mov     w0, #19
-    cbz     x23_arrivedInEL3, psci_el_show
-    mov     w0, #18
-psci_el_show:
-    bl      RPI5Marker
+    //  EL3 arrival: all cores started by armstub; fall through to the shared EL3 wait path.
+    //  EL2-only arrival: only core 0 reached EL3; secondary cores are held by firmware and
+    //      need releasing via PSCI CPU_ON below.
     cbnz    x23_arrivedInEL3, check_el2_spin_table   //  EL3: same wait as RPi3/4
 
     //  EL2-only: secondary cores held by firmware; start via PSCI CPU_ON
@@ -603,17 +540,14 @@ psci_el_show:
     ldr     x2, =running_in_el2
     mov     x3, #0
     smc     #0
-    mov     w25, w0
-    mov     w0, #20
-    cbz     w25, psci_diag_show
-    mov     w0, #21
-psci_diag_show:
-    bl      RPI5Marker
+    mov     w25, w0                    //  save the PSCI CPU_ON return status
     cbnz    w25, next_core
     mrs     x13, cntpct_el0
     ldr     x14, =270000000
     add     x14, x14, x13
+
 rpi5_wait_core_ack:
+
     GetCoreState x9
     cmp     w0, #CORE_SPINNING_IN_EL1
     b.eq    next_core
@@ -623,11 +557,14 @@ rpi5_wait_core_ack:
     b       next_core
 
 check_el2_spin_table:
+
     cmp     x23_arrivedInEL3, #1
     b.ne    write_spin_table
     sev                                                 //  wake secondary cores: after BSS clear they re-assert CORE_SPINNING_IN_EL1
     b       wait_core_ack
+
 write_spin_table:
+
     mov     x10, #armstub_el2_spin_table
     ldr     x11, =running_in_el2
     add     x12, x10, x9, lsl #3
@@ -635,11 +572,15 @@ write_spin_table:
     dc      civac, x12                                          //  flush: MMU is on when this runs
     dsb     sy
     sev
+
 wait_core_ack:
+
     GetCoreState x9
     cmp     w0, #CORE_SPINNING_IN_EL1
     bne     wait_core_ack
+
 next_core:
+
     add x9, x9, #1
     cmp x9, x24_numberOfCoresAvailable                         //  Loop until all cores are started
     b.lo start_next_core
@@ -647,9 +588,6 @@ next_core:
 additional_cores_started:
 
     //  Initialize the platform
-
-    mov     w0, #7
-    bl      RPI5Marker
 
     bl      InitializePlatform
 
