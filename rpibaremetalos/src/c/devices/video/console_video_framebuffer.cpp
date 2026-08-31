@@ -30,24 +30,44 @@ void ConsoleVideoFrameBuffer::DrawGlyph(unsigned char c)
         c = '?';
     }
 
+    //  PutPixel()/FillRect() are bypassed below for speed, so their bounds
+    //      checks are done once here instead. putc() keeps the cursor inside
+    //      Columns()/Rows(), so this is belt-and-braces rather than expected.
+
+    if (!IsAllocated() || (cursor_column_ >= Columns()) || (cursor_row_ >= Rows()))
+    {
+        return;
+    }
+
     const unsigned char *glyph = font8x8_basic[c];
 
     uint32_t origin_x = cursor_column_ * CELL_WIDTH;
     uint32_t origin_y = cursor_row_ * CELL_HEIGHT;
 
+    //  Paint the whole cell, then flush it once. FillRect() flushes on every
+    //      call and each flush ends in a full 'dsb sy', so calling it per
+    //      scaled pixel cost 64 system barriers per character.
+
+    uint32_t foreground = NativePixel(foreground_color_);
+    uint32_t background = NativePixel(background_color_);
+
     for (uint32_t row = 0; row < GLYPH_HEIGHT; row++)
     {
         unsigned char bits = glyph[row];
 
-        for (uint32_t col = 0; col < GLYPH_WIDTH; col++)
+        for (uint32_t scale_y = 0; scale_y < GLYPH_SCALE; scale_y++)
         {
-            uint32_t color = (bits & (1u << col)) ? foreground_color_ : background_color_;
+            volatile uint8_t *dest_row = RowAt(origin_y + (row * GLYPH_SCALE) + scale_y);
 
-            FillRect(origin_x + (col * GLYPH_SCALE),
-                     origin_y + (row * GLYPH_SCALE),
-                     GLYPH_SCALE,
-                     GLYPH_SCALE,
-                     color);
+            for (uint32_t col = 0; col < GLYPH_WIDTH; col++)
+            {
+                uint32_t native = (bits & (1u << col)) ? foreground : background;
+
+                for (uint32_t scale_x = 0; scale_x < GLYPH_SCALE; scale_x++)
+                {
+                    WritePixel(dest_row, origin_x + (col * GLYPH_SCALE) + scale_x, native);
+                }
+            }
         }
     }
 

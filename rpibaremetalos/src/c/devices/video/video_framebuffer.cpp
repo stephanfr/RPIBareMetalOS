@@ -33,7 +33,7 @@ bool VideoFrameBuffer::Allocate()
     SetPhysicalWidthHeightTag setPhysicalWidthHeightTag(requested_width, requested_height);
     SetVirtualWidthHeightTag setVirtualWidthHeightTag(requested_width, requested_height);
     SetVirtualOffsetTag setVirtualOffsetTag(0, 0);
-    SetColourDepthTag setColourDepthTag(DEPTH_BITS_PER_PIXEL);
+    SetColourDepthTag setColourDepthTag(REQUESTED_DEPTH_BITS_PER_PIXEL);
     SetPixelOrderTag setPixelOrderTag(FrameBufferPixelOrder::RGB);
     AllocateFrameBufferTag allocateFrameBufferTag(ALLOCATE_ALIGNMENT_BYTES);
     GetPitchTag getPitchTag;
@@ -60,7 +60,6 @@ bool VideoFrameBuffer::Allocate()
 
     uint32_t applied_width = setPhysicalWidthHeightTag.GetAppliedWidth();
     uint32_t applied_height = setPhysicalWidthHeightTag.GetAppliedHeight();
-    uint32_t applied_depth = setColourDepthTag.GetAppliedBitsPerPixel();
     uint32_t base_address_raw = allocateFrameBufferTag.GetBaseAddress();
     uint32_t size_in_bytes = allocateFrameBufferTag.GetSizeInBytes();
     uint32_t pitch = getPitchTag.GetPitch();
@@ -74,13 +73,8 @@ bool VideoFrameBuffer::Allocate()
         return false;
     }
 
-    //  The firmware does not always honour the requested depth -- RPi5 returns
-    //      16bpp RGB565 even when 32bpp is asked for. Derive the real value from
-    //      the pitch (ground truth for the buffer that was actually allocated)
-    //      rather than trusting SetColourDepthTag's response, and let the
-    //      renderers below adapt instead of painting 32-bit words into 16-bit
-    //      pixels -- which lands one word across two pixels and turns green into
-    //      gold with every second pixel black.
+    //  The depth tag's own response and the pitch should agree; the pitch wins
+    //      if they don't, since it describes the buffer that was really allocated.
 
     uint32_t bytes_per_pixel = pitch / applied_width;
 
@@ -119,6 +113,10 @@ void VideoFrameBuffer::ScrollUp(uint32_t rows, uint32_t fill_color)
 
     volatile uint32_t *base = reinterpret_cast<volatile uint32_t *>(base_address_);
 
+    //  The copy below moves whole 32-bit words regardless of depth, so the fill
+    //      value must be the native pixel replicated across the word -- at 16bpp
+    //      one word covers two pixels.
+
     uint32_t i = 0;
 
     while (i + shift_words < total_words)
@@ -126,10 +124,6 @@ void VideoFrameBuffer::ScrollUp(uint32_t rows, uint32_t fill_color)
         base[i] = base[i + shift_words];
         i++;
     }
-
-    //  The copy below moves whole 32-bit words regardless of depth, so the fill
-    //      value must be the native pixel replicated across the word -- at 16bpp
-    //      one word covers two pixels.
 
     uint32_t native = NativePixel(fill_color);
     uint32_t fill_word = (bytes_per_pixel_ == 2) ? ((native & 0xFFFF) | (native << 16)) : native;
