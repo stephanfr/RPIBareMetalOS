@@ -81,6 +81,19 @@ namespace RP1
 
         Write32(reg, value);
     }
+    
+    void ConfigurePeripheralPad(uint32_t pin, bool pull_up)
+    {
+        uint64_t reg = GpioPadRegister(pin);
+        uint32_t value = Read32(reg);
+
+        value = (value & ~PAD_PULL_MASK) | (pull_up ? PAD_PULL_UP : 0);
+        value &= ~PAD_IN_ENABLE_MASK;   //  cleared below, then re-set: keep both paths explicit
+        value |= PAD_IN_ENABLE_MASK;    //  input enabled
+        value &= ~PAD_OUT_DISABLE_MASK; //  output NOT disabled
+
+        Write32(reg, value);
+    }
 
     uint32_t ResolveClockRateHz(const ClockRegs &clock)
     {

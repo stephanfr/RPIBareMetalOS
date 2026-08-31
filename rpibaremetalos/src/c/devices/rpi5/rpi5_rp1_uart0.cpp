@@ -26,9 +26,9 @@ RP1UART0::RP1UART0( BaudRates  baud_rate, const char* alias )
     RP1::SetPinFunction(14, RP1::FUNCSEL_UART0);
     RP1::SetPinFunction(15, RP1::FUNCSEL_UART0);
 
-    RP1::ConfigurePadForOutput(14);        //  TXD
-    RP1::ConfigurePadForInput(15, true);   //  RXD, pull-up
-
+    RP1::ConfigurePeripheralPad(14, false);  //  TXD
+    RP1::ConfigurePeripheralPad(15, true);   //  RXD, pull-up
+    
     //  Compute the baud rate divisors.
     //      IBRD gets the floor of clock/(16*baud); FBRD is 64 * the
     //      fractional remainder, rounded.
@@ -65,10 +65,6 @@ void RP1UART0::putc(unsigned int c)
 unsigned int RP1UART0::getc()
 {
     char r;
-
-    //  Yield rather than spin -- same reasoning as UART0::getc(): this
-    //      wait is unbounded, and a tight poll here would starve
-    //      everything else scheduled on this core.
 
     while (GetRegister(PL011Registers::UART0_FR) & 0x10)
     {

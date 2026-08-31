@@ -73,4 +73,14 @@ namespace RP1
     //      value this table doesn't cover.
 
     uint32_t ResolveClockRateHz(const ClockRegs &clock);
+
+    //  Pad configuration for a pin muxed to a peripheral function (UART, SPI, ...).
+    //      Matches pinctrl-rp1.c's rp1_set_fsel(): both IN_ENABLE and OUTPUT are left
+    //      enabled unconditionally -- direction is controlled by the peripheral itself
+    //      via the GPIO CTRL register's OUTOVER/OEOVER fields (set to PERI by
+    //      SetPinFunction), not by the pad. The TX/RX distinction in
+    //      ConfigurePadForOutput/ConfigurePadForInput only applies to pure
+    //      software-GPIO (RIO) mode -- do not use those for a peripheral-muxed pin.
+
+    void ConfigurePeripheralPad(uint32_t pin, bool pull_up);
 }

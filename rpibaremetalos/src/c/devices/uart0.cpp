@@ -103,9 +103,7 @@ unsigned int UART0::getc()
 {
     char r;
 
-    //  Yield rather than spin -- this wait is unbounded (it ends only when a character
-    //      arrives), and holding a core in a tight poll for it starves everything else
-    //      scheduled there, including the recurring system timer.
+    //  Yield rather than spin
 
     while (GetRegister(PL011Registers::UART0_FR) & 0x10)
     {

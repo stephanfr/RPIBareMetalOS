@@ -87,9 +87,7 @@ unsigned int UART1::getc()
 {
     char c;
 
-    //  Yield rather than spin: this wait ends only when a character arrives, so holding a
-    //      core in a tight poll for it starves everything else scheduled there, including
-    //      the recurring system timer.
+    //  Yield rather than spin.
 
     while (!(GetRegister(UART1AuxRegisters::AUX_MU_LSR) & 0x01))
     {
