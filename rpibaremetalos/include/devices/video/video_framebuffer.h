@@ -39,7 +39,7 @@ public:
     uint32_t Width() const { return width_; }
     uint32_t Height() const { return height_; }
     uint32_t Pitch() const { return pitch_; }
-    uint32_t BitsPerPixel() const { return DEPTH_BITS_PER_PIXEL; }
+    uint32_t BitsPerPixel() const { return bytes_per_pixel_ * 8; }
 
     //  Packs an 0x00RRGGBB triple into the pixel format the framebuffer
     //      was allocated with.
@@ -49,6 +49,32 @@ public:
         return (static_cast<uint32_t>(r) << 16) | (static_cast<uint32_t>(g) << 8) | static_cast<uint32_t>(b);
     }
 
+    uint32_t NativePixel(uint32_t color) const
+    {
+        if (bytes_per_pixel_ == 2)
+        {
+            uint32_t r = (color >> 16) & 0xFF;
+            uint32_t g = (color >> 8) & 0xFF;
+            uint32_t b = color & 0xFF;
+
+            return ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);   //  RGB565
+        }
+
+        return color;
+    }
+
+    void WritePixel(volatile uint8_t *row, uint32_t x, uint32_t native_color) const
+    {
+        if (bytes_per_pixel_ == 2)
+        {
+            reinterpret_cast<volatile uint16_t *>(row)[x] = static_cast<uint16_t>(native_color);
+        }
+        else
+        {
+            reinterpret_cast<volatile uint32_t *>(row)[x] = native_color;
+        }
+    }
+
     void PutPixel(uint32_t x, uint32_t y, uint32_t color)
     {
         if (!IsAllocated() || (x >= width_) || (y >= height_))
@@ -56,7 +82,7 @@ public:
             return;
         }
 
-        RowAt(y)[x] = color;
+        WritePixel(RowAt(y), x, NativePixel(color));
     }
 
     void FillRect(uint32_t x, uint32_t y, uint32_t rect_width, uint32_t rect_height, uint32_t color)
@@ -69,13 +95,15 @@ public:
         uint32_t x_end = (x + rect_width > width_) ? width_ : (x + rect_width);
         uint32_t y_end = (y + rect_height > height_) ? height_ : (y + rect_height);
 
+        uint32_t native = NativePixel(color);
+
         for (uint32_t row = y; row < y_end; row++)
         {
-            volatile uint32_t *dest_row = RowAt(row);
+            volatile uint8_t *dest_row = RowAt(row);
 
             for (uint32_t col = x; col < x_end; col++)
             {
-                dest_row[col] = color;
+                WritePixel(dest_row, col, native);
             }
         }
 
@@ -103,9 +131,9 @@ protected:
 
         for (uint32_t row = y; row < y_end; row++)
         {
-            uintptr_t start = reinterpret_cast<uintptr_t>(RowAt(row) + x) & ~static_cast<uintptr_t>(63);
-            uintptr_t end = reinterpret_cast<uintptr_t>(RowAt(row) + x_end);
-
+            uintptr_t start = reinterpret_cast<uintptr_t>(RowAt(row) + (x * bytes_per_pixel_)) & ~static_cast<uintptr_t>(63);
+            uintptr_t end = reinterpret_cast<uintptr_t>(RowAt(row) + (x_end * bytes_per_pixel_));
+            
             for (uintptr_t addr = start; addr < end; addr += 64)
             {
                 asm volatile("dc civac, %0" :: "r"(addr) : "memory");
@@ -115,9 +143,9 @@ protected:
         asm volatile("dsb sy" ::: "memory");
     }
 
-    volatile uint32_t *RowAt(uint32_t y) const
+    volatile uint8_t *RowAt(uint32_t y) const
     {
-        return reinterpret_cast<volatile uint32_t *>(base_address_ + (static_cast<uint64_t>(y) * pitch_));
+        return base_address_ + (static_cast<uint64_t>(y) * pitch_);
     }
 
 private:
@@ -132,4 +160,5 @@ private:
     uint32_t pitch_ = 0;
     uint32_t width_ = 0;
     uint32_t height_ = 0;
+    uint32_t bytes_per_pixel_ = 4;
 };

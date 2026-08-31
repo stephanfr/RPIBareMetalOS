@@ -32,8 +32,8 @@ void ConsoleVideoFrameBuffer::DrawGlyph(unsigned char c)
 
     const unsigned char *glyph = font8x8_basic[c];
 
-    uint32_t origin_x = cursor_column_ * GLYPH_WIDTH;
-    uint32_t origin_y = cursor_row_ * GLYPH_HEIGHT;
+    uint32_t origin_x = cursor_column_ * CELL_WIDTH;
+    uint32_t origin_y = cursor_row_ * CELL_HEIGHT;
 
     for (uint32_t row = 0; row < GLYPH_HEIGHT; row++)
     {
@@ -42,18 +42,23 @@ void ConsoleVideoFrameBuffer::DrawGlyph(unsigned char c)
         for (uint32_t col = 0; col < GLYPH_WIDTH; col++)
         {
             uint32_t color = (bits & (1u << col)) ? foreground_color_ : background_color_;
-            PutPixel(origin_x + col, origin_y + row, color);
+
+            FillRect(origin_x + (col * GLYPH_SCALE),
+                     origin_y + (row * GLYPH_SCALE),
+                     GLYPH_SCALE,
+                     GLYPH_SCALE,
+                     color);
         }
     }
 
-    FlushRect(origin_x, origin_y, GLYPH_WIDTH, GLYPH_HEIGHT);
+    FlushRect(origin_x, origin_y, CELL_WIDTH, CELL_HEIGHT);
 }
 
 void ConsoleVideoFrameBuffer::AdvanceCursorAfterGlyph()
 {
     if (cursor_row_ >= Rows())
     {
-        ScrollUp(GLYPH_HEIGHT, background_color_);
+        ScrollUp(CELL_HEIGHT, background_color_);
         cursor_row_ = Rows() - 1;
     }
 }

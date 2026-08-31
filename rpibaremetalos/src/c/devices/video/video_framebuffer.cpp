@@ -4,8 +4,6 @@
 
 #include "devices/video/video_framebuffer.h"
 
-#include "devices/log.h"     //  TEMPORARY -- remove once framebuffer diagnosis is complete
-
 bool VideoFrameBuffer::Allocate()
 {
     GPUMailbox mbox;
@@ -21,9 +19,6 @@ bool VideoFrameBuffer::Allocate()
 
     bool query_ok = mbox.sendMessage(getPhysicalSizeMessage);
 
-    LogError("FB DIAG: physical-size query sendMessage=%u W=%u H=%u\n",
-             query_ok, getPhysicalWidthHeightTag.GetWidth(), getPhysicalWidthHeightTag.GetHeight());
-
     if (query_ok &&
         (getPhysicalWidthHeightTag.GetWidth() != 0) &&
         (getPhysicalWidthHeightTag.GetHeight() != 0))
@@ -31,8 +26,6 @@ bool VideoFrameBuffer::Allocate()
         requested_width = getPhysicalWidthHeightTag.GetWidth();
         requested_height = getPhysicalWidthHeightTag.GetHeight();
     }
-
-    LogError("FB DIAG: requesting %ux%u\n", requested_width, requested_height);
 
     //  One combined message: set physical/virtual size, offset, depth,
     //      pixel order, allocate the buffer, and read back the pitch.
@@ -55,8 +48,6 @@ bool VideoFrameBuffer::Allocate()
 
     bool allocate_ok = mbox.sendMessage(allocateMessage);
 
-    LogError("FB DIAG: allocate sendMessage=%u\n", allocate_ok);
-
     if (!allocate_ok)
     {
         return false;
@@ -69,12 +60,10 @@ bool VideoFrameBuffer::Allocate()
 
     uint32_t applied_width = setPhysicalWidthHeightTag.GetAppliedWidth();
     uint32_t applied_height = setPhysicalWidthHeightTag.GetAppliedHeight();
+    uint32_t applied_depth = setColourDepthTag.GetAppliedBitsPerPixel();
     uint32_t base_address_raw = allocateFrameBufferTag.GetBaseAddress();
     uint32_t size_in_bytes = allocateFrameBufferTag.GetSizeInBytes();
     uint32_t pitch = getPitchTag.GetPitch();
-
-    LogError("FB DIAG: applied W=%u H=%u ADDR=0x%x SIZE=%u PITCH=%u\n",
-             applied_width, applied_height, base_address_raw, size_in_bytes, pitch);
 
     if ((applied_width == 0) ||
         (applied_height == 0) ||
@@ -82,9 +71,25 @@ bool VideoFrameBuffer::Allocate()
         (size_in_bytes == 0) ||
         (pitch == 0))
     {
-        LogError("FB DIAG: one or more applied values were zero -- returning false\n");
         return false;
     }
+
+    //  The firmware does not always honour the requested depth -- RPi5 returns
+    //      16bpp RGB565 even when 32bpp is asked for. Derive the real value from
+    //      the pitch (ground truth for the buffer that was actually allocated)
+    //      rather than trusting SetColourDepthTag's response, and let the
+    //      renderers below adapt instead of painting 32-bit words into 16-bit
+    //      pixels -- which lands one word across two pixels and turns green into
+    //      gold with every second pixel black.
+
+    uint32_t bytes_per_pixel = pitch / applied_width;
+
+    if ((bytes_per_pixel != 2) && (bytes_per_pixel != 4))
+    {
+        return false;
+    }
+
+    bytes_per_pixel_ = bytes_per_pixel;
 
     //  See AllocateFrameBufferTag's comment in gpu_mailbox_messages.h --
     //      the GPU has historically returned a "bus address" with the top
@@ -97,8 +102,6 @@ bool VideoFrameBuffer::Allocate()
     pitch_ = pitch;
     width_ = applied_width;
     height_ = applied_height;
-
-    LogError("FB DIAG: Allocate() succeeded, base_address_=%p\n", (void *)base_address_);
 
     return true;
 }
@@ -124,9 +127,16 @@ void VideoFrameBuffer::ScrollUp(uint32_t rows, uint32_t fill_color)
         i++;
     }
 
+    //  The copy below moves whole 32-bit words regardless of depth, so the fill
+    //      value must be the native pixel replicated across the word -- at 16bpp
+    //      one word covers two pixels.
+
+    uint32_t native = NativePixel(fill_color);
+    uint32_t fill_word = (bytes_per_pixel_ == 2) ? ((native & 0xFFFF) | (native << 16)) : native;
+    
     while (i < total_words)
     {
-        base[i] = fill_color;
+        base[i] = fill_word;
         i++;
     }
 

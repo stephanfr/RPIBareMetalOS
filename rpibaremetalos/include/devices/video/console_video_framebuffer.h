@@ -38,7 +38,10 @@ private:
 
     static constexpr uint32_t GLYPH_WIDTH = 8;
     static constexpr uint32_t GLYPH_HEIGHT = 8;
-
+    static constexpr uint32_t GLYPH_SCALE = 3;
+    static constexpr uint32_t CELL_WIDTH = GLYPH_WIDTH * GLYPH_SCALE;
+    static constexpr uint32_t CELL_HEIGHT = GLYPH_HEIGHT * GLYPH_SCALE;
+    
     uint32_t foreground_color_;
     uint32_t background_color_;
     uint32_t cursor_column_ = 0;
@@ -46,12 +49,12 @@ private:
 
     uint32_t Columns() const
     {
-        return Width() / GLYPH_WIDTH;
+        return Width() / CELL_WIDTH;
     }
 
     uint32_t Rows() const
     {
-        return Height() / GLYPH_HEIGHT;
+        return Height() / CELL_HEIGHT;
     }
 
     void DrawGlyph(unsigned char c);
