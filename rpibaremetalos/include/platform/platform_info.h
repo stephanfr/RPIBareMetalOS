@@ -49,6 +49,11 @@ public:
     {
         return GetBoardType() == RPIBoardType::RPI5;
     }
+    
+    bool PlatformDetailsValid() const
+    {
+        return platform_details_valid_;
+    }
 
     uint32_t GetBoardModelNumber() const
     {
@@ -83,7 +88,8 @@ public:
     void DecodeBoardRevision(minstd::string &buffer) const;
 
 protected:
-    void GetPlatformDetails(uint8_t *mailbox_register_base);
+
+    bool GetPlatformDetails(uint8_t *mailbox_register_base);
 
 private:
     uint32_t board_model_number_;
@@ -92,6 +98,7 @@ private:
     minstd::array<uint8_t, 6> board_mac_address_;
     uint32_t memory_base_address_;
     uint64_t memory_size_in_bytes_;
+    bool platform_details_valid_ = false;
 };
 
 const PlatformInfo &GetPlatformInfo();

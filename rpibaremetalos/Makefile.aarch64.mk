@@ -104,6 +104,12 @@ LINKER_SCRIPT=$(BUILD_ROOT)/link.ld
 
 all: checkdirs $(IMG)
 
+#  Default target: clean build + regression gate.  Fails immediately if the
+#  regression script exits non-zero (Make propagates the exit code).
+.DEFAULT_GOAL := ci
+
+ci: clean all qemu-regression
+
 all_clean: clean all
 
 $(IMG): $(ELF)
