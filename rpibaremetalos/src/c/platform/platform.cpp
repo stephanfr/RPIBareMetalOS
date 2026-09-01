@@ -339,17 +339,16 @@ void InitializePlatform()
     {
         GPUMailbox retry_mbox;
 
-        GetBoardModelTag retry_model_tag;
         GetBoardRevisionTag retry_revision_tag;
 
-        GPUMailboxPropertyMessage retry_message(retry_model_tag, retry_revision_tag);
+        GPUMailboxPropertyMessage retry_message(retry_revision_tag);
 
         bool retry_ok = retry_mbox.sendMessage(retry_message);
 
-        LogError("BOARD INFO RETRY: query_ok=%u model=%u rev=0x%08x\n",
-                 retry_ok, retry_model_tag.GetBoardModel(), retry_revision_tag.GetBoardRevision());
+        LogError("BOARD INFO RETRY: query_ok=%u rev=0x%08x\n",
+                 retry_ok, retry_revision_tag.GetBoardRevision());
     }
-    
+        
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
