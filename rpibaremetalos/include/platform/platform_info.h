@@ -96,6 +96,13 @@ private:
     uint32_t board_revision_;
     uint64_t board_serial_number_;
     minstd::array<uint8_t, 6> board_mac_address_;
+
+    //  Populated from GET_ARM_MEMORY when the mailbox answers it. On every
+    //      real Raspberry Pi to date this is 0 -- RAM always starts at
+    //      physical address 0 -- so a 0 here on a board whose mailbox tag
+    //      goes unanswered (e.g. RPi5, see the board-info fix in the port
+    //      plan) is the architecturally correct value, not a missing one.
+    
     uint32_t memory_base_address_;
     uint64_t memory_size_in_bytes_;
     bool platform_details_valid_ = false;

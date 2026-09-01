@@ -326,28 +326,6 @@ void InitializePlatform()
     {
         ParkCore();
     }
-
-    //  Temporary
-
-    //  Retry the board-info query here, well after MMUManager::Initialize()'s
-    //      TTBR0 swap, to check whether the failure at PlatformInfo construction
-    //      time is a timing/coherency artifact of that swap rather than a
-    //      standing problem with the mailbox itself -- Allocate() successfully
-    //      uses this identical mailbox and address for the framebuffer just
-    //      below this point, which is the anomaly this is meant to isolate.
-
-    {
-        GPUMailbox retry_mbox;
-
-        GetBoardRevisionTag retry_revision_tag;
-
-        GPUMailboxPropertyMessage retry_message(retry_revision_tag);
-
-        bool retry_ok = retry_mbox.sendMessage(retry_message);
-
-        LogError("BOARD INFO RETRY: query_ok=%u rev=0x%08x\n",
-                 retry_ok, retry_revision_tag.GetBoardRevision());
-    }
         
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform

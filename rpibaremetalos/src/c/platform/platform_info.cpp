@@ -4,6 +4,7 @@
 
 #include "os_config.h"
 #include "platform/gpu_mailbox_messages.h"
+#include "platform/kernel_command_line.h"
 
 const char *rpiTypeNames[] = {"A", "B", "A+", "B+", "2B", "Alpha", "CM1", "Error", "3B", "Zero", "CM3", "Error",
                               "Zero W", "3B+", "3A+", "Internal Use Only", "CM3+", "4B", "Zero 2W", "400", "CM4", "CM4S",
@@ -22,6 +23,48 @@ namespace
     const char *NameOrUnknown(const T (&names)[N], uint32_t index)
     {
         return (index < N) ? names[index] : "Unknown";
+    }
+        
+    int HexDigitValue(char c)
+    {
+        if ((c >= '0') && (c <= '9')) return c - '0';
+        if ((c >= 'a') && (c <= 'f')) return c - 'a' + 10;
+        if ((c >= 'A') && (c <= 'F')) return c - 'A' + 10;
+        return -1;
+    }
+
+    //  Parses "XX:XX:XX:XX:XX:XX" (case-insensitive hex) into 6 bytes.
+    //      Deliberately hand-rolled rather than sscanf("%hhx:...") -- this
+    //      minimal libc's format-specifier support isn't something to guess at.
+
+    bool ParseMACAddress(const char *text, minstd::array<uint8_t, 6> &out_mac)
+    {
+        for (uint32_t i = 0; i < 6; i++)
+        {
+            int high = HexDigitValue(text[0]);
+            int low = (high >= 0) ? HexDigitValue(text[1]) : -1;
+
+            if (low < 0)
+            {
+                return false;
+            }
+
+            out_mac[i] = static_cast<uint8_t>((high << 4) | low);
+
+            text += 2;
+
+            if (i < 5)
+            {
+                if (*text != ':')
+                {
+                    return false;
+                }
+
+                text += 1;
+            }
+        }
+
+        return true;
     }
 }
 
@@ -57,17 +100,35 @@ bool PlatformInfo::GetPlatformDetails(uint8_t *mailbox_register_base)
     bool send_ok = mbox.sendMessage(getBoardInfoMessage);
 
     //  GET_BOARD_MODEL (tag 0x00010001) is deliberately not queried here: every real
-    //      Pi -- RPi3/RPi4 included -- has always returned 0 for it and on RPi5 it 
-    //      appears to make the firmware reject the whole combined message
-    //      with a "Request Parsing Error" -- confirmed by GET_BOARD_REVISION (0x00010002)
-    //      alone working correctly on this same board via get_boot_time_settings.S's
-    //      separate, hand-built early-boot mailbox message.
+    //      Pi -- RPi3/RPi4 included -- has always returned 0 for it. See sendMessage()'s
+    //      handling of MBOX_STATUS_REQUEST_PARSING_ERROR for why RPi5 shows that code
+    //      here regardless -- it's a partial response caused by other unanswered
+    //      tags, not by this one.
 
     board_model_number_ = 0;
     board_revision_ = getBoardRevisionTag.GetBoardRevision();
     board_mac_address_ = getBoardMACAddressTag.GetBoardMACAddress();
     board_serial_number_ = getBoardSerialNumberTag.GetBoardSerialNumber();
     memory_base_address_ = getARMMemoryTag.GetBaseAddress();
+
+    //  RPi5's firmware doesn't answer GET_BOARD_MAC_ADDRESS over the mailbox,
+    //      but the same MAC is always present in the kernel command line as
+    //      smsc95xx.macaddr -- the bootloader sources both from the same
+    //      EEPROM/OTP data. Only used as a fallback: a mailbox answer is
+    //      never second-guessed.
+
+    bool mac_address_valid = getBoardMACAddressTag.ResponseWasProvided();
+
+    if (!mac_address_valid)
+    {
+        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> mac_setting;
+        
+        if (KernelCommandLine::FindSetting("smsc95xx.macaddr", mac_setting) &&
+            ParseMACAddress(mac_setting.c_str(), board_mac_address_))
+        {
+            mac_address_valid = true;
+        }
+    }
 
     RevisionCodeWithUint rc;
 
@@ -77,7 +138,7 @@ bool PlatformInfo::GetPlatformDetails(uint8_t *mailbox_register_base)
 
     platform_details_valid_ = send_ok &&
                               getBoardRevisionTag.ResponseWasProvided() &&
-                              getBoardMACAddressTag.ResponseWasProvided() &&
+                              mac_address_valid &&
                               getBoardSerialNumberTag.ResponseWasProvided() &&
                               getARMMemoryTag.ResponseWasProvided();
 
