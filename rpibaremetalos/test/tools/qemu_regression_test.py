@@ -22,7 +22,7 @@ BOOT_READY_MARKER = 'Command Line Interface'
 TIMEOUT = 60  # seconds to wait for each response
 
 
-def run(qemu: str, kernel: str, sdimage: str) -> int:
+def run(qemu: str, kernel: str, sdimage: str, extra_cmdline: str = '') -> int:
     cmd = (
         f'{qemu} -M raspi3b'
         f' -kernel {kernel}'
@@ -30,7 +30,7 @@ def run(qemu: str, kernel: str, sdimage: str) -> int:
         f' -serial stdio'
         f' -display none'
         f' -no-reboot'
-        f' -append "console=ttys0,57600 memory_model=kernel_only_1_to_1"'
+        f' -append "console=ttys0,57600 memory_model=kernel_only_1_to_1{extra_cmdline}"'
     )
 
     print(f'Launching: {cmd}')
@@ -105,8 +105,16 @@ def main() -> int:
     parser.add_argument('--kernel',  required=True, help='Path to kernel8.elf')
     parser.add_argument('--sdimage', required=True, help='Path to sd.img')
     args = parser.parse_args()
-    return run(args.qemu, args.kernel, args.sdimage)
+
+    print('=== Pass 1: default (strict alignment checking off) ===')
+    result = run(args.qemu, args.kernel, args.sdimage)
+    if result != 0:
+        return result
+
+    print('\n=== Pass 2: strict_align=1 (strict alignment checking on) ===')
+    return run(args.qemu, args.kernel, args.sdimage, extra_cmdline=' strict_align=1')
 
 
 if __name__ == '__main__':
     sys.exit(main())
+    

@@ -51,6 +51,7 @@
 				 (0xfful << (MT_NORMAL * 8)) )
 
    // Specify mapping characteristics in translate control register
+
 #define TCREL1VAL  ( (0b00LL << 37)  |  /* TBI=0, no tagging */\
 					 (0b010LL << 32) |  /* IPS= 40 bit (0b010), widened for RPi5's ~128GiB GIC/peripheral addresses */\
 					 (0b10LL << 30)  |  /* TG1=4k ... options are 10=4KB, 01=16KB, 11=64KB ... take care differs from TG0 */\
@@ -66,12 +67,16 @@
 					 (0b0LL  << 7)   |  /* EPD0  ... Translation table walk disable for translations using TTBR0_EL1  0 = walk, 1 = generate fault */\
 					 (25LL   << 0) ) 	/* T0SZ=25 (512G)  ... The region size is 2 POWER (64-T0SZ) bytes */
 				     
+    //  Ordinary Access Alignment (A) is not set in SCTLREL1VAL so that exceptions are not generated for unaligned
+    //      memory access by default.  There is a kernel command line option to enable it which will cause exceptions
+    //      to be generated and the OS to halt if unaligned memory access is attempted.  The intent is that the kernel
+    //      should have correct alignment all the time internally but we do not want to have the same requirement for user code.
+
 #define SCTLREL1VAL ( (0xC00800) |		/* set mandatory reserved bits */\
 					  (1 << 12)  |      /* I, Instruction cache enable. This is an enable bit for instruction caches at EL0 and EL1 */\
-					  (1 << 4)   |		/* SA0, tack Alignment Check Enable for EL0 */\
+					  (1 << 4)   |		/* SA0, Stack Alignment Check Enable for EL0 */\
 					  (1 << 3)   |		/* SA, Stack Alignment Check Enable */\
 					  (1 << 2)   |		/* C, Data cache enable. This is an enable bit for data caches at EL0 and EL1 */\
-					  (1 << 1)   |		/* A, Alignment check enable bit */\
 					  (1 << 0) )		/* set M, enable MMU */
 
 .globl EnableMMUTables;
@@ -81,29 +86,46 @@ EnableMMUTables:
 	dsb     sy
 
 	// Set memory attribute register
+
 	ldr     x2, =MAIR1VAL
 	msr     mair_el1, x2
 
 	// Install translation table bases
+
 	msr     ttbr0_el1, x0
 	msr     ttbr1_el1, x1
 	isb
 
 	// Set translation control register
+
 	ldr     x0, =TCREL1VAL
 	msr     tcr_el1, x0
 	isb
 
 	// Invalidate all EL1 TLB entries before (re-)enabling the MMU.
 	// Required by ARM ARM when changing TTBR or enabling translation.
+
 	tlbi    vmalle1
 	dsb     sy
 	isb
 
 	// Enable MMU, D-cache, and I-cache atomically
+
 	mrs     x0, sctlr_el1
 	ldr     x1, =SCTLREL1VAL
 	orr     x0, x0, x1
+
+	//  Runtime opt-in: __strict_alignment_enabled is set by MMUManager::Initialize()
+	//      from the "strict_align=1" kernel command-line flag before
+	//      it calls EnableMMU(). Default (0/unset) leaves SCTLR_EL1.A clear -- ordinary
+	//      unaligned accesses are tolerated, matching a normal production ARM64 kernel.
+
+	adrp    x2, __strict_alignment_enabled
+	ldr     w2, [x2, :lo12:__strict_alignment_enabled]
+	cbz     w2, 1f
+	orr     x0, x0, #(1 << 1)
+    
+1:
 	msr     sctlr_el1, x0
 	isb                         // flush pipeline after MMU enable
 

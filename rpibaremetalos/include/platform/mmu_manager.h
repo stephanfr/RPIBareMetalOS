@@ -17,10 +17,12 @@ class MMUManager
 public:
     typedef enum class MemoryModelTypes : uint32_t
     {
+        UNKNOWN = 0,
         KERNEL_ONLY_1_TO_1,
     } MemoryModelTypes;
 
     static constexpr uint32_t MAX_RESERVED_MEMORY_REGIONS = 4;
+    static constexpr const char* UNKNOWN_STRING = "unknown";
     static constexpr const char* KERNEL_ONLY_1_TO_1_STRING = "kernel_only_1_to_1";
 
     static void Initialize();
@@ -76,7 +78,12 @@ inline const char *ToString(MMUManager::MemoryModelTypes model)
 {
     switch(  model )
     {
+        case MMUManager::MemoryModelTypes::UNKNOWN:
+            return MMUManager::UNKNOWN_STRING;
+            
         case MMUManager::MemoryModelTypes::KERNEL_ONLY_1_TO_1:
             return MMUManager::KERNEL_ONLY_1_TO_1_STRING;
     }
+
+    return MMUManager::UNKNOWN_STRING;
 }

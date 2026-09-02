@@ -152,6 +152,7 @@ SOFTWARE.
     mov	x0, #\type
     mrs	x1, esr_el1
     mrs	x2, elr_el1
+    mrs	x3, far_el1
     bl	ShowInvalidExceptionTableEntryMessage
     
     //  Just park the core, no recovery possible

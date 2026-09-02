@@ -42,7 +42,6 @@ void MMUManager::Initialize()
 
     minstd::fixed_string<64> memory_model_string;
 
-
     if( KernelCommandLine::FindSetting("memory_model", memory_model_string))
     {
         if( memory_model_string == KERNEL_ONLY_1_TO_1_STRING)
@@ -50,6 +49,25 @@ void MMUManager::Initialize()
             memory_model = MemoryModelTypes::KERNEL_ONLY_1_TO_1;
         }
         else
+        {
+            ParkCore();
+        }
+    }
+
+    //  Check for a "strict_align=1" kernel command-line opt-in to SCTLR_EL1.A
+    //      (alignment-fault-on-every-access). Default is OFF -- a normal production
+    //      ARM64 kernel tolerates unaligned ordinary accesses; enable this for
+    //      kernel development/testing.
+
+    minstd::fixed_string<64> strict_align_string;
+
+    if (KernelCommandLine::FindSetting("strict_align", strict_align_string))
+    {
+        if (strict_align_string == "1")
+        {
+            __strict_alignment_enabled = 1;
+        }
+        else if (strict_align_string != "0")
         {
             ParkCore();
         }
@@ -80,7 +98,10 @@ void MMUManager::Initialize()
     // Secondary cores start with D-cache disabled and read directly from DRAM in
     // EnableMMUForCore() — if these writes are still in core 0's L2 cache, the
     // secondary core sees null and parks.
+
     asm volatile("dc civac, %0" :: "r"(&platform_memory_manager_) : "memory");
+    asm volatile("dc civac, %0" :: "r"(&__strict_alignment_enabled) : "memory");
+
     {
         const uint8_t *p = __mmu_manager_storage;
         const uint8_t *end = __mmu_manager_storage + sizeof(platform_specific_mmu_union) + 16;
@@ -89,11 +110,13 @@ void MMUManager::Initialize()
             asm volatile("dc civac, %0" :: "r"(p) : "memory");
         }
     }
+
     asm volatile("dsb sy" ::: "memory");
 
     // The MMU is already active (early tables from SetupEarlyPageTables/EnableMMUTables in start.S).
     // This call atomically swaps TTBR0 to the final platform-specific tables and invalidates
     // all TLB entries.  Safe because both early and final tables are 1:1 identity maps.
+
     platform_memory_manager_->EnableMMU();
 }
 

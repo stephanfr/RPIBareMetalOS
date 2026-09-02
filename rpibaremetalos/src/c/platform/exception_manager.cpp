@@ -28,15 +28,14 @@ const char *entry_error_messages[] = {
     "SYNC_INVALID_EL0_32",
     "IRQ_INVALID_EL0_32",
     "FIQ_INVALID_EL0_32",
-    "ERROR_INVALID_EL0_32"};
+    "ERROR_INVALID_EL0_32",
 
-//
-//  C linkage entry points for exceptions and interrupts
-//
+    "SYNC_ERROR",
+    "SYSCALL_ERROR"};
 
-extern "C" void ShowInvalidExceptionTableEntryMessage(unsigned int type, unsigned long esr, unsigned long address)
+extern "C" void ShowInvalidExceptionTableEntryMessage(unsigned int type, unsigned long esr, unsigned long address, unsigned long far)
 {
-    GetExceptionManager().HandleException(type, esr, address);
+    GetExceptionManager().HandleException(type, esr, address, far);
 }
 
 extern "C" void HandleIRQ()
@@ -48,9 +47,9 @@ extern "C" void HandleIRQ()
 //  Methods for ExceptionManager follow
 //
 
-void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address)
+void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far)
 {
-    LogError("%s, Core: %d ESR: %x, address: %x\r\n", entry_error_messages[type], GetCoreID(), (unsigned int)esr, (unsigned int)address);
+    LogError("%s, Core: %d ESR: %x, PC: %x, FAR: %x\r\n", entry_error_messages[type], GetCoreID(), (unsigned int)esr, (unsigned int)address, (unsigned int)far);
 }
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)
