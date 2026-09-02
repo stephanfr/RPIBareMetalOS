@@ -48,11 +48,11 @@ def run(qemu: str, kernel: str, sdimage: str) -> int:
             else:
                 print(f'\nPASS [{label}]: found "{text}"')
 
-    def send_command(command: str) -> str:
+    def send_command(command: str, timeout: int = TIMEOUT) -> str:
         child.sendline(command)
-        child.expect(PROMPT, timeout=TIMEOUT)
+        child.expect(PROMPT, timeout=timeout)
         return child.before
-
+        
     try:
         # Wait for the OS to boot and reach the CLI prompt
         child.expect(BOOT_READY_MARKER, timeout=TIMEOUT)
@@ -69,6 +69,18 @@ def run(qemu: str, kernel: str, sdimage: str) -> int:
         # show diagnostics
         output = send_command('show diagnostics')
         check('show diagnostics', output, 'Board Info:', 'RPI Version:')
+
+        # test memory — allocator correctness + the "did we actually unlock
+        # the real amount of RAM" regression guard
+        output = send_command('test memory')
+        check('test memory', output, 'PASS: memory allocator correctness test')
+
+        # test memorysoak — short duration here; this is a regression smoke
+        # check that the churn path itself works, not a real soak run. Extra
+        # pexpect timeout headroom for QEMU being slower than real hardware,
+        # on top of the 10s of in-OS wall-clock time the test itself requests.
+        output = send_command('test memorysoak --seconds=10', timeout=90)
+        check('test memorysoak', output, 'PASS: memory soak test')
 
         # halt
         child.sendline('halt')

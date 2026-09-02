@@ -20,6 +20,7 @@ public:
         KERNEL_ONLY_1_TO_1,
     } MemoryModelTypes;
 
+    static constexpr uint32_t MAX_RESERVED_MEMORY_REGIONS = 4;
     static constexpr const char* KERNEL_ONLY_1_TO_1_STRING = "kernel_only_1_to_1";
 
     static void Initialize();
@@ -38,8 +39,23 @@ public:
 
     virtual void *ARMToGPUAddress(void *ARMaddress) const = 0;
 
-    virtual uint64_t ReservedMemoryBase() const = 0;
 
+    typedef struct ReservedMemoryRegion
+    {
+        uint64_t base_;
+        uint64_t size_;
+    } ReservedMemoryRegion;
+
+    //  Exclusive upper bound of physical RAM the general-purpose allocator may
+    //      hand out.  Everything below this that must NOT be handed out is
+    //      declared as a reserved region instead of shrinking this bound --
+    //      the carve-outs are interior holes on every board with more RAM than
+    //      the GPU-addressable window, so a single ceiling cannot express them.
+
+    virtual uint64_t AllocatableMemoryTop() const = 0;
+
+    virtual uint32_t ReservedMemoryRegionCount() const = 0;
+    virtual ReservedMemoryRegion ReservedMemoryRegionAt(uint32_t index) const = 0;
     virtual MemoryModelTypes MemoryModel() const = 0;
 
     static bool IsMMUEnabled()

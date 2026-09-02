@@ -6,6 +6,8 @@
 
 #include "os_config.h"
 
+#include <array>
+
 #include "asm_globals.h"
 
 #include "platform/mmu_manager.h"
@@ -143,9 +145,19 @@ public:
         return memory_model_;
     }
 
-    uint64_t ReservedMemoryBase() const override
+    uint64_t AllocatableMemoryTop() const override
     {
-        return page_table_block_ * level1_blocksize_;
+        return platform_memory_in_bytes_;
+    }
+
+    uint32_t ReservedMemoryRegionCount() const override
+    {
+        return reserved_region_count_;
+    }
+
+    ReservedMemoryRegion ReservedMemoryRegionAt(uint32_t index) const override
+    {
+        return reserved_regions_[index];
     }
 
 protected:
@@ -179,4 +191,35 @@ protected:
         asm volatile("dc civac, %0" ::"r"(&__kernel_page_table_base) : "memory");
         asm volatile("dsb sy" ::: "memory");
     }
+
+    //  Each board's constructor declares its own carve-outs once its block
+    //      layout is computed.  Overlapping regions are harmless -- MemoryManager
+    //      only marks pages occupied, so marking one twice costs nothing.
+
+    void AddReservedRegion(uint64_t base, uint64_t size)
+    {
+        if (reserved_region_count_ < MAX_RESERVED_MEMORY_REGIONS)
+        {
+            reserved_regions_[reserved_region_count_++] = ReservedMemoryRegion{base, size};
+        }
+        else
+        {
+            ParkCore();
+        }
+    }
+
+    //  The page-table block, the DMA block and VideoCore's own memory are placed
+    //      contiguously by every board (dma = videocore_start - 1 block,
+    //      page_table = dma - 1), so they are one run.
+
+    void AddStandardReservedRegions()
+    {
+        const uint64_t base = page_table_block_ * level1_blocksize_;
+        const uint64_t top = (uint64_t)videocore_memory_start_ + videocore_memory_size_;
+
+        AddReservedRegion(base, top - base);
+    }
+
+    minstd::array<ReservedMemoryRegion, MAX_RESERVED_MEMORY_REGIONS> reserved_regions_;
+    uint32_t reserved_region_count_ = 0;
 };

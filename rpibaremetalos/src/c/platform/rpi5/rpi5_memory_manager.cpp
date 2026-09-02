@@ -137,7 +137,7 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
 
     const uint64_t gpu_window_first_block = videocore_memory_start_block_;
     const uint64_t gpu_window_last_block  = BYTES_1G / level1_blocksize_;
-    
+
     for (uint64_t i = gpu_window_first_block; i < gpu_window_last_block; i++)
     {
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){
@@ -214,4 +214,8 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
 
         kernel_page_table_1_to_1_[rp1_index] = rp1_block_descriptor.Raw64;
     }
+
+    //  Add the standard reserved regions (kernel, stack, etc.) -- no GPU window to reserve on RPi5, since the GPU-addressable window is already reserved above.
+    
+    AddStandardReservedRegions();   //  BCM2712 has no peripherals below 4GB
 }

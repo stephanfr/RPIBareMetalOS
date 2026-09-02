@@ -135,16 +135,41 @@ namespace
         uint32_t cmdline_base = ParseHexUint32(base_setting.c_str());
         uint32_t cmdline_size = ParseHexUint32(size_setting.c_str());
 
+        //  Confirmed on RPI4 and 5 hardware: GET_VC_MEMORY (mailbox) and
+        //      vc_mem.mem_base/vc_mem.mem_size (kernel command line) are not two
+        //      reports of the same quantity, so a mismatch here is expected, not
+        //      a symptom of anything wrong. The mailbox tag answers what it is
+        //      actually specified to answer -- the VideoCore's own small private
+        //      RAM reservation (RPi4: base=0x3b400000, size=0x04c00000 -- these
+        //      sum to exactly 0x40000000, a clean ~76MB gpu_mem= split flush
+        //      against the low-1GB boundary). vc_mem.mem_base/mem_size instead
+        //      describe the size of the low-memory GPU-addressable aperture as a
+        //      whole -- consistent with mem_size reading exactly 1GB on every
+        //      board regardless of installed RAM or gpu_mem= setting, which is
+        //      not a plausible reservation size but is exactly the aperture size.
+        //
+        //      Which side is "correct" for OUR purposes still differs by board:
+        //      RPi4's mailbox value sits inside the low-1GB window and is used
+        //      directly for block placement, unmodified, in RPI4BMemoryManager.
+        //      RPi5's mailbox value (~0xFDB00000) sits OUTSIDE that window
+        //      entirely -- itself a real answer to the same question, just one
+        //      that happens to be useless for placement -- so RPI5MemoryManager
+        //      overrides it with a sourced constant instead (see that
+        //      constructor). Either way, neither board's placement logic reads
+        //      the command-line value, so this check can never be acted on --
+        //      demoted to LogDebug1 accordingly: worth keeping (a firmware update
+        //      could change either side), not worth a WARNING on every boot.
+
         if (cmdline_base != __videocore_memory_base)
         {
-            LogWarning("VC memory base mismatch: mailbox=0x%08x cmdline=0x%08x\n",
-                      __videocore_memory_base, cmdline_base);
+            LogDebug1("VC memory base mismatch: mailbox=0x%08x cmdline=0x%08x\n",
+                     __videocore_memory_base, cmdline_base);
         }
 
         if (cmdline_size != __videocore_memory_size_in_bytes)
         {
-            LogWarning("VC memory size mismatch: mailbox=0x%08x cmdline=0x%08x\n",
-                      __videocore_memory_size_in_bytes, cmdline_size);
+            LogDebug1("VC memory size mismatch: mailbox=0x%08x cmdline=0x%08x\n",
+                     __videocore_memory_size_in_bytes, cmdline_size);
         }
     }
 }
