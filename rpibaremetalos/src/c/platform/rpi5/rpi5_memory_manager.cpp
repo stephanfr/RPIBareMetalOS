@@ -22,22 +22,40 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
     uint32_t last_physical_memory_entry = platform_memory_in_bytes_ / level1_blocksize_;
     uint32_t entries_per_level1_block = (level1_blocksize_ / level2_blocksize_);
 
+    //  Neither of RPi5's two "here is where VideoCore memory lives" reports can
+    //      be trusted for this. GET_VC_MEMORY (the mailbox tag) answers
+    //      ~0xFDB00000 (~3.96GB) -- a real firmware response, but one that
+    //      already has bits 30/31 set, which makes ARMToGPUAddress()'s
+    //      "| 0xC0000000" aliasing a no-op if anything is placed using it: the
+    //      GPU would decode the resulting bus address as physical 0x3D800000,
+    //      0xC0000000 bytes from where anything was actually written, and every
+    //      mailbox call would fail. vc_mem.mem_base/vc_mem.mem_size on the
+    //      kernel command line are not a safe substitute either -- they are an
+    //      undocumented pass-through from firmware to the vc_mem Linux driver
+    //      (drivers/char/broadcom/vc_mem.c declares both module_param()s with no
+    //      MODULE_PARM_DESC), and mem_size is a suspiciously identical 1024 MiB
+    //      on both RPi4 and RPi5 -- not a plausible gpu_mem= split, and more
+    //      likely describing the ARM-visible GPU-addressable aperture itself
+    //      than a live VideoCore RAM reservation. Neither is confirmed to answer
+    //      the same question this code actually needs answered.
+    //
+    //      What IS confirmed, from primary source (BCM2712's dma-ranges: bus
+    //      0xC0000000-0xFFFFFFFF maps to physical 0-0x40000000), is that the low
+    //      1GB of physical RAM is the entire GPU-addressable window -- the same
+    //      fact ARMToGPUAddress() already relies on below. Override the base
+    //      class's mailbox-derived values with that sourced constant, so this is
+    //      the intentional design rather than a mailbox-derived value that
+    //      happens to always lose a min() against a hardcoded cap.
+
+    videocore_memory_start_ = (uint8_t *)(896ULL * BYTES_1M);
+    videocore_memory_size_ = (uint32_t)(BYTES_1G - (896ULL * BYTES_1M));
+
     videocore_memory_start_block_ = (uint64_t)videocore_memory_start_ / level1_blocksize_;
 
-    //  The VideoCore can only reach the low 1GB of physical RAM: BCM2712's
-    //      dma-ranges map bus 0xC0000000-0xFFFFFFFF onto physical 0-0x40000000,
-    //      which is exactly the aliasing ARMToGPUAddress()'s "| 0xC0000000"
-    //      assumes.  RPi5 reports videocore memory at ~0xFDB00000 (~3.96GB), so
-    //      the RPi3/RPi4 convention of placing these blocks just below videocore
-    //      memory puts the DMA block at ~0xFD800000 -- an address that ALREADY
-    //      has bits 30 and 31 set, making the OR a no-op.  The GPU then decodes
-    //      that bus address as physical 0x3D800000, 0xC0000000 bytes from where
-    //      the message was actually written, and every mailbox call fails.
-    //
-    //      Cap the reservation inside the GPU-addressable window instead,
-    //      leaving the space above it in the low 1GB free for the firmware's own
-    //      framebuffer allocations (1920x1080x32bpp is ~8MB; the framebuffer
-    //      observed on this board landed at 0x3F800000).
+    //  The reservation sits just below the 896MB boundary above, leaving the
+    //      remaining space up to 1GB free for the firmware's own framebuffer
+    //      allocations (1920x1080x32bpp is ~8MB; the framebuffer observed on
+    //      this board landed at 0x3F800000).
     //
     //      NOTE: this also caps MemoryManager's allocatable RAM at ~896MB, since
     //      ReservedMemoryBase() is page_table_block_-derived.  Only the DMA block
@@ -45,11 +63,7 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
     //      block so it can live high, and teaching MemoryManager to exclude the
     //      low DMA block, is a worthwhile follow-up on an 8GB board.
 
-    const uint64_t gpu_addressable_top_block = (896 * BYTES_1M) / level1_blocksize_;
-
-    const uint64_t reservation_top_block = minstd::min(videocore_memory_start_block_, gpu_addressable_top_block);
-
-    dma_block_ = reservation_top_block - 1;
+    dma_block_ = videocore_memory_start_block_ - 1;
     page_table_block_ = dma_block_ - 1;
 
     kernel_page_table_1_to_1_ = (uint64_t *)(page_table_block_ * level1_blocksize_);
@@ -121,9 +135,9 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
     //      This is exactly the region left free above our own reservation, so
     //      it does not overlap the page-table or DMA blocks.
 
-    const uint64_t gpu_window_first_block = reservation_top_block;
+    const uint64_t gpu_window_first_block = videocore_memory_start_block_;
     const uint64_t gpu_window_last_block  = BYTES_1G / level1_blocksize_;
-
+    
     for (uint64_t i = gpu_window_first_block; i < gpu_window_last_block; i++)
     {
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){

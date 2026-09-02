@@ -75,6 +75,78 @@ namespace
     private:
         minstd::xoroshiro128_plus_plus rng_;
     };
+
+    //  Parses an optionally "0x"/"0X"-prefixed hex string. Hand-rolled rather than
+    //      sscanf("%x", ...) for the same reason as the MAC-address parser in
+    //      platform_info.cpp: this minimal libc's format-specifier support isn't
+    //      something to assume. Returns 0 on a malformed string, matching the
+    //      other honest-zero-on-failure conventions already used in this file.
+
+    uint32_t ParseHexUint32(const char *text)
+    {
+        if ((text[0] == '0') && ((text[1] == 'x') || (text[1] == 'X')))
+        {
+            text += 2;
+        }
+
+        uint32_t value = 0;
+
+        while (*text)
+        {
+            char c = *text;
+            int digit;
+
+            if ((c >= '0') && (c <= '9')) digit = c - '0';
+            else if ((c >= 'a') && (c <= 'f')) digit = c - 'a' + 10;
+            else if ((c >= 'A') && (c <= 'F')) digit = c - 'A' + 10;
+            else break;
+
+            value = (value << 4) | static_cast<uint32_t>(digit);
+            text++;
+        }
+
+        return value;
+    }
+
+    //  Cross-checks the VideoCore memory placement the early-boot mailbox call
+    //      (GetBootTimeSettings, via __videocore_memory_base/
+    //      __videocore_memory_size_in_bytes) established against the same
+    //      information the firmware independently embeds in the kernel command
+    //      line as vc_mem.mem_base=/vc_mem.mem_size=. Both describe the same
+    //      underlying firmware state through two different paths; on a board
+    //      where the mailbox answers some tags incorrectly or not at all (see
+    //      the board-info fix in the port plan), this is a free second opinion
+    //      that costs nothing to check. A mismatch does not halt the boot -- the
+    //      memory manager was already built on the mailbox-derived value by the
+    //      time this runs -- but it is loud, early evidence something is wrong,
+    //      rather than a stranger failure showing up later with no clear cause.
+
+    void CrossCheckVideocoreMemoryLayout()
+    {
+        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> base_setting;
+        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> size_setting;
+
+        if (!KernelCommandLine::FindSetting("vc_mem.mem_base", base_setting) ||
+            !KernelCommandLine::FindSetting("vc_mem.mem_size", size_setting))
+        {
+            return;
+        }
+
+        uint32_t cmdline_base = ParseHexUint32(base_setting.c_str());
+        uint32_t cmdline_size = ParseHexUint32(size_setting.c_str());
+
+        if (cmdline_base != __videocore_memory_base)
+        {
+            LogWarning("VC memory base mismatch: mailbox=0x%08x cmdline=0x%08x\n",
+                      __videocore_memory_base, cmdline_base);
+        }
+
+        if (cmdline_size != __videocore_memory_size_in_bytes)
+        {
+            LogWarning("VC memory size mismatch: mailbox=0x%08x cmdline=0x%08x\n",
+                      __videocore_memory_size_in_bytes, cmdline_size);
+        }
+    }
 }
 
 //  To initialize SW RNG - implementation in 'platform_sw_rngs.cpp' but I do not want to expose in header.
@@ -327,7 +399,8 @@ void InitializePlatform()
         ParkCore();
     }
         
-    //  Insure that the number of cores available is less than the max and that they match the number according to the platform
+    CrossCheckVideocoreMemoryLayout();
+
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
     //    if ((__number_of_cores_available > MAX_CORES) ||
