@@ -6,8 +6,9 @@
 #include <string.h>
 
 #include <fixed_string>
-#include <memory>
 #include <minimalstdio.h>
+
+#include "utility/hex_parsers.h"
 
 #include "platform/platform_info.h"
 #include "platform/exception_manager.h"
@@ -31,6 +32,7 @@
 #include "devices/uart0.h"
 #include "devices/uart1.h"
 #include "devices/rpi5/rpi5_rp1_uart0.h"
+#include "devices/rpi5/rpi5_rp1_uart1.h"
 
 #include "devices/video/console_video_framebuffer.h"
 
@@ -75,38 +77,6 @@ namespace
     private:
         minstd::xoroshiro128_plus_plus rng_;
     };
-
-    //  Parses an optionally "0x"/"0X"-prefixed hex string. Hand-rolled rather than
-    //      sscanf("%x", ...) for the same reason as the MAC-address parser in
-    //      platform_info.cpp: this minimal libc's format-specifier support isn't
-    //      something to assume. Returns 0 on a malformed string, matching the
-    //      other honest-zero-on-failure conventions already used in this file.
-
-    uint32_t ParseHexUint32(const char *text)
-    {
-        if ((text[0] == '0') && ((text[1] == 'x') || (text[1] == 'X')))
-        {
-            text += 2;
-        }
-
-        uint32_t value = 0;
-
-        while (*text)
-        {
-            char c = *text;
-            int digit;
-
-            if ((c >= '0') && (c <= '9')) digit = c - '0';
-            else if ((c >= 'a') && (c <= 'f')) digit = c - 'a' + 10;
-            else if ((c >= 'A') && (c <= 'F')) digit = c - 'A' + 10;
-            else break;
-
-            value = (value << 4) | static_cast<uint32_t>(digit);
-            text++;
-        }
-
-        return value;
-    }
 
     //  Cross-checks the VideoCore memory placement the early-boot mailbox call
     //      (GetBootTimeSettings, via __videocore_memory_base/
@@ -240,8 +210,16 @@ bool SetupSerialConsole()
 
     if (GetPlatformInfo().IsRPI5())
     {
-        auto rp1_uart0 = make_static_unique<RP1UART0>(baud_rate, "CONSOLE");
-        GetOSEntityRegistry().AddEntity(rp1_uart0);
+        if (console_uart == "UART1")
+        {
+            auto rp1_uart1 = make_static_unique<RP1UART1>(baud_rate, "CONSOLE");
+            GetOSEntityRegistry().AddEntity(rp1_uart1);
+        }
+        else
+        {
+            auto rp1_uart0 = make_static_unique<RP1UART0>(baud_rate, "CONSOLE");
+            GetOSEntityRegistry().AddEntity(rp1_uart0);
+        }
     }
     else if (console_uart == "UART0")
     {

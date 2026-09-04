@@ -19,7 +19,7 @@ RP1UART0::RP1UART0( BaudRates  baud_rate, const char* alias )
     //      hardware the bootloader configures AUXSRC=2 (xosc, 50MHz), not
     //      the naively-assumed default of AUXSRC=0 (100MHz).
 
-    uint32_t uart_clock_hz = RP1::ResolveClockRateHz(RP1::CLK_UART);
+    uint32_t uart_clock_hz = RP1::ResolveClockRateHz(RP1::CLK_UART0);
 
     //  Mux GPIO14/15 to UART0 (FUNCSEL=4) and configure their pads.
 

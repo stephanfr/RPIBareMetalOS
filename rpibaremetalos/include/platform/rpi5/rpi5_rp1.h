@@ -11,11 +11,6 @@
 //      configuration, and clock resolution for RP1, the PCIe-attached
 //      southbridge that owns the 40-pin header on RPi5.
 //
-//  Deliberately NOT UART-specific -- this is expected to grow over time
-//      (general RP1 GPIO support). Nothing in this file constructs a
-//      CharacterIODevice or any other OSEntity; it is pure address
-//      constants and register-poke helpers.
-//
 //  RP1 is reached over the PCIe outbound window the bootloader leaves
 //      configured at OS entry (see resources/config.txt's pciex4_reset=0)
 //      -- there is no bare-metal PCIe root-complex driver yet. This
@@ -28,19 +23,23 @@ namespace RP1
     constexpr uint64_t WINDOW_BASE = 0x1F00000000ULL;
 
     constexpr uint64_t CLOCKS_BASE = WINDOW_BASE + 0x00018000ULL;
-    constexpr uint64_t GPIO_BASE   = WINDOW_BASE + 0x000D0000ULL;   //  io_bank0
-    constexpr uint64_t PADS_BASE   = WINDOW_BASE + 0x000F0000ULL;   //  pads_bank0
+    constexpr uint64_t GPIO_BASE   = WINDOW_BASE + 0x000D0000ULL;
+    constexpr uint64_t PADS_BASE   = WINDOW_BASE + 0x000F0000ULL;
     constexpr uint64_t UART0_BASE  = WINDOW_BASE + 0x00030000ULL;
+    constexpr uint64_t UART1_BASE  = WINDOW_BASE + 0x00034000ULL;
 
     //  Bank 0 covers pins 0-27 -- the only bank implemented so far (pins
-    //      14/15 for UART0 fall inside it). Banks 1/2 (pins 28-53) are not
-    //      yet supported by SetPinFunction/ConfigurePadFor*.
+    //      0/1 for UART1 and 14/15 for UART0 fall inside it). Banks 1/2
+    //      (pins 28-53) are not yet supported by SetPinFunction/ConfigurePadFor*.
 
     constexpr uint32_t PADS_BANK0_OFFSET = 0x0004;
 
-    //  FUNCSEL values, from pinctrl-rp1.c's PIN() tables for pins 14/15.
+    //  FUNCSEL values, from pinctrl-rp1.c's PIN() tables.
+    //      UART0: pins 14 (TXD) and 15 (RXD), funcsel=4.
+    //      UART1: pins 0 (TXD) and 1 (RXD), funcsel=2.
 
     constexpr uint32_t FUNCSEL_UART0 = 4;
+    constexpr uint32_t FUNCSEL_UART1 = 2;
 
     //  RP1's clock generator has one CTRL/DIV_INT register pair per clock
     //      output. AUXSRC (CTRL bits[9:5]) selects the parent; rate =
@@ -54,7 +53,8 @@ namespace RP1
         uint32_t div_int_offset;
     };
 
-    constexpr ClockRegs CLK_UART{0x54, 0x58};
+    constexpr ClockRegs CLK_UART0{0x54, 0x58};
+    constexpr ClockRegs CLK_UART1{0x5C, 0x60};
 
     //  Pin function select (CTRL.FUNCSEL, bits[4:0]) -- bank 0 only.
 

@@ -47,3 +47,21 @@ private:
 
     uint32_t Next32BitValueInternal();
 };
+
+
+class RPi4HardwareRandomNumberGeneratorOSEntity : public RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>
+{
+public:
+    RPi4HardwareRandomNumberGeneratorOSEntity( bool permanent,
+                                               const char* name,
+                                               const char* alias, 
+                                               RPi4HardwareRandomNumberGenerator &wrapped_generator)
+        : RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>(permanent, name, alias, wrapped_generator)
+    {
+    }
+    
+    static std::unique_ptr<RPi4HardwareRandomNumberGeneratorOSEntity> Create(RPi4HardwareRandomNumberGenerator &generator)
+    {
+        return std::make_unique<RPi4HardwareRandomNumberGeneratorOSEntity>(true, "hw_rng", "HWRNG", generator);
+    }
+};

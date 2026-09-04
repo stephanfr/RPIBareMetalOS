@@ -44,3 +44,21 @@ public:
 
     double entropy() const noexcept override { return 0.0; }
 };
+
+
+class RPi5HardwareRandomNumberGeneratorOSEntity : public RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>
+{
+public:
+    RPi5HardwareRandomNumberGeneratorOSEntity( bool permanent,
+                                               const char* name,
+                                               const char* alias, 
+                                               RPi5HardwareRandomNumberGenerator &wrapped_generator)
+        : RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>(permanent, name, alias, wrapped_generator)
+    {
+    }
+    
+    static std::unique_ptr<RPi5HardwareRandomNumberGeneratorOSEntity> Create(RPi5HardwareRandomNumberGenerator &generator)
+    {
+        return std::make_unique<RPi5HardwareRandomNumberGeneratorOSEntity>(true, "hw_rng", "HWRNG", generator);
+    }
+};

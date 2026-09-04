@@ -1,4 +1,4 @@
-// Copyright 2023 Stephan Friedl. All rights reserved.
+// Copyright 2026 Stephan Friedl. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -42,3 +42,20 @@ private:
     uint32_t Next32BitValueInternal();
 };
 
+
+class RPi3HardwareRandomNumberGeneratorOSEntity : public RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>
+{
+public:
+    RPi3HardwareRandomNumberGeneratorOSEntity( bool permanent,
+                                               const char* name,
+                                               const char* alias, 
+                                               RPi3HardwareRandomNumberGenerator &wrapped_generator)
+        : RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>(permanent, name, alias, wrapped_generator)
+    {
+    }
+    
+    static std::unique_ptr<RPi3HardwareRandomNumberGeneratorOSEntity> Create(RPi3HardwareRandomNumberGenerator &generator)
+    {
+        return std::make_unique<RPi3HardwareRandomNumberGeneratorOSEntity>(true, "hw_rng", "HWRNG", generator);
+    }
+};

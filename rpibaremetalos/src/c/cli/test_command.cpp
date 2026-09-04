@@ -796,8 +796,6 @@ namespace cli::commands
                 context << minstd::format(buffer, "  Allocated {} MB in one contiguous block\n",
                                         (uint32_t)(large_size / (1024 * 1024)));
 
-                uint8_t *ptr = large_block;
-
                 //  ... existing spot-check-every-64MB loop, unchanged, just now
                 //      iterating over `large_size` bytes starting at `ptr` ...
 
