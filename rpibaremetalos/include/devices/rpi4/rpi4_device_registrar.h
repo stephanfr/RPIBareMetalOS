@@ -28,21 +28,21 @@ class RPi4DeviceRegistrar : public DeviceRegistrar
 {
 public:
 
-    minstd::random_device *CreateHardwareRNG(const PlatformInfo &platform_info) override
+    minstd::random_device *CreateHardwareRNG() override
     {
         //  Create and register the Hardware Random Number Generator (HWRNG) for RPi4
 
-        hardware_rng_ = make_static_unique<RPi4HardwareRandomNumberGenerator>(platform_info);
+        hardware_rng_ = make_static_unique<RPi4HardwareRandomNumberGenerator>(GetPlatformInfo());
 
         return hardware_rng_.get();
     }
 
-    void RegisterDevices(const PlatformInfo &platform_info) override
+    void RegisterDevices(minstd::random_device *hw_rng) override
     {
         //  Register the Hardware Random Number Generator (HWRNG) for RPi4
         
         auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(
-                              true, "hw_rng", "HWRNG", *hardware_rng_);
+                              true, "hw_rng", "HWRNG", *hw_rng);
         GetOSEntityRegistry().AddEntity(rng_entity);
         
         // Register UART0 (PL011 at 4MHz)

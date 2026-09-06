@@ -29,20 +29,20 @@ class RPi5DeviceRegistrar : public DeviceRegistrar
 {
 public:
 
-    minstd::random_device *CreateHardwareRNG(const PlatformInfo &platform_info) override
+    minstd::random_device *CreateHardwareRNG() override
     {
         //  Create and register the Hardware Random Number Generator (HWRNG) for RPi5
 
-        hardware_rng_ = make_static_unique<RPi5HardwareRandomNumberGenerator>(platform_info);
+        hardware_rng_ = make_static_unique<RPi5HardwareRandomNumberGenerator>(GetPlatformInfo());
 
         return hardware_rng_.get();
     }
 
-    void RegisterDevices(const PlatformInfo &platform_info) override
+    void RegisterDevices(minstd::random_device *hw_rng) override
     {
         //  Create and register the Hardware Random Number Generator (HWRNG) for RPi5
 
-        auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(true, "hw_rng", "HWRNG", *hardware_rng_);
+        auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(true, "hw_rng", "HWRNG", *hw_rng);
         GetOSEntityRegistry().AddEntity(rng_entity);
 
         // Register primary RP1 UART0 (preferred on RPi5)

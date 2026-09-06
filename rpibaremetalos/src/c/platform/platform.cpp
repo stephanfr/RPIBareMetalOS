@@ -48,10 +48,6 @@ static const PlatformInfo *__platform_info = nullptr;
 static ExceptionManager *__exception_manager = nullptr;
 static MemoryManager *__memory_manager = nullptr;
 
-//  Global for HW RNG generator
-
-static minstd::random_device *__hw_random_number_generator = nullptr;
-
 //  SW RNG fallback for when no hardware RNG is available (e.g. under QEMU).
 //  Wraps minstd::xoroshiro128_plus_plus to satisfy the minstd::random_device interface.
 
@@ -220,12 +216,14 @@ void InitializePlatform()
 
     MMUManager::Initialize();
 
-    //  Seed UUID generation before entities/tasks are created on additional cores.
-
-    UUID::SeedRNG(88172645463325252ULL);
-
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
+    //
+    //  Device intialization is a two-step process: first we have to create the hardware random number generator (HWRNG)
+    //    and then we can register the devices for the platform. The HWRNG is used to seed the software RNGs, which are
+    //    used to generate UUIDs for the devices. The HWRNG is also registered as an OSEntity, so that it can be used by
+    //    other parts of the OS. The device registrar is responsible for creating and registering the
+    //    devices for the platform. The device registrar is also responsible for creating and registering the HWRNG.
 
     minstd::unique_ptr<DeviceRegistrar> device_registrar;
 
@@ -265,15 +263,15 @@ void InitializePlatform()
             break;
     }
 
-    __hw_random_number_generator = device_registrar->CreateHardwareRNG(*__platform_info);
+    auto hw_rng = device_registrar->CreateHardwareRNG();
 
     //  If HW RNG is not available (e.g. QEMU), fall back to a SW RNG seeded from the CPU timer and board serial number
 
-    if (__hw_random_number_generator == nullptr)
+    if (hw_rng == nullptr)
     {
         uint64_t ticks = PhysicalTimer::CurrentTicks();
         uint64_t serial = __platform_info->GetBoardSerialNumber();
-        __hw_random_number_generator = static_new<xoroshiro_random_device>(
+        hw_rng = static_new<xoroshiro_random_device>(
             minstd::xoroshiro128_plus_plus::seed_type(ticks ^ 0x9E3779B97F4A7C15ULL,
                                                       serial ^ 0x6A09E667F3BCC908ULL));
     }
@@ -284,9 +282,13 @@ void InitializePlatform()
 
     //  Initialize the platform software RNGs from the HW RNG
 
-    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()),
-                                       minstd::xoroshiro128_plus_plus::seed_type(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)(),
-                                                                                  ((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()));
+    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(((uint64_t)((*hw_rng)()) << 32) | (*hw_rng)()),
+                                       minstd::xoroshiro128_plus_plus::seed_type(((uint64_t)((*hw_rng)()) << 32) | (*hw_rng)(),
+                                                                                  ((uint64_t)((*hw_rng)()) << 32) | (*hw_rng)()));
+
+    //  We have the RNGs setup - now register the devices for the platform
+
+    device_registrar->RegisterDevices(hw_rng);
 
     //  Setup the console, and if it fails, park the core -- we cannot continue without a console.
 
