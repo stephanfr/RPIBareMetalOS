@@ -201,29 +201,6 @@ bool SetupSerialConsole()
     return true;
 }
 
-//  Function to set up an HDMI framebuffer console, best-effort.
-//      Unlike SetupSerialConsole(), failure here is an ordinary, expected
-//      outcome (no monitor attached, running under QEMU with no display)
-//      -- it must NOT ParkCore(); the caller just skips mirroring to it.
-
-bool SetupFrameBufferConsole(ConsoleVideoFrameBuffer *&out_frame_buffer_console)
-{
-    auto fb_console = make_static_unique<ConsoleVideoFrameBuffer>("HDMI",
-                                                                  VideoFrameBuffer::PackColor(0x00, 0xFF, 0x00),
-                                                                  VideoFrameBuffer::PackColor(0x00, 0x00, 0x00));
-
-    if (!fb_console->IsAllocated())
-    {
-        return false;
-    }
-
-    out_frame_buffer_console = fb_console.get();
-
-    GetOSEntityRegistry().AddEntity(fb_console);
-
-    return true;
-}
-
 //  Function to setup platform specific code
 //      Declare it as 'extern "C"' so that it is not mangled and we can call it from the startup assembly code.
 
@@ -242,6 +219,10 @@ void InitializePlatform()
     //      The GPU Mailbox assumes that the MMU is enabled, so we need to do this first.
 
     MMUManager::Initialize();
+
+    //  Seed UUID generation before entities/tasks are created on additional cores.
+
+    UUID::SeedRNG(88172645463325252ULL);
 
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
@@ -284,7 +265,7 @@ void InitializePlatform()
             break;
     }
 
-    device_registrar->RegisterDevices(*__platform_info);
+    __hw_random_number_generator = device_registrar->CreateHardwareRNG(*__platform_info);
 
     //  If HW RNG is not available (e.g. QEMU), fall back to a SW RNG seeded from the CPU timer and board serial number
 
@@ -299,7 +280,6 @@ void InitializePlatform()
 
     //  Seed UUID generation before entities/tasks are created on additional cores.
 
-    //    UUID::SeedRNG(__hw_random_number_generator->Next64BitValue());
     UUID::SeedRNG(88172645463325252ULL);
 
     //  Initialize the platform software RNGs from the HW RNG
@@ -315,26 +295,17 @@ void InitializePlatform()
         ParkCore();
     }
 
-    //  Ditto with the framebuffer console -- if it fails, log an error and continue.
-
-    ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
-    bool have_frame_buffer = SetupFrameBufferConsole(frame_buffer_console);
-
-    if (!have_frame_buffer)
-    {
-        LogError("Framebuffer console not available, continuing without it.\n");
-    }
-
     //  Tee the serial console and framebuffer console together if both are available,
     //      and set the standard streams to the tee.
 
     auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+    auto frame_buffer_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("HDMI");
 
-    if (!console_lookup.Failed() && have_frame_buffer)
+    if (!console_lookup.Failed() && !frame_buffer_lookup.Failed())
     {
         CharacterIODevice &serial_console = *console_lookup;
 
-        auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_console, "STDOUT_TEE");
+        auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_lookup, "STDOUT_TEE");
 
         CharacterIODevice *tee_ptr = tee.get();
 

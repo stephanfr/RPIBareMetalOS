@@ -18,5 +18,11 @@ class DeviceRegistrar
 public:
     virtual ~DeviceRegistrar() = default;
 
+    virtual minstd::random_device *CreateHardwareRNG(const PlatformInfo &platform_info) = 0;
+
     virtual void RegisterDevices(const PlatformInfo &platform_info) = 0;
+
+protected:
+
+    minstd::unique_ptr<minstd::random_device> hardware_rng_;
 };

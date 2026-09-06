@@ -27,17 +27,24 @@
 class RPi4DeviceRegistrar : public DeviceRegistrar
 {
 public:
-    void RegisterDevices(const PlatformInfo &platform_info) override
+
+    minstd::random_device *CreateHardwareRNG(const PlatformInfo &platform_info) override
     {
         //  Create and register the Hardware Random Number Generator (HWRNG) for RPi4
 
-        auto *rpi4_rng = static_new<RPi4HardwareRandomNumberGenerator>(platform_info);
-        if (rpi4_rng->Initialize())
-        {
-            auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(true, "hw_rng", "HWRNG", *rpi4_rng);
-            GetOSEntityRegistry().AddEntity(rng_entity);
-        }
+        hardware_rng_ = make_static_unique<RPi4HardwareRandomNumberGenerator>(platform_info);
 
+        return hardware_rng_.get();
+    }
+
+    void RegisterDevices(const PlatformInfo &platform_info) override
+    {
+        //  Register the Hardware Random Number Generator (HWRNG) for RPi4
+        
+        auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(
+                              true, "hw_rng", "HWRNG", *hardware_rng_);
+        GetOSEntityRegistry().AddEntity(rng_entity);
+        
         // Register UART0 (PL011 at 4MHz)
 
         auto uart0 = make_static_unique<RPi4UART0>(BaudRates::BAUD_RATE_115200, "CONSOLE", 4000000);

@@ -23,17 +23,25 @@
 class RPi3DeviceRegistrar : public DeviceRegistrar
 {
 public:
-    void RegisterDevices(const PlatformInfo &platform_info) override
+
+    minstd::random_device *CreateHardwareRNG(const PlatformInfo &platform_info) override
     {
         //  Create and register the Hardware Random Number Generator (HWRNG) for RPi3
 
-        auto *rpi3_rng = static_new<RPi3HardwareRandomNumberGenerator>(platform_info);
-        if (rpi3_rng->Initialize())
-        {
-            auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(true, "hw_rng", "HWRNG", *rpi3_rng);
-            GetOSEntityRegistry().AddEntity(rng_entity);
-        }
+        hardware_rng_ = make_static_unique<RPi3HardwareRandomNumberGenerator>(platform_info);
 
+        return hardware_rng_.get();
+    }
+
+
+    void RegisterDevices(const PlatformInfo &platform_info) override
+    {
+        //  Register the Hardware Random Number Generator (HWRNG) for RPi3
+        
+        auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(
+                              true, "hw_rng", "HWRNG", *hardware_rng_);
+        GetOSEntityRegistry().AddEntity(rng_entity);
+        
         // Register UART0 (PL011 at 4MHz)
 
         auto uart0 = make_static_unique<RPi3UART0>(BaudRates::BAUD_RATE_115200, "CONSOLE", 4000000);
@@ -48,8 +56,9 @@ public:
 
         // Register HDMI framebuffer console
 
-        auto fb_console = make_static_unique<ConsoleVideoFrameBuffer>( "HDMI", VideoFrameBuffer::PackColor(0x00, 0xFF, 0x00),
-                                                                VideoFrameBuffer::PackColor(0x00, 0x00, 0x00) );
+        auto fb_console = make_static_unique<ConsoleVideoFrameBuffer>( "HDMI",
+                                                                       VideoFrameBuffer::PackColor(0x00, 0xFF, 0x00),
+                                                                       VideoFrameBuffer::PackColor(0x00, 0x00, 0x00) );
 
         if (fb_console->IsAllocated())
         {
