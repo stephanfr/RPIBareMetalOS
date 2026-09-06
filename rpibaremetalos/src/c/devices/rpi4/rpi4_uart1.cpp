@@ -8,10 +8,6 @@
 
 
 RPi4UART1::RPi4UART1(BaudRates baud_rate, const char* alias)
-    : RPi4UART1(baud_rate, alias, platform_info_.GetGPUClockRate())
-{
-}
-
-RPi4UART1::~RPi4UART1()
+    : RPi4UART1(baud_rate, alias, GetPlatformInfo().GetGPUClockRate())
 {
 }

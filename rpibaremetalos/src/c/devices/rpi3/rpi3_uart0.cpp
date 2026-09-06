@@ -5,13 +5,9 @@
 #include "os_config.h"
 
 #include "devices/rpi3/rpi3_uart0.h"
-#include "platform/os_config.h"
 
 RPi3UART0::RPi3UART0(BaudRates baud_rate, const char* alias)
     : RPi3UART0(baud_rate, alias, FREQUENCY_4MHZ)
 {
 }
 
-RPi3UART0::~RPi3UART0()
-{
-}

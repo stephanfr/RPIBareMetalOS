@@ -12,6 +12,7 @@ class RPi3HardwareRandomNumberGenerator : public minstd::random_device
     static constexpr uint32_t HW_RNG_REGISTER_OFFSET = 0x00104000;
 
 public:
+
     RPi3HardwareRandomNumberGenerator() = delete;
 
     RPi3HardwareRandomNumberGenerator(const PlatformInfo &platform_info)
@@ -28,6 +29,7 @@ public:
     double entropy() const noexcept override { return 32.0; }
 
 private:
+
     typedef struct RPI3HWRandomNumberGeneratorRegisters
     {
         volatile uint32_t control_;
@@ -40,22 +42,4 @@ private:
     RPI3HWRandomNumberGeneratorRegisters *registers_;
 
     uint32_t Next32BitValueInternal();
-};
-
-
-class RPi3HardwareRandomNumberGeneratorOSEntity : public RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>
-{
-public:
-    RPi3HardwareRandomNumberGeneratorOSEntity( bool permanent,
-                                               const char* name,
-                                               const char* alias, 
-                                               RPi3HardwareRandomNumberGenerator &wrapped_generator)
-        : RandomNumberGeneratorProxyOSEntity<HARDWARE_RNG>(permanent, name, alias, wrapped_generator)
-    {
-    }
-    
-    static std::unique_ptr<RPi3HardwareRandomNumberGeneratorOSEntity> Create(RPi3HardwareRandomNumberGenerator &generator)
-    {
-        return std::make_unique<RPi3HardwareRandomNumberGeneratorOSEntity>(true, "hw_rng", "HWRNG", generator);
-    }
 };

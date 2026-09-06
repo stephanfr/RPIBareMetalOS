@@ -24,15 +24,11 @@
 #include "platform/rpi4/rpi4_platform_info.h"
 #include "platform/rpi5/rpi5_platform_info.h"
 
-#include "devices/rpi3/rpi3_hw_rng.h"
-#include "devices/rpi4/rpi4_hw_rng.h"
-#include "devices/rpi5/rpi5_hw_rng.h"
+#include "devices/rpi3/rpi3_device_registrar.h"
+#include "devices/rpi4/rpi4_device_registrar.h"
+#include "devices/rpi5/rpi5_device_registrar.h"
 
 #include "devices/std_streams.h"
-#include "devices/uart0.h"
-#include "devices/uart1.h"
-#include "devices/rpi5/rpi5_rp1_uart0.h"
-#include "devices/rpi5/rpi5_rp1_uart1.h"
 
 #include "devices/video/console_video_framebuffer.h"
 
@@ -156,7 +152,6 @@ bool SetupSerialConsole()
     //  Set defaults in case the command line does not contain a console setting
 
     minstd::fixed_string<> console_uart(DEAULT_SERIAL_CONSOLE);
-    BaudRates baud_rate = BaudRateFromInteger(DEFAULT_SERIAL_CONSOLE_BAUD_RATE);
 
     //  Check the command line
 
@@ -172,26 +167,8 @@ bool SetupSerialConsole()
 
         int arguments_processed = sscanf(console_setting.c_str(), "%[^ ,] %[ ,] %d", console_uart_requested, comma, &baud_rate_requested);
 
-        //  Two serial ports are available ttys0 and ttys1.  If there is a comma, the second parameter is the baud rate.
-
-        if (arguments_processed >= 2)
-        {
-            switch (baud_rate_requested)
-            {
-            case (uint32_t)BaudRates::BAUD_RATE_300:
-            case (uint32_t)BaudRates::BAUD_RATE_1200:
-            case (uint32_t)BaudRates::BAUD_RATE_2400:
-            case (uint32_t)BaudRates::BAUD_RATE_4800:
-            case (uint32_t)BaudRates::BAUD_RATE_9600:
-            case (uint32_t)BaudRates::BAUD_RATE_14400:
-            case (uint32_t)BaudRates::BAUD_RATE_19200:
-            case (uint32_t)BaudRates::BAUD_RATE_38400:
-            case (uint32_t)BaudRates::BAUD_RATE_57600:
-            case (uint32_t)BaudRates::BAUD_RATE_115200:
-                baud_rate = BaudRateFromInteger(baud_rate_requested);
-                break;
-            }
-        }
+        (void)comma;
+        (void)baud_rate_requested;
 
         if (arguments_processed >= 1)
         {
@@ -204,32 +181,6 @@ bool SetupSerialConsole()
                 console_uart = "UART1";
             }
         }
-    }
-
-    //  We should have valid console and baud rate - so set them
-
-    if (GetPlatformInfo().IsRPI5())
-    {
-        if (console_uart == "UART1")
-        {
-            auto rp1_uart1 = make_static_unique<RP1UART1>(baud_rate, "CONSOLE");
-            GetOSEntityRegistry().AddEntity(rp1_uart1);
-        }
-        else
-        {
-            auto rp1_uart0 = make_static_unique<RP1UART0>(baud_rate, "CONSOLE");
-            GetOSEntityRegistry().AddEntity(rp1_uart0);
-        }
-    }
-    else if (console_uart == "UART0")
-    {
-        auto uart0 = make_static_unique<UART0>(baud_rate, "CONSOLE");
-        GetOSEntityRegistry().AddEntity(uart0);
-    }
-    else
-    {
-        auto uart1 = make_static_unique<UART1>(baud_rate, "CONSOLE");
-        GetOSEntityRegistry().AddEntity(uart1);
     }
 
     //  Set stdin and stdout
@@ -295,17 +246,16 @@ void InitializePlatform()
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
 
+    minstd::unique_ptr<DeviceRegistrar> device_registrar;
+
     switch (__hw_board_type)
     {
         case RPI_BOARD_ENUM_RPI3:
         {
             __platform_info = static_new<RPI3PlatformInfo>();
             __exception_manager = static_new<BCM2837ExceptionManager>();
-            auto *rpi3_rng = static_new<RPi3HardwareRandomNumberGenerator>(*__platform_info);
-            if (rpi3_rng->Initialize())
-            {
-                __hw_random_number_generator = rpi3_rng;
-            }
+            device_registrar = dynamic_new<RPi3DeviceRegistrar>();
+
             break;
         }
 
@@ -313,11 +263,8 @@ void InitializePlatform()
         {
             __platform_info = static_new<RPI4PlatformInfo>();
             __exception_manager = static_new<BCM2711ExceptionManager>();
-            auto *rpi4_rng = static_new<RPi4HardwareRandomNumberGenerator>(*__platform_info);
-            if (rpi4_rng->Initialize())
-            {
-                __hw_random_number_generator = rpi4_rng;
-            }
+            device_registrar = dynamic_new<RPi4DeviceRegistrar>();
+
             break;
         }
 
@@ -325,15 +272,8 @@ void InitializePlatform()
         {
             __platform_info = static_new<RPI5PlatformInfo>();
             __exception_manager = static_new<RPI5ExceptionManager>();
-
-            //  Stub only -- GIC-400 refactor is deferred to the RP1/GPIO-UART
-            //  work. This exists so GetExceptionManager() has a non-null target.
-            
-            auto *rpi5_rng = static_new<RPi5HardwareRandomNumberGenerator>(*__platform_info);
-            if (rpi5_rng->Initialize())
-            {
-                __hw_random_number_generator = rpi5_rng;
-            }
+            device_registrar = dynamic_new<RPi5DeviceRegistrar>();
+        
             break;
         }
 

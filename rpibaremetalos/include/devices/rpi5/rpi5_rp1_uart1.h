@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "devices/character_io.h"
+#include "devices/uart_base.h"
 
 #include "platform/rpi5/rpi5_rp1.h"
 
