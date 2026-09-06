@@ -24,7 +24,7 @@ public:
 
     RPi5UART1(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
         : CharacterIODevice(true, "UART1", alias),
-          PL011UARTBase(baud_rate, clock_hz)
+          PL011UARTBase(reinterpret_cast<void *>(RP1::UART1_BASE), baud_rate, clock_hz)
     {
     }
 

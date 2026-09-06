@@ -23,7 +23,7 @@ public:
      */
     RPi5UART0(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
         : CharacterIODevice(true, "UART0", alias),
-          PL011UARTBase(baud_rate, clock_hz)
+          PL011UARTBase(reinterpret_cast<void *>(RP1::UART0_BASE), baud_rate, clock_hz)
     {
     }
 
@@ -40,8 +40,8 @@ public:
         uint32_t clock_hz = RP1::ResolveClockRateHz(RP1::CLK_UART0);
         
         // Configure RP1 GPIO pins for UART0
-        ConfigureRP1GPIO();
-        
+        RP1UARTUtilities::ConfigureRP1GPIO(14, 15, RP1::FUNCSEL_UART0);
+
         // Set computed baud rate
         ComputeAndApplyBaudRate(clock_hz);
         
@@ -50,15 +50,6 @@ public:
     }
 
 private:
-    /**
-     * @brief Configure RP1 GPIO pins for UART0.
-     * 
-     *   Pins 14 (TXD) and 15 (RXD) with FUNCSEL_UART0.
-     */
-    void ConfigureRP1GPIO()
-    {
-        RP1UARTUtilities::ConfigureRP1GPIO(14, 15, RP1::FUNCSEL_UART0);
-    }
 
     /**
      * @brief Compute and apply baud rate.
