@@ -14,7 +14,7 @@
  * The AUX mini-UART uses the board's crystal oscillator
  * and requires minimal configuration compared to PL011.
  */
-class RPi4UART1 : public MiniUARTBase
+class RPi4UART1 : public CharacterIODevice, public MiniUARTBase
 {
 public:
     using MiniUARTBase::MiniUARTBase;
@@ -23,15 +23,25 @@ public:
     RPi4UART1(BaudRates baud_rate, const char* alias);
 
     RPi4UART1(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
-        : MiniUARTBase(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(GetPlatformInfo().GetMMIOBase()) + 0x215000),
+        : CharacterIODevice(true, "UART1", alias),
+          MiniUARTBase(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(GetPlatformInfo().GetMMIOBase()) + 0x215000),
                        baud_rate,
-                       alias,
                        clock_hz)
     {
     }
 
     virtual ~RPi4UART1()
     {
+    }
+
+    void putc(unsigned int c) override 
+    {
+        MiniUARTBase::putc(c);
+    }
+
+    unsigned int getc(void) override
+    {
+        return MiniUARTBase::getc();
     }
 
     /**

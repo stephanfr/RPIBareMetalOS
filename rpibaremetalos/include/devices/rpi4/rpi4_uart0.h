@@ -17,23 +17,32 @@
  * for clock rate setting.
  */
 
-class RPi4UART0 : public PL011UARTBase<StandardPL011Registers>
+class RPi4UART0 : public CharacterIODevice, public PL011UARTBase<StandardPL011Registers>
 {
 public:
-    using PL011UARTBase::PL011UARTBase;
 
     RPi4UART0(BaudRates baud_rate, const char* alias);
 
     RPi4UART0(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
-        : PL011UARTBase(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(GetPlatformInfo().GetMMIOBase()) + 0x201000),
+        : CharacterIODevice(true, "UART0", alias),
+          PL011UARTBase(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(GetPlatformInfo().GetMMIOBase()) + 0x201000),
                         baud_rate,
-                        alias,
                         clock_hz)
     {
     }
 
     virtual ~RPi4UART0()
     {
+    }
+
+    void putc(unsigned int c) override 
+    {
+        PL011UARTBase::putc(c);
+    }
+
+    unsigned int getc(void) override
+    {
+        return PL011UARTBase::getc();
     }
 
     /**

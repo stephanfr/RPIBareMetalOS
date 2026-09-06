@@ -14,11 +14,18 @@
  * Uses dynamic clock resolution from RP1.
  */
 
-class RPi5UART0 : public PL011UARTBase<RP1PL011Registers>
+class RPi5UART0 : public CharacterIODevice, public PL011UARTBase<RP1PL011Registers>
 {
 public:
 
-    using PL011UARTBase::PL011UARTBase;
+    /**
+     * @brief Constructor with explicit clock rate.
+     */
+    RPi5UART0(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
+        : CharacterIODevice(true, "UART0", alias),
+          PL011UARTBase(baud_rate, clock_hz)
+    {
+    }
 
     /**
      * @brief Initialize UART0 on RPi5.
@@ -27,7 +34,7 @@ public:
      *   and performs standard PL011 initialization.
      */
     
-    void initialize() override
+    void Initialize() override
     {
         // Resolve actual clock rate from RP1
         uint32_t clock_hz = RP1::ResolveClockRateHz(RP1::CLK_UART0);
@@ -39,15 +46,7 @@ public:
         ComputeAndApplyBaudRate(clock_hz);
         
         // Perform standard PL011 initialization
-        PL011UARTBase::initialize();
-    }
-
-    /**
-     * @brief Constructor with explicit clock rate.
-     */
-    RPi5UART0(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
-        : PL011UARTBase(baud_rate, alias, clock_hz)
-    {
+        PL011UARTBase::Initialize();
     }
 
 private:

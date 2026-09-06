@@ -67,12 +67,11 @@ inline BaudRates BaudRateFromInteger(uint32_t value)
 
 constexpr BaudRates DEFAULT_BAUD_RATE = BaudRates::BAUD_RATE_115200;
 
-class UARTBase : public CharacterIODevice
+class UARTBase
 {
 public:
-    UARTBase(void *base_address, BaudRates baud_rate, const char *alias)
-        : CharacterIODevice(true, "UART", alias),
-          base_address_(base_address),
+    UARTBase(void *base_address, BaudRates baud_rate)
+        : base_address_(base_address),
           baud_rate_(baud_rate)
     {}
 
@@ -80,7 +79,7 @@ public:
 
     virtual void Initialize() = 0;
 
-    void putc(unsigned int c) override
+    void putc(unsigned int c)
     {
         WaitToSend();
 
@@ -93,7 +92,7 @@ public:
         WriteRegister(DR_REG_OFFSET, c);
     }
 
-    unsigned int getc() override
+    unsigned int getc()
     {
         // FR.RXFE (bit 4) — receive FIFO empty
 
@@ -159,8 +158,8 @@ template<class RegLayout>
 class PL011UARTBase : public UARTBase
 {
 public:
-    PL011UARTBase(void *base_address, BaudRates baud_rate, const char *alias, uint32_t clock_hz)
-        : UARTBase(base_address, baud_rate, alias),
+    PL011UARTBase(void *base_address, BaudRates baud_rate, uint32_t clock_hz)
+        : UARTBase(base_address, baud_rate),
           uart_clock_hz_(clock_hz)
     {}
 
@@ -182,14 +181,14 @@ protected:
 class MiniUARTBase : public UARTBase
 {
 public:
-    MiniUARTBase(void *base_address, BaudRates baud_rate, const char *alias, uint32_t clock_hz)
-        : UARTBase(base_address, baud_rate, alias),
+    MiniUARTBase(void *base_address, BaudRates baud_rate, uint32_t clock_hz)
+        : UARTBase(base_address, baud_rate),
           uart_clock_hz_(clock_hz)
     {}
 
     // Mini-UART uses LSR, not PL011 FR — override both directions
 
-    void putc(unsigned int c) override
+    void putc(unsigned int c)
     {
         while (!(ReadRegister(AUX_MU_LSR_REG_OFFSET) & (1u << 5)))
         {
@@ -206,7 +205,7 @@ public:
         WriteRegister(AUX_MU_IO_REG_OFFSET, c);
     }
 
-    unsigned int getc() override
+    unsigned int getc()
     {
         while (!(ReadRegister(AUX_MU_LSR_REG_OFFSET) & 1u))
         {

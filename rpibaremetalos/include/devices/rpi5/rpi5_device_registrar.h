@@ -14,14 +14,14 @@
 #include "devices/device_registrar.h"
 #include "devices/rng_entity.h"
 
-#include "rpi5_rp1_uart0.h"
-#include "rpi5_rp1_uart1.h"
+#include "rpi5_uart0.h"
+#include "rpi5_uart1.h"
 #include "rpi5_hw_rng.h"
 
 /**
  * @brief Device registrar for RPi5.
  * 
- * Registers RP1 UART0 and RP1 UART1 (primary UARTs on RPi5).
+ * Registers RPi5 UART0 and RPi5 UART1 (primary UARTs on RPi5).
  * Legacy PL011 UARTs are deprecated but available via wrapper classes.
  */
 
@@ -45,14 +45,14 @@ public:
         auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(true, "hw_rng", "HWRNG", *hw_rng);
         GetOSEntityRegistry().AddEntity(rng_entity);
 
-        // Register primary RP1 UART0 (preferred on RPi5)
+        // Register primary RPi5 UART0 (preferred on RPi5)
 
-        auto rp1_uart0 = make_static_unique<RP1UART0>(BaudRates::BAUD_RATE_115200, "CONSOLE");
-        GetOSEntityRegistry().AddEntity(rp1_uart0);
+        auto rpi5_uart0 = make_static_unique<RPi5UART0>(BaudRates::BAUD_RATE_115200, "CONSOLE");
+        GetOSEntityRegistry().AddEntity(rpi5_uart0);
 
-        // Register primary RP1 UART1
-        auto rp1_uart1 = make_static_unique<RP1UART1>(BaudRates::BAUD_RATE_9600, "DEBUG");
-        GetOSEntityRegistry().AddEntity(rp1_uart1);
+        // Register primary RPi5 UART1
+        auto rpi5_uart1 = make_static_unique<RPi5UART1>(BaudRates::BAUD_RATE_9600, "DEBUG");
+        GetOSEntityRegistry().AddEntity(rpi5_uart1);
 
         // Register HDMI framebuffer console
         auto fb_console = make_static_unique<ConsoleVideoFrameBuffer>("HDMI", VideoFrameBuffer::PackColor(0x00, 0xFF, 0x00),
