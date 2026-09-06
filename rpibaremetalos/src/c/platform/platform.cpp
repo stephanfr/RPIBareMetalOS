@@ -284,6 +284,8 @@ void InitializePlatform()
             break;
     }
 
+    device_registrar->RegisterDevices(*__platform_info);
+
     //  If HW RNG is not available (e.g. QEMU), fall back to a SW RNG seeded from the CPU timer and board serial number
 
     if (__hw_random_number_generator == nullptr)
@@ -313,15 +315,18 @@ void InitializePlatform()
         ParkCore();
     }
 
-    //  Ditto with the framebuffer console -- if it fails, park the core.
+    //  Ditto with the framebuffer console -- if it fails, log an error and continue.
 
     ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
     bool have_frame_buffer = SetupFrameBufferConsole(frame_buffer_console);
 
     if (!have_frame_buffer)
     {
-        ParkCore();
+        LogError("Framebuffer console not available, continuing without it.\n");
     }
+
+    //  Tee the serial console and framebuffer console together if both are available,
+    //      and set the standard streams to the tee.
 
     auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
 
@@ -337,11 +342,7 @@ void InitializePlatform()
 
         SetStandardStreams(tee_ptr, &serial_console);
     }
-    else
-    {
-        ParkCore();
-    }
-        
+
     CrossCheckVideocoreMemoryLayout();
 
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
