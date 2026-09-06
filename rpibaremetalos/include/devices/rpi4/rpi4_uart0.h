@@ -21,7 +21,10 @@ class RPi4UART0 : public CharacterIODevice, public PL011UARTBase<StandardPL011Re
 {
 public:
 
-    RPi4UART0(BaudRates baud_rate, const char* alias);
+    RPi4UART0(BaudRates baud_rate, const char* alias)
+        : RPi4UART0(baud_rate, alias, FREQUENCY_4MHZ)
+    {
+    }
 
     RPi4UART0(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
         : CharacterIODevice(true, "UART0", alias),

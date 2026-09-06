@@ -18,8 +18,11 @@ class RPi3UART1 : public CharacterIODevice, public MiniUARTBase
 {
 public:
 
-    RPi3UART1(BaudRates baud_rate, const char* alias);
-
+    RPi3UART1(BaudRates baud_rate, const char* alias)
+        : RPi3UART1(baud_rate, alias, GetPlatformInfo().GetGPUClockRate())
+    {
+    }
+    
     RPi3UART1(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
         : CharacterIODevice(true, "UART1", alias),
           MiniUARTBase(reinterpret_cast<void *>(reinterpret_cast<uintptr_t>(GetPlatformInfo().GetMMIOBase()) + 0x215000),

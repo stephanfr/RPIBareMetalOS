@@ -17,10 +17,11 @@
 class RPi4UART1 : public CharacterIODevice, public MiniUARTBase
 {
 public:
-    using MiniUARTBase::MiniUARTBase;
 
-
-    RPi4UART1(BaudRates baud_rate, const char* alias);
+    RPi4UART1(BaudRates baud_rate, const char* alias)
+        : RPi4UART1(baud_rate, alias, GetPlatformInfo().GetGPUClockRate())
+    {
+    }
 
     RPi4UART1(BaudRates baud_rate, const char* alias, uint32_t clock_hz)
         : CharacterIODevice(true, "UART1", alias),
