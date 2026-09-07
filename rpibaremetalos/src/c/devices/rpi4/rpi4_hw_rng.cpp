@@ -6,6 +6,7 @@
 
 #include "devices/rpi4/rpi4_hw_rng.h"
 #include "asm_utility.h"
+#include "utility/device_probe.h"
 
 #define RNG_CTRL_OFFSET 0x00
 #define RNG_TOTAL_BIT_COUNT_OFFSET 0x0C
@@ -21,7 +22,14 @@
 
 bool RPi4HardwareRandomNumberGenerator::Initialize()
 {
-    if (registers_->control_ & RNG_CTRL_RNG_RBGEN_MASK)
+    uint32_t ctrl_value;
+
+    if (!ProbeDeviceRegister(&registers_->control_, ctrl_value))
+    {
+        return false;
+    }
+
+    if (ctrl_value & RNG_CTRL_RNG_RBGEN_MASK)
     {
         return true;
     }

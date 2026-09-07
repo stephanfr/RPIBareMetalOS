@@ -48,6 +48,10 @@ extern uint32_t __number_of_cores_available;
 extern minstd::atomic<uint32_t> __core_state[];
 
 extern uint32_t __board_version;
+
+//  Device probe tracking flags (abort-tolerant peripheral probing)
+extern uint32_t __device_probe_in_progress;
+extern uint32_t __device_probe_faulted;
 extern uint32_t __videocore_memory_base;
 extern uint32_t __videocore_memory_size_in_bytes;
 extern char __kernel_command_line;

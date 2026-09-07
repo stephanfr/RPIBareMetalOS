@@ -124,3 +124,15 @@ __kernel_page_table_base : .quad 0
 .balign 64
 
 __strict_alignment_enabled : .word 0
+
+//  Device probe tracking flags (abort-tolerant peripheral probing)
+//  These flags are checked during MMIO fault handling to support graceful
+//  recovery when devices are absent (e.g., QEMU raspi4b lacks RNG200).
+
+.global __device_probe_in_progress
+.global __device_probe_faulted
+.data
+.balign 64
+
+__device_probe_in_progress : .word 0
+__device_probe_faulted : .word 0
