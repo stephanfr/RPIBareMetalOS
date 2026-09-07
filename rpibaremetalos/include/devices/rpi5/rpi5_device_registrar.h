@@ -55,11 +55,12 @@ public:
         // Register primary RPi5 UART0 (preferred on RPi5)
 
         auto rpi5_uart0 = make_static_unique<RPi5UART0>(BaudRates::BAUD_RATE_115200, "CONSOLE");
+        rpi5_uart0->Initialize();
         GetOSEntityRegistry().AddEntity(rpi5_uart0);
 
         // Register primary RPi5 UART1
-        auto rpi5_uart1 = make_static_unique<RPi5UART1>(BaudRates::BAUD_RATE_9600, "DEBUG");
-        GetOSEntityRegistry().AddEntity(rpi5_uart1);
+//        auto rpi5_uart1 = make_static_unique<RPi5UART1>(BaudRates::BAUD_RATE_9600, "DEBUG");
+//        GetOSEntityRegistry().AddEntity(rpi5_uart1);
 
         // Register HDMI framebuffer console
         auto fb_console = make_static_unique<ConsoleVideoFrameBuffer>("HDMI", VideoFrameBuffer::PackColor(0x00, 0xFF, 0x00),

@@ -62,9 +62,9 @@ public:
 
         // Register UART1 (mini-UART with 27MHz crystal)
 
-        auto uart1 = make_static_unique<RPi4UART1>(BaudRates::BAUD_RATE_9600, "DEBUG", 27000000);
-        uart1->Initialize();
-        GetOSEntityRegistry().AddEntity(uart1);
+//        auto uart1 = make_static_unique<RPi4UART1>(BaudRates::BAUD_RATE_9600, "DEBUG", 27000000);
+//        uart1->Initialize();
+//        GetOSEntityRegistry().AddEntity(uart1);
 
         // Register HDMI framebuffer console
 
