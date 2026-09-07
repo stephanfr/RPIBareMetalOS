@@ -15,8 +15,9 @@ bool BCM2711ExceptionManager::Initialize()
 
 bool BCM2711ExceptionManager::SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id)
 {
-    SetCoreMailbox(core_id, 3, static_cast<uint32_t>(ipi_id));
-
+    asm volatile("dsb sy" ::: "memory");
+    *reinterpret_cast<volatile uint32_t *>(GICD_SGIR) =
+        ((1u << core_id) << GICD_SGIR_CPU_TARGET_LIST__SHIFT) | (static_cast<uint32_t>(ipi_id) & 0x0F);
     return true;
 }
 
@@ -33,11 +34,6 @@ bool BCM2711ExceptionManager::EnableInterrupt(Interrupts interrupt_to_enable, Co
             if (on_cores.Cores() & (1 << current_core))
             {
                 Enable2711Interrupt(current_core, bcm_2711_interrupt);
-
-                if (bcm_2711_interrupt == BCM2711Interrupts::CORE_MAILBOX_3)
-                {
-                    EnableCoreMailbox(current_core, 3);
-                }
             }
         }
     }
@@ -58,11 +54,6 @@ bool BCM2711ExceptionManager::DisableInterrupt(Interrupts interrupt_to_disable, 
             if (on_cores.Cores() & (1 << current_core))
             {
                 Disable2711Interrupt(current_core, bcm_2711_interrupt);
-
-                if (bcm_2711_interrupt == BCM2711Interrupts::CORE_MAILBOX_3)
-                {
-                    DisableCoreMailbox(current_core, 3);
-                }
             }
         }
     }
@@ -79,24 +70,11 @@ void BCM2711ExceptionManager::HandleInterrupt()
 
     InterruptServiceRoutine *core_task_switch_isr = nullptr;
 
-    //  Mailbox 3 is used exclusively for IPIs and its payload may combine
-    //      multiple pending IPI bits -- every other interrupt source maps
-    //      to exactly one Interrupts value via GetInterruptType().
-
-    if ((irq >= 0x20) && (irq <= 0x2F) && ((irq & 0x03) == 3))
+    if (irq < 16)
     {
-        uint32_t mailbox_value = ReadCoreMailbox(GetCoreID(), 3);
-        ResetCoreMailbox(GetCoreID(), 3, mailbox_value);
-
-        bool recognized_any = DispatchIPIMailboxPayload(mailbox_value, [&](Interrupts interrupt)
-        {
-            DispatchInterruptType(interrupt, core_task_switch_isr);
-        });
-
-        if (!recognized_any)
-        {
-            LogWarning("Unhandled IPI mailbox payload: %u\n", mailbox_value);
-        }
+        //  SGI: intid == InterprocessorInterrupts value
+        Interrupts interrupt = AsInterrupt(static_cast<InterprocessorInterrupts>(irq));
+        DispatchInterruptType(interrupt, core_task_switch_isr);
     }
     else
     {

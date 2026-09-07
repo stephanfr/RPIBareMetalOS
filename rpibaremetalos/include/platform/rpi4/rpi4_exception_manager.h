@@ -167,12 +167,8 @@ private:
         switch (interrupt)
         {
         case Interrupts::CORE_HALT:
-            return BCM2711Interrupts::CORE_MAILBOX_3;
-
         case Interrupts::SWITCH_TASK:
-            return BCM2711Interrupts::CORE_MAILBOX_3;
-
-            //  Normally I'd use just one case - but gcc appears to not like the extra colons in the case statements
+            return BCM2711Interrupts::NO_SUCH_INTERRUPT;  //  IPIs delivered as GIC SGIs, not mailbox SPIs
 
         case Interrupts::CORE_MAILBOX_0:
             return BCM2711Interrupts::CORE_MAILBOX_0;
