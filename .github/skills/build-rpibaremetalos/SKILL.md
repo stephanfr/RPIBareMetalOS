@@ -194,9 +194,10 @@ umount /mnt/sdcard
 
 ```bash
 cd /workspaces/RPIBareMetalOS/rpibaremetalos
-make qemu          # boots in QEMU for RPi 3
-make qemu-rpi4     # boots in QEMU for RPi 4
-make qemu-regression   # runs regression test suite
+make qemu-regression        # full suite: RPi3 and RPi4, each in both alignment modes
+make qemu-regression-rpi3   # RPi3 only (raspi3b)
+make qemu-regression-rpi4   # RPi4 only (raspi4b, 2GB)
+make qemu-cli-soak          # long-running CLI soak (RPi3)
 ```
 
 QEMU must be installed (`qemu-system-aarch64`). The dev container installs it

@@ -30,9 +30,18 @@ public:
 
     minstd::random_device *CreateHardwareRNG() override
     {
-        //  Create and register the Hardware Random Number Generator (HWRNG) for RPi4
+        //  Create and register the Hardware Random Number Generator (HWRNG) for RPi4.
+        //      On a QEMU RPi4, this will fail and return nullptr, so platform.cpp will
+        //      fall back to the SW RNG.
 
-        hardware_rng_ = make_static_unique<RPi4HardwareRandomNumberGenerator>(GetPlatformInfo());
+        auto rng = make_static_unique<RPi4HardwareRandomNumberGenerator>(GetPlatformInfo());
+
+        if (!rng->Initialize())
+        {
+            return nullptr;         //  platform.cpp falls back to the SW RNG
+        }
+
+        hardware_rng_ = minstd::move(rng);
 
         return hardware_rng_.get();
     }

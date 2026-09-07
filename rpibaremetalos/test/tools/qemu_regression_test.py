@@ -7,10 +7,16 @@
 # Launches the OS under qemu-system-aarch64, exercises the CLI and asserts
 # expected output for each command, then halts cleanly.
 #
+# Runs the suite twice for the requested machine -- once with the default
+# (relaxed) alignment policy and once with strict_align=1 -- so a regression in
+# either policy is caught. Board selection in the OS is runtime (MIDR_EL1
+# PARTNUM), so the same kernel8.elf and sd.img serve every machine.
+#
 # Usage:
 #   python3 qemu_regression_test.py --qemu <qemu-binary> \
 #                                   --kernel <kernel8.elf> \
-#                                   --sdimage <sd.img>
+#                                   --sdimage <sd.img> \
+#                                   [--machine raspi3b] [--memory 2G]
 
 import argparse
 import sys
@@ -22,9 +28,13 @@ BOOT_READY_MARKER = 'Command Line Interface'
 TIMEOUT = 60  # seconds to wait for each response
 
 
-def run(qemu: str, kernel: str, sdimage: str, extra_cmdline: str = '') -> int:
+def run(qemu: str, kernel: str, sdimage: str,
+        machine: str = 'raspi3b',
+        memory: str = '',
+        extra_cmdline: str = '') -> int:
     cmd = (
-        f'{qemu} -M raspi3b'
+        f'{qemu} -M {machine}'
+        f'{f" -m {memory}" if memory else ""}'
         f' -kernel {kernel}'
         f' -drive file={sdimage},if=sd,format=raw'
         f' -serial stdio'
@@ -52,7 +62,7 @@ def run(qemu: str, kernel: str, sdimage: str, extra_cmdline: str = '') -> int:
         child.sendline(command)
         child.expect(PROMPT, timeout=timeout)
         return child.before
-        
+
     try:
         # Wait for the OS to boot and reach the CLI prompt
         child.expect(BOOT_READY_MARKER, timeout=TIMEOUT)
@@ -104,15 +114,22 @@ def main() -> int:
     parser.add_argument('--qemu',    required=True, help='Path to qemu-system-aarch64')
     parser.add_argument('--kernel',  required=True, help='Path to kernel8.elf')
     parser.add_argument('--sdimage', required=True, help='Path to sd.img')
+    parser.add_argument('--machine', default='raspi3b',
+                        help='QEMU machine model (default: raspi3b)')
+    parser.add_argument('--memory',  default='',
+                        help='RAM size passed to QEMU -m (default: machine default)')
     args = parser.parse_args()
 
-    print('=== Pass 1: default (strict alignment checking off) ===')
-    result = run(args.qemu, args.kernel, args.sdimage)
+    print(f'=== {args.machine} Pass 1: default (strict alignment checking off) ===')
+    result = run(args.qemu, args.kernel, args.sdimage,
+                 machine=args.machine, memory=args.memory)
     if result != 0:
         return result
 
-    print('\n=== Pass 2: strict_align=1 (strict alignment checking on) ===')
-    return run(args.qemu, args.kernel, args.sdimage, extra_cmdline=' strict_align=1')
+    print(f'\n=== {args.machine} Pass 2: strict_align=1 (strict alignment checking on) ===')
+    return run(args.qemu, args.kernel, args.sdimage,
+               machine=args.machine, memory=args.memory,
+               extra_cmdline=' strict_align=1')
 
 
 if __name__ == '__main__':

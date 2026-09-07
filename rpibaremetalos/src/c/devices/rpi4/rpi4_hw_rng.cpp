@@ -23,7 +23,7 @@ bool RPi4HardwareRandomNumberGenerator::Initialize()
 {
     if (registers_->control_ & RNG_CTRL_RNG_RBGEN_MASK)
     {
-        return false;
+        return true;
     }
 
     //	Enable the RNG

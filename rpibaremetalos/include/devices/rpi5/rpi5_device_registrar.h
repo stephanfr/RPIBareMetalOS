@@ -33,7 +33,14 @@ public:
     {
         //  Create and register the Hardware Random Number Generator (HWRNG) for RPi5
 
-        hardware_rng_ = make_static_unique<RPi5HardwareRandomNumberGenerator>(GetPlatformInfo());
+        auto rng = make_static_unique<RPi5HardwareRandomNumberGenerator>(GetPlatformInfo());
+
+        if (!rng->Initialize())
+        {
+            return nullptr;         //  platform.cpp falls back to the SW RNG
+        }
+
+        hardware_rng_ = minstd::move(rng);
 
         return hardware_rng_.get();
     }
