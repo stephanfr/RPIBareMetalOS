@@ -7,7 +7,6 @@
 #include "os_memory_config.h"
 #include "enable_disable_irqs.h"
 
-
 #define BIT(x) (1 << (x))
 
 #define SCR_RW			    BIT(10)
@@ -76,10 +75,21 @@ x24_numberOfCoresAvailable .req x24
 
 
 .macro InitializeLocalRegisterVariables
-    mrs     x19_coreNumber, MPIDR_EL1
-    and     x19_coreNumber, x19_coreNumber, #3
     bl      IdentifyBoardType
     mov     x20_boardHWId, x0
+    mrs     x19_coreNumber, MPIDR_EL1
+    //  Core index location depends on the CPU topology:
+    //    A53 (RPi3) / A72 (RPi4): legacy layout, core index in Aff0 (bits 1:0).
+    //    A76 (RPi5): DynamIQ, core index in Aff1 (bits 15:8); Aff0 is the thread.
+    //  Extracting Aff0 on RPi5 yields 0 for every core, so secondary cores would
+    //      all masquerade as core 0.
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.eq    99f
+    and     x19_coreNumber, x19_coreNumber, #3
+    b       98f
+99:
+    ubfx    x19_coreNumber, x19_coreNumber, #8, #8
+98:
     bl      DetermineNumberOfCores
     mov     x24_numberOfCoresAvailable, x0
     adrp    x21_coreStateTableAddress, __core_state
@@ -148,13 +158,13 @@ x24_numberOfCoresAvailable .req x24
 
 _start:
 
-    //
+    mov     x23_arrivedInEL3, #0
+
     //  Set move to EL1
     //
     //      This will require some config at EL3 and EL2, which is dependent on the EL level when we enter this code.
     //      The default armstub configures EL3 and then jumps to this code in EL2.
     //      The armstub_base.bin with this project does not change the EL at all, so we will enter here at EL3.
-    //
 
     //  Determine if we are running at EL3 - this can occur if the default ARMSTUB is replaced
 
@@ -176,6 +186,22 @@ _start:
 
     mov     x23_arrivedInEL3, #1                    //  Set flag to indicate we arrived in EL3
 
+    //  L2CTLR_EL1 (S3_1_C11_C0_2) and CPUECTLR_EL1 (S3_1_C15_C2_1) below are the
+    //      Cortex-A53/A72 IMPLEMENTATION DEFINED encodings.  The Cortex-A76 in the
+    //      RPi5 implements NEITHER at those encodings -- it relocates CPUECTLR_EL1
+    //      to S3_0_C15_C1_4 and has no L2CTLR_EL1 equivalent (confirmed against ARM
+    //      Trusted Firmware's include/lib/cpus/aarch64/cortex_a{72,76}.h).  Executing
+    //      them on an A76 raises an Undefined Instruction exception, and VBAR_EL3 is
+    //      not set yet here -- so there is no vector to take it to and the core dies
+    //      silently, before board detection, the MMU, or any console exists.
+    //
+    //      Neither is needed on the A76: SMPEN is an A53/A72 bit (A76 cache coherency
+    //      is always on, which is why TF-A's own A76 reset handler never touches it),
+    //      and the L2 latency setting is A72-specific tuning.
+
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.eq    skip_a53_a72_imp_def_registers
+
 	// Set L2 read/write cache latency to 3
 
 	mrs     x9, L2CTLR_EL1
@@ -183,13 +209,20 @@ _start:
 	orr     x9, x9, x10
 	msr     L2CTLR_EL1, x9
 
+skip_a53_a72_imp_def_registers:
+
 	//  Enable Floating point instruction set and SIMD instructions
 
 	msr     CPTR_EL3, xzr
 
 	//  Set up SCR
-	
+
     mov     x9, #SCR_VAL
+    //  RPi5: clear SMD so SMC from EL1 routes to EL3 firmware (required for PSCI CPU_ON)
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.ne    set_scr_el3
+    bic     x9, x9, #SCR_SMD
+set_scr_el3:
 	msr     SCR_EL3, x9
 
 	//  Set up ACTLR
@@ -197,10 +230,15 @@ _start:
 	mov     x9, #ACTLR_VAL
 	msr     ACTLR_EL3, x9
 
-	//  Set SMPEN
+	//  Set SMPEN -- A53/A72 only, see the comment above
+
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.eq    skip_smpen
 
 	mov     x9, #CPUECTLR_EL1_SMPEN
 	msr     CPUECTLR_EL1, x9
+
+skip_smpen:
 
     //  Identify the board type and then setup the physical timer
 
@@ -209,15 +247,20 @@ _start:
 
     bl      SetupPhysicalTimer                                  //  Board HW id must be passed in x0
 
-    //  If we are on a platform that supports the Generic Interrupt Controller, configure it now
-    //      Register 3 contains the board type copied above. 
+    //  RPi3 has no GIC-400, so skip it there.  RPi4 and RPi5 both configure it on
+    //      every core: ConfigureGIC400 internally restricts the shared distributor
+    //      setup to core 0 and lets each core enable its own (banked) CPU interface.
+    //
+    //  NOTE: x0 does NOT still hold the board type here -- SetupPhysicalTimer above
+    //      returns its own status code in x0 -- so reload it from x20.
 
     cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI3
-    b.eq    rpi3_skip_gic_config
+    b.eq    skip_gic_config
 
+    mov     x0, x20_boardHWId
     bl      ConfigureGIC400
-	
-rpi3_skip_gic_config:
+
+skip_gic_config:
 
     //  Set up SCTLR_EL2
 	//      All set bits below are res1. LE, no WXN/I/SA/C/A/M
@@ -235,7 +278,7 @@ rpi3_skip_gic_config:
 
     //  Running at EL2 - processor will be in EL2 on entry with the default ARMSTUB
 
-.align 4                                                        //  Align the code to a 4 byte boundary
+.align 4
 running_in_el2:
 
     //  Setup the local registers holding the core number, etc
@@ -249,6 +292,7 @@ running_in_el2:
     b.eq    skip_set_core_started_el2
 
     SetCoreState #CORE_STARTED_IN_EL2
+
 skip_set_core_started_el2:
 
     SetCoreState #CORE_CONFIGURING_STACKS_IN_EL2
@@ -336,6 +380,8 @@ running_in_el1:
     add     x10, x10, x19_coreNumber, lsl #3        //  Compute the address of the correct jump table slot, we need this in a register for the cache line invalidation  
 
 el1_spin:
+
+    SetCoreState #CORE_SPINNING_IN_EL1               //  re-assert: BSS clear may have wiped it
 	wfe
     dc 		civac, x10                               //  Invalidate the cache line containing the jump address as it is written by the master core
 	ldr     x9, [x10]
@@ -417,8 +463,7 @@ continue_on_core0:
     bl      EnableMMUTables
     //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
 
-    //  Clear bss
-    //      TODO - make this more robust in the face of BSS segments not a multiple of 8 bytes in length
+    //  Clear BSS -this code assumes BSS segments are a multiple of 8 bytes in length
 
     adrp    x9, __bss_start
     add     x9, x9, :lo12:__bss_start
@@ -469,22 +514,78 @@ loop_for_next_static_initializer:
 
 start_additional_cores:
 
+    //  Nothing to do when only one core is available.  The loop below is a
+    //      do-while: it falls into wait_core_ack for core 1 BEFORE ever testing
+    //      x24_numberOfCoresAvailable, so without this guard a single-core
+    //      configuration blocks forever waiting on a core that was never started.
+
+    cmp     x24_numberOfCoresAvailable, #1
+    b.ls    additional_cores_started
+
     mov x9, #1                                                 //  Start with core 1
 
 start_next_core:
+
+    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
+    b.ne    check_el2_spin_table
+
+    //  EL3 arrival: all cores started by armstub; fall through to the shared EL3 wait path.
+    //  EL2-only arrival: only core 0 reached EL3; secondary cores are held by firmware and
+    //      need releasing via PSCI CPU_ON below.
+    cbnz    x23_arrivedInEL3, check_el2_spin_table   //  EL3: same wait as RPi3/4
+
+    //  EL2-only: secondary cores held by firmware; start via PSCI CPU_ON
+    ldr     x0, =0xC4000003
+    lsl     x1, x9, #8                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
+    ldr     x2, =running_in_el2
+    mov     x3, #0
+    smc     #0
+    mov     w25, w0                    //  save the PSCI CPU_ON return status
+    cbnz    w25, next_core
+    mrs     x13, cntpct_el0
+    ldr     x14, =270000000
+    add     x14, x14, x13
+
+rpi5_wait_core_ack:
+
+    GetCoreState x9
+    cmp     w0, #CORE_SPINNING_IN_EL1
+    b.eq    next_core
+    mrs     x13, cntpct_el0
+    cmp     x13, x14
+    b.lo    rpi5_wait_core_ack
+    b       next_core
+
+check_el2_spin_table:
+
     cmp     x23_arrivedInEL3, #1
-    b.eq    wait_core_ack
+    b.ne    write_spin_table
+    sev                                                 //  wake secondary cores: after BSS clear they re-assert CORE_SPINNING_IN_EL1
+    b       wait_core_ack
+
+write_spin_table:
+
     mov     x10, #armstub_el2_spin_table
     ldr     x11, =running_in_el2
-    str     x11, [x10, x9, lsl #3]
+    add     x12, x10, x9, lsl #3
+    str     x11, [x12]
+    dc      civac, x12                                          //  flush: MMU is on when this runs
+    dsb     sy
     sev
+
 wait_core_ack:
+
     GetCoreState x9
     cmp     w0, #CORE_SPINNING_IN_EL1
     bne     wait_core_ack
+
+next_core:
+
     add x9, x9, #1
     cmp x9, x24_numberOfCoresAvailable                         //  Loop until all cores are started
     b.lo start_next_core
+
+additional_cores_started:
 
     //  Initialize the platform
 

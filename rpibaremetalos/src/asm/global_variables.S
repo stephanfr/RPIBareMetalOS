@@ -111,3 +111,28 @@ __kernel_command_line:                                      .space S_MAX_KERNEL_
 .balign 64
 
 __kernel_page_table_base : .quad 0
+
+
+//  Global variable holding whether strict alignment checking (SCTLR_EL1.A) has been
+//      enabled via the "strict_align=1" kernel command-line flag. Read by EnableMMUTables
+//      (mmu.S) on every call site so whichever core executes it applies the same,
+//      already-decided policy. Default 0 (unset) means alignment checking stays OFF --
+//      the production default; pass strict_align=1 for kernel-development builds.
+
+.global __strict_alignment_enabled
+.data
+.balign 64
+
+__strict_alignment_enabled : .word 0
+
+//  Device probe tracking flags (abort-tolerant peripheral probing)
+//  These flags are checked during MMIO fault handling to support graceful
+//  recovery when devices are absent (e.g., QEMU raspi4b lacks RNG200).
+
+.global __device_probe_in_progress
+.global __device_probe_faulted
+.data
+.balign 64
+
+__device_probe_in_progress : .word 0
+__device_probe_faulted : .word 0

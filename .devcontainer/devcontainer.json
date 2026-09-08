@@ -2,7 +2,7 @@
     "name": "RPIBareMetalOS",
     "image": "ghcr.io/stephanfr/aarch64-bare-metal-toolchain:13.3.rel1",
     "runArgs": ["--network=host"],
-    "postCreateCommand": "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git-lfs mtools python3 python3-pexpect qemu-system-aarch64 gdb gdb-multiarch valgrind strace ltrace && git lfs install && git lfs pull && mkdir -p ~/dev_tools && ln -sf /opt/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-elf ~/dev_tools/",
+    "postCreateCommand": "apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git-lfs mtools python3 python3-pexpect python3-venv gdb gdb-multiarch valgrind strace ltrace build-essential ninja-build meson pkg-config libglib2.0-dev libpixman-1-dev flex bison wget xz-utils && bash .devcontainer/install_qemu.sh && git lfs install && git lfs pull && mkdir -p ~/dev_tools && ln -sf /opt/arm-gnu-toolchain-13.3.rel1-x86_64-aarch64-none-elf ~/dev_tools/",
     "remoteEnv": {
         "CPPUTEST_PATH": "/opt/cpputest"
     },

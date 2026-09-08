@@ -19,9 +19,10 @@
 //      rather than treating construction failure as fatal the way
 //      SetupSerialConsole() does for UART0/UART1.
 //
-//  getc() has no real input source -- this device is write-only. It
-//      always returns 0 immediately rather than blocking, since nothing
-//      produces input for it.
+//  getc() has no real input source -- this device is output-only. It blocks
+//      forever rather than returning, so it is only ever reachable in the
+//      framebuffer-only fallback (RPi5 with the RP1 UART unavailable), where
+//      there is no input device to read from in the first place.
 
 class ConsoleVideoFrameBuffer : public CharacterIODevice, public VideoFrameBuffer 
 {
@@ -38,7 +39,10 @@ private:
 
     static constexpr uint32_t GLYPH_WIDTH = 8;
     static constexpr uint32_t GLYPH_HEIGHT = 8;
-
+    static constexpr uint32_t GLYPH_SCALE = 1;
+    static constexpr uint32_t CELL_WIDTH = GLYPH_WIDTH * GLYPH_SCALE;
+    static constexpr uint32_t CELL_HEIGHT = GLYPH_HEIGHT * GLYPH_SCALE;
+    
     uint32_t foreground_color_;
     uint32_t background_color_;
     uint32_t cursor_column_ = 0;
@@ -46,12 +50,12 @@ private:
 
     uint32_t Columns() const
     {
-        return Width() / GLYPH_WIDTH;
+        return Width() / CELL_WIDTH;
     }
 
     uint32_t Rows() const
     {
-        return Height() / GLYPH_HEIGHT;
+        return Height() / CELL_HEIGHT;
     }
 
     void DrawGlyph(unsigned char c);

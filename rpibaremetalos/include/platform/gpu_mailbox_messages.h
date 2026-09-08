@@ -126,11 +126,10 @@ public:
         return "GetBoardSerialNumberTag";
     }
 
-    uint32_t GetBoardSerialNumber() const
+    uint64_t GetBoardSerialNumber() const
     {
-        return GetResponse().board_serial_number_lsb_;
-    }
-};
+        return (static_cast<uint64_t>(GetResponse().board_serial_number_msb_) << 32) | GetResponse().board_serial_number_lsb_;
+    }};
 
 //
 //  ARM Memory Tag

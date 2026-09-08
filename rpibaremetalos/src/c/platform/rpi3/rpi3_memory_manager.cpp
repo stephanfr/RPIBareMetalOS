@@ -117,4 +117,9 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModelTypes memory_model)
 
     kernel_page_table_1_to_1_[0] = (0x8000000000000000) | (uintptr_t)&Stage2map1to1_[0] | 3;
     kernel_page_table_1_to_1_[1] = (0x8000000000000000) | (uintptr_t)&Stage2map1to1_[512] | 3;
+
+    //  Add the standard reserved regions (kernel, stack, etc.) and add the reserved region for the GPU window
+    
+    AddStandardReservedRegions();
+    AddReservedRegion(0x3F000000, 0x40000000 - 0x3F000000);   //  BCM2837 peripherals
 }

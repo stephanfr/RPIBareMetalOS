@@ -156,4 +156,9 @@ RPI4BMemoryManager::RPI4BMemoryManager(MemoryModelTypes memory_model)
     {
         kernel_page_table_1_to_1_[i] = (0x8000000000000000) | (uintptr_t)&Stage2map1to1_[i * entries_per_level1_block] | 3;
     }
+
+    //  Add the standard reserved regions (kernel, stack, etc.) and add the reserved region for the GPU window
+    
+    AddStandardReservedRegions();
+    AddReservedRegion(0xFC000000, 0x100000000 - 0xFC000000);  //  main + ARM peripherals, matching the device-mapped loops above
 }

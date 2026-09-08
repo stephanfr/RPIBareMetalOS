@@ -11,15 +11,20 @@
 
 #include "cpu_part_nums.h"
 
-#define MAILBOX_READ 0x0000B880
-#define MAILBOX_WRITE 0x0000B8A0
-#define MAILBOX_STATUS 0x0000B898
+//  Mailbox register offsets, relative to each board's own absolute mailbox base
+//      (loaded per-board below). These small offsets -- READ/STATUS/WRITE at
+//      +0x00/+0x18/+0x20 -- are unchanged across BCM2835/2837/2711/2712; only
+//      the base address itself moves per board.
+
+#define MAILBOX_READ 0x00
+#define MAILBOX_WRITE 0x20
+#define MAILBOX_STATUS 0x18
 #define MAILBOX_PROPETY_CHANNEL 0x08
 
 #define MAILBOX_STATUS_EMPTY 0x40000000
 #define MAILBOX_STATUS_RESPONSE_SUCCESS 0x80000000
 
-x15_mmiobase .req x15
+x15_mailboxbase .req x15
 
 //  extern "C" void GetBootTimeSettings( uint32_t core_type );
 
@@ -35,17 +40,39 @@ GetBootTimeSettings:
     cmp w0, #RPI_BOARD_ENUM_RPI3
 	b.ne not_rpi3
 
-    mov x15_mmiobase, #0x3F000000
-    b have_mmiobase
+    //  0x3F00B880 -- RPi3 mailbox base (BCM2837 peripheral base 0x3F000000 + 0xB880)
+
+    movz x15_mailboxbase, #0xB880
+    movk x15_mailboxbase, #0x3F00, lsl #16
+    b have_mailboxbase
 
 not_rpi3:
 
     cmp w0, #RPI_BOARD_ENUM_RPI4
+	b.ne not_rpi4
+
+    //  0xFE00B880 -- RPi4 mailbox base (BCM2711 peripheral base 0xFE000000 + 0xB880)
+
+    movz x15_mailboxbase, #0xB880
+    movk x15_mailboxbase, #0xFE00, lsl #16
+    b have_mailboxbase
+
+not_rpi4:
+
+    cmp w0, #RPI_BOARD_ENUM_RPI5
 	b.ne park_core_on_error
 
-    mov x15_mmiobase, #0xFE000000
+    //  0x10_7C013880 -- RPi5 mailbox base, confirmed from raspberrypi/linux
+    //      bcm2712.dtsi (mailbox@7c013880, translated through the 'soc' node's
+    //      ranges into CPU physical space). NOT derived from a peripheral base
+    //      + fixed offset -- BCM2712 moved the mailbox to a different offset
+    //      within its own peripheral block -- so it is its own literal address.
 
-have_mmiobase:
+    movz x15_mailboxbase, #0x3880
+    movk x15_mailboxbase, #0x7C01, lsl #16
+    movk x15_mailboxbase, #0x10,   lsl #32
+
+have_mailboxbase:
 
     adrp x14, __board_version_vc_start_cmd_line_message_mailbox_buffer
     add x14, x14, :lo12:__board_version_vc_start_cmd_line_message_mailbox_buffer
@@ -54,7 +81,7 @@ have_mmiobase:
     add x14, x14, #MAILBOX_PROPETY_CHANNEL
 
     mov x13, #MAILBOX_WRITE
-    str w14, [x15_mmiobase, x13]
+    str w14, [x15_mailboxbase, x13]
 
     mov x13, #MAILBOX_READ
     mov x10, #MAILBOX_STATUS
@@ -64,13 +91,17 @@ have_mmiobase:
 
 loop_until_message_processed:
 
-    ldr w12, [x15_mmiobase, x10]
+    //  We loop until we have a response from the GPU.  If successful,
+    //      the board revision, video core memory info and command line 
+    //      are left in memory to be used later.
+
+    ldr w12, [x15_mailboxbase, x10]
 
     mov x11, #MAILBOX_STATUS_EMPTY
     and w12, w12, w11
     cbnz w12, loop_until_message_processed
 
-    ldr w12, [x15_mmiobase, x13]
+    ldr w12, [x15_mailboxbase, x13]
     and w12, w12, #0x0F
     cmp w12, #MAILBOX_PROPETY_CHANNEL
     b.ne loop_until_message_processed

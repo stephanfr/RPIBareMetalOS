@@ -8,9 +8,12 @@ SRC_ROOT := src
 BUILD_ROOT := build
 IMAGE_DIR   := image
 
-QEMU                  := qemu-system-aarch64
+QEMU                   := qemu-system-aarch64
 QEMU_REGRESSION_SCRIPT := test/tools/qemu_regression_test.py
 QEMU_CLI_SOAK_SCRIPT   := test/tools/qemu_cli_soak_test.py
+QEMU_RPI3_MACHINE      ?= raspi3b
+QEMU_RPI4_MACHINE      ?= raspi4b
+QEMU_RPI4_MEMORY       ?= 2G
 
 SOAK_DURATION_SECONDS          ?= 3600
 SOAK_MIN_INTERVAL_SECONDS      ?= 0.2
@@ -26,9 +29,11 @@ $(BUILD_ROOT)/c/utility \
 $(BUILD_ROOT)/c/platform \
 $(BUILD_ROOT)/c/platform/rpi3 \
 $(BUILD_ROOT)/c/platform/rpi4 \
+$(BUILD_ROOT)/c/platform/rpi5 \
 $(BUILD_ROOT)/c/devices \
 $(BUILD_ROOT)/c/devices/rpi3 \
 $(BUILD_ROOT)/c/devices/rpi4 \
+$(BUILD_ROOT)/c/devices/rpi5 \
 $(BUILD_ROOT)/c/devices/video \
 $(BUILD_ROOT)/c/isr \
 $(BUILD_ROOT)/c/filesystem \
@@ -43,9 +48,11 @@ C_DIRS     := c \
 			  c/platform \
 			  c/platform/rpi3 \
 			  c/platform/rpi4 \
+			  c/platform/rpi5 \
 			  c/devices \
 			  c/devices/rpi3 \
 			  c/devices/rpi4 \
+			  c/devices/rpi5 \
 			  c/devices/video \
 			  c/isr \
 			  c/filesystem \
@@ -58,9 +65,11 @@ CPP_DIRS   := c \
 			  c/platform \
 			  c/platform/rpi3 \
 			  c/platform/rpi4 \
+			  c/platform/rpi5 \
 			  c/devices \
 			  c/devices/rpi3 \
 			  c/devices/rpi4 \
+			  c/devices/rpi5 \
 			  c/devices/video \
 			  c/isr \
 			  c/filesystem \
@@ -83,6 +92,11 @@ CPP_SRC := $(foreach sdir,$(CPP_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
 OBJ := $(patsubst $(SRC_ROOT)/asm/%.S,$(BUILD_ROOT)/asm/%.o,$(ASM_SRC)) $(patsubst $(SRC_ROOT)/c/%.c,$(BUILD_ROOT)/c/%.o,$(C_SRC)) $(patsubst $(SRC_ROOT)/c/%.cpp,$(BUILD_ROOT)/c/%.o,$(CPP_SRC))
 
+#  Auto-generated header dependency files (one .d per .o). -MMD emits them during
+#  compilation; the -include at the bottom of this file pulls them back in so that
+#  editing a header rebuilds every object that includes it (e.g. inline GetCoreID).
+DEPS := $(OBJ:.o=.d)
+
 INCLUDE_DIRS := -I../deps/minimalclib/include -I../deps/minimalstdio/include -I../deps/minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
 LDFLAGS += -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64 
 LDLIBS = -lminimalstdio -lminimalclib -lminimalstdlib
@@ -92,6 +106,12 @@ LINKER_SCRIPT=$(BUILD_ROOT)/link.ld
 
 
 all: checkdirs $(IMG)
+
+#  Default target: clean build + regression gate.  Fails immediately if the
+#  regression script exits non-zero (Make propagates the exit code).
+.DEFAULT_GOAL := ci
+
+ci: clean all qemu-regression
 
 all_clean: clean all
 
@@ -111,23 +131,26 @@ $(LINKER_SCRIPT):
 
 define make-asm-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.S
-	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -g3 -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(ASM_FLAGS) -MMD -MP -g3 -c $$< -o $$@
 endef
 
 define make-c-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.c
-	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(C_FLAGS) -MMD -MP -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 define make-cpp-goal
 $(BUILD_ROOT)/$1/%.o: $(SRC_ROOT)/$1/%.cpp
-	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
+	$(CC) $(INCLUDE_DIRS) $(CPP_FLAGS) -MMD -MP -g3 $(OPTIMIZATION_FLAGS) -c $$< -o $$@
 endef
 
 
 $(foreach bdir,$(ASM_DIRS), $(eval $(call make-asm-goal,$(bdir))))
 $(foreach bdir,$(C_DIRS), $(eval $(call make-c-goal,$(bdir))))
 $(foreach bdir,$(CPP_DIRS), $(eval $(call make-cpp-goal,$(bdir))))
+
+#  Pull in auto-generated header dependencies so header edits trigger rebuilds.
+-include $(DEPS)
 
 
 checkdirs: $(BUILD_DIRS)
@@ -181,11 +204,28 @@ armstub_clean:
 #       QEMU regression test
 #
 
-qemu-regression: all
+#  Each board runs the suite twice -- default (relaxed) alignment and
+#  strict_align=1. RPi3 and RPi4 have materially different reserved-memory
+#  topologies: RPi3's holes both sit at the top of its 1GB, leaving one
+#  unbroken span, while RPi4's straddle the low-middle and the top, splitting
+#  usable RAM. Only the RPi4 layout exercises the fragmentation path.
+
+qemu-regression-rpi3: all
 	python3 $(QEMU_REGRESSION_SCRIPT) \
 		--qemu $(QEMU) \
 		--kernel $(BUILD_ROOT)/kernel8.elf \
-		--sdimage $(IMAGE_DIR)/sd.img
+		--sdimage $(IMAGE_DIR)/sd.img \
+		--machine $(QEMU_RPI3_MACHINE)
+
+qemu-regression-rpi4: all
+	python3 $(QEMU_REGRESSION_SCRIPT) \
+		--qemu $(QEMU) \
+		--kernel $(BUILD_ROOT)/kernel8.elf \
+		--sdimage $(IMAGE_DIR)/sd.img \
+		--machine $(QEMU_RPI4_MACHINE) \
+		--memory $(QEMU_RPI4_MEMORY)
+
+qemu-regression: qemu-regression-rpi3 qemu-regression-rpi4
 
 qemu-cli-soak: all
 	python3 $(QEMU_CLI_SOAK_SCRIPT) \

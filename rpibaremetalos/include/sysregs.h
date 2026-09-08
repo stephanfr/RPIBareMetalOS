@@ -48,6 +48,7 @@
 
 #define ESR_ELx_EC_SHIFT		26
 #define ESR_ELx_EC_SVC64		0x15    //  SVC instruction executed in AArch64 state
+#define ESR_ELx_EC_DABT_CUR	0x25        //  Data Aborted Taken Without Change (current transaction)
 
 //
 //  PSR bits

@@ -21,6 +21,7 @@
 #define BCM2711_LOCAL_PRESCALER		0xFF800008
 
 #define BCM2711_OSC_FREQ		    54000000
+#define BCM2712_OSC_FREQ		    54000000
 
 //
 //  The following function sets up the physical timer on the board.  The setup
@@ -111,9 +112,41 @@ spt_notRpi3 :
 
     ret
 
-    //  Not RPI3 or RPI4 if we get below, so return a failed result
+    //  Not the RPI4 if we get below
 
 spt_notRpi4 :
+
+    cmp x0, #RPI_BOARD_ENUM_RPI5
+    b.ne spt_notRpi5
+
+    //  BCM2712 follows
+    //
+    //  Deliberately NO LOCAL_CONTROL / LOCAL_PRESCALER writes here, unlike the
+    //      BCM2837/BCM2711 paths above.  Those are BCM2836-style ARM_LOCAL registers;
+    //      BCM2712 relocates that block to 0x10_7CD00000 and whether it needs the
+    //      same programming is NOT confirmed from source -- and a stray write to an
+    //      unimplemented address here (MMU off, no exception vectors) hangs the core
+    //      silently.  Everything below is architectural AArch64 state, valid on any
+    //      ARMv8 core regardless of SoC.
+
+	ldr x9, =BCM2712_OSC_FREQ
+	msr CNTFRQ_EL0, x9
+
+    ldr x9, =0
+    msr CNTKCTL_EL1, x9
+
+    ldr x9, =3
+    msr CNTP_CTL_EL0, x9                        //  Enable the timer but without interrupts
+
+    msr CNTVOFF_EL2, xzr                        //  No virtual offset
+
+    ldr x0, =1                                  //  Return Success
+
+    ret
+
+    //  Not RPI3, RPI4 or RPI5 if we get below, so return a failed result
+
+spt_notRpi5 :
 
     ldr x0, =0                                  //  Return Failure
     ret

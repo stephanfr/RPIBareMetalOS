@@ -17,7 +17,9 @@ bool VideoFrameBuffer::Allocate()
     uint32_t requested_width = DEFAULT_FALLBACK_WIDTH;
     uint32_t requested_height = DEFAULT_FALLBACK_HEIGHT;
 
-    if (mbox.sendMessage(getPhysicalSizeMessage) &&
+    bool query_ok = mbox.sendMessage(getPhysicalSizeMessage);
+
+    if (query_ok &&
         (getPhysicalWidthHeightTag.GetWidth() != 0) &&
         (getPhysicalWidthHeightTag.GetHeight() != 0))
     {
@@ -31,7 +33,7 @@ bool VideoFrameBuffer::Allocate()
     SetPhysicalWidthHeightTag setPhysicalWidthHeightTag(requested_width, requested_height);
     SetVirtualWidthHeightTag setVirtualWidthHeightTag(requested_width, requested_height);
     SetVirtualOffsetTag setVirtualOffsetTag(0, 0);
-    SetColourDepthTag setColourDepthTag(DEPTH_BITS_PER_PIXEL);
+    SetColourDepthTag setColourDepthTag(REQUESTED_DEPTH_BITS_PER_PIXEL);
     SetPixelOrderTag setPixelOrderTag(FrameBufferPixelOrder::RGB);
     AllocateFrameBufferTag allocateFrameBufferTag(ALLOCATE_ALIGNMENT_BYTES);
     GetPitchTag getPitchTag;
@@ -44,7 +46,9 @@ bool VideoFrameBuffer::Allocate()
                                               allocateFrameBufferTag,
                                               getPitchTag);
 
-    if (!mbox.sendMessage(allocateMessage))
+    bool allocate_ok = mbox.sendMessage(allocateMessage);
+
+    if (!allocate_ok)
     {
         return false;
     }
@@ -68,6 +72,18 @@ bool VideoFrameBuffer::Allocate()
     {
         return false;
     }
+
+    //  The depth tag's own response and the pitch should agree; the pitch wins
+    //      if they don't, since it describes the buffer that was really allocated.
+
+    uint32_t bytes_per_pixel = pitch / applied_width;
+
+    if ((bytes_per_pixel != 2) && (bytes_per_pixel != 4))
+    {
+        return false;
+    }
+
+    bytes_per_pixel_ = bytes_per_pixel;
 
     //  See AllocateFrameBufferTag's comment in gpu_mailbox_messages.h --
     //      the GPU has historically returned a "bus address" with the top
@@ -97,6 +113,10 @@ void VideoFrameBuffer::ScrollUp(uint32_t rows, uint32_t fill_color)
 
     volatile uint32_t *base = reinterpret_cast<volatile uint32_t *>(base_address_);
 
+    //  The copy below moves whole 32-bit words regardless of depth, so the fill
+    //      value must be the native pixel replicated across the word -- at 16bpp
+    //      one word covers two pixels.
+
     uint32_t i = 0;
 
     while (i + shift_words < total_words)
@@ -105,9 +125,14 @@ void VideoFrameBuffer::ScrollUp(uint32_t rows, uint32_t fill_color)
         i++;
     }
 
+    uint32_t native = NativePixel(fill_color);
+    uint32_t fill_word = (bytes_per_pixel_ == 2) ? ((native & 0xFFFF) | (native << 16)) : native;
+    
     while (i < total_words)
     {
-        base[i] = fill_color;
+        base[i] = fill_word;
         i++;
     }
+
+    FlushRect(0, 0, width_, height_);
 }

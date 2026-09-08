@@ -182,7 +182,17 @@ template <typename TREQ, typename TRESP, MailboxTags tag>
 class GPUMailboxPropertyMessageTagBase : public GPUMailboxPropertyMessageTag
 {
 public:
-    GPUMailboxPropertyMessageTagBase() = default;
+    
+    GPUMailboxPropertyMessageTagBase()
+    {
+        //  ValueBuffer is a union of the request and response structs, which cannot
+        //      carry member initializers (see the note in gpu_mailbox_messages.h),
+        //      so it starts as whatever was on the stack. A tag the firmware does
+        //      not populate then reads back as garbage rather than zero -- which is
+        //      how a failed board-info query produced a plausible-looking MAC.
+
+        memset(&payload_.value_buffer_, 0, sizeof(ValueBuffer));
+    }
 
     MailboxTags Tag() const override
     {
@@ -213,6 +223,11 @@ public:
         }
 
         return GetPayloadSize();
+    }
+
+    bool ResponseWasProvided() const
+    {
+        return ((payload_.request_response_codes_ & 0x80000000) != 0) && (GetResponseLength() > 0);
     }
 
 protected:

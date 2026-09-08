@@ -15,7 +15,8 @@ typedef enum class RPIBoardType : uint32_t
 {
     UNKNOWN = RPI_BOARD_ENUM_UNKNOWN,
     RPI3 = RPI_BOARD_ENUM_RPI3,
-    RPI4 = RPI_BOARD_ENUM_RPI4
+    RPI4 = RPI_BOARD_ENUM_RPI4,
+    RPI5 = RPI_BOARD_ENUM_RPI5
 } RPIBoardType;
 
 class PlatformInfo
@@ -42,6 +43,16 @@ public:
     bool IsRPI4() const
     {
         return GetBoardType() == RPIBoardType::RPI4;
+    }
+
+    bool IsRPI5() const
+    {
+        return GetBoardType() == RPIBoardType::RPI5;
+    }
+    
+    bool PlatformDetailsValid() const
+    {
+        return platform_details_valid_;
     }
 
     uint32_t GetBoardModelNumber() const
@@ -77,15 +88,24 @@ public:
     void DecodeBoardRevision(minstd::string &buffer) const;
 
 protected:
-    void GetPlatformDetails(uint8_t *mailbox_register_base);
+
+    bool GetPlatformDetails(uint8_t *mailbox_register_base);
 
 private:
     uint32_t board_model_number_;
     uint32_t board_revision_;
     uint64_t board_serial_number_;
     minstd::array<uint8_t, 6> board_mac_address_;
+
+    //  Populated from GET_ARM_MEMORY when the mailbox answers it. On every
+    //      real Raspberry Pi to date this is 0 -- RAM always starts at
+    //      physical address 0 -- so a 0 here on a board whose mailbox tag
+    //      goes unanswered (e.g. RPi5, see the board-info fix in the port
+    //      plan) is the architecturally correct value, not a missing one.
+    
     uint32_t memory_base_address_;
     uint64_t memory_size_in_bytes_;
+    bool platform_details_valid_ = false;
 };
 
 const PlatformInfo &GetPlatformInfo();

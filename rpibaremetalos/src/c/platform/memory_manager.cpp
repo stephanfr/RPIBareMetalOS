@@ -6,6 +6,7 @@
 
 #include "asm_globals.h"
 #include "heaps.h"
+#include "os_memory_config.h"
 
 #include "platform/platform_info.h"
 #include "platform/mmu_manager.h"
@@ -19,16 +20,67 @@ MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
       total_memory_in_bytes_(total_memory_in_bytes),
       mmio_base_(mmio_base),
       free_memory_start_((uint64_t)&__os_process_start),
-      num_pages_((minstd::min(minstd::min(((uint64_t)mmio_base_ - free_memory_start_), total_memory_in_bytes_),
-                 (MMUManager::Instance().ReservedMemoryBase() - free_memory_start_)) / page_size_)),
-      page_map_(static_cast<minstd::atomic<uint8_t> *>(
-                 __os_static_heap_resource.allocate(num_pages_ * sizeof(minstd::atomic<uint8_t>), alignof(minstd::atomic<uint8_t>))))
+      num_pages_((MMUManager::Instance().AllocatableMemoryTop() - free_memory_start_) / page_size_)
 {
     LogEntryAndExit("num_pages: %u\n", num_pages_);
+
+    //  The page map is one byte per page and comes out of the static heap, so it
+    //      scales directly with installed RAM: ~2MB on an 8GB board, ~4MB on 16GB.
+    //      Check it up front rather than relying on the arena's out-of-memory
+    //      behaviour -- a silently short map would hand out pages it never tracked.
+
+    const uint64_t page_map_size_in_bytes = num_pages_ * sizeof(minstd::atomic<uint8_t>);
+
+    if (page_map_size_in_bytes > STATIC_HEAP_SIZE_IN_BYTES)
+    {
+        LogError("MemoryManager: page map needs %u bytes, static heap is only %u -- raise STATIC_HEAP_SIZE_IN_BYTES in os_memory_config.h\n",
+                 (uint32_t)page_map_size_in_bytes, (uint32_t)STATIC_HEAP_SIZE_IN_BYTES);
+        ParkCore();
+    }
+
+    page_map_ = static_cast<minstd::atomic<uint8_t> *>(
+        __os_static_heap_resource.allocate(page_map_size_in_bytes, alignof(minstd::atomic<uint8_t>)));
+
+    if (page_map_ == nullptr)
+    {
+        LogError("MemoryManager: page map allocation of %u bytes failed\n", (uint32_t)page_map_size_in_bytes);
+        ParkCore();
+    }
 
     for (uint64_t i = 0; i < num_pages_; i++)
     {
         new (&page_map_[i]) minstd::atomic<uint8_t>(0);
+    }
+
+    //  Mark every reserved region permanently occupied.  GetFreeBlock()'s scan
+    //      already skips any page whose map byte is nonzero, so an interior hole
+    //      needs no change to the allocation algorithm itself -- these pages are
+    //      simply never free.
+
+    const uint64_t managed_top = free_memory_start_ + (num_pages_ * page_size_);
+
+    for (uint32_t region = 0; region < MMUManager::Instance().ReservedMemoryRegionCount(); region++)
+    {
+        const auto reserved = MMUManager::Instance().ReservedMemoryRegionAt(region);
+
+        const uint64_t hole_start = minstd::max(reserved.base_, free_memory_start_);
+        const uint64_t hole_end = minstd::min(reserved.base_ + reserved.size_, managed_top);
+
+        if (hole_start >= hole_end)
+        {
+            continue;
+        }
+
+        //  Round the start down and the end up so a partially covered page is
+        //      excluded entirely rather than half handed out.
+
+        const uint64_t first_page = (hole_start - free_memory_start_) / page_size_;
+        const uint64_t last_page = ((hole_end - free_memory_start_) + page_size_ - 1) / page_size_;
+
+        for (uint64_t i = first_page; (i < last_page) && (i < num_pages_); i++)
+        {
+            page_map_[i].store(1, minstd::memory_order_relaxed);
+        }
     }
 }
 

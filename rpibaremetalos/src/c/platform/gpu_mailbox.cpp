@@ -161,7 +161,19 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 
         uint32_t *response_message = reinterpret_cast<uint32_t *>(reinterpret_cast<uint64_t>(message_ARM_address) & 0xFFFFFFFFFFFFFFF0);
 
-        if (response_message[1] == MBOX_STATUS_RESPONSE_SUCCESS)
+        //  0x80000001 is a PARTIAL response, not a failed one: per the mailbox
+        //      property interface spec, the firmware processed every tag it
+        //      recognized and set this code because at least one tag was unknown
+        //      to it ("unknown tags are ignored -- the response bit will not be
+        //      set"). The tags it did answer are valid and must still be
+        //      harvested; each tag's own ResponseWasProvided() is what tells a
+        //      caller which values to trust. Returning without ReturnTags() here
+        //      discarded good data -- on RPi5 that threw away a perfectly valid
+        //      board revision because an unrelated tag in the same message was
+        //      not supported by that board's firmware.
+
+        if ((response_message[1] == MBOX_STATUS_RESPONSE_SUCCESS) ||
+            (response_message[1] == MBOX_STATUS_REQUEST_PARSING_ERROR))
         {
             message.ReturnTags((const char *)response_message);
 
@@ -170,14 +182,7 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
             return true;
         }
 
-        if (response_message[1] == MBOX_STATUS_REQUEST_PARSING_ERROR)
-        {
-            LogError("GPUMailbox Request Parsing Error\n");
-        }
-        else
-        {
-            LogError("GPUMailbox error, Response Code: %u\n", response_message[1]);
-        }
+        LogError("GPUMailbox error, Response Code: %u\n", response_message[1]);
 
         return false;
     }

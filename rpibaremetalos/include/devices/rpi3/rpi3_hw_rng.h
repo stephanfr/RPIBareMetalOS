@@ -1,7 +1,8 @@
-// Copyright 2023 Stephan Friedl. All rights reserved.
+// Copyright 2026 Stephan Friedl. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+#pragma once
 
 #include "platform/platform_info.h"
 
@@ -12,6 +13,7 @@ class RPi3HardwareRandomNumberGenerator : public minstd::random_device
     static constexpr uint32_t HW_RNG_REGISTER_OFFSET = 0x00104000;
 
 public:
+
     RPi3HardwareRandomNumberGenerator() = delete;
 
     RPi3HardwareRandomNumberGenerator(const PlatformInfo &platform_info)
@@ -28,6 +30,7 @@ public:
     double entropy() const noexcept override { return 32.0; }
 
 private:
+
     typedef struct RPI3HWRandomNumberGeneratorRegisters
     {
         volatile uint32_t control_;
@@ -41,4 +44,3 @@ private:
 
     uint32_t Next32BitValueInternal();
 };
-

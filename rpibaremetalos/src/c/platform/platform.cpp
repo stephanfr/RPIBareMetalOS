@@ -6,8 +6,9 @@
 #include <string.h>
 
 #include <fixed_string>
-#include <memory>
 #include <minimalstdio.h>
+
+#include "utility/hex_parsers.h"
 
 #include "platform/platform_info.h"
 #include "platform/exception_manager.h"
@@ -17,16 +18,17 @@
 
 #include "platform/rpi3/rpi3_exception_manager.h"
 #include "platform/rpi4/rpi4_exception_manager.h"
+#include "platform/rpi5/rpi5_exception_manager.h"
 
 #include "platform/rpi3/rpi3_platform_info.h"
 #include "platform/rpi4/rpi4_platform_info.h"
+#include "platform/rpi5/rpi5_platform_info.h"
 
-#include "devices/rpi3/rpi3_hw_rng.h"
-#include "devices/rpi4/rpi4_hw_rng.h"
+#include "devices/rpi3/rpi3_device_registrar.h"
+#include "devices/rpi4/rpi4_device_registrar.h"
+#include "devices/rpi5/rpi5_device_registrar.h"
 
 #include "devices/std_streams.h"
-#include "devices/uart0.h"
-#include "devices/uart1.h"
 
 #include "devices/video/console_video_framebuffer.h"
 
@@ -35,7 +37,6 @@
 #include "services/uuid.h"
 
 #include "devices/physical_timer.h"
-
 
 //  Global flag to indicate if the platform has been initialized
 
@@ -46,10 +47,6 @@ bool __platform_initialized = false;
 static const PlatformInfo *__platform_info = nullptr;
 static ExceptionManager *__exception_manager = nullptr;
 static MemoryManager *__memory_manager = nullptr;
-
-//  Global for HW RNG generator
-
-static minstd::random_device *__hw_random_number_generator = nullptr;
 
 //  SW RNG fallback for when no hardware RNG is available (e.g. under QEMU).
 //  Wraps minstd::xoroshiro128_plus_plus to satisfy the minstd::random_device interface.
@@ -72,6 +69,71 @@ namespace
     private:
         minstd::xoroshiro128_plus_plus rng_;
     };
+
+    //  Cross-checks the VideoCore memory placement the early-boot mailbox call
+    //      (GetBootTimeSettings, via __videocore_memory_base/
+    //      __videocore_memory_size_in_bytes) established against the same
+    //      information the firmware independently embeds in the kernel command
+    //      line as vc_mem.mem_base=/vc_mem.mem_size=. Both describe the same
+    //      underlying firmware state through two different paths; on a board
+    //      where the mailbox answers some tags incorrectly or not at all (see
+    //      the board-info fix in the port plan), this is a free second opinion
+    //      that costs nothing to check. A mismatch does not halt the boot -- the
+    //      memory manager was already built on the mailbox-derived value by the
+    //      time this runs -- but it is loud, early evidence something is wrong,
+    //      rather than a stranger failure showing up later with no clear cause.
+
+    void CrossCheckVideocoreMemoryLayout()
+    {
+        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> base_setting;
+        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> size_setting;
+
+        if (!KernelCommandLine::FindSetting("vc_mem.mem_base", base_setting) ||
+            !KernelCommandLine::FindSetting("vc_mem.mem_size", size_setting))
+        {
+            return;
+        }
+
+        uint32_t cmdline_base = ParseHexUint32(base_setting.c_str());
+        uint32_t cmdline_size = ParseHexUint32(size_setting.c_str());
+
+        //  Confirmed on RPI4 and 5 hardware: GET_VC_MEMORY (mailbox) and
+        //      vc_mem.mem_base/vc_mem.mem_size (kernel command line) are not two
+        //      reports of the same quantity, so a mismatch here is expected, not
+        //      a symptom of anything wrong. The mailbox tag answers what it is
+        //      actually specified to answer -- the VideoCore's own small private
+        //      RAM reservation (RPi4: base=0x3b400000, size=0x04c00000 -- these
+        //      sum to exactly 0x40000000, a clean ~76MB gpu_mem= split flush
+        //      against the low-1GB boundary). vc_mem.mem_base/mem_size instead
+        //      describe the size of the low-memory GPU-addressable aperture as a
+        //      whole -- consistent with mem_size reading exactly 1GB on every
+        //      board regardless of installed RAM or gpu_mem= setting, which is
+        //      not a plausible reservation size but is exactly the aperture size.
+        //
+        //      Which side is "correct" for OUR purposes still differs by board:
+        //      RPi4's mailbox value sits inside the low-1GB window and is used
+        //      directly for block placement, unmodified, in RPI4BMemoryManager.
+        //      RPi5's mailbox value (~0xFDB00000) sits OUTSIDE that window
+        //      entirely -- itself a real answer to the same question, just one
+        //      that happens to be useless for placement -- so RPI5MemoryManager
+        //      overrides it with a sourced constant instead (see that
+        //      constructor). Either way, neither board's placement logic reads
+        //      the command-line value, so this check can never be acted on --
+        //      demoted to LogDebug1 accordingly: worth keeping (a firmware update
+        //      could change either side), not worth a WARNING on every boot.
+
+        if (cmdline_base != __videocore_memory_base)
+        {
+            LogDebug1("VC memory base mismatch: mailbox=0x%08x cmdline=0x%08x\n",
+                     __videocore_memory_base, cmdline_base);
+        }
+
+        if (cmdline_size != __videocore_memory_size_in_bytes)
+        {
+            LogDebug1("VC memory size mismatch: mailbox=0x%08x cmdline=0x%08x\n",
+                     __videocore_memory_size_in_bytes, cmdline_size);
+        }
+    }
 }
 
 //  To initialize SW RNG - implementation in 'platform_sw_rngs.cpp' but I do not want to expose in header.
@@ -86,7 +148,6 @@ bool SetupSerialConsole()
     //  Set defaults in case the command line does not contain a console setting
 
     minstd::fixed_string<> console_uart(DEAULT_SERIAL_CONSOLE);
-    BaudRates baud_rate = BaudRateFromInteger(DEFAULT_SERIAL_CONSOLE_BAUD_RATE);
 
     //  Check the command line
 
@@ -102,26 +163,8 @@ bool SetupSerialConsole()
 
         int arguments_processed = sscanf(console_setting.c_str(), "%[^ ,] %[ ,] %d", console_uart_requested, comma, &baud_rate_requested);
 
-        //  Two serial ports are available ttys0 and ttys1.  If there is a comma, the second parameter is the baud rate.
-
-        if (arguments_processed >= 2)
-        {
-            switch (baud_rate_requested)
-            {
-            case (uint32_t)BaudRates::BAUD_RATE_300:
-            case (uint32_t)BaudRates::BAUD_RATE_1200:
-            case (uint32_t)BaudRates::BAUD_RATE_2400:
-            case (uint32_t)BaudRates::BAUD_RATE_4800:
-            case (uint32_t)BaudRates::BAUD_RATE_9600:
-            case (uint32_t)BaudRates::BAUD_RATE_14400:
-            case (uint32_t)BaudRates::BAUD_RATE_19200:
-            case (uint32_t)BaudRates::BAUD_RATE_38400:
-            case (uint32_t)BaudRates::BAUD_RATE_57600:
-            case (uint32_t)BaudRates::BAUD_RATE_115200:
-                baud_rate = BaudRateFromInteger(baud_rate_requested);
-                break;
-            }
-        }
+        (void)comma;
+        (void)baud_rate_requested;
 
         if (arguments_processed >= 1)
         {
@@ -134,19 +177,6 @@ bool SetupSerialConsole()
                 console_uart = "UART1";
             }
         }
-    }
-
-    //  We should have valid console and baud rate - so set them
-
-    if (console_uart == "UART0")
-    {
-        auto uart0 = make_static_unique<UART0>(baud_rate, "CONSOLE");
-        GetOSEntityRegistry().AddEntity(uart0);
-    }
-    else
-    {
-        auto uart1 = make_static_unique<UART1>(baud_rate, "CONSOLE");
-        GetOSEntityRegistry().AddEntity(uart1);
     }
 
     //  Set stdin and stdout
@@ -163,29 +193,6 @@ bool SetupSerialConsole()
     SetStandardStreams(&char_io_device, &char_io_device);
 
     //  Finished with success
-
-    return true;
-}
-
-//  Function to set up an HDMI framebuffer console, best-effort.
-//      Unlike SetupSerialConsole(), failure here is an ordinary, expected
-//      outcome (no monitor attached, running under QEMU with no display)
-//      -- it must NOT ParkCore(); the caller just skips mirroring to it.
-
-bool SetupFrameBufferConsole(ConsoleVideoFrameBuffer *&out_frame_buffer_console)
-{
-    auto fb_console = make_static_unique<ConsoleVideoFrameBuffer>("HDMI",
-                                                                  VideoFrameBuffer::PackColor(0x00, 0xFF, 0x00),
-                                                                  VideoFrameBuffer::PackColor(0x00, 0x00, 0x00));
-
-    if (!fb_console->IsAllocated())
-    {
-        return false;
-    }
-
-    out_frame_buffer_console = fb_console.get();
-
-    GetOSEntityRegistry().AddEntity(fb_console);
 
     return true;
 }
@@ -211,93 +218,106 @@ void InitializePlatform()
 
     //  We have not set the current board type yet, do so now.
     //      This should only happen once very early in OS initialization.
+    //
+    //  Device intialization is a two-step process: first we have to create the hardware random number generator (HWRNG)
+    //    and then we can register the devices for the platform. The HWRNG is used to seed the software RNGs, which are
+    //    used to generate UUIDs for the devices. The HWRNG is also registered as an OSEntity, so that it can be used by
+    //    other parts of the OS. The device registrar is responsible for creating and registering the
+    //    devices for the platform. The device registrar is also responsible for creating and registering the HWRNG.
+
+    minstd::unique_ptr<DeviceRegistrar> device_registrar;
 
     switch (__hw_board_type)
     {
-    case RPI_BOARD_ENUM_RPI3:
-    {
-        __platform_info = static_new<RPI3PlatformInfo>();
-        __exception_manager = static_new<BCM2837ExceptionManager>();
-        auto *rpi3_rng = static_new<RPi3HardwareRandomNumberGenerator>(*__platform_info);
-        if (rpi3_rng->Initialize())
+        case RPI_BOARD_ENUM_RPI3:
         {
-            __hw_random_number_generator = rpi3_rng;
-        }
-        break;
-    }
+            __platform_info = static_new<RPI3PlatformInfo>();
+            __exception_manager = static_new<BCM2837ExceptionManager>();
+            device_registrar = dynamic_new<RPi3DeviceRegistrar>();
 
-    case RPI_BOARD_ENUM_RPI4:
-    {
-        __platform_info = static_new<RPI4PlatformInfo>();
-        __exception_manager = static_new<BCM2711ExceptionManager>();
-        auto *rpi4_rng = static_new<RPi4HardwareRandomNumberGenerator>(*__platform_info);
-        if (rpi4_rng->Initialize())
-        {
-            __hw_random_number_generator = rpi4_rng;
+            break;
         }
-        break;
-    }
+
+        case RPI_BOARD_ENUM_RPI4:
+        {
+            __platform_info = static_new<RPI4PlatformInfo>();
+            __exception_manager = static_new<BCM2711ExceptionManager>();
+            device_registrar = dynamic_new<RPi4DeviceRegistrar>();
+
+            break;
+        }
+
+        case RPI_BOARD_ENUM_RPI5:
+        {
+            __platform_info = static_new<RPI5PlatformInfo>();
+            __exception_manager = static_new<RPI5ExceptionManager>();
+            device_registrar = dynamic_new<RPi5DeviceRegistrar>();
+        
+            break;
+        }
 
         //  If we do not identify the correct board, then park the core.
 
-    default:
-        ParkCore();
-        break;
+        default:
+            ParkCore();
+            break;
     }
+
+    auto hw_rng = device_registrar->CreateHardwareRNG();
 
     //  If HW RNG is not available (e.g. QEMU), fall back to a SW RNG seeded from the CPU timer and board serial number
 
-    if (__hw_random_number_generator == nullptr)
+    if (hw_rng == nullptr)
     {
         uint64_t ticks = PhysicalTimer::CurrentTicks();
         uint64_t serial = __platform_info->GetBoardSerialNumber();
-        __hw_random_number_generator = static_new<xoroshiro_random_device>(
+        hw_rng = static_new<xoroshiro_random_device>(
             minstd::xoroshiro128_plus_plus::seed_type(ticks ^ 0x9E3779B97F4A7C15ULL,
                                                       serial ^ 0x6A09E667F3BCC908ULL));
     }
 
     //  Seed UUID generation before entities/tasks are created on additional cores.
 
-    //    UUID::SeedRNG(__hw_random_number_generator->Next64BitValue());
     UUID::SeedRNG(88172645463325252ULL);
 
     //  Initialize the platform software RNGs from the HW RNG
 
-    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()),
-                                       minstd::xoroshiro128_plus_plus::seed_type(((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)(),
-                                                                                  ((uint64_t)((*__hw_random_number_generator)()) << 32) | (*__hw_random_number_generator)()));
+    InitializeSWRandomNumberGenerators(MurmurHash64ASeed(((uint64_t)((*hw_rng)()) << 32) | (*hw_rng)()),
+                                       minstd::xoroshiro128_plus_plus::seed_type(((uint64_t)((*hw_rng)()) << 32) | (*hw_rng)(),
+                                                                                  ((uint64_t)((*hw_rng)()) << 32) | (*hw_rng)()));
 
-    //  Setup the serial console
+    //  We have the RNGs setup - now register the devices for the platform
+
+    device_registrar->RegisterDevices(hw_rng);
+
+    //  Setup the console, and if it fails, park the core -- we cannot continue without a console.
 
     if (!SetupSerialConsole())
     {
         ParkCore();
     }
 
-    //  Best-effort: mirror console output onto an HDMI framebuffer console
-    //      if one can be allocated. stdin stays serial-only -- the
-    //      framebuffer console has no input device behind it.
+    //  Tee the serial console and framebuffer console together if both are available,
+    //      and set the standard streams to the tee.
 
-    ConsoleVideoFrameBuffer *frame_buffer_console = nullptr;
+    auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+    auto frame_buffer_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("HDMI");
 
-    if (SetupFrameBufferConsole(frame_buffer_console))
+    if (!console_lookup.Failed() && !frame_buffer_lookup.Failed())
     {
-        auto console_lookup = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+        CharacterIODevice &serial_console = *console_lookup;
 
-        if (!console_lookup.Failed())
-        {
-            CharacterIODevice &serial_console = *console_lookup;
+        auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_lookup, "STDOUT_TEE");
 
-            auto tee = make_static_unique<TeeCharacterIODevice>(serial_console, *frame_buffer_console, "STDOUT_TEE");
+        CharacterIODevice *tee_ptr = tee.get();
 
-            CharacterIODevice *tee_ptr = tee.get();
+        GetOSEntityRegistry().AddEntity(tee);
 
-            GetOSEntityRegistry().AddEntity(tee);
-
-            SetStandardStreams(tee_ptr, &serial_console);
-        }
+        SetStandardStreams(tee_ptr, &serial_console);
     }
-    
+
+    CrossCheckVideocoreMemoryLayout();
+
     //  Insure that the number of cores available is less than the max and that they match the number according to the platform
 
     //    if ((__number_of_cores_available > MAX_CORES) ||

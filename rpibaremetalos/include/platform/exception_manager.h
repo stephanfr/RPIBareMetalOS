@@ -35,7 +35,7 @@ public:
 
     virtual void HandleInterrupt() = 0;
 
-    void HandleException(unsigned int type, unsigned long esr, unsigned long address);
+    void HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far);
 
 protected:
     using ISRPointerList = minstd::forward_list<InterruptServiceRoutine *>;

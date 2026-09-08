@@ -152,6 +152,7 @@ SOFTWARE.
     mov	x0, #\type
     mrs	x1, esr_el1
     mrs	x2, elr_el1
+    mrs	x3, far_el1
     bl	ShowInvalidExceptionTableEntryMessage
     
     //  Just park the core, no recovery possible
@@ -298,6 +299,20 @@ EL1_SynchronousException:
 	and		x24, x24, #0x3F										//	Isolate the exception class - there is another field in the register if FEAT_LS64 is implemented
 	cmp		x24, #ESR_ELx_EC_SVC64								//	If the exception is from SVC in 64-bit state, then
 	b.eq	EL1_SyscallDispatcher								//		branch to the syscall dispatcher
+	cmp		x24, #ESR_ELx_EC_DABT_CUR						//	Check for Data Abort at EL1 (MMIO probe fault)
+	b.ne	EL1_SynchronousFault
+	adrp	x0, __device_probe_in_progress
+	ldr		w1, [x0, :lo12:__device_probe_in_progress]
+	cbz		w1, EL1_SynchronousFault						//	not probing - treat as real fault
+	str		wzr, [x0, :lo12:__device_probe_in_progress]
+	adrp	x0, __device_probe_faulted
+	mov		w1, #1
+	str		w1, [x0, :lo12:__device_probe_faulted]
+	ldr		x0, [sp, #16 * 16]								//	step ELR_EL1 past the faulting load
+	add		x0, x0, #4
+	str		x0, [sp, #16 * 16]
+	KernelExit EL1
+EL1_SynchronousFault:
 	HandleInvalidEntry EL1, SYNC_ERROR
 
 EL1_SyscallDispatcher:
@@ -338,7 +353,6 @@ EL0_SyscallDispatcher:
 	blr		x16													//	call system_call routine
 	str		x0, [sp, 0]											// 	Returned x0 - zero is offset of x0 in the stack frame
 	KernelExit EL0
-
 
 EL0_SyscallIndexOutOfRange:
 	HandleInvalidEntry EL0, SYSCALL_ERROR

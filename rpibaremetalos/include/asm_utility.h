@@ -31,14 +31,12 @@ extern "C"
 
 inline uint32_t GetCoreID()
 {
-    uint32_t core;
-
-    asm volatile(
-        "mrs %0, mpidr_el1\n\t"
-        "and %0, %0, #3"
-        : "=r"(core));
-
-    return core;
+    uint64_t mpidr;
+    asm volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
+    //  A53/A72 (RPi3/4): core index in Aff0 (bits 1:0), Aff1=0.
+    //  A76 (RPi5, DynamIQ): core index in Aff1 (bits 15:8), Aff0=0.
+    //  OR-ing them together gives the correct core number on both topologies.
+    return static_cast<uint32_t>(((mpidr >> 8) & 0xFF) | (mpidr & 3));
 }
 
 inline void *GetTaskContext()

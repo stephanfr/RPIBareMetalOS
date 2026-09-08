@@ -15,6 +15,9 @@ extern "C" uint64_t DetermineNumberOfCores( uint64_t    device_type )
         case RPI_BOARD_ENUM_RPI4:
             return 4;
 
+        case RPI_BOARD_ENUM_RPI5:
+            return 4;
+            
         default:
             return 1;
     }
