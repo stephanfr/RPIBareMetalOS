@@ -8,42 +8,42 @@
 
 #include <random>
 
-//  BCM2712's HW RNG register layout is NOT confirmed from source in this
-//      plan (RPi3/RPi4's iproc_rng200-style layout is not guaranteed to
-//      carry over -- BCM2712 already changed the mailbox, power manager, and
-//      SD controller offsets relative to RPi3/RPi4, so assuming this one is
-//      unchanged would be exactly the kind of invented value this plan's
-//      guidance rules warn against). Initialize() always fails, so this
-//      always falls through to the existing SW RNG fallback in
-//      platform.cpp -- same behavior QEMU already exercises today. Replace
-//      this with a real register-based implementation once BCM2712's RNG
-//      binding/register map is confirmed from a primary source.
-
 class RPi5HardwareRandomNumberGenerator : public minstd::random_device
 {
+    // BCM2712 iproc_rng200 variant; offset from GetMMIOBase() (0x107C000000 + 0x1208000)
+    static constexpr uint32_t HW_RNG_REGISTER_OFFSET = 0x01208000;
+
 public:
     RPi5HardwareRandomNumberGenerator() = delete;
 
     RPi5HardwareRandomNumberGenerator(const PlatformInfo &platform_info)
+        : registers_((RPI5HWRandomNumberGeneratorRegisters *)(platform_info.GetMMIOBase() + HW_RNG_REGISTER_OFFSET))
     {
-        (void)platform_info;
     }
 
     ~RPi5HardwareRandomNumberGenerator() {}
 
-    bool Initialize()
+    bool Initialize();
+
+    result_type operator()() override;
+
+    double entropy() const noexcept override { return 32.0; }
+
+private:
+    typedef struct RPI5HWRandomNumberGeneratorRegisters
     {
-        return false;
-    }
+        volatile uint32_t control_;        // 0x00
+        volatile uint32_t rng_soft_reset_; // 0x04
+        volatile uint32_t rbg_soft_reset_; // 0x08
+        volatile uint32_t reserved1_[3];   // 0x0C-0x14
+        volatile uint32_t int_status_;     // 0x18
+        volatile uint32_t reserved2_;      // 0x1C
+        volatile uint32_t fifo_data_;      // 0x20
+        volatile uint32_t fifo_count_;     // 0x24
+    } RPI5HWRandomNumberGeneratorRegisters;
 
-    result_type operator()() override
-    {
-        //  Never reached -- Initialize() always fails, so platform.cpp never
-        //      installs this as __hw_random_number_generator.
+    RPI5HWRandomNumberGeneratorRegisters *registers_;
 
-        return 0;
-    }
-
-    double entropy() const noexcept override { return 0.0; }
+    uint32_t Next32BitValueInternal();
 };
 
