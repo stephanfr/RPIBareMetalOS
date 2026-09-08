@@ -8,6 +8,7 @@
 #include "heaps.h"
 #include "os_memory_config.h"
 
+#include "platform/address_space_layout.h"
 #include "platform/platform_info.h"
 #include "platform/mmu_manager.h"
 
@@ -19,7 +20,7 @@ MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
       page_size_(DEFAULT_PAGE_SIZE),
       total_memory_in_bytes_(total_memory_in_bytes),
       mmio_base_(mmio_base),
-      free_memory_start_((uint64_t)&__os_process_start),
+      free_memory_start_(KernelVirtualAddressToPhysical((uint64_t)&__os_process_start)),
       num_pages_((MMUManager::Instance().AllocatableMemoryTop() - free_memory_start_) / page_size_)
 {
     LogEntryAndExit("num_pages: %u\n", num_pages_);

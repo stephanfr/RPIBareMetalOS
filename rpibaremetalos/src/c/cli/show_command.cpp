@@ -63,17 +63,17 @@ namespace cli::commands
         context.output_stream_ << minstd::format(format_buffer, "Init Array End: {}\n", (void *)&__init_array_end);
         context.output_stream_ << minstd::format(format_buffer, "Static Heap Reserved Space Start: {}\n", (void *)&__static_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Static Heap Reserved Space End: {}\n", (void *)&__static_heap_end);
-        context.output_stream_ << minstd::format(format_buffer, "Static Heap Reserved Space Size: {}\n", (uint32_t *)&__static_heap_size_in_bytes);
+//        context.output_stream_ << minstd::format(format_buffer, "Static Heap Reserved Space Size: {}\n", (uint32_t *)&__static_heap_size_in_bytes);       //  TODO - fix this after the virtual memory changes
         context.output_stream_ << minstd::format(format_buffer, "Static Heap Start: {}\n", (void *)&__static_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Static Heap End: {}\n", (void *)&__static_heap_end);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space Start: {}\n", (void *)&__dynamic_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space End: {}\n", (void *)&__dynamic_heap_end);
-        context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space Size: {}\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
+//        context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Reserved Space Size: {}\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap Start: {}\n", (void *)&__dynamic_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Dynamic Heap End: {}\n", (void *)&__dynamic_heap_end);
         context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Reserved Space Start: {}\n", (void *)&__filesystem_cache_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Reserved Space End: {}\n", (void *)&__filesystem_cache_heap_end);
-        context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Reserved Space Size: {}\n", (uint32_t *)&__filesystem_cache_heap_size_in_bytes);
+//        context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Reserved Space Size: {}\n", (uint32_t *)&__filesystem_cache_heap_size_in_bytes);
         context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap Start: {}\n", (void *)&__filesystem_cache_heap_start);
         context.output_stream_ << minstd::format(format_buffer, "Filesystem Cache Heap End: {}\n", (void *)&__filesystem_cache_heap_end);
         context.output_stream_ << minstd::format(format_buffer, "Core Initialization Stack Top: {}\n", (void *)&__per_core_initialization_stack_top);

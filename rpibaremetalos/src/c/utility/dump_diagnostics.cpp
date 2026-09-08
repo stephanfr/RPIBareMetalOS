@@ -50,17 +50,17 @@ void DumpDiagnostics()
     printf("Init Array End: %p\n", (uint8_t *)&__init_array_end);
     printf("Static Heap Reserved Space Start: %p\n", (uint8_t *)&__static_heap_start);
     printf("Static Heap Reserved Space End: %p\n", (uint8_t *)&__static_heap_end);
-    printf("Static Heap Reserved Space Size: %p\n", (uint32_t *)&__static_heap_size_in_bytes);
+//    printf("Static Heap Reserved Space Size: %p\n", (uint32_t *)&__static_heap_size_in_bytes);       //  TODO - fix this after the virtual memory changes
     printf("Static Heap Start: %p\n", (void *)&__static_heap_start);
     printf("Static Heap End: %p\n", (void *)&__static_heap_end);
     printf("Dynamic Heap Reserved Space Start: %p\n", (uint8_t *)&__dynamic_heap_start);
     printf("Dynamic Heap Reserved Space End: %p\n", (uint8_t *)&__dynamic_heap_end);
-    printf("Dynamic Heap Reserved Space Size: %p\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
+//    printf("Dynamic Heap Reserved Space Size: %p\n", (uint32_t *)&__dynamic_heap_size_in_bytes);       //  TODO - fix this after the virtual memory changes
     printf("Dynamic Heap Start: %p\n", (void *)&__dynamic_heap_start);
     printf("Dynamic Heap End: %p\n", (void *)&__dynamic_heap_end);
     printf("Filesystem Cache Heap Reserved Space Start: %p\n", (uint8_t *)&__filesystem_cache_heap_start);
     printf("Filesystem Cache Heap Reserved Space End: %p\n", (uint8_t *)&__filesystem_cache_heap_end);
-    printf("Filesystem Cache Heap Reserved Space Size: %p\n", (uint32_t *)&__filesystem_cache_heap_size_in_bytes);
+//    printf("Filesystem Cache Heap Reserved Space Size: %p\n", (uint32_t *)&__filesystem_cache_heap_size_in_bytes);       //  TODO - fix this after the virtual memory changes
     printf("Filesystem Cache Heap Start: %p\n", (void *)&__filesystem_cache_heap_start);
     printf("Filesystem Cache Heap End: %p\n", (void *)&__filesystem_cache_heap_end);
     printf("Core Initialization Stack Top: %p\n", (uint8_t *)&__per_core_initialization_stack_top);

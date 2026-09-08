@@ -415,6 +415,25 @@ use_page_tables_on_secondary_core:
     mov     x1, x0
     bl      EnableMMUTables
 
+    //  Same transition as core 0 (Step 1.3b): rebase the stack, jump high, re-derive
+    //      VBAR and the two table-base registers.
+
+    ldr     x9, =S_KERNEL_VA_BASE
+    add     x10, sp, x9
+    mov     sp, x10
+    ldr     x9, =secondary_running_at_high_va
+    br      x9
+
+secondary_running_at_high_va:
+
+    adr     x9, __exception_vectors
+    msr     VBAR_EL1, x9
+
+    adrp    x21_coreStateTableAddress, __core_state
+    add     x21_coreStateTableAddress, x21_coreStateTableAddress, :lo12:__core_state
+    adrp    x22_coreJumpTableAddress, __core_jump_table
+    add     x22_coreJumpTableAddress, x22_coreJumpTableAddress, :lo12:__core_jump_table
+
     //  Mark the core as having jumped to application code
 
     SetCoreState #CORE_JUMPED_TO_SECONDARY_MAIN
@@ -466,7 +485,31 @@ continue_on_core0:
     add     x0, x0, :lo12:__early_l1_page_table
     mov     x1, x0                                              //  same table in both TTBRs (see address_space_layout.h)
     bl      EnableMMUTables
-    //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
+
+    //  Move to the high VA.  From here on -- BSS clear, static constructors,
+    //      InitializePlatform -- every pointer C++ computes is a kernel VA.
+    //
+    //      `ldr x9, =label` is deliberate: it resolves to the LINKED (high) address,
+    //      which is the destination.  The literal pool itself is reached PC-relatively.
+
+    ldr     x9, =S_KERNEL_VA_BASE
+    add     x10, sp, x9
+    mov     sp, x10                                             //  the boot stack is in the image: rebase it
+    ldr     x9, =core0_running_at_high_va
+    br      x9
+
+core0_running_at_high_va:
+
+    //  Re-derive the three physical values still held from before the jump.  All were
+    //      computed with adr/adrp at a physical PC; recomputing at a high PC gives high.
+
+    adr     x9, __exception_vectors
+    msr     VBAR_EL1, x9
+
+    adrp    x21_coreStateTableAddress, __core_state
+    add     x21_coreStateTableAddress, x21_coreStateTableAddress, :lo12:__core_state
+    adrp    x22_coreJumpTableAddress, __core_jump_table
+    add     x22_coreJumpTableAddress, x22_coreJumpTableAddress, :lo12:__core_jump_table
 
     //  Clear BSS -this code assumes BSS segments are a multiple of 8 bytes in length
 
@@ -543,9 +586,11 @@ start_next_core:
     ldr     x0, =0xC4000003
     lsl     x1, x9, #8                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
     ldr     x2, =running_in_el2
+    ldr     x16, =S_KERNEL_VA_BASE
+    sub     x2, x2, x16                 //  PHYSICAL-ENTRY-POINT: target core starts with MMU off (R1)
     mov     x3, #0
     smc     #0
-    mov     w25, w0                    //  save the PSCI CPU_ON return status
+    mov     w25, w0                     //  save the PSCI CPU_ON return status
     cbnz    w25, next_core
     mrs     x13, cntpct_el0
     ldr     x14, =270000000

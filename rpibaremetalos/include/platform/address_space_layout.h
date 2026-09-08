@@ -45,5 +45,5 @@ static_assert(USER_SPACE_TOP - USER_SPACE_BASE <= BYTES_1G, "user window must fi
 static_assert((USER_SPACE_BASE & (BYTES_1G - 1)) == 0, "user window must be 1GB-aligned");
 static_assert(USER_SPACE_TOP < (1ULL << 39), "user window must fit the T0SZ=25 512GB TTBR0 range");
 
-constexpr uint64_t PhysToKernelVA(uint64_t physical_address) { return physical_address + KERNEL_VA_BASE; }
-constexpr uint64_t KernelVAToPhys(uint64_t virtual_address)  { return virtual_address - KERNEL_VA_BASE; }
+constexpr uint64_t PhysicalToKernelVirtualAddress(uint64_t physical_address) { return physical_address + KERNEL_VA_BASE; }
+constexpr uint64_t KernelVirtualAddressToPhysical(uint64_t virtual_address)  { return virtual_address - KERNEL_VA_BASE; }
