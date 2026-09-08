@@ -9,6 +9,7 @@
 #include <array>
 
 #include "asm_globals.h"
+#include "platform/address_space_layout.h"
 
 #include "platform/mmu_manager.h"
 
@@ -178,15 +179,16 @@ protected:
     uint64_t dma_block_;
     uint64_t page_table_block_;
 
-    uint64_t *kernel_page_table_1_to_1_;
+    uint64_t *kernel_page_table_;
     VMSAv8_64_DESCRIPTOR *Stage2map1to1_;
 
     //  A secondary core reads this with its MMU and caches off, so the value has to be
     //      pushed out to DRAM rather than left sitting in this core's caches.
+    //      Read by secondary cores with their MMU OFF: must be PHYSICAL (R1).
 
-    static void PublishKernelPageTableBase(uint64_t page_table_base)
+    static void PublishKernelPageTableBase(uint64_t page_table_base_va)
     {
-        __kernel_page_table_base = page_table_base;
+        __kernel_page_table_base = KernelVirtualAddressToPhysical(page_table_base_va);
 
         asm volatile("dc civac, %0" ::"r"(&__kernel_page_table_base) : "memory");
         asm volatile("dsb sy" ::: "memory");

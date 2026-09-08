@@ -30,7 +30,7 @@ namespace task
         //  This reserves space for a complete KernelEntry stack frame at the task top of stack.
         //      This state is swapped in when the task is initiated.
 
-        initial_full_cpu_state_location_ = (TaskImpl::FullCPUState*)((unsigned long)initial_stack + stack_size_in_bytes_ - sizeof(TaskImpl::FullCPUState));
+        initial_full_cpu_state_location_ = (TaskImpl::FullCPUState*)((unsigned long)(uint8_t *)initial_stack + stack_size_in_bytes_ - sizeof(TaskImpl::FullCPUState));
         memset(initial_full_cpu_state_location_, 0, sizeof(TaskImpl::FullCPUState));
 
         return *initial_full_cpu_state_location_;

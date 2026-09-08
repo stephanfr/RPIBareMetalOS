@@ -4,8 +4,10 @@
 
 #pragma once
 
-#include "platform/exception_manager.h"
 #include "asm_utility.h"
+
+#include "platform/exception_manager.h"
+#include "platform/address_space_layout.h"
 
 #include <devices/log.h>
 
@@ -151,29 +153,30 @@ private:
 
     //  GIC distributor register offsets
 
-    static constexpr uint32_t GICD_IPRIORITYR              = 0x400;
-    static constexpr uint32_t GICD_ITARGETSR               = 0x800;
-    static constexpr uint32_t GICD_ISENABLER               = 0x100;
-    static constexpr uint32_t GICD_ICENABLER               = 0x180;
-    static constexpr uint32_t GICD_SGIR                    = 0xF00;
+    static constexpr uint32_t GICD_IPRIORITYR                 = 0x400;
+    static constexpr uint32_t GICD_ITARGETSR                  = 0x800;
+    static constexpr uint32_t GICD_ISENABLER                  = 0x100;
+    static constexpr uint32_t GICD_ICENABLER                  = 0x180;
+    static constexpr uint32_t GICD_SGIR                       = 0xF00;
     static constexpr uint32_t GICD_SGIR_CPU_TARGET_LIST_SHIFT = 16;
 
     //  GIC CPU interface register offsets
 
-    static constexpr uint32_t GICC_IAR                     = 0x00C;
-    static constexpr uint32_t GICC_EOIR                    = 0x010;
+    static constexpr uint32_t GICC_IAR                        = 0x00C;
+    static constexpr uint32_t GICC_EOIR                       = 0x010;
 
-    static constexpr uint32_t GICC_IAR_INTID_MASK          = 0x3FF;
-    static constexpr uint32_t GIC_SPURIOUS_INTID           = 1023;
+    static constexpr uint32_t GICC_IAR_INTID_MASK             = 0x3FF;
+    static constexpr uint32_t GIC_SPURIOUS_INTID              = 1023;
 
+    
     volatile uint32_t &GICD(uint32_t offset)
     {
-        return *reinterpret_cast<volatile uint32_t *>(gicd_base_ + offset);
+        return *reinterpret_cast<volatile uint32_t *>(PhysicalToKernelVirtualAddress(gicd_base_ + offset));
     }
 
     volatile uint32_t &GICC(uint32_t offset)
     {
-        return *reinterpret_cast<volatile uint32_t *>(gicc_base_ + offset);
+        return *reinterpret_cast<volatile uint32_t *>(PhysicalToKernelVirtualAddress(gicc_base_ + offset));
     }
 
     int32_t InterruptToINTID(Interrupts interrupt)

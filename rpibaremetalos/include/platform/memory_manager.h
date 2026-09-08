@@ -12,15 +12,24 @@
 #include <strong_typedef>
 
 #include "asm_globals.h"
+#include "platform/address_space_layout.h"
 
 #include "os_entity.h"
 
 struct MemoryPagePointer : minstd::strong_type<uint64_t, MemoryPagePointer>
 {
+    //  value_ is PHYSICAL.  Pointer conversion yields the kernel VA so callers that
+    //      dereference a page keep working; page-table/DMA code asks for Physical().
+
     template <typename T>
     operator T *() const
     {
-        return reinterpret_cast<T *>(value_);
+        return reinterpret_cast<T *>(PhysicalToKernelVirtualAddress(value_));
+    }
+
+    uint64_t Physical() const
+    {
+        return value_;
     }
 
     MemoryPagePointer operator+(uint64_t offset) const

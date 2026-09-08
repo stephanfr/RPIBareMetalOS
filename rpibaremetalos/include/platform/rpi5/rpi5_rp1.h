@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include "platform/address_space_layout.h"
+
 //
 //  RP1 platform/config surface: base addresses, GPIO pin muxing, pad
 //      configuration, and clock resolution for RP1, the PCIe-attached
@@ -21,6 +23,7 @@
 namespace RP1
 {
     constexpr uint64_t WINDOW_BASE = 0x1F00000000ULL;
+    constexpr uint64_t WINDOW_VA   = PhysicalToKernelVirtualAddress(WINDOW_BASE);
 
     constexpr uint64_t CLOCKS_BASE = WINDOW_BASE + 0x00018000ULL;
     constexpr uint64_t GPIO_BASE   = WINDOW_BASE + 0x000D0000ULL;

@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include "devices/video/video_framebuffer.h"
+#include "platform/address_space_layout.h"
 
 bool VideoFrameBuffer::Allocate()
 {
@@ -91,7 +92,7 @@ bool VideoFrameBuffer::Allocate()
     //      physical address. Masking them off is the standard Pi3/4/5
     //      convention.
 
-    base_address_ = reinterpret_cast<volatile uint8_t *>(static_cast<uintptr_t>(base_address_raw & 0x3FFFFFFF));
+    base_address_ = reinterpret_cast<volatile uint8_t *>(PhysicalToKernelVirtualAddress(static_cast<uintptr_t>(base_address_raw & 0x3FFFFFFF)));
     size_in_bytes_ = size_in_bytes;
     pitch_ = pitch;
     width_ = applied_width;

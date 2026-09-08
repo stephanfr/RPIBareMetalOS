@@ -20,19 +20,26 @@ public:
 
     void EnableMMU() override
     {
-        PublishKernelPageTableBase((uint64_t)&kernel_page_table_1_to_1_[0]);
+        //  kernel_page_table_ is a kernel VA now.  PublishKernelPageTableBase converts
+        //      it to physical internally, because a secondary core reads that global with
+        //      its MMU off.
 
-        EnableMMUTables((uint64_t)&kernel_page_table_1_to_1_[0], (uint64_t)&kernel_page_table_1_to_1_[0]);
+        PublishKernelPageTableBase((uint64_t)&kernel_page_table_[0]);
+
+        //  Both arguments PHYSICAL (R1).  TTBR0 becomes model-decided in Step 1B.2.
+
+        EnableMMUTables(KernelVirtualAddressToPhysical((uint64_t)&kernel_page_table_[0]),
+                        KernelVirtualAddressToPhysical((uint64_t)&kernel_page_table_[0]));
     }
 
     void *DMAUncachedMemoryBase() const override
     {
-        return (void *)(dma_block_ * level1_blocksize_);
+        return (void *)PhysicalToKernelVirtualAddress(dma_block_ * level1_blocksize_);
     }
 
     void *ARMToGPUAddress(void *ARMaddress) const override
     {
-        return (void *)((uintptr_t)ARMaddress | 0xC0000000);
+        return (void *)(KernelVirtualAddressToPhysical((uintptr_t)ARMaddress) | 0xC0000000);
     }
 
 };

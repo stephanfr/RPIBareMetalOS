@@ -33,7 +33,7 @@ namespace syscall
             return -1;
         }
 
-        return static_cast<unsigned long>(new_page);
+        return (unsigned long)(uint8_t *)new_page;
     }
 
     void Exit()
