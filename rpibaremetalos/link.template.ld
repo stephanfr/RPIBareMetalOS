@@ -66,6 +66,8 @@ SECTIONS
         . = . + 4096;           /* 512 L1 entries x 8 bytes; we use 4 (covers 0-4GB) */
         __early_l2_page_table = .;
         . = . + (4096 * 4);     /* 4 sub-tables x 512 entries x 8 bytes = 16KB */
+        __empty_user_page_table = .;
+        . = . + 4096;           /* one all-zero L1: TTBR0 for every kernel task (R3) */
         . = ALIGN(4096);
         __early_page_tables_end = .;
     } > OS_RAM

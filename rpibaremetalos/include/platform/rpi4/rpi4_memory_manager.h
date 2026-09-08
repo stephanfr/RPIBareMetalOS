@@ -21,7 +21,7 @@ public:
     {
         PublishKernelPageTableBase((uint64_t)&kernel_page_table_1_to_1_[0]);
 
-        EnableMMUTables((uint64_t)&kernel_page_table_1_to_1_[0], (uint64_t)0);
+        EnableMMUTables((uint64_t)&kernel_page_table_1_to_1_[0], (uint64_t)&kernel_page_table_1_to_1_[0]);
     }
 
     void *DMAUncachedMemoryBase() const override

@@ -407,7 +407,12 @@ el1_spin:
 
 use_page_tables_on_secondary_core:
 
-    mov     x1, #0
+    //  ONE table in BOTH TTBRs.  Never mix the early table with a board's final table:
+    //      they give the VideoCore/DMA block different attributes (cached vs
+    //      NORMAL_NO_CACHING), and the architecture does not keep two attribute sets on
+    //      one physical page coherent.
+
+    mov     x1, x0
     bl      EnableMMUTables
 
     //  Mark the core as having jumped to application code
@@ -459,7 +464,7 @@ continue_on_core0:
 
     adrp    x0, __early_l1_page_table
     add     x0, x0, :lo12:__early_l1_page_table
-    mov     x1, #0                                              //  TTBR1 unused; TTBR0 covers all
+    mov     x1, x0                                              //  same table in both TTBRs (see address_space_layout.h)
     bl      EnableMMUTables
     //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
 
