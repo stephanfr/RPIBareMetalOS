@@ -39,7 +39,7 @@ void MMUManager::Initialize()
 
     //  Get the memory model from the kernel command line
 
-    MemoryModelTypes memory_model = MemoryModelTypes::KERNEL_ONLY_1_TO_1;
+    MemoryModelTypes memory_model = MemoryModelTypes::KERNEL_HIGH_USER_LOW;
 
     minstd::fixed_string<64> memory_model_string;
 

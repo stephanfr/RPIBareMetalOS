@@ -148,3 +148,38 @@ public:
 
     const UserSpaceLayout &UserSpace() const override { return SharedUserSpaceLayout(); }
 };
+
+
+//
+//  Memory model where user space is isolated from kernel space.
+//
+
+class KernelHighUserLowMemoryModel : public MemoryModel
+{
+public:
+    MemoryModelTypes Type() const override { return MemoryModelTypes::KERNEL_HIGH_USER_LOW; }
+    const char *Name() const override { return MMUManager::KERNEL_HIGH_USER_LOW_STRING; }
+
+    //  The identity map served only the Phase 1 transition.  Every low VA a kernel task
+    //      touches faults from here on (R3).  __empty_user_page_table is a real, permanently
+    //      empty table: absence faults, it never silently succeeds.
+
+    uint64_t BootTTBR0Physical(const uint64_t * /*kernel_l1_va*/) const override
+    {
+        return KernelVirtualAddressToPhysical((uint64_t)&__empty_user_page_table);
+    }
+
+    //  A task sees its own window and nothing else.
+
+    bool SeedTaskL1(uint64_t *task_l1_va) const override
+    {
+        for (uint32_t i = 0; i < TASK_L1_ENTRY_COUNT; i++)
+        {
+            task_l1_va[i] = 0;
+        }
+
+        return true;
+    }
+
+    const UserSpaceLayout &UserSpace() const override { return SharedUserSpaceLayout(); }
+};

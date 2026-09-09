@@ -84,6 +84,12 @@
 .align	4
 
 EnableMMUTables:
+
+	//  A null translation table is a programming error, never a runtime state.
+
+	cbz     x0, ParkCore
+	cbz     x1, ParkCore
+
 	dsb     sy
 
 	// Set memory attribute register

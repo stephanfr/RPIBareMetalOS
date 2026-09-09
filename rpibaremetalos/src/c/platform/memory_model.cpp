@@ -12,6 +12,7 @@
 union memory_model_union
 {
     KernelOnly1To1MemoryModel kernel_only_1_to_1;
+    KernelHighUserLowMemoryModel kernel_high_user_low;
 };
 
 uint8_t __memory_model_storage[sizeof(memory_model_union) + 16] __attribute__((aligned(16)));
@@ -28,6 +29,10 @@ void MemoryModel::Initialize(MemoryModelTypes type)
     {
         case MemoryModelTypes::KERNEL_ONLY_1_TO_1:
             instance_ = new ((void *)__memory_model_storage) KernelOnly1To1MemoryModel();
+            break;
+
+        case MemoryModelTypes::KERNEL_HIGH_USER_LOW:
+            instance_ = new ((void *)__memory_model_storage) KernelHighUserLowMemoryModel();
             break;
 
         default:
