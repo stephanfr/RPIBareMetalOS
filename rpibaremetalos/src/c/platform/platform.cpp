@@ -202,6 +202,8 @@ bool SetupSerialConsole()
 
 extern "C" void InitializePlatform() __attribute__((used));
 
+extern "C" void initialize_dynamic_heap();
+
 void InitializePlatform()
 {
     //  TODO - figure out how to signal error messages
@@ -210,6 +212,12 @@ void InitializePlatform()
     {
         return;
     }
+
+    //  The dynamic heap has to exist before the first dynamic_new.
+    //      Safe here: start.S runs the .init_array static constructors before calling
+    //      InitializePlatform(), which is the ordering this call actually depends on.
+
+    initialize_dynamic_heap();
 
     //  First thing, initialize the MMU manager
     //      The GPU Mailbox assumes that the MMU is enabled, so we need to do this first.

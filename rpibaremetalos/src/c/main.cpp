@@ -36,10 +36,6 @@ extern "C" void initialize_dynamic_heap();
 
 extern "C" void kernel_main()
 {
-    // The dynamic heap requires thread-aware mechanisms and complex allocations
-    // that clash with global static init loops. So we lazily initialize it immediately on boot.
-    initialize_dynamic_heap();
-
     printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
     printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
