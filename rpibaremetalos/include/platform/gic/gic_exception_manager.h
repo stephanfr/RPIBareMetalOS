@@ -53,17 +53,16 @@ public:
 
         //  Priority 0 (highest), well below the 0xFF mask so it is deliverable.
 
-        reinterpret_cast<volatile uint8_t *>(gicd_base_ + GICD_IPRIORITYR)[intid] = 0x00;
+        GICDBytes(GICD_IPRIORITYR)[intid] = 0x00;
 
         //  SPIs (>= 32) are routed to specific cores via ITARGETSR;
         //  PPIs (16–31) are per-core banked and ignore ITARGETSR.
 
         if (intid >= 32)
         {
-            reinterpret_cast<volatile uint8_t *>(gicd_base_ + GICD_ITARGETSR)[intid] =
-                static_cast<uint8_t>(on_cores.Cores() & 0xFF);
+            GICDBytes(GICD_ITARGETSR)[intid] = static_cast<uint8_t>(on_cores.Cores() & 0xFF);
         }
-
+        
         GICD(GICD_ISENABLER + ((intid / 32) * 4)) = (1u << (intid % 32));
 
         return true;
@@ -177,6 +176,15 @@ private:
     volatile uint32_t &GICC(uint32_t offset)
     {
         return *reinterpret_cast<volatile uint32_t *>(PhysicalToKernelVirtualAddress(gicc_base_ + offset));
+    }
+
+    //  GICD_IPRIORITYR and GICD_ITARGETSR are byte-addressable per-INTID arrays, so they
+    //      cannot go through GICD()'s uint32_t accessor -- but they must not dereference
+    //      gicd_base_ raw either, because that is a PHYSICAL address (R1).
+
+    volatile uint8_t *GICDBytes(uint32_t offset)
+    {
+        return reinterpret_cast<volatile uint8_t *>(PhysicalToKernelVirtualAddress(gicd_base_ + offset));
     }
 
     int32_t InterruptToINTID(Interrupts interrupt)

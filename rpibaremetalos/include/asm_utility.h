@@ -9,8 +9,12 @@
 extern "C"
 {
     void EnableMMUTables(uint64_t map1to1, uint64_t virtalmap);
-    uint32_t ARMaddrToGPUaddr(void *ARMaddress);
-    void *GPUaddrToARMaddr(uint32_t GPUaddress);
+
+    //  Installs a task's TTBR0.  ASID in [63:48], PHYSICAL L1 base in [47:0].  The ASID is
+    //      what makes this cheap -- no TLB maintenance is needed on the switch itself.
+
+    void SwitchUserAddressSpace(uint64_t ttbr0_value);
+    uint32_t ARMaddrToGPUaddr(void *ARMaddress);    void *GPUaddrToARMaddr(uint32_t GPUaddress);
     void *GetPhysicalAddress(void *virtual_address);
 
     void CPUTicksDelay(uint64_t ticks);
@@ -43,10 +47,12 @@ inline void *GetTaskContext()
 {
     void *task;
 
-    //  The task context contains a pointer to the current task and is stored in both the TPIDR_EL1 and the TPIDRRO_EL0 registers.
+    //  TPIDR_EL1 only.  TPIDRRO_EL0 is readable at EL0 and holds an opaque per-task id.
+    //      Both registers are saved/restored by KernelEntry/KernelExit and SwitchCPUState,
+    //      so this is a straight substitution.
 
     asm volatile(
-        "mrs %0, tpidrro_el0"
+        "mrs %0, tpidr_el1"
         : "=r"(task));
 
     return task;

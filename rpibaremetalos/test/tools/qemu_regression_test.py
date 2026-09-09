@@ -94,6 +94,11 @@ def run(qemu: str, kernel: str, sdimage: str,
         output = send_command('test memorysoak --seconds=10', timeout=90)
         check('test memorysoak', output, 'PASS: memory soak test')
 
+        # test addrspace — model-independence check for the address space / page
+        # table layer; exercises both memory models.
+        output = send_command('test addrspace')
+        check('test addrspace', output, 'PASS: address space test')
+
         # halt
         child.sendline('halt')
         child.expect('Halting', timeout=TIMEOUT)

@@ -340,7 +340,19 @@ EL0_SynchronousException:
 	and		x24, x24, #0x3F										//	Isolate the exception class - there is another field in the register if FEAT_LS64 is implemented
 	cmp		x24, #ESR_ELx_EC_SVC64								//	If the exception is from SVC in 64-bit state, then
 	b.eq	EL0_SyscallDispatcher								//		branch to the syscall dispatcher
-	HandleInvalidEntry EL0, SYNC_ERROR
+
+	//	Not a syscall, so a genuine fault taken at EL0.  Kill the TASK, not the core: an
+	//		EL1 fault is fatal, but a user program faulting is an ordinary event.  The
+	//		frame KernelEntry EL0 just built is the SAME frame a syscall runs on, which is
+	//		why HandleUserTaskFault can simply call Exit() the way sc_Exit does.
+	//		HandleUserTaskFault never returns.
+
+	mrs		x0, esr_el1
+	mrs		x1, elr_el1
+	mrs		x2, far_el1
+	bl		HandleUserTaskFault
+
+	HandleInvalidEntry EL0, SYNC_ERROR							//	unreachable -- Exit() does not return
 
 EL0_SyscallDispatcher:
 	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
@@ -366,7 +378,19 @@ ReturnFromForkASMStub:
 	cbz	x19, ReturnToUserSpace									//	If x19 is zero, return to EL0 which is user space
 	mov	x0, x20
 	blr	x19
-ReturnToUserSpace:
-	DisableIRQs													//	Disable IRQs				
-	KernelExit EL0 
 
+ReturnToUserSpace:
+
+	//	Reload SP with this task's initial CPU-state frame before KernelExit pops it.
+	//
+	//	We are several call frames deep here -- TaskManagerImpl::ReturnFromFork() called
+	//		this stub, and a wrapper that RETURNS (only a user task's does) pushed its own
+	//		frame on top -- so the current SP is nowhere near the frame KernelExit EL0 has
+	//		to restore from.  This never mattered before user tasks existed: every kernel
+	//		wrapper ends in Exit(), which never returns, so this code was unreachable.
+
+	bl	GetTaskInitialCPUStateFrame
+	mov	sp, x0
+
+	DisableIRQs													//	Disable IRQs				
+	KernelExit EL0

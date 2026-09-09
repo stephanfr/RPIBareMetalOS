@@ -180,6 +180,14 @@ namespace task
 
         next->switched_in_last_ = PhysicalTimer::Now();
 
+        //  Install the incoming task's user space before its registers.  A kernel task
+        //      gets the empty table (ASID 0) so any low VA faults.  ASIDs make TLB
+        //      maintenance unnecessary on the switch itself.
+
+        SwitchUserAddressSpace(next->address_space_ != nullptr
+                                   ? next->address_space_->TTBR0Value()
+                                   : AddressSpace::KernelTTBR0Value());
+
         SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
     }
 } // namespace task

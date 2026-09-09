@@ -78,18 +78,16 @@ namespace task
             runnable->Exit();
         }
 
-        extern "C" void UserSpaceRunnableWrapperWithExit(Runnable *runnable)
+        extern "C" void StartUserTaskWrapper(Runnable *)
         {
-            runnable->Run();
-            sc_Exit();
-        }
+            TaskImpl &task = task::TaskManagerImpl::Instance().CurrentTask();
 
-        extern "C" void MoveToUserSpaceWrapper(Runnable *runnable)
-        {
-            auto err = task::TaskManagerImpl::Instance().CurrentTask().MoveToUserSpace(&UserSpaceRunnableWrapperWithExit, (unsigned long)runnable);
+            auto err = task.MoveToUserSpace(task.UserArg());
+
             if (Failed(err))
             {
-                LogError("Failed to move task to user space");
+                LogError("Failed to move task to user space: %s\n", ErrorMessage(err));
+                task.Exit();
             }
         }
 
@@ -310,12 +308,14 @@ namespace task
         return ForkKernelTaskInternal(runnable, &internal::KernelRunnableWrapperWithExit, task_definition);
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkUserTask(Runnable *runnable, const TaskDefinition &task_definition)
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkUserTask(const minstd::string &binary_path, unsigned long arg,
+                                                                     const TaskDefinition &task_definition)
     {
-        return ForkKernelTaskInternal(runnable, &internal::MoveToUserSpaceWrapper, task_definition);
+        return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg);
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition &task_definition)
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition &task_definition,
+                                                                              const minstd::string *user_binary_path, unsigned long user_arg)
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
@@ -340,17 +340,35 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
+        new_task->preempt_count_ = 1;                           //	Preemption will be re-enabled in schedule_tail
+
+        //  TPIDRRO_EL0 is readable at EL0, so it never carries a kernel pointer -- it gets
+        //      an opaque monotonic id instead.  TPIDR_EL1 is the one the kernel reads back
+        //      through GetTaskContext() (see 2.3c).
+
+        static minstd::atomic<uint32_t> next_user_visible_id(1);
+
+        new_task->user_visible_id_ = next_user_visible_id.fetch_add(1);
 
         new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
         new_task->cpu_state_.sp = &childregs;
-        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task.get();
+        new_task->cpu_state_.tpidrro_el0 = new_task->user_visible_id_;
         new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Set the task context - this is a kernel task right now
 
         childregs.tpidr_el1 = (unsigned long)new_task.get();
-        childregs.tpidrro_el0 = (unsigned long)new_task.get();
+        childregs.tpidrro_el0 = new_task->user_visible_id_;
+
+        //  A user task's binary path and argument have to be in place BEFORE AddTask()
+        //      makes it schedulable -- another core can pick it up the instant AddTask()
+        //      returns, and StartUserTaskWrapper reads both on its very first run.
+
+        if (user_binary_path != nullptr)
+        {
+            new_task->binary_path_ = *user_binary_path;
+            new_task->user_arg_ = user_arg;
+        }
 
         //  Add the task to our task map
 
@@ -487,6 +505,11 @@ namespace task
     void TaskManagerImpl::SwitchToNextTask()
     {
         task_execution_contexts_[GetCoreID()].SwitchTasks();
+    }
+
+    extern "C" void *GetTaskInitialCPUStateFrame()
+    {
+        return &(TaskImpl::GetTask().GetTaskInitialFullCPUState());
     }
 
     void TaskManagerImpl::ReturnFromFork()

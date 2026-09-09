@@ -140,6 +140,17 @@ EnableMMUTables:
 .ltorg
 
 
+//	void SwitchUserAddressSpace(uint64_t ttbr0_value);   ASID in [63:48], PHYSICAL L1 in [47:0]
+.align	4
+.globl SwitchUserAddressSpace
+
+SwitchUserAddressSpace:
+	dsb     ishst                       //	page-table writes visible before the switch
+	msr     ttbr0_el1, x0
+	isb
+	ret
+.ltorg
+
 
 //	uint32_t ARMaddrToGPUaddr (void* ARMaddress);
 .align	4

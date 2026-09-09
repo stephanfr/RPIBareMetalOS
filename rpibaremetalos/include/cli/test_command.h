@@ -92,7 +92,33 @@ namespace cli::commands
                           CLISessionContext &context) const override;
     };
 
-    class CLITestCommand : public CLIParentCommand<6>
+    class CLITestAddressSpaceCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestAddressSpaceCommand instance;
+
+        CLITestAddressSpaceCommand()
+            : CLICommandExecutor("addrspace")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
+    };
+
+    class CLITestUserTaskCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestUserTaskCommand instance;
+
+        CLITestUserTaskCommand()
+            : CLICommandExecutor("usertask")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
+    };
+
+    class CLITestCommand : public CLIParentCommand<8>
     {
     public:
         static const CLITestCommand instance;
@@ -103,7 +129,9 @@ namespace cli::commands
                                         CLITestFairnessCommand::instance,
                                         CLITestTaskCommand::instance,
                                         CLITestMemoryCommand::instance,
-                                        CLITestMemorySoakCommand::instance})
+                                        CLITestMemorySoakCommand::instance,
+                                        CLITestAddressSpaceCommand::instance,
+                                        CLITestUserTaskCommand::instance})
         {
         }
     };

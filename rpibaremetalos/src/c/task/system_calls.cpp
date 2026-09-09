@@ -5,6 +5,8 @@
 #include "task/system_calls.h"
 #include "task/task_manager_impl.h"
 
+#include "platform/memory_model.h"
+
 #include "devices/std_streams.h"
 
 namespace syscall
@@ -26,14 +28,34 @@ namespace syscall
 
     unsigned long Malloc( unsigned long block_size )
     {
-        MemoryPagePointer new_page = GetMemoryManager().GetFreeBlock(block_size);
+        task::TaskImpl &task = task::TaskImpl::GetTask();
 
-        if (new_page == 0)
+        if (task.UserAddressSpace() == nullptr)
         {
-            return -1;
+            return (unsigned long)-1;                           //  kernel task: no user heap
         }
 
-        return (unsigned long)(uint8_t *)new_page;
+        //  Through the model's hook, never GetMemoryManager() directly -- this is the seam
+        //      that lets Phase 6 give a model its own user pool without touching this code.
+
+        const MemoryModel &model = MemoryModel::Instance();
+
+        MemoryPagePointer frame = model.AllocateUserFrame(block_size);
+
+        if (frame == 0)
+        {
+            return (unsigned long)-1;
+        }
+
+        uint64_t user_va = task.MapIntoUserHeap(frame.Physical(), block_size);
+
+        if (user_va == 0)
+        {
+            model.ReleaseUserFrame(frame, block_size);
+            return (unsigned long)-1;
+        }
+
+        return user_va;
     }
 
     void Exit()

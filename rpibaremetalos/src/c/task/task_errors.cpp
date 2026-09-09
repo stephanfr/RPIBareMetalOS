@@ -7,7 +7,7 @@
 namespace task
 {
 
-    static_assert((uint32_t)TaskResultCodes::__END_OF_TASK_RESULT_CODES__ == 6);
+    static_assert((uint32_t)TaskResultCodes::__END_OF_TASK_RESULT_CODES__ == 10);
 
     const char *ErrorMessage(TaskResultCodes code)
     {
@@ -30,6 +30,18 @@ namespace task
 
         case TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK_STACK:
             return "Unable to allocate memory for new task stack";
+
+        case TaskResultCodes::USER_BINARY_NOT_FOUND:
+            return "User binary not found";
+
+        case TaskResultCodes::USER_BINARY_UNREADABLE:
+            return "User binary could not be read";
+
+        case TaskResultCodes::USER_BINARY_MALFORMED:
+            return "User binary header is malformed";
+
+        case TaskResultCodes::UNABLE_TO_MAP_USER_BINARY:
+            return "Unable to map user binary into the task address space";
 
         default:
             return "Missing message";

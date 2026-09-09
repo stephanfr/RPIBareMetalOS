@@ -25,6 +25,18 @@ MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
 {
     LogEntryAndExit("num_pages: %u\n", num_pages_);
 
+    //  Every page handed out has to be 4KB-aligned: AddressSpace maps them with L3
+    //      descriptors, whose output address field cannot encode anything finer.  The
+    //      linker script aligns __os_process_start to 4096 for exactly this reason, so a
+    //      failure here means that alignment was lowered.
+
+    if ((free_memory_start_ & (DEFAULT_PAGE_SIZE - 1)) != 0)
+    {
+        LogError("MemoryManager: allocatable base 0x%016lx is not 4KB-aligned -- check __os_process_start in link.template.ld\n",
+                 free_memory_start_);
+        ParkCore();
+    }
+
     //  The page map is one byte per page and comes out of the static heap, so it
     //      scales directly with installed RAM: ~2MB on an 8GB board, ~4MB on 16GB.
     //      Check it up front rather than relying on the arena's out-of-memory

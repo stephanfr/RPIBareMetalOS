@@ -14,6 +14,8 @@
 #include "devices/physical_timer.h"
 
 #include "platform/exception_manager.h"
+#include "platform/address_space.h"
+#include "platform/address_space_layout.h"
 #include "platform/memory_manager.h"
 
 #include "task/runnable.h"
@@ -184,7 +186,7 @@ namespace task
         FullCPUState &GetTaskInitialFullCPUState();
         FullCPUState &ResetTaskInitialFullCPUState();
 
-        TaskResultCodes MoveToUserSpace(RunnableWrapper pc, unsigned long arg);
+        TaskResultCodes MoveToUserSpace(unsigned long arg);
 
     private:
         friend class TaskManagerImpl;
@@ -212,11 +214,29 @@ namespace task
         long counter_;
         long priority_;
         long preempt_count_;
-        MemoryPagePointer stack_;
+        MemoryPagePointer stack_;                               //  KERNEL stack; every task has one
+
+        AddressSpace *address_space_ = nullptr;                 //  USER_TASK only; null = empty TTBR0
+        minstd::fixed_string<128> binary_path_;                 //  set by ForkUserTask, read by MoveToUserSpace
+        unsigned long user_arg_ = 0;                            //  the single argument a user task receives in x0
+        uint64_t user_heap_break_ = USER_HEAP_BASE;
+        uint32_t user_visible_id_ = 0;                          //  what tpidrro_el0 holds
 
         TaskImpl::FullCPUState *initial_full_cpu_state_location_;
 
     public:
+        AddressSpace *UserAddressSpace() const { return address_space_; }
+
+        //  The single argument a user task receives in x0.  Read by StartUserTaskWrapper,
+        //      which is a free function rather than a member and so cannot see user_arg_.
+
+        unsigned long UserArg() const { return user_arg_; }
+
+        //  Maps size bytes of physical memory at the current user heap break and returns the
+        //      USER VA it landed at, or 0 if it will not fit.  Implemented in Step 2.8.
+
+        uint64_t MapIntoUserHeap(uint64_t physical, uint64_t size);
+
         ALIGN TaskContextCPUState cpu_state_;
     };
 

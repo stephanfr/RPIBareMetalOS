@@ -22,15 +22,22 @@
 
 namespace RP1
 {
+    //  WINDOW_BASE is the PHYSICAL base of RP1's PCIe outbound window -- that is what the
+    //      page tables map (L1 slots 124-127, see RPI5_RP1_WINDOW_L1_START) and it must
+    //      stay physical.  Every register base below is a KERNEL VA, because every one of
+    //      them is DEREFERENCED: Read32/Write32 here, and PL011UARTBase for the two UART
+    //      bases (rpi5_uart0.h / rpi5_uart1.h), which never pass through Read32 at all.
+    //      Deriving them from WINDOW_VA converts both paths in one place (R1).
+
     constexpr uint64_t WINDOW_BASE = 0x1F00000000ULL;
     constexpr uint64_t WINDOW_VA   = PhysicalToKernelVirtualAddress(WINDOW_BASE);
 
-    constexpr uint64_t CLOCKS_BASE = WINDOW_BASE + 0x00018000ULL;
-    constexpr uint64_t GPIO_BASE   = WINDOW_BASE + 0x000D0000ULL;
-    constexpr uint64_t PADS_BASE   = WINDOW_BASE + 0x000F0000ULL;
-    constexpr uint64_t UART0_BASE  = WINDOW_BASE + 0x00030000ULL;
-    constexpr uint64_t UART1_BASE  = WINDOW_BASE + 0x00034000ULL;
-
+    constexpr uint64_t CLOCKS_BASE = WINDOW_VA + 0x00018000ULL;
+    constexpr uint64_t GPIO_BASE   = WINDOW_VA + 0x000D0000ULL;
+    constexpr uint64_t PADS_BASE   = WINDOW_VA + 0x000F0000ULL;
+    constexpr uint64_t UART0_BASE  = WINDOW_VA + 0x00030000ULL;
+    constexpr uint64_t UART1_BASE  = WINDOW_VA + 0x00034000ULL;
+    
     //  Bank 0 covers pins 0-27 -- the only bank implemented so far (pins
     //      0/1 for UART1 and 14/15 for UART0 fall inside it). Banks 1/2
     //      (pins 28-53) are not yet supported by SetPinFunction/ConfigurePadFor*.

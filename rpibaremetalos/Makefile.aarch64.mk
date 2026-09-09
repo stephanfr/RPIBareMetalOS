@@ -22,7 +22,7 @@ SOAK_PROGRESS_INTERVAL_SECONDS ?= 30
 SOAK_SEED                      ?=
 SOAK_EXTRA_ARGS                ?=
 
-BUILD_DIRS := $(IMAGE_DIR) $(BUILD_ROOT) \
+BUILD_DIRS := $(IMAGE_DIR) $(BUILD_ROOT) $(BUILD_ROOT)/user\
 $(BUILD_ROOT)/asm \
 $(BUILD_ROOT)/c \
 $(BUILD_ROOT)/c/utility \
@@ -104,8 +104,33 @@ LDLIBS = -lminimalstdio -lminimalclib -lminimalstdlib
 LINKER_SCRIPT_TEMPLATE=link.template.ld
 LINKER_SCRIPT=$(BUILD_ROOT)/link.ld
 
+#  Rule R2: code that can run BEFORE the high-VA jump must not load a symbol's address
+#  from the literal pool.  `ldr xN, =symbol` assembles to a PC-relative load of the LINKED
+#  (high) value, which is unmapped at a physical PC; use adrp/adr, which are correct at
+#  either PC.  The failure mode is a dead board with no console, so catch it at build time.
+#
+#  Two escape hatches, both comments on the offending line itself (this grep is
+#  line-oriented, so a marker on the following line rescues nothing):
+#
+#    PHYSICAL-ENTRY-POINT  it really is a symbol address, but it is converted to physical
+#                          on the next line and handed to a core whose MMU is off.
+#    LINKER-CONSTANT       it is not an address -- it is a linker-computed count
+#                          (symbol = end - start), so R2 does not apply.
+#
+#  The pattern only matches names beginning `__` or `running_in_`, so =S_KERNEL_VA_BASE,
+#  =TCREL1VAL, =MIDR_EL1_*, =RPI_BOARD_ENUM_* and the *_running_at_high_va jump targets
+#  are all outside it by construction.
 
-all: checkdirs $(IMG)
+BOOT_ASM := src/asm/start.S src/asm/mmu.S src/asm/get_boot_time_settings.S src/asm/identify_board_type.S
+
+check_boot_asm:
+	@if grep -nE 'ldr[[:space:]]+[xw][0-9]+,[[:space:]]*=(__|running_in_)' $(BOOT_ASM) \
+	    | grep -vE 'PHYSICAL-ENTRY-POINT|LINKER-CONSTANT' ; then \
+	    echo "ERROR: symbol-address literal load in the boot path.  Use adrp/adr (rule R2 in the address-space plan)."; \
+	    exit 1; \
+	fi
+
+all: checkdirs check_boot_asm $(IMG)
 
 #  Default target: clean build + regression gate.  Fails immediately if the
 #  regression script exits non-zero (Make propagates the exit code).
@@ -115,13 +140,44 @@ ci: clean all qemu-regression
 
 all_clean: clean all
 
-$(IMG): $(ELF)
+#  ---- User space ------------------------------------------------------------
+#
+#  A user image is a FIXED-ADDRESS flat binary linked at USER_IMAGE_BASE, with a
+#  32-byte UserImageHeader at offset 0 so the loader can tell text from data (a flat
+#  binary has no section table).  It is built with its own flags and its own linker
+#  script and shares NOTHING with the kernel link -- user/syscalls.S deliberately
+#  duplicates the four sc_* stubs rather than linking the kernel's copies.
+
+USER_DIR      := user
+USER_BUILD    := $(BUILD_ROOT)/user
+USER_BIN      := $(USER_BUILD)/hello.bin
+USER_ELF      := $(USER_BUILD)/hello.elf
+USER_LD       := $(USER_DIR)/user.ld
+USER_SRC      := $(USER_DIR)/crt0.S $(USER_DIR)/syscalls.S $(USER_DIR)/hello.c
+USER_FLAGS    := -ffreestanding -nostdlib -nostartfiles -static -no-pie -Wl,--build-id=none \
+                 -mcpu=cortex-a53 -mstrict-align -O1 -Wall -Iinclude
+
+#  sd.img is a whole-disk image with an MBR, not a bare filesystem, so mtools needs the
+#  byte offset of the partition to write into -- plain "::" gives "non DOS media".
+#  Partition 1 ("RPI BOOT", LBA 2048) is the boot partition that already holds kernel8.img
+#  and cmdline.txt, so the user binary belongs there too.
+
+SD_BOOT_PARTITION_OFFSET ?= 1048576
+
+$(USER_BIN): $(USER_SRC) $(USER_LD)
+	$(CC) $(USER_FLAGS) -T $(USER_LD) -o $(USER_ELF) $(USER_SRC)
+	$(OBJCOPY) -O binary $(USER_ELF) $(USER_BIN)
+
+user: checkdirs $(USER_BIN)
+
+$(IMG): $(ELF) $(USER_BIN)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
 	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
 	/bin/cp armstub/image/armstub_minimal.bin image/.
 	/bin/cp resources/*.txt image/.
 	/bin/cp resources/sd.img image/.
+	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
 
 $(ELF): $(OBJ) $(LINKER_SCRIPT)
 	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -g -T $(LINKER_SCRIPT) -o $(ELF)

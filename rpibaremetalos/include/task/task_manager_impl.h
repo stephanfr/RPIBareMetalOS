@@ -16,6 +16,8 @@
 #include "result.h"
 
 #include "heaps.h"
+#include "platform/memory_model.h"
+#include "task/user_binary_loader.h"
 
 #include "os_entity.h"
 
@@ -78,7 +80,7 @@ namespace task
         void SwitchToNextTask(void);
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
-        ValueResult<TaskResultCodes, UUID> ForkUserTask(Runnable *runnable, const TaskDefinition& task_definition) override;
+        ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
 
         ValueResult<TaskResultCodes, UUID> CloneTask(const TaskDefinition& task_definition, MemoryPagePointer stack);
 
@@ -118,8 +120,10 @@ namespace task
 
         explicit TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc);
 
-        
-
-        ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition& task_definition);
+        ValueResult<TaskResultCodes, UUID> ForkKernelTaskInternal( Runnable *runnable,
+                                                                   void (*wrapper)(Runnable *),
+                                                                   const TaskDefinition& task_definition,
+                                                                   const minstd::string *user_binary_path = nullptr,
+                                                                   unsigned long user_arg = 0 );
     };
 } // namespace task

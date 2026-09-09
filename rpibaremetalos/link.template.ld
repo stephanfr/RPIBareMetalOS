@@ -146,11 +146,16 @@ SECTIONS
 
     __per_core_initialization_stack_in_bytes = __per_core_initialization_stack_top - __per_core_initialization_stack_bottom;
 
-    . = ALIGN(16);
+    /*   4KB, not 16: MemoryManager counts its pages from here, and AddressSpace maps those
+     *       pages with 4KB L3 descriptors, which can only encode a 4KB-aligned physical
+     *       address.  At ALIGN(16) every "page" the allocator handed out was misaligned by
+     *       whatever the preceding sections left over.
+     */
+
+    . = ALIGN(4096);
     __os_process_start = .;
 
-    /*
-     *   The firmware and QEMU's -kernel loader jump to e_entry with the MMU off, so
+    /*   The firmware and QEMU's -kernel loader jump to e_entry with the MMU off, so
      *       the ELF entry point must be the PHYSICAL address of _start.
      */
 

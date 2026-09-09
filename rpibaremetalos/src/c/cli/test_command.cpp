@@ -14,20 +14,25 @@
 #include "task/runnable.h"
 #include "heaps.h"
 
+#include "platform/address_space.h"
+#include "task/user_binary_loader.h"
 #include "platform/memory_manager.h"
+#include "platform/memory_model.h"
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 
 namespace cli::commands
 {
-    const CLITestSchedulingCommand CLITestSchedulingCommand::instance;
-    const CLITestForkingCommand    CLITestForkingCommand::instance;
-    const CLITestFairnessCommand   CLITestFairnessCommand::instance;
-    const CLITestTaskCommand       CLITestTaskCommand::instance;
-    const CLITestMemoryCommand     CLITestMemoryCommand::instance;
-    const CLITestMemorySoakCommand CLITestMemorySoakCommand::instance;
-    const CLITestCommand           CLITestCommand::instance;
+    const CLITestSchedulingCommand      CLITestSchedulingCommand::instance;
+    const CLITestForkingCommand         CLITestForkingCommand::instance;
+    const CLITestFairnessCommand        CLITestFairnessCommand::instance;
+    const CLITestTaskCommand            CLITestTaskCommand::instance;
+    const CLITestMemoryCommand          CLITestMemoryCommand::instance;
+    const CLITestMemorySoakCommand      CLITestMemorySoakCommand::instance;
+    const CLITestAddressSpaceCommand    CLITestAddressSpaceCommand::instance;
+    const CLITestUserTaskCommand        CLITestUserTaskCommand::instance;
+    const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
     //  test scheduling
@@ -1003,4 +1008,271 @@ namespace cli::commands
         }
     }
 
+    // -------------------------------------------------------------------------
+    //  test addrspace
+    //
+    //  Model-independence check.  Under kernel_only_1_to_1 a task's L1 really does
+    //      contain the kernel identity map, so rows 3 and 4 below are only "unmapped"
+    //      because Translate() range-checks BEFORE it walks.  If either ever reports
+    //      "mapped", the syscall boundary has a hole.
+    // -------------------------------------------------------------------------
+
+    void CLITestAddressSpaceCommand::ProcessToken( CommandParser &parser,
+                                                   CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << minstd::format(buffer, "\nAddress space test [{}]\n",
+                                  ToString(MMUManager::Instance().MemoryModel()));
+
+        uint32_t failures = 0;
+
+        AddressSpace *space = dynamic_new<AddressSpace>().release();
+
+        if ((space == nullptr) || !space->Initialize())
+        {
+            context << "FAIL: could not initialize an AddressSpace\n";
+            return;
+        }
+
+        //  Map exactly one page at the user image base.
+
+        MemoryPagePointer frame = MemoryModel::Instance().AllocateUserFrame(BYTES_4K);
+
+        if (frame == 0)
+        {
+            context << "FAIL: could not allocate a user frame\n";
+            dynamic_delete(space);
+            return;
+        }
+
+        if (!space->MapPages(USER_IMAGE_BASE, frame.Physical(), BYTES_4K,
+                             Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false))
+        {
+            context << "FAIL: MapPages rejected a valid single-page mapping\n";
+            dynamic_delete(space);
+            return;
+        }
+
+        struct Expectation
+        {
+            const char *label;
+            uint64_t    va;
+            bool        expect_mapped;
+        };
+
+        const Expectation checks[] = {
+            {"the mapped user VA",            USER_IMAGE_BASE,                        true},
+            {"an unmapped user-window VA",    USER_HEAP_BASE,                         false},
+            {"0x80000 (kernel image PA)",     0x80000ULL,                             false},
+            {"KERNEL_VA_BASE",                KERNEL_VA_BASE,                         false},
+        };
+
+        for (const Expectation &check : checks)
+        {
+            uint64_t physical = 0;
+            bool mapped = space->Translate(check.va, physical);
+
+            if (mapped != check.expect_mapped)
+            {
+                context << minstd::format(buffer, "FAIL: {} -- expected {}, got {}\n",
+                                          check.label,
+                                          check.expect_mapped ? "mapped" : "unmapped",
+                                          mapped ? "mapped" : "unmapped");
+                failures++;
+                continue;
+            }
+
+            if (mapped && (physical != frame.Physical()))
+            {
+                context << minstd::format(buffer, "FAIL: {} -- mapped to the wrong frame\n", check.label);
+                failures++;
+                continue;
+            }
+
+            context << minstd::format(buffer, "  {}: {}\n", check.label,
+                                      mapped ? "mapped" : "unmapped");
+        }
+
+        //  Step 2.6 -- load hello.bin into a scratch space and confirm the two-region map.
+        //      A fresh space, because the one above already has USER_IMAGE_BASE occupied.
+
+        AddressSpace *load_space = dynamic_new<AddressSpace>().release();
+
+        if ((load_space == nullptr) || !load_space->Initialize())
+        {
+            context << "FAIL: could not initialize a second AddressSpace\n";
+            failures++;
+        }
+        else
+        {
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary_name("hello.bin");
+
+            auto entry = task::LoadUserBinary(binary_name, *load_space);
+
+            if (!entry.Successful())
+            {
+                context << minstd::format(buffer, "FAIL: LoadUserBinary -- {}\n",
+                                          task::ErrorMessage(entry.ResultCode()));
+                failures++;
+            }
+            else
+            {
+                context << minstd::format(buffer, "  loaded hello.bin, entry {:#018x}\n", entry.Value());
+
+                uint64_t physical = 0;
+
+                if (!load_space->Translate(USER_IMAGE_BASE, physical))
+                {
+                    context << "FAIL: loaded image text is not mapped\n";
+                    failures++;
+                }
+                else
+                {
+                    context << "  loaded text: mapped\n";
+                }
+
+                if (load_space->Translate(USER_HEAP_BASE, physical))
+                {
+                    context << "FAIL: the user heap must not be mapped by the loader\n";
+                    failures++;
+                }
+                else
+                {
+                    context << "  loader left the heap unmapped\n";
+                }
+            }
+
+            dynamic_delete(load_space);
+        }
+
+        MemoryModel::Instance().ReleaseUserFrame(frame, BYTES_4K);
+        dynamic_delete(space);
+
+        if (failures == 0)
+        {
+            context << "PASS: address space test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: address space test -- {} failure(s)\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test usertask
+    //
+    //  The first thing in this OS that actually executes at EL0.  Each case forks
+    //      hello.bin with a packed argument (case in the low byte, payload above) and
+    //      joins it.  Cases 1, 1b, 2 and 3 are all EXPECTED to be killed -- a
+    //      "KILLED user task" line from HandleUserTaskFault is the pass condition, and
+    //      the absence of a "NOT KILLED" line is what the regression asserts.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        struct UserTaskCase
+        {
+            const char *label;
+            unsigned long arg;
+        };
+
+        bool ForkAndJoinUserTask(CLISessionContext &context, const char *name, unsigned long arg)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+
+            minstd::fixed_string<MAX_TASK_NAME_LENGTH> task_name(name);
+
+            auto result = context.task_manager_.ForkUserTask(binary, arg, task::TaskDefinition{task_name});
+
+            if (result.Failed())
+            {
+                context << minstd::format(buffer, "FAIL: ForkUserTask({}) -- {}\n",
+                                          name, task::ErrorMessage(result.ResultCode()));
+                return false;
+            }
+
+            auto task = context.task_manager_.FindTask(result.Value());
+
+            if (task.has_value())
+            {
+                task.value().get().Join();
+            }
+
+            return true;
+        }
+    }
+
+    void CLITestUserTaskCommand::ProcessToken(CommandParser &parser,
+                                              CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << minstd::format(buffer, "\nUser task test [{}]\n",
+                                  ToString(MMUManager::Instance().MemoryModel()));
+
+        const UserTaskCase cases[] = {
+            {"case 0 (hello)",          0},
+            {"case 1 (kernel VA)",      1},
+            {"case 1b (0x80000)",       2},
+            {"case 2 (write text)",     3},
+            {"case 3 (exec stack)",     4},
+        };
+
+        uint32_t failures = 0;
+
+        for (const UserTaskCase &test_case : cases)
+        {
+            context << minstd::format(buffer, "-- {}\n", test_case.label);
+
+            if (!ForkAndJoinUserTask(context, test_case.label, test_case.arg))
+            {
+                failures++;
+            }
+        }
+
+        //  Case 4 -- two tasks, concurrently, with different payloads.  Both must report
+        //      "isolated": this is what proves the spaces are DISTINCT rather than merely
+        //      permission-protected, and it has to hold under kernel_only_1_to_1 too.
+
+        context << "-- case 4 (heap isolation, x2)\n";
+
+        minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+
+        minstd::fixed_string<MAX_TASK_NAME_LENGTH> name_a("isolation A");
+        minstd::fixed_string<MAX_TASK_NAME_LENGTH> name_b("isolation B");
+
+        auto first = context.task_manager_.ForkUserTask(binary, 5 | (0xA5A5A5A5UL << 8), task::TaskDefinition{name_a});
+        auto second = context.task_manager_.ForkUserTask(binary, 5 | (0x5A5A5A5AUL << 8), task::TaskDefinition{name_b});
+
+        if (first.Failed() || second.Failed())
+        {
+            context << "FAIL: could not fork the two isolation tasks\n";
+            failures++;
+        }
+        else
+        {
+            const UUID joined_ids[] = {first.Value(), second.Value()};
+
+            for (const UUID &id : joined_ids)
+            {
+                auto task = context.task_manager_.FindTask(id);
+
+                if (task.has_value())
+                {
+                    task.value().get().Join();
+                }
+            }
+        }
+
+        if (failures == 0)
+        {
+            context << "PASS: user task test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: user task test -- {} failure(s)\n", failures);
+        }
+    }
 } // namespace cli::commands

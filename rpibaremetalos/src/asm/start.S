@@ -539,9 +539,9 @@ core0_running_at_high_va:
 
     adrp    x9, __bss_start
     add     x9, x9, :lo12:__bss_start
-    ldr     w10, =__bss_size_in_double_words
+    ldr     w10, =__bss_size_in_double_words                    //  LINKER-CONSTANT: a COUNT, not an address -- immediate load, not PC-relative (R2 n/a)
     cbz     w10, restore_globals_after_bss                      //  Skip the loop if the bss section is zero length
-
+    
 loop_for_bss_clear:
 
     str     xzr, [x9], #8                                       //  Set 8 bytes at a time - the section in the linker script must match
@@ -604,17 +604,18 @@ start_next_core:
     //  EL3 arrival: all cores started by armstub; fall through to the shared EL3 wait path.
     //  EL2-only arrival: only core 0 reached EL3; secondary cores are held by firmware and
     //      need releasing via PSCI CPU_ON below.
-    cbnz    x23_arrivedInEL3, check_el2_spin_table   //  EL3: same wait as RPi3/4
+
+    cbnz    x23_arrivedInEL3, check_el2_spin_table      //  EL3: same wait as RPi3/4
 
     //  EL2-only: secondary cores held by firmware; start via PSCI CPU_ON
+
     ldr     x0, =0xC4000003
-    lsl     x1, x9, #8                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
-    ldr     x2, =running_in_el2
+    lsl     x1, x9, #8                                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
+    ldr     x2, =running_in_el2                         //  PHYSICAL-ENTRY-POINT: converted to physical just below
     ldr     x16, =S_KERNEL_VA_BASE
-    sub     x2, x2, x16                 //  PHYSICAL-ENTRY-POINT: target core starts with MMU off (R1)
-    mov     x3, #0
+    sub     x2, x2, x16                                 //  target core starts with its MMU off, so it needs a physical entry (R1)    mov     x3, #0
     smc     #0
-    mov     w25, w0                     //  save the PSCI CPU_ON return status
+    mov     w25, w0                                     //  save the PSCI CPU_ON return status
     cbnz    w25, next_core
     mrs     x13, cntpct_el0
     ldr     x14, =270000000
@@ -640,10 +641,12 @@ check_el2_spin_table:
 write_spin_table:
 
     mov     x10, #armstub_el2_spin_table
-    ldr     x11, =running_in_el2
+    ldr     x11, =running_in_el2                        //  PHYSICAL-ENTRY-POINT: converted to physical just below
+    ldr     x16, =S_KERNEL_VA_BASE
+    sub     x11, x11, x16                               //  target core starts with its MMU off, so it needs a physical entry (R1)
     add     x12, x10, x9, lsl #3
     str     x11, [x12]
-    dc      civac, x12                                          //  flush: MMU is on when this runs
+    dc      civac, x12                                  //  flush: MMU is on when this runs
     dsb     sy
     sev
 
@@ -656,7 +659,7 @@ wait_core_ack:
 next_core:
 
     add x9, x9, #1
-    cmp x9, x24_numberOfCoresAvailable                         //  Loop until all cores are started
+    cmp x9, x24_numberOfCoresAvailable                  //  Loop until all cores are started
     b.lo start_next_core
 
 additional_cores_started:
