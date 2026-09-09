@@ -204,11 +204,13 @@ armstub_clean:
 #       QEMU regression test
 #
 
-#  Each board runs the suite twice -- default (relaxed) alignment and
-#  strict_align=1. RPi3 and RPi4 have materially different reserved-memory
-#  topologies: RPi3's holes both sit at the top of its 1GB, leaving one
-#  unbroken span, while RPi4's straddle the low-middle and the top, splitting
-#  usable RAM. Only the RPi4 layout exercises the fragmentation path.
+#  Each board runs the suite four times -- both memory models
+#  (kernel_only_1_to_1 and kernel_high_user_low) each paired with default
+#  (relaxed) alignment and strict_align=1. RPi3 and RPi4 have materially
+#  different reserved-memory topologies: RPi3's holes both sit at the top of
+#  its 1GB, leaving one unbroken span, while RPi4's straddle the low-middle
+#  and the top, splitting usable RAM. Only the RPi4 layout exercises the
+#  fragmentation path.
 
 qemu-regression-rpi3: all
 	python3 $(QEMU_REGRESSION_SCRIPT) \

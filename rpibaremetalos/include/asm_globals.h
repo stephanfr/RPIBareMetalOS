@@ -60,4 +60,6 @@ extern uint32_t __strict_alignment_enabled;
 
 extern uint64_t __kernel_page_table_base;
 
+extern uint64_t __boot_ttbr0_base;
+
 extern uint64_t __empty_user_page_table;

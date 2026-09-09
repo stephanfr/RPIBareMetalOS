@@ -399,20 +399,28 @@ el1_spin:
     add     x11, x11, :lo12:__kernel_page_table_base
     dc      civac, x11
     dsb     sy
-    ldr     x0, [x11]
-    cbnz    x0, use_page_tables_on_secondary_core
+    ldr     x1, [x11]                                           //  TTBR1: the kernel linear map
+    cbnz    x1, use_page_tables_on_secondary_core
 
-    adrp    x0, __early_l1_page_table
-    add     x0, x0, :lo12:__early_l1_page_table
+    //  Core 0 has not published yet: fall back to the early table in BOTH TTBRs.  Never
+    //      mix the early table with a board's final table -- they give the VideoCore/DMA
+    //      block different attributes (cached vs NORMAL_NO_CACHING), and the architecture
+    //      does not keep two attribute sets on one physical page coherent.
+
+    adrp    x1, __early_l1_page_table
+    add     x1, x1, :lo12:__early_l1_page_table
 
 use_page_tables_on_secondary_core:
 
-    //  ONE table in BOTH TTBRs.  Never mix the early table with a board's final table:
-    //      they give the VideoCore/DMA block different attributes (cached vs
-    //      NORMAL_NO_CACHING), and the architecture does not keep two attribute sets on
-    //      one physical page coherent.
+    //  TTBR0 gets the SAME table as TTBR1 here -- BOTH paths above leave that table in x1
+    //      -- which identity-maps this core's low PC.  The memory model's TTBR0 is
+    //      installed further down, AFTER the jump to the high VA: under
+    //      kernel_high_user_low it is an all-zero table, and installing it now would unmap
+    //      the very next instruction this core fetches.  Core 0 needs no such dance -- it
+    //      reaches EnableMMUTables from MMUManager::Initialize(), already running high.
 
-    mov     x1, x0
+    mov     x0, x1
+
     bl      EnableMMUTables
 
     //  Same transition as core 0 (Step 1.3b): rebase the stack, jump high, re-derive
@@ -425,6 +433,22 @@ use_page_tables_on_secondary_core:
     br      x9
 
 secondary_running_at_high_va:
+
+    //  Executing high now, so TTBR0 is free to become whatever the memory model chose --
+    //      the kernel identity table under kernel_only_1_to_1, the all-zero table under
+    //      kernel_high_user_low.  A published VALUE, not a branch: this code does not know
+    //      the models exist.
+
+    adrp    x12, __boot_ttbr0_base
+    add     x12, x12, :lo12:__boot_ttbr0_base
+    dc      civac, x12
+    dsb     sy
+    ldr     x12, [x12]
+    msr     ttbr0_el1, x12
+    isb
+    tlbi    vmalle1
+    dsb     nsh
+    isb
 
     adr     x9, __exception_vectors
     msr     VBAR_EL1, x9

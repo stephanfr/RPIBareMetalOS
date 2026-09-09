@@ -7,9 +7,10 @@
 # Launches the OS under qemu-system-aarch64, exercises the CLI and asserts
 # expected output for each command, then halts cleanly.
 #
-# Runs the suite twice for the requested machine -- once with the default
-# (relaxed) alignment policy and once with strict_align=1 -- so a regression in
-# either policy is caught. Board selection in the OS is runtime (MIDR_EL1
+# Runs the suite four times for the requested machine -- both memory models
+# (kernel_only_1_to_1 and kernel_high_user_low) each paired with the default
+# (relaxed) alignment policy and strict_align=1 -- so regressions in any
+# combination are caught. Board selection in the OS is runtime (MIDR_EL1
 # PARTNUM), so the same kernel8.elf and sd.img serve every machine.
 #
 # Usage:
@@ -31,6 +32,7 @@ TIMEOUT = 60  # seconds to wait for each response
 def run(qemu: str, kernel: str, sdimage: str,
         machine: str = 'raspi3b',
         memory: str = '',
+        memory_model: str = 'kernel_only_1_to_1',
         extra_cmdline: str = '') -> int:
     cmd = (
         f'{qemu} -M {machine}'
@@ -40,7 +42,7 @@ def run(qemu: str, kernel: str, sdimage: str,
         f' -serial stdio'
         f' -display none'
         f' -no-reboot'
-        f' -append "console=ttys0,57600 memory_model=kernel_only_1_to_1{extra_cmdline}"'
+        f' -append "console=ttys0,57600 memory_model={memory_model}{extra_cmdline}"'
     )
 
     print(f'Launching: {cmd}')
@@ -120,15 +122,32 @@ def main() -> int:
                         help='RAM size passed to QEMU -m (default: machine default)')
     args = parser.parse_args()
 
-    print(f'=== {args.machine} Pass 1: default (strict alignment checking off) ===')
+    print(f'=== {args.machine} Pass 1: kernel_only_1_to_1, default alignment ===')
     result = run(args.qemu, args.kernel, args.sdimage,
-                 machine=args.machine, memory=args.memory)
+                 machine=args.machine, memory=args.memory,
+                 memory_model='kernel_only_1_to_1')
     if result != 0:
         return result
 
-    print(f'\n=== {args.machine} Pass 2: strict_align=1 (strict alignment checking on) ===')
+    print(f'\n=== {args.machine} Pass 2: kernel_only_1_to_1, strict_align=1 ===')
+    result = run(args.qemu, args.kernel, args.sdimage,
+                 machine=args.machine, memory=args.memory,
+                 memory_model='kernel_only_1_to_1',
+                 extra_cmdline=' strict_align=1')
+    if result != 0:
+        return result
+
+    print(f'\n=== {args.machine} Pass 3: kernel_high_user_low, default alignment ===')
+    result = run(args.qemu, args.kernel, args.sdimage,
+                 machine=args.machine, memory=args.memory,
+                 memory_model='kernel_high_user_low')
+    if result != 0:
+        return result
+
+    print(f'\n=== {args.machine} Pass 4: kernel_high_user_low, strict_align=1 ===')
     return run(args.qemu, args.kernel, args.sdimage,
                machine=args.machine, memory=args.memory,
+               memory_model='kernel_high_user_low',
                extra_cmdline=' strict_align=1')
 
 

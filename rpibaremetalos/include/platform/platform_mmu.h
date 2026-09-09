@@ -9,8 +9,9 @@
 #include <array>
 
 #include "asm_globals.h"
-#include "platform/address_space_layout.h"
 
+#include "platform/address_space_layout.h"
+#include "platform/memory_model.h"
 #include "platform/mmu_manager.h"
 
 class AARCH64PlatformMemoryManager : public MMUManager
@@ -58,33 +59,35 @@ protected:
             TableType EntryType : 2; // @0-1		1 for a block table, 3 for a page table
 
             // These are only valid on BLOCK DESCRIPTOR
-            MemoryAttribute MemAttr : 4;     // @2-5
-            Stage2AccessPermission S2AP : 2; // @6-7
-            Stage2Sharability SH : 2;        // @8-9
-            AccessFlag AF : 1;               // @10      Access Flag - if zero, the MMU will fault on access
 
-            uint64_t NonGlobalFlag : 1 = 0;  // @11		Indicates if a page should be visible in all address spaces, so the TLB should not be flushed on a context switch
-            uint64_t Address : 36;           // @12-47	36 Bits of address
-            uint64_t _reserved48_50 : 3 = 0; // @48-51	Set to 0
-            uint64_t DBM : 1 = 0;            // @51		Dirty Bit Management, set to zero
-            uint64_t Contiguous : 1 = 0;     // @52		Contiguous flag, set to zero
-            uint64_t PXN : 1 = 0;            // @53		Privileged Execute Never, set to 0
-            uint64_t UXN : 1 = 0;            // @54		Unprivileged Execute Never, set to 0
-            uint64_t _reserved55_58 : 4 = 0; // @55-58	Set to 0
+            MemoryAttribute MemAttr : 4;            // @2-5
+            Stage2AccessPermission S2AP : 2;        // @6-7
+            Stage2Sharability SH : 2;               // @8-9
+            AccessFlag AF : 1;                      // @10      Access Flag - if zero, the MMU will fault on access
+
+            uint64_t NonGlobalFlag : 1 = 0;         // @11		Indicates if a page should be visible in all address spaces, so the TLB should not be flushed on a context switch
+            uint64_t Address : 36;                  // @12-47	36 Bits of address
+            uint64_t _reserved48_50 : 3 = 0;        // @48-51	Set to 0
+            uint64_t DBM : 1 = 0;                   // @51		Dirty Bit Management, set to zero
+            uint64_t Contiguous : 1 = 0;            // @52		Contiguous flag, set to zero
+            uint64_t PXN : 1 = 0;                   // @53		Privileged Execute Never, set to 0
+            uint64_t UXN : 1 = 0;                   // @54		Unprivileged Execute Never, set to 0
+            uint64_t _reserved55_58 : 4 = 0;        // @55-58	Set to 0
 
             // These are only valid on PAGE DESCRIPTOR
-            uint64_t PXNTable : 1; // @59      Never allow execution from a lower EL level
-            uint64_t XNTable : 1;  // @60		Never allow translation from a lower EL level
-                                   //		enum {
-                                   //			APTABLE_NOEFFECT = 0,			// No effect
-                                   //			APTABLE_NO_EL0 = 1,				// Access at EL0 not permitted, regardless of permissions in subsequent levels of lookup
-                                   //			APTABLE_NO_WRITE = 2,			// Write access not permitted, at any Exception level, regardless of permissions in subsequent levels of lookup
-                                   //			APTABLE_NO_WRITE_EL0_READ = 3	// Write access not permitted,at any Exception level, Read access not permitted at EL0.
-                                   //		}
-            uint64_t APTable : 2;  // @61-62	AP Table control .. see enumerate options
-            uint64_t NSTable : 1;  // @63		Secure state, for accesses from Non-secure state this bit is RES0 and is ignored
+
+            uint64_t PXNTable : 1;                  // @59      Never allow execution from a lower EL level
+            uint64_t XNTable : 1;                   // @60		Never allow translation from a lower EL level
+                                                    //		    enum {
+                                                    //			    APTABLE_NOEFFECT = 0,			// No effect
+                                                    //			    APTABLE_NO_EL0 = 1,				// Access at EL0 not permitted, regardless of permissions in subsequent levels of lookup
+                                                    //			    APTABLE_NO_WRITE = 2,			// Write access not permitted, at any Exception level, regardless of permissions in subsequent levels of lookup
+                                                    //			    APTABLE_NO_WRITE_EL0_READ = 3	// Write access not permitted,at any Exception level, Read access not permitted at EL0.
+                                                    //		    }
+            uint64_t APTable : 2;                   // @61-62	AP Table control .. see enumerate options
+            uint64_t NSTable : 1;                   // @63		Secure state, for accesses from Non-secure state this bit is RES0 and is ignored
         };
-        uint64_t Raw64; // @0-63	Raw access to all 64 bits via this union
+        uint64_t Raw64;                             // @0-63	Raw access to all 64 bits via this union
     } VMSAv8_64_DESCRIPTOR;
 
 public:
@@ -150,6 +153,11 @@ public:
     {
         return platform_memory_in_bytes_;
     }
+    
+    const uint64_t *KernelPageTableL1() const override
+    {
+        return kernel_page_table_;
+    }
 
     uint32_t ReservedMemoryRegionCount() const override
     {
@@ -182,15 +190,21 @@ protected:
     uint64_t *kernel_page_table_;
     VMSAv8_64_DESCRIPTOR *Stage2map1to1_;
 
-    //  A secondary core reads this with its MMU and caches off, so the value has to be
-    //      pushed out to DRAM rather than left sitting in this core's caches.
-    //      Read by secondary cores with their MMU OFF: must be PHYSICAL (R1).
+    //  Both values are read by secondary cores with their MMU and caches OFF, so both must
+    //      be PHYSICAL (R1) and both must be pushed to DRAM.
+    //
+    //  TTBR0 is the ONLY thing a memory model changes at boot.  The model answers; this
+    //      code does not branch, and start.S installs a published value and never learns
+    //      that models exist.  A third model changes nothing below this line.
 
-    static void PublishKernelPageTableBase(uint64_t page_table_base_va)
+    void PublishBootPageTableBases(uint64_t kernel_page_table_va)
     {
-        __kernel_page_table_base = KernelVirtualAddressToPhysical(page_table_base_va);
+        __kernel_page_table_base = KernelVirtualAddressToPhysical(kernel_page_table_va);
+
+        __boot_ttbr0_base = MemoryModel::Instance().BootTTBR0Physical((const uint64_t *)kernel_page_table_va);
 
         asm volatile("dc civac, %0" ::"r"(&__kernel_page_table_base) : "memory");
+        asm volatile("dc civac, %0" ::"r"(&__boot_ttbr0_base) : "memory");
         asm volatile("dsb sy" ::: "memory");
     }
 
