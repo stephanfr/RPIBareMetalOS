@@ -39,6 +39,18 @@ namespace filesystems
         {
             return file_uuid_;
         }
+        
+        FileModes Mode() const
+        {
+            auto file = GetFileMap().GetFileByUUID(file_uuid_);
+
+            if (!file.Successful())
+            {
+                return FileModes::READ;
+            }
+
+            return file->Mode();
+        }
 
         ReferenceResult<FilesystemResultCodes, const minstd::string> Filename() const
         {

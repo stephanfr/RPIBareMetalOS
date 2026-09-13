@@ -97,9 +97,9 @@ OBJ := $(patsubst $(SRC_ROOT)/asm/%.S,$(BUILD_ROOT)/asm/%.o,$(ASM_SRC)) $(patsub
 #  editing a header rebuilds every object that includes it (e.g. inline GetCoreID).
 DEPS := $(OBJ:.o=.d)
 
-INCLUDE_DIRS := -I../deps/minimalclib/include -I../deps/minimalstdio/include -I../deps/minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
-LDFLAGS += -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64 
-LDLIBS = -lminimalstdio -lminimalclib -lminimalstdlib
+INCLUDE_DIRS := -I../deps/fat32filesystem/include -I../deps/minimalclib/include -I../deps/minimalstdio/include -I../deps/minimalstdlib/include -Iinclude $(INCLUDE_DIRS)
+LDFLAGS += -L../deps/fat32filesystem/lib/aarch64 -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64
+LDLIBS = -lfat32filesystem -lminimalstdio -lminimalclib -lminimalstdlib
 
 LINKER_SCRIPT_TEMPLATE=link.template.ld
 LINKER_SCRIPT=$(BUILD_ROOT)/link.ld

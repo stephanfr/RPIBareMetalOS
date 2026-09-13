@@ -228,6 +228,8 @@ namespace filesystems
 
         virtual const UUID &ID() const = 0;
 
+        virtual FileModes Mode() const = 0;
+
         virtual ReferenceResult<FilesystemResultCodes, const minstd::string> Filename() const = 0;
         virtual ReferenceResult<FilesystemResultCodes, const minstd::string> AbsolutePath() const = 0;
 
