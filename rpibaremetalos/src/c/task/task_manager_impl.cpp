@@ -69,6 +69,21 @@ namespace task
             }
         };
 
+        class ReaperTask : public Runnable
+        {
+        public:
+            void Run() override
+            {
+                while (1)
+                {
+                    TaskManagerImpl::Instance().ReapZombies();
+
+                    Yield();
+                    PhysicalTimer::Wait(milliseconds(250));
+                }
+            }
+        };
+
         //  Wrapper functions to call the Run() method of a Runnable object.
         //      We use extern C to prevent name mangling.
 
@@ -119,8 +134,8 @@ namespace task
 
     TaskManagerImpl::TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc)
                 : number_of_cores_(GetPlatformInfo().GetNumberOfCores()),
-                    task_map_allocator_(alloc),
-                    task_map_(alloc.resource())
+                  task_map_allocator_(alloc),
+                  task_map_(alloc.resource())
     {
     }
 
@@ -170,6 +185,16 @@ namespace task
             }
 
             instance_->get().idle_tasks_[core_id] = instance_->get().task_map_.find(fork_idle_task_result.Value())->second;
+        }
+
+        //  Create one reaper task to periodically clean up zombie tasks
+
+        auto reaper_ = static_new<internal::ReaperTask>();
+
+        if (instance_->get().ForkKernelTask(reaper_, TaskDefinition{"Reaper"}).Failed())
+        {
+            LogFatal("Failed to create the reaper task\n");
+            ParkCore();
         }
 
         //  Start the secondary cores
@@ -516,6 +541,71 @@ namespace task
     {
         TaskManagerImpl::Instance().CurrentTask().PreemptEnable();
         ReturnFromForkASMStub(); //  Assembly function
+    }
+
+    uint32_t TaskManagerImpl::ReapZombies()
+    {
+        const auto now = PhysicalTimer::Now();
+
+        //  TWO PASSES, deliberately.  task_map_ is minstd::skip_list, whose removal API is
+        //      remove(key) -- there is no erase(iterator) -- so an iterator cannot be
+        //      advanced across a removal.  Collect keys first, mutate second.
+
+        UUID reapable[MAX_REAPED_PER_PASS];
+        uint32_t reapable_count = 0;
+
+        for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
+        {
+            TaskImpl *task = itr->second;
+
+            if ((task->State() != Task::ExecutionState::ZOMBIE) ||
+                (task->References() != 0) ||
+                (duration_cast<seconds>(now - task->zombie_timestamp_) < zombie_lifetime_))
+            {
+                continue;
+            }
+
+            reapable[reapable_count++] = task->ID();
+
+            if (reapable_count >= MAX_REAPED_PER_PASS)
+            {
+                break;
+            }
+        }
+
+        uint32_t reaped = 0;
+
+        for (uint32_t i = 0; i < reapable_count; i++)
+        {
+            //  Re-find rather than caching the pointer from pass one: between the passes a
+            //      Join() may have taken a reference.
+
+            auto itr = task_map_.find(reapable[i]);
+
+            if (itr == task_map_.end())
+            {
+                continue;
+            }
+
+            TaskImpl *task = itr->second;
+
+            if (task->References() != 0)
+            {
+                continue;                       //  a joiner arrived between the passes; next round
+            }
+
+            if (!task_map_.remove(reapable[i]))
+            {
+                continue;                       //  someone else took it
+            }
+
+            task->ReleaseResources();
+            dynamic_delete(task);
+
+            reaped++;
+        }
+
+        return reaped;
     }
 
 } // namespace task

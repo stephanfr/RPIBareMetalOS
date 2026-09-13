@@ -15,6 +15,8 @@
 
 #include "result.h"
 
+#include "asm_utility.h"
+
 #include "heaps.h"
 #include "platform/memory_model.h"
 #include "task/user_binary_loader.h"
@@ -30,8 +32,6 @@
 
 #include <random>
 #include "platform/platform_sw_rngs.h"
-
-#include "asm_utility.h"
 
 #include "synchronization.h"
 
@@ -88,8 +88,17 @@ namespace task
 
         void AddTask(minstd::unique_ptr<TaskImpl> &task);
 
+        TaskImpl &IdleTaskForCurrentCore() const
+        {
+            return *(idle_tasks_[GetCoreID()]);
+        }
+
+        uint32_t ReapZombies();
+
     private:
         using TaskMap = minstd::skip_list<UUID, TaskImpl*, MAX_CORES>;
+
+        constexpr static uint32_t MAX_REAPED_PER_PASS = 16;
 
         //  Data members
 
@@ -100,6 +109,8 @@ namespace task
         minstd::array<TaskImpl *, MAX_CORES> kernel_main_tasks_;
         minstd::array<TaskImpl *, MAX_CORES> idle_tasks_;
 
+        TaskImpl* reaper_{nullptr};
+
         minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
 
         minstd::fast_lockfree_low_quality_rng random_generator_{GetGeneralRNG()()};
@@ -109,8 +120,7 @@ namespace task
         minstd::pmr::polymorphic_allocator<uint8_t> task_map_allocator_;
         TaskMap task_map_{};
 
-
-        seconds zombie_lifetime_{600};
+        seconds zombie_lifetime_{5};
         
         //
         //  Private methods

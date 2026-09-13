@@ -155,11 +155,15 @@ namespace task
 
         void Join() override
         {
+            AddReference();
+
             while (state_ != Task::ExecutionState::ZOMBIE)
             {
                 Yield();
                 PhysicalTimer::Wait(microseconds(100));
             }
+
+            ReleaseReference();
         }
 
         void PreemptDisable()
@@ -170,6 +174,36 @@ namespace task
         void PreemptEnable()
         {
             preempt_count_--;
+        }
+
+        void AddReference()
+        {
+            references_.fetch_add(1);
+        }
+
+        void ReleaseReference()
+        {
+            references_.fetch_sub(1);
+        }
+
+        uint32_t References() const
+        {
+            return references_.load();
+        }
+
+        void ReleaseResources()
+        {
+            if (address_space_ != nullptr)
+            {
+                dynamic_delete(address_space_);
+                address_space_ = nullptr;
+            }
+
+            if (stack_ != 0)
+            {
+                GetMemoryManager().ReleaseBlock(stack_, stack_size_in_bytes_);
+                stack_ = MemoryPagePointer(0);
+            }
         }
 
         ExecutionState State() const override
@@ -207,6 +241,7 @@ namespace task
         time_point<nanoseconds> switched_in_last_;
         time_point<nanoseconds> switched_out_last_;
         time_point<nanoseconds> zombie_timestamp_;
+        minstd::atomic<uint32_t> references_{0};
 
         microseconds runtime_ = microseconds::zero();
 

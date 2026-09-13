@@ -7,6 +7,8 @@
 #include "devices/log.h"
 #include "devices/physical_timer.h"
 
+#include "task/task_manager_impl.h"
+
 #include <minimalstdio.h>
 
 extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
@@ -106,7 +108,9 @@ namespace task
 
         if (next_task == nullptr)
         {
-            return TaskImpl::GetTask();
+            //  Normally we should never get here, but just in case, return the idle task.
+
+            return TaskManagerImpl::Instance().IdleTaskForCurrentCore();
         }
 
         //  Return the task with the highest counter value
