@@ -94,6 +94,12 @@ def run(qemu: str, kernel: str, sdimage: str,
         output = send_command('test memorysoak --seconds=10', timeout=90)
         check('test memorysoak', output, 'PASS: memory soak test')
 
+        # test usertask — verifies user-space task execution, fault handling,
+        # and heap isolation across different argument scenarios. Exercises the
+        # complete user-task lifecycle from EL1 fork to EL0 execution and back.
+        output = send_command('test usertask')
+        check('test usertask', output, 'PASS: user task test')
+
         # test addrspace — model-independence check for the address space / page
         # table layer; exercises both memory models.
         output = send_command('test addrspace')

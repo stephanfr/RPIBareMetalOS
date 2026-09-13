@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "heaps.h"
+#include "synchronization.h"
 
 #include "asm_utility.h"
 
@@ -168,6 +169,8 @@ namespace EmmcImpl
         uint32_t relative_card_address_register_;
         SDCardConfigurationRegister sd_card_configuration_register_;
 
+        SpinLock controller_lock_;
+
         EMMCCommand GetCommand(EMMCCommandTypes command_type) const
         {
             return commands[static_cast<uint32_t>(command_type)];
@@ -203,7 +206,7 @@ namespace EmmcImpl
         ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t> AppCommand(EMMCCommandTypes command, uint32_t arg, uint32_t timeout);
         BlockIOResultCodes ResetCommand();
         ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t> IssueCommand(EMMCCommand cmd, uint32_t arg, uint32_t timeout);
-        BlockIOResultCodes DataCommand(bool write, uint8_t *buffer, uint32_t bytes_to_process, uint32_t block_number);
+        BlockIOResultCodes DataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer);
 
         BlockIOResultCodes TransferData(EMMCCommand cmd);
 
@@ -975,6 +978,11 @@ namespace EmmcImpl
 
     BlockIOResultCodes SDCardController::DataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer)
     {
+        //  Acquire the controller lock with IRQs masked to prevent preemption while the lock is held.
+        //  The EMMC hardware updates int_flags independently of IRQ masking, so polling still works.
+
+        InterruptLockGuard controller_guard(controller_lock_);
+
         if (!is_sdhc_card_)
         {
             block_number *= 512;

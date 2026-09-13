@@ -187,7 +187,11 @@ namespace task
             instance_->get().idle_tasks_[core_id] = instance_->get().task_map_.find(fork_idle_task_result.Value())->second;
         }
 
-        //  Create one reaper task to periodically clean up zombie tasks
+        //  Start the secondary cores
+
+        instance_->get().StartSecondaryCores();
+
+        //  Create one reaper task to periodically clean up zombie tasks.
 
         auto reaper_ = static_new<internal::ReaperTask>();
 
@@ -196,10 +200,6 @@ namespace task
             LogFatal("Failed to create the reaper task\n");
             ParkCore();
         }
-
-        //  Start the secondary cores
-
-        instance_->get().StartSecondaryCores();
 
         return TaskResultCodes::SUCCESS;
     }
@@ -355,8 +355,11 @@ namespace task
 
         if (new_task.get() == nullptr)
         {
+            GetMemoryManager().ReleaseBlock(free_block, task_definition.stack_size_in_bytes_);
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
+
+        new_task->stack_ = free_block;
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 

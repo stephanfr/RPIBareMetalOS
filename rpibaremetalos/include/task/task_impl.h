@@ -148,6 +148,8 @@ namespace task
 
             GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
+            EnableIRQs();
+
             while(true)
             {
             }
