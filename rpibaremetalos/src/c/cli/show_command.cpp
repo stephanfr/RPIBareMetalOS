@@ -56,6 +56,7 @@ namespace cli::commands
 
         context.output_stream_ << "\nMemory Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Memory Base Address {:#010x}\n", platformInfo.GetMemoryBaseAddress());
+        context.output_stream_ << minstd::format(format_buffer, "Free Pages: {} of {}\n", GetMemoryManager().FreePages(), GetMemoryManager().NumberOfPages());
         context.output_stream_ << minstd::format(format_buffer, "Code Start: {}\n", (void *)&__start);
         context.output_stream_ << minstd::format(format_buffer, "BSS Start: {}\n", (void *)&__bss_start);
         context.output_stream_ << minstd::format(format_buffer, "BSS End: {}\n", (void *)&__bss_end);

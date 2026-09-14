@@ -285,6 +285,35 @@ qemu-regression-rpi4: all
 
 qemu-regression: qemu-regression-rpi3 qemu-regression-rpi4
 
+#  Interactive QEMU session: serial I/O on stdin/stdout, no display.
+#  Override QEMU_RPI4_MACHINE/QEMU_RPI4_MEMORY or use qemu-rpi3 for RPi3.
+#  Memory model: MM=1to1 (default) or MM=isolated
+#  Strict alignment: SA=1 to enable
+ifeq ($(MM),isolated)
+QEMU_MEMORY_MODEL := kernel_high_user_low
+else
+QEMU_MEMORY_MODEL ?= kernel_only_1_to_1
+endif
+QEMU_STRICT_ALIGN := $(if $(filter 1,$(SA)), strict_align=1,)
+
+qemu-rpi3: all
+	$(QEMU) -M $(QEMU_RPI3_MACHINE) \
+		-kernel $(BUILD_ROOT)/kernel8.elf \
+		-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
+		-serial stdio \
+		-display none \
+		-no-reboot \
+		-append "console=ttys0,57600 memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+
+qemu-rpi4: all
+	$(QEMU) -M $(QEMU_RPI4_MACHINE) -m $(QEMU_RPI4_MEMORY) \
+		-kernel $(BUILD_ROOT)/kernel8.elf \
+		-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
+		-serial stdio \
+		-display none \
+		-no-reboot \
+		-append "console=ttys0,57600 memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+
 qemu-cli-soak: all
 	python3 $(QEMU_CLI_SOAK_SCRIPT) \
 		--qemu $(QEMU) \

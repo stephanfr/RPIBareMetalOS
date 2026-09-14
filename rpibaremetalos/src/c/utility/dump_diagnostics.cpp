@@ -43,6 +43,7 @@ void DumpDiagnostics()
     printf("\nMemory Info:\n");
     printf("Memory Size in bytes 0x%08lx\n", platformInfo.GetMemorySizeInBytes());
     printf("Memory Base Address 0x%08x\n", platformInfo.GetMemoryBaseAddress());
+    printf("Free Pages: %lu of %lu\n", GetMemoryManager().FreePages(), GetMemoryManager().NumberOfPages());
     printf("Code Start: %p\n", (uint8_t *)&__start);
     printf("BSS Start: %p\n", (uint8_t *)&__bss_start);
     printf("BSS End: %p\n", (uint8_t *)&__bss_end);

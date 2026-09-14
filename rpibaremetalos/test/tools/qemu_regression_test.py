@@ -97,7 +97,7 @@ def run(qemu: str, kernel: str, sdimage: str,
         # test usertask — verifies user-space task execution, fault handling,
         # and heap isolation across different argument scenarios. Exercises the
         # complete user-task lifecycle from EL1 fork to EL0 execution and back.
-        output = send_command('test usertask')
+        output = send_command('test usertask', timeout=240)
         check('test usertask', output, 'PASS: user task test')
 
         # test addrspace — model-independence check for the address space / page

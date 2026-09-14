@@ -1173,8 +1173,9 @@ namespace cli::commands
     {
         struct UserTaskCase
         {
-            const char *label;
-            unsigned long arg;
+            const char *label_;
+            unsigned long arg_;
+            const char *expectation_;
         };
 
         bool ForkAndJoinUserTask(CLISessionContext &context, const char *name, unsigned long arg)
@@ -1213,20 +1214,20 @@ namespace cli::commands
                                   ToString(MMUManager::Instance().MemoryModel()));
 
         const UserTaskCase cases[] = {
-            {"case 0 (hello)",          0},
-            {"case 1 (kernel VA)",      1},
-            {"case 1b (0x80000)",       2},
-            {"case 2 (write text)",     3},
-            {"case 3 (exec stack)",     4},
+            {"case 0 (hello)",      0, "runs to completion, prints 'hello from EL0'"},
+            {"case 1 (kernel VA)",  1, "KILLED -- permission fault reading the kernel linear map"},
+            {"case 1b (0x80000)",   2, "KILLED -- fault reading the kernel image PA"},
+            {"case 2 (write text)", 3, "KILLED -- permission fault writing read-only user text"},
+            {"case 3 (exec stack)", 4, "KILLED -- permission fault executing from a UXN stack"},
         };
 
         uint32_t failures = 0;
 
         for (const UserTaskCase &test_case : cases)
         {
-            context << minstd::format(buffer, "-- {}\n", test_case.label);
+            context << minstd::format(buffer, "-- {}  [expect: {}]\n", test_case.label_, test_case.expectation_);
 
-            if (!ForkAndJoinUserTask(context, test_case.label, test_case.arg))
+            if (!ForkAndJoinUserTask(context, test_case.label_, test_case.arg_))
             {
                 failures++;
             }

@@ -69,6 +69,21 @@ public:
         return num_pages_;
     }
 
+    uint64_t FreePages() const
+    {
+        uint64_t free_pages = 0;
+
+        for (uint64_t i = 0; i < num_pages_; i++)
+        {
+            if (page_map_[i].load(minstd::memory_order_relaxed) == 0)
+            {
+                free_pages++;
+            }
+        }
+
+        return free_pages;
+    }
+
     MemoryPagePointer GetFreeBlock(uint64_t block_size);
 
     void ReleaseBlock(MemoryPagePointer first_page, uint64_t block_size);

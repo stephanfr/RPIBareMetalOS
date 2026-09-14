@@ -247,6 +247,14 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
         return false;
     }
 
+    //  Refuse BEFORE mapping anything: on a full owned_ the block could not be recorded,
+    //      and an unrecorded block is exactly the leak this check exists to prevent.
+
+    if (owned_count_ >= MAX_OWNED_BLOCKS)
+    {
+        return false;
+    }
+
     for (uint64_t offset = 0; offset < size; offset += PAGE_SIZE)
     {
         uint64_t *entry = L3EntryFor(user_va + offset, true);
@@ -279,6 +287,8 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
     //      can be installed.
 
     asm volatile("dsb ishst" ::: "memory");
+
+    owned_[owned_count_++] = OwnedBlock{physical_base, size};
 
     return true;
 }

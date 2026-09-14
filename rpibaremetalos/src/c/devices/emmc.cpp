@@ -182,11 +182,18 @@ namespace EmmcImpl
             {
                 if ((reg & mask) ? set : !set)
                 {
+                    if (attempts > 4)
+                    {
+                        LogError("EMMC: WaitForInterrupt took %u attempts (mask %08x)\n", attempts, mask);
+                    }
+
                     return true;
                 }
 
                 PhysicalTimer::Wait(milliseconds(1));
             }
+
+            LogError("EMMC: WaitForInterrupt TIMED OUT after %u attempts (mask %08x)\n", retries, mask);
 
             return false;
         }

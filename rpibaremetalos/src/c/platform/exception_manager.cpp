@@ -59,7 +59,7 @@ extern "C" void HandleUserTaskFault(unsigned long esr, unsigned long elr, unsign
 {
     task::TaskImpl &task = task::TaskImpl::GetTask();
 
-    LogError("KILLED user task %s: ESR=%016lx PC=%016lx FAR=%016lx\n",
+    LogWarning("Exception in User Task - task killed: %s: ESR=%016lx PC=%016lx FAR=%016lx\n",
              task.Name().c_str(), esr, elr, far);
 
     task.Exit();
