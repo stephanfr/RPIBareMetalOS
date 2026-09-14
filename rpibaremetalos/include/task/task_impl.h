@@ -161,7 +161,7 @@ namespace task
 
             while (state_ != Task::ExecutionState::ZOMBIE)
             {
-                Yield();
+                TaskImpl::GetTask().Yield();                            //  the CALLER yields; never touch the target's counter
                 PhysicalTimer::Wait(microseconds(100));
             }
 

@@ -110,7 +110,6 @@ extern "C" void kernel_main()
 
     while (1)
     {
-        CPUTicksDelay(1000);
-        task::Task::GetTask().Yield();
+        WAIT_FOR_INTERRUPT;
     }
 }

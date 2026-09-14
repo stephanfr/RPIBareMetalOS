@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "heaps.h"
-#include "synchronization.h"
 
 #include "asm_utility.h"
 
@@ -17,6 +16,7 @@
 #include "devices/physical_timer.h"
 
 #include "devices/emmc.h"
+#include "task/tasks.h"
 
 #include "devices/emmc/emmc_commands.h"
 #include "devices/emmc/emmc_registers.h"
@@ -169,7 +169,7 @@ namespace EmmcImpl
         uint32_t relative_card_address_register_;
         SDCardConfigurationRegister sd_card_configuration_register_;
 
-        SpinLock controller_lock_;
+        minstd::atomic<bool> controller_in_use_{false};
 
         EMMCCommand GetCommand(EMMCCommandTypes command_type) const
         {
@@ -985,10 +985,18 @@ namespace EmmcImpl
 
     BlockIOResultCodes SDCardController::DataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer)
     {
-        //  Acquire the controller lock with IRQs masked to prevent preemption while the lock is held.
-        //  The EMMC hardware updates int_flags independently of IRQ masking, so polling still works.
+        //  Yield until no other task is using the controller; atomic exchange prevents multi-core races.
+        
+        while (controller_in_use_.exchange(true, minstd::memory_order_acquire))
+        {
+            task::Task::GetTask().Yield();
+        }
 
-        InterruptLockGuard controller_guard(controller_lock_);
+        struct ReleaseGuard
+        {
+            minstd::atomic<bool> &flag_;
+            ~ReleaseGuard() { flag_.store(false, minstd::memory_order_release); }
+        } release_guard{controller_in_use_};
 
         if (!is_sdhc_card_)
         {

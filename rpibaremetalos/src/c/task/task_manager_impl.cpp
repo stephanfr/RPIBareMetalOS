@@ -62,9 +62,7 @@ namespace task
 
                 while (1)
                 {
-                    WAIT_FOR_EVENT;
-                    Yield();
-                    PhysicalTimer::Wait(milliseconds(100));
+                    WAIT_FOR_INTERRUPT;
                 }
             }
         };
@@ -79,7 +77,6 @@ namespace task
                     TaskManagerImpl::Instance().ReapZombies();
 
                     Yield();
-                    PhysicalTimer::Wait(milliseconds(250));
                 }
             }
         };
@@ -550,62 +547,60 @@ namespace task
     {
         const auto now = PhysicalTimer::Now();
 
-        //  TWO PASSES, deliberately.  task_map_ is minstd::skip_list, whose removal API is
-        //      remove(key) -- there is no erase(iterator) -- so an iterator cannot be
-        //      advanced across a removal.  Collect keys first, mutate second.
+        //  PASS 1 -- release RESOURCES.  This is the pass the free-page gate measures: it
+        //      returns the kernel stack and the AddressSpace with every frame it owns.  It
+        //      does NOT consult References(): a joiner only reads state_, and the TaskImpl
+        //      object is untouched.  ReleaseResources() is idempotent, so re-running it over
+        //      a retained zombie is harmless.
 
-        UUID reapable[MAX_REAPED_PER_PASS];
-        uint32_t reapable_count = 0;
-
-        for (auto itr = task_map_.begin(); itr != task_map_.end(); ++itr)
+        for (uint32_t i = 0; i < retained_zombie_count_; i++)
         {
-            TaskImpl *task = itr->second;
-
-            if ((task->State() != Task::ExecutionState::ZOMBIE) ||
-                (task->References() != 0) ||
-                (duration_cast<seconds>(now - task->zombie_timestamp_) < zombie_lifetime_))
+            if (duration_cast<seconds>(now - retained_zombies_[i]->zombie_timestamp_) >= zombie_resource_grace_)
             {
-                continue;
-            }
-
-            reapable[reapable_count++] = task->ID();
-
-            if (reapable_count >= MAX_REAPED_PER_PASS)
-            {
-                break;
+                retained_zombies_[i]->ReleaseResources();
             }
         }
 
+        //  PASS 2 -- destroy the OBJECTS, and compact.  Safe now: the task is in no run
+        //      list (it only reaches this array via FindNextTask delisting it) and nothing
+        //      holds a reference.  Removing from task_map_ last is what keeps FindTask()
+        //      working for the whole retention window.
+
+        const bool over_cap = (retained_zombie_count_ >= MAX_RETAINED_ZOMBIES);
+
         uint32_t reaped = 0;
+        uint32_t surviving = 0;
 
-        for (uint32_t i = 0; i < reapable_count; i++)
+        for (uint32_t i = 0; i < retained_zombie_count_; i++)
         {
-            //  Re-find rather than caching the pointer from pass one: between the passes a
-            //      Join() may have taken a reference.
+            TaskImpl *task = retained_zombies_[i];
 
-            auto itr = task_map_.find(reapable[i]);
+            const bool old_enough =
+                duration_cast<seconds>(now - task->zombie_timestamp_) >= zombie_lifetime_;
 
-            if (itr == task_map_.end())
+            if ((task->References() != 0) || (!old_enough && !over_cap))
             {
+                retained_zombies_[surviving++] = task;
                 continue;
             }
 
-            TaskImpl *task = itr->second;
-
-            if (task->References() != 0)
-            {
-                continue;                       //  a joiner arrived between the passes; next round
-            }
-
-            if (!task_map_.remove(reapable[i]))
-            {
-                continue;                       //  someone else took it
-            }
-
-            task->ReleaseResources();
+            task_map_.remove(task->ID());
+            task->ReleaseResources();          //  no-op if pass 1 already ran
             dynamic_delete(task);
 
             reaped++;
+        }
+
+        retained_zombie_count_ = surviving;
+
+        //  DRAIN last, into the space pass 2 just freed.  Anything that will not fit stays
+        //      queued for the next sweep rather than being dropped.
+
+        TaskImpl *delisted = nullptr;
+
+        while ((retained_zombie_count_ < MAX_RETAINED_ZOMBIES) && delisted_zombies_.pop_front(delisted))
+        {
+            retained_zombies_[retained_zombie_count_++] = delisted;
         }
 
         return reaped;

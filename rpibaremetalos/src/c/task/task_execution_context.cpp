@@ -57,6 +57,7 @@ namespace task
             {
                 //  Remove takes the last task in the list and places it into the slot to be removed
 
+                TaskManagerImpl::Instance().NotifyTaskDelisted(*task);
                 task_list_.RemoveTaskByIndex(i);
 
                 if (i >= task_list_.NumTasks())
