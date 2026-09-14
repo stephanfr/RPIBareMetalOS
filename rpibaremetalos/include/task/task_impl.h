@@ -155,7 +155,7 @@ namespace task
         {
             AddReference();
 
-            while (state_ != Task::ExecutionState::ZOMBIE)
+            while (const_cast<volatile ExecutionState &>(state_) != Task::ExecutionState::ZOMBIE)
             {
                 Yield();
                 PhysicalTimer::Wait(microseconds(100));

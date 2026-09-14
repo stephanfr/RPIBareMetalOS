@@ -1050,6 +1050,7 @@ namespace cli::commands
                              Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false))
         {
             context << "FAIL: MapPages rejected a valid single-page mapping\n";
+            MemoryModel::Instance().ReleaseUserFrame(frame, BYTES_4K);
             dynamic_delete(space);
             return;
         }
@@ -1146,7 +1147,6 @@ namespace cli::commands
             dynamic_delete(load_space);
         }
 
-        MemoryModel::Instance().ReleaseUserFrame(frame, BYTES_4K);
         dynamic_delete(space);
 
         if (failures == 0)

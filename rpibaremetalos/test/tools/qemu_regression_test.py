@@ -98,7 +98,21 @@ def run(qemu: str, kernel: str, sdimage: str,
         # and heap isolation across different argument scenarios. Exercises the
         # complete user-task lifecycle from EL1 fork to EL0 execution and back.
         output = send_command('test usertask', timeout=240)
-        check('test usertask', output, 'PASS: user task test')
+        check('test usertask', output, 'PASS: user task test', 'hello from EL0')
+
+        # Cases 1-3 are SUPPOSED to be killed, so the real pass condition is the ABSENCE of
+        # the "NOT KILLED" line hello.c prints when an expected fault did not happen. The
+        # kernel counts forks, not arrivals, which is what let this command report PASS on a
+        # run where a case-4 task never reached EL0.
+
+        if output.count('case 4: isolated') != 2:
+            print('\nFAIL [test usertask]: case 4 did not run both tasks')
+            failures += 1
+
+        for bad in ('Failed to move task to user space', 'NOT KILLED'):
+            if bad in output:
+                print(f'\nFAIL [test usertask]: unexpected "{bad}" in output')
+                failures += 1
 
         # test addrspace — model-independence check for the address space / page
         # table layer; exercises both memory models.

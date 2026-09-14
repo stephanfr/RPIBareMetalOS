@@ -149,7 +149,6 @@ namespace task
         if (voluntary)
         {
             prev->counter_ = 0;
-            prev->preempt_count_ = 0;
         }
 
         //  First, groom the task list.
@@ -179,6 +178,7 @@ namespace task
 
         if (prev == next)
         {
+            prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
 

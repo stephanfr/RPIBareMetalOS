@@ -117,6 +117,9 @@ namespace task
                                       stack_size_in_bytes_,
                                       Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false))
         {
+            //  MapPages failed, so the space never took ownership -- give the stack back here.
+
+            MemoryModel::Instance().ReleaseUserFrame(user_stack, stack_size_in_bytes_);
             return Result::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK_STACK;
         }
 

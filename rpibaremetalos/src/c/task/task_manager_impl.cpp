@@ -419,17 +419,23 @@ namespace task
 
         if (new_task.get() == nullptr)
         {
+            GetMemoryManager().ReleaseBlock(free_block, task_definition.stack_size_in_bytes_);
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
+
+        //  The task owns the KERNEL stack we just allocated -- that is what ReleaseResources()
+        //      gives back.  `stack` is the caller's USER stack and stays the caller's to free;
+        //      recording it here leaked free_block and double-freed the caller's block.
+
+        new_task->stack_ = free_block;
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
         TaskImpl::FullCPUState &cur_regs = CurrentTask().GetTaskInitialFullCPUState();
         childregs = cur_regs;
-        childregs.regs[0] = SYS_CLONE_NEW_TASK; //  This sets x0 to the value which signals to callers that we have a net-new task
+        childregs.regs[0] = SYS_CLONE_NEW_TASK;
         childregs.sp = stack + task_definition.stack_size_in_bytes_;
-        new_task->stack_ = stack;
-
+        
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
         new_task->preempt_count_ = 1;
