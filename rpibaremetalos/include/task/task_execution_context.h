@@ -78,7 +78,7 @@ namespace task
             inter_context_message_queue_.QueueMessage(message);
         }
 
-        void SwitchTasks();
+        void SwitchTasks(bool voluntary = false);
 
     private:
 

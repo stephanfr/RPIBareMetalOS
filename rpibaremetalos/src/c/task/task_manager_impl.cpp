@@ -527,9 +527,9 @@ namespace task
         }
     }
 
-    void TaskManagerImpl::SwitchToNextTask()
+    void TaskManagerImpl::SwitchToNextTask(bool voluntary)
     {
-        task_execution_contexts_[GetCoreID()].SwitchTasks();
+        task_execution_contexts_[GetCoreID()].SwitchTasks(voluntary);
     }
 
     extern "C" void *GetTaskInitialCPUStateFrame()

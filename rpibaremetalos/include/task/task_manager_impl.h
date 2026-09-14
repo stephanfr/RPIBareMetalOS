@@ -77,7 +77,7 @@ namespace task
         void PreemptiveSchedule(void);
 
         void Schedule(void);
-        void SwitchToNextTask(void);
+        void SwitchToNextTask(bool voluntary = false);
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
         ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;

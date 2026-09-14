@@ -127,10 +127,6 @@ namespace task
 
         void Yield() override
         {
-            //  TODO - maybe put the assignments to counter and preempt_count in sc_Yield();
-            counter_ = 0;
-            preempt_count_ = 0;
-
             sc_Yield();
         }
 
@@ -161,7 +157,7 @@ namespace task
 
             while (state_ != Task::ExecutionState::ZOMBIE)
             {
-                TaskImpl::GetTask().Yield();                            //  the CALLER yields; never touch the target's counter
+                Yield();
                 PhysicalTimer::Wait(microseconds(100));
             }
 

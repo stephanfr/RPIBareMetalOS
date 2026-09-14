@@ -119,7 +119,7 @@ namespace task
         return *next_task;
     }
 
-    void TaskExecutionContext::SwitchTasks()
+    void TaskExecutionContext::SwitchTasks(bool voluntary)
     {
         //  Be very care with the order of operations here - we are in a critical section.
         //      Do not allow interrupts to occur in this code as we are manipulating the task list
@@ -142,6 +142,14 @@ namespace task
         if (prev->switched_in_last_.time_since_epoch().count() != 0)
         {
             prev->runtime_ += duration_cast<microseconds>(switch_start - prev->switched_in_last_);
+        }
+
+        //  A voluntary yield expires the remaining timeslice immediately.
+
+        if (voluntary)
+        {
+            prev->counter_ = 0;
+            prev->preempt_count_ = 0;
         }
 
         //  First, groom the task list.
