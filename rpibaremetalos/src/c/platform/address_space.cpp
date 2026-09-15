@@ -318,6 +318,35 @@ bool AddressSpace::Translate(uint64_t user_va, uint64_t &physical_out) const
     return true;
 }
 
+bool AddressSpace::TranslateForWrite(uint64_t user_va, uint64_t &physical_out) const
+{
+    const UserSpaceLayout &layout = MemoryModel::Instance().UserSpace();
+
+    if ((user_va < layout.space_base) || (user_va >= layout.space_top))
+    {
+        return false;
+    }
+
+    const uint64_t *entry = L3EntryFor(user_va);
+
+    if ((entry == nullptr) || (*entry == 0))
+    {
+        return false;
+    }
+
+    VMSAv8_64_DESCRIPTOR desc{};
+    desc.Raw64 = *entry;
+
+    if (desc.S2AP == EL1_READ_ONLY || desc.S2AP == EL1_READ_ONLY_EL0_READ_ONLY || desc.UXN == 0)
+    {
+        return false;
+    }
+
+    physical_out = DescriptorPhysical(*entry) | (user_va & (PAGE_SIZE - 1));
+
+    return true;
+}
+
 AddressSpace::~AddressSpace()
 {
     //  owned_ records only frames THIS space allocated -- its L1, its L2/L3 tables, and the

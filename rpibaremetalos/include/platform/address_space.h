@@ -52,6 +52,9 @@ public:
 
     bool Translate(uint64_t user_va, uint64_t &physical_out) const;
 
+    //  Like Translate, but also rejects read-only and executable pages.
+    bool TranslateForWrite(uint64_t user_va, uint64_t &physical_out) const;
+
     uint64_t TTBR0Value() const { return ((uint64_t)asid_ << 48) | l1_physical_; }   //  ASID [63:48], PHYSICAL L1 [47:0]
 
     //  What TTBR0 holds while a KERNEL task runs.  This is the whole of the runtime

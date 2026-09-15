@@ -308,7 +308,7 @@ namespace EmmcImpl
         registers_->arg1 = arg;
         registers_->cmd_xfer_mode = command_reg;
 
-        PhysicalTimer::Wait(milliseconds(10));
+        PhysicalTimer::Wait(microseconds(100));
 
         uint32_t times = 0;
 

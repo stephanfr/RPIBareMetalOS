@@ -4,25 +4,49 @@
 
 #include "task/system_calls.h"
 #include "task/task_manager_impl.h"
+#include "task/user_access.h"
 
 #include "platform/memory_model.h"
 
 #include "devices/std_streams.h"
 
+
 namespace syscall
 {
     void Write(const char *buf)
     {
-        *stdout << buf;
-    }
+        //  buf is a USER pointer when the caller is at EL0.  Copy it in through the task's
+        //      own address space before touching it -- *stdout << buf would otherwise let a
+        //      user task print arbitrary kernel memory by passing a kernel VA.
 
+        char local[MAX_SYSCALL_STRING_LENGTH];
+
+         //  TODO - do not copy but map memory between user and kernel space directly
+
+        if (!task::CopyStringFromUserSpaceToKernelSpace(local, (uint64_t)buf, sizeof(local)))             
+        {
+            return;                                 //  bad pointer: drop the write
+        }
+
+        *stdout << local;
+    }
+    
     int CloneTask( const char* name, MemoryPagePointer stack, task::TaskResultCodes &result_code, UUID &result)
     {
         auto new_task = task::TaskManagerImpl::Instance().CloneTask(name, stack);
 
-        result_code = new_task.ResultCode();
-        result = new_task.Successful() ? new_task.Value() : UUID::NIL;
+        //  Both of these are USER addresses.  Writing through the references directly is an
+        //      arbitrary kernel-mode write at an address EL0 chose.
 
+        const auto code = new_task.ResultCode();
+        const UUID id   = new_task.Successful() ? new_task.Value() : UUID::NIL;
+
+        if (!task::CopyToUserSpaceFromKernelSpace((uint64_t)&result_code, &code, sizeof(code)) ||
+            !task::CopyToUserSpaceFromKernelSpace((uint64_t)&result, &id, sizeof(id)))
+        {
+            return SYS_CLONE_FAILURE;
+        }
+        
         return new_task.Successful() ? SYS_CLONE_SUCCESS : SYS_CLONE_FAILURE;
     }
 

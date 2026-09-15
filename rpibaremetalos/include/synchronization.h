@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include "asm_utility.h"
 #include "services/uuid.h"
 
 #include "devices/log.h"
@@ -71,11 +72,14 @@ class SpinLock : public LockableObject
 
     void Lock()
     {
+        //  Recursive acquisition.  Returning here would hand the caller a lock it does not hold, and its
+        //  guard's destructor would then release someone else's.  There is no correct way to continue, so just terminate.
+
         if((lock_ != UNLOCKED) && track_owning_task_ && ( owner_ == GetCurrentTaskId()))
         {
             char buffer[128];
-            LogError("SpinLock already owned by current task: %s\n", owner_.ToString(buffer));
-            return;
+            LogFatal("SpinLock already owned by current task: %s\n", owner_.ToString(buffer));
+            ParkCore();
         }
 
         LockSpinLock(&lock_);
@@ -88,11 +92,14 @@ class SpinLock : public LockableObject
 
     void Unlock()
     {
+        //  Releasing a lock we do not own.  Returning leaves it held forever and every
+        //      other core spins on it -- strictly worse than terminating the OS.
+
         if(( lock_ != UNLOCKED ) && ( track_owning_task_ && ( owner_ != GetCurrentTaskId())))
         {
             char buffer[128];
-            LogError("SpinLock not owned by current task: %s\n", owner_.ToString(buffer));
-            return;
+            LogFatal("SpinLock not owned by current task: %s\n", owner_.ToString(buffer));
+            ParkCore();
         }
 
         owner_ = UUID::NIL;

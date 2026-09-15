@@ -114,6 +114,8 @@ namespace task
 
         static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;
 
+        static inline minstd::atomic<uint32_t> next_user_visible_id{1};                //  Starts at 1: 0 is reserved for "not a user task" (SetCoreMainTaskContext).
+
         const uint32_t number_of_cores_;
 
         minstd::array<TaskImpl *, MAX_CORES> kernel_main_tasks_;

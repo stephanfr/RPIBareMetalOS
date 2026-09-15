@@ -26,8 +26,13 @@ namespace task
             switch (message.Type())
             {
             case InterContextMessage::MessageType::ADD_TASK:
-                //  Add the task to the task list
-                task_list_.AddTask(message.Task());
+
+                if (!task_list_.AddTask(message.Task()))
+                {
+                    //  Log the failure (run list full - MAX_ACTIVE_TASKS_PER_CORE reached) and park the core to prevent further execution.
+                    LogFatal("TaskExecutionContext::ServiceMessages - core %u run list full, dropping task\n", GetCoreID());
+                    ParkCore();
+                }
                 break;
 
             case InterContextMessage::MessageType::SURRENDER_TASK:

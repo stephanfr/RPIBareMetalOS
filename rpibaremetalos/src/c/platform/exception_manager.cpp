@@ -71,7 +71,7 @@ extern "C" void HandleUserTaskFault(unsigned long esr, unsigned long elr, unsign
 
 void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far)
 {
-    LogError("%s, Core: %d ESR: %x, PC: %x, FAR: %x\r\n", entry_error_messages[type], GetCoreID(), (unsigned int)esr, (unsigned int)address, (unsigned int)far);
+    LogError("%s, Core: %d ESR: %016lx PC: %016lx FAR: %016lx\r\n", entry_error_messages[type], GetCoreID(), esr, address, far);
 }
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)

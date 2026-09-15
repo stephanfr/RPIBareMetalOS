@@ -308,7 +308,12 @@ namespace task
 
         SetKernelTaskContext(task.get());
         task->cpu_state_.tpidr_el1 = (unsigned long)task.get();
-        task->cpu_state_.tpidrro_el0 = (unsigned long)task.get();
+
+        //  A core main task never reaches EL0, but it can be current when a user task's
+        //      syscall or fault is taken, so the EL0-readable register must not carry a
+        //      kernel pointer here either.  0 is the reserved "no user id".
+
+        task->cpu_state_.tpidrro_el0 = 0;
     }
 
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
@@ -370,8 +375,6 @@ namespace task
         //  TPIDRRO_EL0 is readable at EL0, so it never carries a kernel pointer -- it gets
         //      an opaque monotonic id instead.  TPIDR_EL1 is the one the kernel reads back
         //      through GetTaskContext() (see 2.3c).
-
-        static minstd::atomic<uint32_t> next_user_visible_id(1);
 
         new_task->user_visible_id_ = next_user_visible_id.fetch_add(1);
 
@@ -435,19 +438,22 @@ namespace task
         childregs = cur_regs;
         childregs.regs[0] = SYS_CLONE_NEW_TASK;
         childregs.sp = stack + task_definition.stack_size_in_bytes_;
-        
+
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
         new_task->preempt_count_ = 1;
 
         new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
         new_task->cpu_state_.sp = &childregs;
-        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task.get();
+
+        new_task->user_visible_id_ = next_user_visible_id.fetch_add(1);
+
+        new_task->cpu_state_.tpidrro_el0 = new_task->user_visible_id_;
         new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Set the task context based on if this is a kernel or user task
 
-        childregs.tpidrro_el0 = (unsigned long)new_task.get();
+        childregs.tpidrro_el0 = new_task->user_visible_id_;
         childregs.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Add the task to the task map
