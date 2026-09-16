@@ -24,13 +24,6 @@
 #include "services/uuid.h"
 #include "task/task_errors.h"
 
-#define MAX_SYSCALL_STRING_LENGTH   256
-
-namespace task
-{
-    bool CopyStringFromUser(char *dst, uint64_t user_va, size_t max_len);
-    bool CopyToUser(uint64_t user_va, const void *src, size_t size);
-}
 
 extern "C" int sc_CloneTask(const char* name, unsigned long fn, unsigned long arg, unsigned long stack, task::TaskResultCodes &result_code, UUID &result);
 extern "C" unsigned long sc_Malloc(unsigned long block_size);

@@ -19,7 +19,7 @@ namespace syscall
         //      own address space before touching it -- *stdout << buf would otherwise let a
         //      user task print arbitrary kernel memory by passing a kernel VA.
 
-        char local[MAX_SYSCALL_STRING_LENGTH];
+        char local[task::MAX_USER_STRING_LENGTH];
 
          //  TODO - do not copy but map memory between user and kernel space directly
 
@@ -33,7 +33,20 @@ namespace syscall
     
     int CloneTask( const char* name, MemoryPagePointer stack, task::TaskResultCodes &result_code, UUID &result)
     {
-        auto new_task = task::TaskManagerImpl::Instance().CloneTask(name, stack);
+        //  `name` is a USER pointer.  TaskDefinition's const char* constructor strlen()s and
+        //      copies it at EL1, so it has to be brought across first -- the same reason
+        //      Write() cannot hand `buf` straight to *stdout.
+
+        char local_name[task::MAX_USER_STRING_LENGTH];
+
+        if (!task::CopyStringFromUserSpaceToKernelSpace(local_name, (uint64_t)name, sizeof(local_name)))
+        {
+            return SYS_CLONE_FAILURE;
+        }
+
+        //  Now clone
+
+        auto new_task = task::TaskManagerImpl::Instance().CloneTask(local_name, stack);
 
         //  Both of these are USER addresses.  Writing through the references directly is an
         //      arbitrary kernel-mode write at an address EL0 chose.

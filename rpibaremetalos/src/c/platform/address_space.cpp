@@ -7,7 +7,8 @@
 #include "platform/address_space.h"
 
 #include <atomic>
-#include <lockfree/sp_mc_value_stack>
+
+#include "devices/log.h"
 
 //  4KB granule, T0SZ = 25 (a 39-bit user VA):
 //
@@ -44,42 +45,76 @@ namespace
 
     constexpr uint64_t DescriptorPhysical(uint64_t raw) { return raw & DESCRIPTOR_ADDRESS_MASK; }
 
-    //  ASIDs are handed out monotonically from 1; 0 belongs to the kernel's TTBR0.
+    //  ASID allocator.
+    //
+    //  An ASID is a dense integer in [1, 65535], so a bitmap is the natural representation --
+    //      and unlike a single-producer stack it is safe for concurrent allocate AND release
+    //      from any core, which is what actually happens: any core can fork a user task, and
+    //      BOTH the reaper (ReleaseResources) and the CLI (test addrspace) destroy address
+    //      spaces.  There is no producer/consumer contract left to violate.
+    //
+    //  Claim is one fetch_or, release is one fetch_and -- no CAS loop, and no ABA, because
+    //      the bit IS the ASID and there is no slot to recycle.  1024 words = 8KB.
+    //
+    //  Bit 0 is the kernel's TTBR0 ASID and is never handed out.
 
-    minstd::atomic<uint16_t> next_asid(1);
+    constexpr uint32_t ASID_BITMAP_WORDS = 65536 / 64;
 
-    //  Returned ASIDs wait here until NextASID() reuses them.  push() is single-producer
-    //  (only the reaper destroys address spaces); pop() is multi-consumer (any core can
-    //  fork a user task).  Lock-free: no IRQ masking or spinlock required.
+    minstd::atomic<uint64_t> asid_in_use[ASID_BITMAP_WORDS];
 
-    static constexpr size_t ASID_POOL_CAPACITY = MAX_CORES * MAX_ACTIVE_TASKS_PER_CORE;
-    minstd::lockfree::sp_mc_value_stack<uint16_t, ASID_POOL_CAPACITY> asid_pool;
+    //  Where the last claim landed, so a busy system does not rescan from zero.  A hint
+    //      only -- correctness never depends on it.
+
+    minstd::atomic<uint32_t> asid_hint(1);
 }
 
 uint16_t AddressSpace::NextASID()
 {
-    uint16_t asid;
+    //  No wrap case and no vmalle1is: there is no monotonic counter to wrap, and every ASID
+    //      is invalidated individually in ~AddressSpace() before it returns to the bitmap.
 
-    if (asid_pool.pop(asid))
+    const uint32_t start_word = (asid_hint.load(minstd::memory_order_relaxed) / 64) % ASID_BITMAP_WORDS;
+
+    for (uint32_t scanned = 0; scanned < ASID_BITMAP_WORDS; scanned++)
     {
-        return asid;
+        const uint32_t word_index = (start_word + scanned) % ASID_BITMAP_WORDS;
+
+        while (true)
+        {
+            const uint64_t word = asid_in_use[word_index].load(minstd::memory_order_relaxed);
+
+            if (word == ~0ULL)
+            {
+                break;                                      //  full, move to the next word
+            }
+
+            const uint32_t bit = __builtin_ctzll(~word);    //  lowest clear bit
+            const uint64_t mask = 1ULL << bit;
+            const uint32_t candidate = (word_index * 64) + bit;
+
+            if (candidate == KERNEL_ASID)
+            {
+                //  Claim bit 0 permanently so the scan stops finding it.  Self-healing on the
+                //      first allocation -- no static initializer, so no .init_array ordering
+                //      to reason about.
+
+                asid_in_use[0].fetch_or(1ULL, minstd::memory_order_relaxed);
+                continue;
+            }
+
+            if ((asid_in_use[word_index].fetch_or(mask, minstd::memory_order_acquire) & mask) == 0)
+            {
+                asid_hint.store(candidate, minstd::memory_order_relaxed);
+
+                return (uint16_t)candidate;
+            }
+
+            //  Another core claimed that bit first -- retry this word.
+        }
     }
 
-    asid = next_asid.fetch_add(1);
-
-    if (asid == 0)
-    {
-        //  Wrapped past 0xFFFF, so some other space may still hold TLB entries tagged
-        //      with the ASID we are about to reuse.  Flush every core before handing it out.
-
-        asm volatile("tlbi vmalle1is" ::: "memory");
-        asm volatile("dsb ish" ::: "memory");
-        asm volatile("isb" ::: "memory");
-
-        asid = next_asid.fetch_add(1);
-    }
-
-    return asid;
+    LogFatal("AddressSpace::NextASID - all 65535 ASIDs are in use\n");
+    ParkCore();
 }
 
 uint64_t *AddressSpace::AllocateTable(uint64_t &physical_out)
@@ -352,7 +387,12 @@ bool AddressSpace::TranslateForWrite(uint64_t user_va, uint64_t &physical_out) c
     VMSAv8_64_DESCRIPTOR desc{};
     desc.Raw64 = *entry;
 
-    if (desc.S2AP == EL1_READ_ONLY || desc.S2AP == EL1_READ_ONLY_EL0_READ_ONLY || desc.UXN == 0)
+    //  ALLOWLIST, not a blocklist: EL1_READ_WRITE_EL0_READ_WRITE is the only encoding EL0 may
+    //      write through.  EL1_READ_WRITE (S2AP 0) is EL1-only with NO EL0 access and must not
+    //      become a valid destination merely by not being read-only.  UXN == 0 additionally
+    //      refuses executable pages, so no I-cache maintenance is ever needed after a write.
+
+    if ((desc.S2AP != EL1_READ_WRITE_EL0_READ_WRITE) || (desc.UXN == 0))
     {
         return false;
     }
@@ -368,24 +408,27 @@ AddressSpace::~AddressSpace()
 
     if (asid_ != KERNEL_ASID)
     {
-        asid_pool.push(asid_);
-        asid_ = KERNEL_ASID;    //  prevent double-return if destructor is re-entered
+        //  Invalidate every TLB entry tagged with this ASID BEFORE it becomes reusable.
+        //      The frames released below are about to be handed to another space, and a
+        //      stale entry would let the next holder of this ASID read them.
+        //
+        //  This is the ONLY place the invalidation can happen -- NextASID() has no flush of
+        //      its own, because per-ASID invalidation here is strictly cheaper than the
+        //      whole-TLB vmalle1is the old monotonic-counter wrap needed.
+        //
+        //  ASID goes in bits [63:48] of the operand -- the same layout TTBR0Value() uses.
+
+        asm volatile("dsb ishst" ::: "memory");
+        asm volatile("tlbi aside1is, %0" ::"r"((uint64_t)asid_ << 48) : "memory");
+        asm volatile("dsb ish" ::: "memory");
+        asm volatile("isb" ::: "memory");
+
+        //  Release ONLY after the invalidation above has completed on every core -- this is
+        //      what makes the ASID visible to NextASID() again.  No lock: fetch_and is safe
+        //      from any core against any other core's fetch_or.
+
+        asid_in_use[asid_ / 64].fetch_and(~(1ULL << (asid_ % 64)), minstd::memory_order_release);
+
+        asid_ = KERNEL_ASID;    //  prevent double-claim if destructor is re-entered
     }
-
-    //  owned_ records only frames THIS space allocated -- its L1, its L2/L3 tables, and the
-    //      blocks it mapped.  Under kernel_only_1_to_1 the L1 also contains kernel identity
-    //      entries, but those were copied as values and their L2/L3 tables were never added
-    //      to owned_, so teardown cannot free the kernel's own page tables.  Never walk the
-    //      L1 to decide what to free; walk owned_.
-
-    const MemoryModel &model = MemoryModel::Instance();
-
-    for (uint32_t i = 0; i < owned_count_; i++)
-    {
-        model.ReleaseUserFrame(MemoryPagePointer{owned_[i].physical}, owned_[i].size);
-    }
-
-    owned_count_ = 0;
-    l1_ = nullptr;
-    l1_physical_ = 0;
 }
