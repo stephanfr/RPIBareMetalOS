@@ -184,7 +184,7 @@ namespace EmmcImpl
                 {
                     if (attempts > 4)
                     {
-                        LogError("EMMC: WaitForInterrupt took %u attempts (mask %08x)\n", attempts, mask);
+                        LogDebug1("EMMC: WaitForInterrupt took %u attempts (mask %08x)\n", attempts, mask);
                     }
 
                     return true;
@@ -246,8 +246,12 @@ namespace EmmcImpl
         {
             //  Wait for the card to be ready for the read or write operation
 
+            const auto wait_start = PhysicalTimer::Now();
+
             WaitForInterrupt(registers_->int_flags, read_or_write_ready_interrupt | InterruptRegError, true, 2000);
 
+            LogWarning("EMMC: block %u ReadReady after %lu us\n", block, duration_cast<microseconds>(PhysicalTimer::Now() - wait_start).count());
+            
             uint32_t intr_val = registers_->int_flags;
 
             registers_->int_flags = read_or_write_ready_interrupt | InterruptRegError;
@@ -755,7 +759,21 @@ namespace EmmcImpl
 
         emmc_host_clock_rate_ = getEMMCClockRateTag.GetRateInHz();
 
-        LogDebug1("EMMC Host Clock Rate: %u Hz\n", getEMMCClockRateTag.GetRateInHz());
+        LogDebug1("EMMC Host Clock Rate: %u Hz\n", emmc_host_clock_rate_);
+
+        //  The mailbox is a VideoCore service and RPi5's differs from BCM2837/BCM2711.  An
+        //      unanswered or malformed reply leaves this 0 or garbage, GetClockDivider then
+        //      computes a divider from it, and the card still works -- just at the wrong
+        //      clock, with nothing said.  Report it at a level the default log level shows.
+        //
+        //      Deliberately does NOT substitute a default: guessing a base clock is how you
+        //      get a card that works on one board and corrupts on another.
+
+        if ((emmc_host_clock_rate_ < SDClockNormalRate) || (emmc_host_clock_rate_ > 1000000000))
+        {
+            LogError("EMMC: implausible host clock rate from mailbox: %u Hz (expected %u..1000000000)\n",
+                     emmc_host_clock_rate_, (uint32_t)SDClockNormalRate);
+        }
 
         //  Setup the clock
 
@@ -878,11 +896,13 @@ namespace EmmcImpl
             }
         }
 
-        //  Cap the divider at 1024
+        //  Cap at 512, the largest POWER OF TWO representable in the 10-bit divider field.
 
-        if (closest_integral_divider > 1024)
+        static constexpr uint32_t MAX_CLOCK_DIVIDER = 512;
+
+        if (closest_integral_divider > MAX_CLOCK_DIVIDER)
         {
-            closest_integral_divider = 1024;
+            closest_integral_divider = MAX_CLOCK_DIVIDER;
         }
 
         //  Find the closest power of 2 larger than the divider
@@ -892,12 +912,10 @@ namespace EmmcImpl
         for (power_of_2_divider = 1; power_of_2_divider < closest_integral_divider; power_of_2_divider *= 2)
             ;
 
-        //  Cap the power of 2 divider at 15
-
-        //        if (power_of_2_divider > 15)
-        //        {
-        //            power_of_2_divider = 15;
-        //        }
+        if (power_of_2_divider > MAX_CLOCK_DIVIDER)
+        {
+            power_of_2_divider = MAX_CLOCK_DIVIDER;
+        }
 
         LogDebug1("SD Card Clock Rate Divider: %u for target: %u\n", power_of_2_divider, desired_frequency);
 

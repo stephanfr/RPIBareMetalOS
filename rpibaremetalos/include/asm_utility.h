@@ -77,3 +77,15 @@ inline uint32_t GetExceptionLevel()
     return el;
 }
 
+//  The system counter frequency, in Hz.  EVERY timed wait in the OS derives from this --
+//      PhysicalTimer::Wait(), the 50ms scheduling quantum, the EMMC poll loops -- and nothing
+//      validates it.  Expect 19200000 on RPi3/RPi4 and 54000000 on RPi5.
+
+inline uint64_t GetCounterFrequency()
+{
+    uint64_t counter_frequency;
+
+    asm volatile("mrs %0, cntfrq_el0" : "=r"(counter_frequency));
+
+    return counter_frequency;
+}

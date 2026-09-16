@@ -1214,11 +1214,12 @@ namespace cli::commands
                                   ToString(MMUManager::Instance().MemoryModel()));
 
         const UserTaskCase cases[] = {
-            {"case 0 (hello)",      0, "runs to completion, prints 'hello from EL0'"},
-            {"case 1 (kernel VA)",  1, "KILLED -- permission fault reading the kernel linear map"},
-            {"case 1b (0x80000)",   2, "KILLED -- fault reading the kernel image PA"},
-            {"case 2 (write text)", 3, "KILLED -- permission fault writing read-only user text"},
-            {"case 3 (exec stack)", 4, "KILLED -- permission fault executing from a UXN stack"},
+            {"case 0 (hello)",       0, "runs to completion, prints 'hello from EL0'"},
+            {"case 1 (kernel VA)",   1, "KILLED -- permission fault reading the kernel linear map"},
+            {"case 1b (0x80000)",    2, "KILLED -- fault reading the kernel image PA"},
+            {"case 2 (write text)",  3, "KILLED -- permission fault writing read-only user text"},
+            {"case 3 (exec stack)",  4, "KILLED -- permission fault executing from a UXN stack"},
+            {"case 5 (bad syscall)", 6, "KILLED -- out-of-range syscall number 99, core survives"},
         };
 
         uint32_t failures = 0;

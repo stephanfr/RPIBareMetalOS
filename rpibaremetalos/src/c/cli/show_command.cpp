@@ -54,6 +54,9 @@ namespace cli::commands
         context.output_stream_ << "\nException Level Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Current Exception Level: {}\n", GetExceptionLevel());
 
+        context.output_stream_ << "\nTimer Info:\n";
+        context.output_stream_ << minstd::format(format_buffer, "Counter Frequency (cntfrq_el0): {} Hz ({} ticks/ms)\n", GetCounterFrequency(), GetCounterFrequency() / 1000);
+
         context.output_stream_ << "\nMemory Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Memory Base Address {:#010x}\n", platformInfo.GetMemoryBaseAddress());
         context.output_stream_ << minstd::format(format_buffer, "Free Pages: {} of {}\n", GetMemoryManager().FreePages(), GetMemoryManager().NumberOfPages());

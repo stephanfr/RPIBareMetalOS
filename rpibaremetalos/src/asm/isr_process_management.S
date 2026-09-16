@@ -160,6 +160,16 @@ SOFTWARE.
     b ParkCore
 .endm
 
+//  Variant for paths where KernelEntry has already run -- avoids pushing a second frame.
+.macro HandleInvalidEntryNoFrame el, type
+    mov	x0, #\type
+    mrs	x1, esr_el1
+    mrs	x2, elr_el1
+    mrs	x3, far_el1
+    bl	ShowInvalidExceptionTableEntryMessage
+    b ParkCore
+.endm
+
 //
 //  Macro to define an exception vector table entry.  Interrupts are a subset of Exceptions in AARCH64. 
 //      
@@ -313,7 +323,7 @@ EL1_SynchronousException:
 	str		x0, [sp, #16 * 16]
 	KernelExit EL1
 EL1_SynchronousFault:
-	HandleInvalidEntry EL1, SYNC_ERROR
+	HandleInvalidEntryNoFrame EL1, SYNC_ERROR
 
 EL1_SyscallDispatcher:
 	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
@@ -329,7 +339,10 @@ EL1_SyscallDispatcher:
 
 
 EL1_SyscallIndexOutOfRange:
-	HandleInvalidEntry EL1, SYSCALL_ERROR
+
+	//	An EL1 syscall index out of range is a Kernel error - kill the OS.
+
+	HandleInvalidEntryNoFrame EL1, SYSCALL_ERROR
 
 //	EL0 synchronous exception handler
 
@@ -352,9 +365,10 @@ EL0_SynchronousException:
 	mrs		x2, far_el1
 	bl		HandleUserTaskFault
 
-	HandleInvalidEntry EL0, SYNC_ERROR							//	unreachable -- Exit() does not return
+	HandleInvalidEntryNoFrame EL0, SYNC_ERROR								//	unreachable -- Exit() does not return
 
 EL0_SyscallDispatcher:
+
 	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
 	uxtw	syscall_number, w8									//	syscall number in w8
 	mov		num_system_calls, #NUMBER_OF_SYSTEM_CALLS
@@ -367,7 +381,15 @@ EL0_SyscallDispatcher:
 	KernelExit EL0
 
 EL0_SyscallIndexOutOfRange:
-	HandleInvalidEntry EL0, SYSCALL_ERROR
+
+	//	An out-of-range syscall number is a user program error, not a kernel fault - kill the task
+
+	mrs		x0, esr_el1
+	mrs		x1, elr_el1
+	mrs		x2, far_el1
+	bl		HandleUserTaskFault
+
+	HandleInvalidEntryNoFrame EL0, SYSCALL_ERROR							//	unreachable -- Exit() does not return
 
 //
 //	ReturnFromForkASMStub is called from the C 'TaskManager::ReturnFromFork()' function when new processes or threads are created.

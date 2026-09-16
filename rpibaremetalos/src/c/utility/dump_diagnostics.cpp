@@ -71,6 +71,7 @@ void DumpDiagnostics()
 
     printf("\nHardware Info:\n");
     printf("MMIOBase: %p\n", platformInfo.GetMMIOBase());
+    printf("Counter Frequency (cntfrq_el0): %lu Hz (%lu ticks/ms)\n", GetCounterFrequency(), GetCounterFrequency() / 1000);
 
     printf("\nKernal Command Line: %s\n", KernelCommandLine::RawCommandLine().c_str());
     

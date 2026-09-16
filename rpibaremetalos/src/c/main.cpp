@@ -42,7 +42,7 @@ extern "C" void kernel_main()
 
     printf("Memory Model: %s\n", ToString(MMUManager::Instance().MemoryModel()));
 
-    SetLogLevel(LogLevel::WARNING);
+    SetLogLevel(LogLevel::ERROR);
 
     //  Setup the ISRs
 

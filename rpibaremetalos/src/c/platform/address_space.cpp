@@ -7,6 +7,7 @@
 #include "platform/address_space.h"
 
 #include <atomic>
+#include <lockfree/sp_mc_value_stack>
 
 //  4KB granule, T0SZ = 25 (a 39-bit user VA):
 //
@@ -46,11 +47,25 @@ namespace
     //  ASIDs are handed out monotonically from 1; 0 belongs to the kernel's TTBR0.
 
     minstd::atomic<uint16_t> next_asid(1);
+
+    //  Returned ASIDs wait here until NextASID() reuses them.  push() is single-producer
+    //  (only the reaper destroys address spaces); pop() is multi-consumer (any core can
+    //  fork a user task).  Lock-free: no IRQ masking or spinlock required.
+
+    static constexpr size_t ASID_POOL_CAPACITY = MAX_CORES * MAX_ACTIVE_TASKS_PER_CORE;
+    minstd::lockfree::sp_mc_value_stack<uint16_t, ASID_POOL_CAPACITY> asid_pool;
 }
 
 uint16_t AddressSpace::NextASID()
 {
-    uint16_t asid = next_asid.fetch_add(1);
+    uint16_t asid;
+
+    if (asid_pool.pop(asid))
+    {
+        return asid;
+    }
+
+    asid = next_asid.fetch_add(1);
 
     if (asid == 0)
     {
@@ -349,6 +364,14 @@ bool AddressSpace::TranslateForWrite(uint64_t user_va, uint64_t &physical_out) c
 
 AddressSpace::~AddressSpace()
 {
+    //  Return ASID before releasing pages so it can be reused immediately.
+
+    if (asid_ != KERNEL_ASID)
+    {
+        asid_pool.push(asid_);
+        asid_ = KERNEL_ASID;    //  prevent double-return if destructor is re-entered
+    }
+
     //  owned_ records only frames THIS space allocated -- its L1, its L2/L3 tables, and the
     //      blocks it mapped.  Under kernel_only_1_to_1 the L1 also contains kernel identity
     //      entries, but those were copied as values and their L2/L3 tables were never added

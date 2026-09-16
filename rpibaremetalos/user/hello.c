@@ -123,6 +123,21 @@ int main(unsigned long arg)
             break;
         }
 
+        case 6:
+        {
+            //  Issue an out-of-range syscall number.  EL0_SyscallIndexOutOfRange routes
+            //      this to HandleUserTaskFault, so the task must die here.
+
+            sc_Write("case 5: invalid syscall (w8=99)\n");
+            asm volatile("mov w8, #99\n\t"
+                         "svc #0"
+                         :
+                         :
+                         : "x8", "memory");
+            sc_Write("case 5: NOT KILLED\n");
+            break;
+        }
+
         default:
             sc_Write("unknown case\n");
             break;
