@@ -1,1 +1,1 @@
-console=ttys0,57600 memory_model=kernel_only_1_to_1
+console=ttys0,57600 memory_model=kernel_high_user_low

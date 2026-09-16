@@ -160,6 +160,16 @@ SOFTWARE.
     b ParkCore
 .endm
 
+//  Variant for paths where KernelEntry has already run -- avoids pushing a second frame.
+.macro HandleInvalidEntryNoFrame el, type
+    mov	x0, #\type
+    mrs	x1, esr_el1
+    mrs	x2, elr_el1
+    mrs	x3, far_el1
+    bl	ShowInvalidExceptionTableEntryMessage
+    b ParkCore
+.endm
+
 //
 //  Macro to define an exception vector table entry.  Interrupts are a subset of Exceptions in AARCH64. 
 //      
@@ -313,7 +323,7 @@ EL1_SynchronousException:
 	str		x0, [sp, #16 * 16]
 	KernelExit EL1
 EL1_SynchronousFault:
-	HandleInvalidEntry EL1, SYNC_ERROR
+	HandleInvalidEntryNoFrame EL1, SYNC_ERROR
 
 EL1_SyscallDispatcher:
 	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
@@ -329,7 +339,10 @@ EL1_SyscallDispatcher:
 
 
 EL1_SyscallIndexOutOfRange:
-	HandleInvalidEntry EL1, SYSCALL_ERROR
+
+	//	An EL1 syscall index out of range is a Kernel error - kill the OS.
+
+	HandleInvalidEntryNoFrame EL1, SYSCALL_ERROR
 
 //	EL0 synchronous exception handler
 
@@ -340,9 +353,22 @@ EL0_SynchronousException:
 	and		x24, x24, #0x3F										//	Isolate the exception class - there is another field in the register if FEAT_LS64 is implemented
 	cmp		x24, #ESR_ELx_EC_SVC64								//	If the exception is from SVC in 64-bit state, then
 	b.eq	EL0_SyscallDispatcher								//		branch to the syscall dispatcher
-	HandleInvalidEntry EL0, SYNC_ERROR
+
+	//	Not a syscall, so a genuine fault taken at EL0.  Kill the TASK, not the core: an
+	//		EL1 fault is fatal, but a user program faulting is an ordinary event.  The
+	//		frame KernelEntry EL0 just built is the SAME frame a syscall runs on, which is
+	//		why HandleUserTaskFault can simply call Exit() the way sc_Exit does.
+	//		HandleUserTaskFault never returns.
+
+	mrs		x0, esr_el1
+	mrs		x1, elr_el1
+	mrs		x2, far_el1
+	bl		HandleUserTaskFault
+
+	HandleInvalidEntryNoFrame EL0, SYNC_ERROR								//	unreachable -- Exit() does not return
 
 EL0_SyscallDispatcher:
+
 	adr		syscall_table_ptr, __system_call_table				//	load syscall table pointer
 	uxtw	syscall_number, w8									//	syscall number in w8
 	mov		num_system_calls, #NUMBER_OF_SYSTEM_CALLS
@@ -355,7 +381,15 @@ EL0_SyscallDispatcher:
 	KernelExit EL0
 
 EL0_SyscallIndexOutOfRange:
-	HandleInvalidEntry EL0, SYSCALL_ERROR
+
+	//	An out-of-range syscall number is a user program error, not a kernel fault - kill the task
+
+	mrs		x0, esr_el1
+	mrs		x1, elr_el1
+	mrs		x2, far_el1
+	bl		HandleUserTaskFault
+
+	HandleInvalidEntryNoFrame EL0, SYSCALL_ERROR							//	unreachable -- Exit() does not return
 
 //
 //	ReturnFromForkASMStub is called from the C 'TaskManager::ReturnFromFork()' function when new processes or threads are created.
@@ -366,7 +400,19 @@ ReturnFromForkASMStub:
 	cbz	x19, ReturnToUserSpace									//	If x19 is zero, return to EL0 which is user space
 	mov	x0, x20
 	blr	x19
-ReturnToUserSpace:
-	DisableIRQs													//	Disable IRQs				
-	KernelExit EL0 
 
+ReturnToUserSpace:
+
+	//	Reload SP with this task's initial CPU-state frame before KernelExit pops it.
+	//
+	//	We are several call frames deep here -- TaskManagerImpl::ReturnFromFork() called
+	//		this stub, and a wrapper that RETURNS (only a user task's does) pushed its own
+	//		frame on top -- so the current SP is nowhere near the frame KernelExit EL0 has
+	//		to restore from.  This never mattered before user tasks existed: every kernel
+	//		wrapper ends in Exit(), which never returns, so this code was unreachable.
+
+	bl	GetTaskInitialCPUStateFrame
+	mov	sp, x0
+
+	DisableIRQs													//	Disable IRQs				
+	KernelExit EL0

@@ -31,9 +31,10 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModelTypes memory_model)
     page_table_block_ = dma_block_ - 1;
 
     // 	Create page table blocks in the page table memory we set aside
+    //  Written through the kernel VA; every pointer INSIDE a descriptor is physical (R1).
 
-    kernel_page_table_1_to_1_ = (uint64_t *)(page_table_block_ * level1_blocksize_);
-    Stage2map1to1_ = (VMSAv8_64_DESCRIPTOR *)(kernel_page_table_1_to_1_ + number_of_pagetable_entries_);
+    kernel_page_table_ = (uint64_t *)PhysicalToKernelVirtualAddress(page_table_block_ * level1_blocksize_);
+    Stage2map1to1_ = (VMSAv8_64_DESCRIPTOR *)(kernel_page_table_ + number_of_pagetable_entries_);
 
     //  This is going to be inefficient but for setting up page tables, I'd rather be slow and
     //      correct than fast and wrong.
@@ -42,7 +43,7 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModelTypes memory_model)
 
     for (uint64_t i = 0; i < number_of_pagetable_entries_; i++)
     {
-        kernel_page_table_1_to_1_[i] = 0;
+        kernel_page_table_[i] = 0;
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){.Raw64 = 0};
     }
 
@@ -115,8 +116,8 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModelTypes memory_model)
 
     // Level 1 has 2 valid entries mapping the each 1GB in stage2
 
-    kernel_page_table_1_to_1_[0] = (0x8000000000000000) | (uintptr_t)&Stage2map1to1_[0] | 3;
-    kernel_page_table_1_to_1_[1] = (0x8000000000000000) | (uintptr_t)&Stage2map1to1_[512] | 3;
+    kernel_page_table_[0] = (0x8000000000000000) | KernelVirtualAddressToPhysical((uintptr_t)&Stage2map1to1_[0]) | 3;
+    kernel_page_table_[1] = (0x8000000000000000) | KernelVirtualAddressToPhysical((uintptr_t)&Stage2map1to1_[512]) | 3;
 
     //  Add the standard reserved regions (kernel, stack, etc.) and add the reserved region for the GPU window
     

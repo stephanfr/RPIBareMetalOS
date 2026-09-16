@@ -19,11 +19,13 @@ public:
     {
         UNKNOWN = 0,
         KERNEL_ONLY_1_TO_1,
+        KERNEL_HIGH_USER_LOW
     } MemoryModelTypes;
 
     static constexpr uint32_t MAX_RESERVED_MEMORY_REGIONS = 4;
     static constexpr const char* UNKNOWN_STRING = "unknown";
     static constexpr const char* KERNEL_ONLY_1_TO_1_STRING = "kernel_only_1_to_1";
+    static constexpr const char* KERNEL_HIGH_USER_LOW_STRING = "kernel_high_user_low";
 
     static void Initialize();
 
@@ -41,6 +43,7 @@ public:
 
     virtual void *ARMToGPUAddress(void *ARMaddress) const = 0;
 
+    virtual const uint64_t *KernelPageTableL1() const = 0;
 
     typedef struct ReservedMemoryRegion
     {
@@ -83,6 +86,9 @@ inline const char *ToString(MMUManager::MemoryModelTypes model)
             
         case MMUManager::MemoryModelTypes::KERNEL_ONLY_1_TO_1:
             return MMUManager::KERNEL_ONLY_1_TO_1_STRING;
+
+        case MMUManager::MemoryModelTypes::KERNEL_HIGH_USER_LOW:
+            return MMUManager::KERNEL_HIGH_USER_LOW_STRING;
     }
 
     return MMUManager::UNKNOWN_STRING;

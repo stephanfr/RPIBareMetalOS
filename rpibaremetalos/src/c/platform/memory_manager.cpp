@@ -8,6 +8,7 @@
 #include "heaps.h"
 #include "os_memory_config.h"
 
+#include "platform/address_space_layout.h"
 #include "platform/platform_info.h"
 #include "platform/mmu_manager.h"
 
@@ -19,10 +20,22 @@ MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
       page_size_(DEFAULT_PAGE_SIZE),
       total_memory_in_bytes_(total_memory_in_bytes),
       mmio_base_(mmio_base),
-      free_memory_start_((uint64_t)&__os_process_start),
+      free_memory_start_(KernelVirtualAddressToPhysical((uint64_t)&__os_process_start)),
       num_pages_((MMUManager::Instance().AllocatableMemoryTop() - free_memory_start_) / page_size_)
 {
     LogEntryAndExit("num_pages: %u\n", num_pages_);
+
+    //  Every page handed out has to be 4KB-aligned: AddressSpace maps them with L3
+    //      descriptors, whose output address field cannot encode anything finer.  The
+    //      linker script aligns __os_process_start to 4096 for exactly this reason, so a
+    //      failure here means that alignment was lowered.
+
+    if ((free_memory_start_ & (DEFAULT_PAGE_SIZE - 1)) != 0)
+    {
+        LogError("MemoryManager: allocatable base 0x%016lx is not 4KB-aligned -- check __os_process_start in link.template.ld\n",
+                 free_memory_start_);
+        ParkCore();
+    }
 
     //  The page map is one byte per page and comes out of the static heap, so it
     //      scales directly with installed RAM: ~2MB on an 8GB board, ~4MB on 16GB.
@@ -167,7 +180,7 @@ MemoryPagePointer MemoryManager::GetFreeBlock(uint64_t block_size)
 void MemoryManager::ReleaseBlock(MemoryPagePointer page_to_free, uint64_t block_size)
 {
     const uint64_t num_pages_in_block = PagesInBlock(block_size);
-    const uint64_t starting_page = (static_cast<uint64_t>(page_to_free) - free_memory_start_) / page_size_;
+    const uint64_t starting_page = (page_to_free.Physical() - free_memory_start_) / page_size_;
 
     for (uint64_t i = starting_page; i < starting_page + num_pages_in_block; i++)
     {

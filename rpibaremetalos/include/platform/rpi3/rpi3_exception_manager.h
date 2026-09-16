@@ -216,7 +216,12 @@ private:
             {
                 if (on_cores.Cores() & (1 << current_core))
                 {
-                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = mailbox_bit_to_set;
+                    //  READ-MODIFY-WRITE.  One register holds the enable bits for all four mailboxes on this core;
+                    //      a plain '=' turns the other three off, mailbox 3 -- the task-switch IPI -- included.
+
+                    volatile uint32_t *mailbox_control = reinterpret_cast<volatile uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core));
+
+                    *mailbox_control = *mailbox_control | mailbox_bit_to_set;
                 }
             }
             return true;
@@ -285,13 +290,15 @@ private:
         case Interrupts::CORE_MAILBOX_2:
         case Interrupts::CORE_MAILBOX_3:
         {
-//            uint32_t mailbox_bit_to_clear = ~(0x00000001 << ((uint32_t)interrupt_to_disable - (uint32_t)Interrupts::CORE_MAILBOX_0));
+            uint32_t mailbox_bit_to_clear = ~(0x00000001 << ((uint32_t)interrupt_to_disable - (uint32_t)Interrupts::CORE_MAILBOX_0));
 
             for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
             {
                 if (on_cores.Cores() & (1 << current_core))
                 {
-                    *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core)) = 0;
+                    volatile uint32_t *mailbox_control = reinterpret_cast<volatile uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core));
+
+                    *mailbox_control = *mailbox_control & mailbox_bit_to_clear;
                 }
             }
             return true;

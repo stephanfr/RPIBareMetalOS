@@ -7,6 +7,8 @@
 #include "devices/log.h"
 #include "devices/physical_timer.h"
 
+#include "task/task_manager_impl.h"
+
 #include <minimalstdio.h>
 
 extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::TaskImpl::TaskContextCPUState *next);
@@ -24,8 +26,13 @@ namespace task
             switch (message.Type())
             {
             case InterContextMessage::MessageType::ADD_TASK:
-                //  Add the task to the task list
-                task_list_.AddTask(message.Task());
+
+                if (!task_list_.AddTask(message.Task()))
+                {
+                    //  Log the failure (run list full - MAX_ACTIVE_TASKS_PER_CORE reached) and park the core to prevent further execution.
+                    LogFatal("TaskExecutionContext::ServiceMessages - core %u run list full, dropping task\n", GetCoreID());
+                    ParkCore();
+                }
                 break;
 
             case InterContextMessage::MessageType::SURRENDER_TASK:
@@ -55,6 +62,7 @@ namespace task
             {
                 //  Remove takes the last task in the list and places it into the slot to be removed
 
+                TaskManagerImpl::Instance().NotifyTaskDelisted(*task);
                 task_list_.RemoveTaskByIndex(i);
 
                 if (i >= task_list_.NumTasks())
@@ -106,7 +114,9 @@ namespace task
 
         if (next_task == nullptr)
         {
-            return TaskImpl::GetTask();
+            //  Normally we should never get here, but just in case, return the idle task.
+
+            return TaskManagerImpl::Instance().IdleTaskForCurrentCore();
         }
 
         //  Return the task with the highest counter value
@@ -114,7 +124,7 @@ namespace task
         return *next_task;
     }
 
-    void TaskExecutionContext::SwitchTasks()
+    void TaskExecutionContext::SwitchTasks(bool voluntary)
     {
         //  Be very care with the order of operations here - we are in a critical section.
         //      Do not allow interrupts to occur in this code as we are manipulating the task list
@@ -137,6 +147,13 @@ namespace task
         if (prev->switched_in_last_.time_since_epoch().count() != 0)
         {
             prev->runtime_ += duration_cast<microseconds>(switch_start - prev->switched_in_last_);
+        }
+
+        //  A voluntary yield expires the remaining timeslice immediately.
+
+        if (voluntary)
+        {
+            prev->counter_ = 0;
         }
 
         //  First, groom the task list.
@@ -166,6 +183,7 @@ namespace task
 
         if (prev == next)
         {
+            prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
 
@@ -179,6 +197,14 @@ namespace task
         }
 
         next->switched_in_last_ = PhysicalTimer::Now();
+
+        //  Install the incoming task's user space before its registers.  A kernel task
+        //      gets the empty table (ASID 0) so any low VA faults.  ASIDs make TLB
+        //      maintenance unnecessary on the switch itself.
+
+        SwitchUserAddressSpace(next->address_space_ != nullptr
+                                   ? next->address_space_->TTBR0Value()
+                                   : AddressSpace::KernelTTBR0Value());
 
         SwitchCPUState(&(prev->cpu_state_), &(next->cpu_state_));
     }

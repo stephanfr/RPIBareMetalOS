@@ -10,6 +10,7 @@
 #include "cpu_part_nums.h"
 
 #include "platform/kernel_command_line.h"
+#include "platform/memory_model.h"
 
 #include "platform/rpi3/rpi3_memory_manager.h"
 #include "platform/rpi4/rpi4_memory_manager.h"
@@ -38,7 +39,7 @@ void MMUManager::Initialize()
 
     //  Get the memory model from the kernel command line
 
-    MemoryModelTypes memory_model = MemoryModelTypes::KERNEL_ONLY_1_TO_1;
+    MemoryModelTypes memory_model = MemoryModelTypes::KERNEL_HIGH_USER_LOW;
 
     minstd::fixed_string<64> memory_model_string;
 
@@ -47,6 +48,10 @@ void MMUManager::Initialize()
         if( memory_model_string == KERNEL_ONLY_1_TO_1_STRING)
         {
             memory_model = MemoryModelTypes::KERNEL_ONLY_1_TO_1;
+        }
+        else if( memory_model_string == KERNEL_HIGH_USER_LOW_STRING)
+        {
+            memory_model = MemoryModelTypes::KERNEL_HIGH_USER_LOW;
         }
         else
         {
@@ -72,6 +77,10 @@ void MMUManager::Initialize()
             ParkCore();
         }
     }
+
+    //  Construct the memory model BEFORE the board memory manager, EnableMMU() requires it exist.
+
+    MemoryModel::Initialize(memory_model);
 
     //  Create the platform specific memory manager
     //      Use placement new to create the object in the storage buffer allocaated above.

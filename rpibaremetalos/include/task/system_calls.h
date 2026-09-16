@@ -18,8 +18,12 @@
 
 #ifndef __ASSEMBLER__
 
+#include <stddef.h>
+#include <stdint.h>
+
 #include "services/uuid.h"
 #include "task/task_errors.h"
+
 
 extern "C" int sc_CloneTask(const char* name, unsigned long fn, unsigned long arg, unsigned long stack, task::TaskResultCodes &result_code, UUID &result);
 extern "C" unsigned long sc_Malloc(unsigned long block_size);

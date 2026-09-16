@@ -14,6 +14,8 @@
 #include "devices/physical_timer.h"
 
 #include "platform/exception_manager.h"
+#include "platform/address_space.h"
+#include "platform/address_space_layout.h"
 #include "platform/memory_manager.h"
 
 #include "task/runnable.h"
@@ -125,10 +127,6 @@ namespace task
 
         void Yield() override
         {
-            //  TODO - maybe put the assignments to counter and preempt_count in sc_Yield();
-            counter_ = 0;
-            preempt_count_ = 0;
-
             sc_Yield();
         }
 
@@ -146,6 +144,8 @@ namespace task
 
             GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
+            EnableIRQs();
+
             while(true)
             {
             }
@@ -153,11 +153,15 @@ namespace task
 
         void Join() override
         {
-            while (state_ != Task::ExecutionState::ZOMBIE)
+            AddReference();
+
+            while (const_cast<volatile ExecutionState &>(state_) != Task::ExecutionState::ZOMBIE)
             {
                 Yield();
                 PhysicalTimer::Wait(microseconds(100));
             }
+
+            ReleaseReference();
         }
 
         void PreemptDisable()
@@ -168,6 +172,36 @@ namespace task
         void PreemptEnable()
         {
             preempt_count_--;
+        }
+
+        void AddReference()
+        {
+            references_.fetch_add(1);
+        }
+
+        void ReleaseReference()
+        {
+            references_.fetch_sub(1);
+        }
+
+        uint32_t References() const
+        {
+            return references_.load();
+        }
+
+        void ReleaseResources()
+        {
+            if (address_space_ != nullptr)
+            {
+                dynamic_delete(address_space_);
+                address_space_ = nullptr;
+            }
+
+            if (stack_ != 0)
+            {
+                GetMemoryManager().ReleaseBlock(stack_, stack_size_in_bytes_);
+                stack_ = MemoryPagePointer(0);
+            }
         }
 
         ExecutionState State() const override
@@ -184,7 +218,7 @@ namespace task
         FullCPUState &GetTaskInitialFullCPUState();
         FullCPUState &ResetTaskInitialFullCPUState();
 
-        TaskResultCodes MoveToUserSpace(RunnableWrapper pc, unsigned long arg);
+        TaskResultCodes MoveToUserSpace(unsigned long arg);
 
     private:
         friend class TaskManagerImpl;
@@ -205,6 +239,7 @@ namespace task
         time_point<nanoseconds> switched_in_last_;
         time_point<nanoseconds> switched_out_last_;
         time_point<nanoseconds> zombie_timestamp_;
+        minstd::atomic<uint32_t> references_{0};
 
         microseconds runtime_ = microseconds::zero();
 
@@ -212,11 +247,29 @@ namespace task
         long counter_;
         long priority_;
         long preempt_count_;
-        MemoryPagePointer stack_;
+        MemoryPagePointer stack_;                               //  KERNEL stack; every task has one
+
+        AddressSpace *address_space_ = nullptr;                 //  USER_TASK only; null = empty TTBR0
+        minstd::fixed_string<128> binary_path_;                 //  set by ForkUserTask, read by MoveToUserSpace
+        unsigned long user_arg_ = 0;                            //  the single argument a user task receives in x0
+        uint64_t user_heap_break_ = USER_HEAP_BASE;
+        uint32_t user_visible_id_ = 0;                          //  what tpidrro_el0 holds
 
         TaskImpl::FullCPUState *initial_full_cpu_state_location_;
 
     public:
+        AddressSpace *UserAddressSpace() const { return address_space_; }
+
+        //  The single argument a user task receives in x0.  Read by StartUserTaskWrapper,
+        //      which is a free function rather than a member and so cannot see user_arg_.
+
+        unsigned long UserArg() const { return user_arg_; }
+
+        //  Maps size bytes of physical memory at the current user heap break and returns the
+        //      USER VA it landed at, or 0 if it will not fit.  Implemented in Step 2.8.
+
+        uint64_t MapIntoUserHeap(uint64_t physical, uint64_t size);
+
         ALIGN TaskContextCPUState cpu_state_;
     };
 

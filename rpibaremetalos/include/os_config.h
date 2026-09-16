@@ -4,10 +4,13 @@
 
 #pragma once
 
-#define MAX_CORES 16
-#define S_MAX_KERNEL_COMMAND_LINE_LENGTH 2048
-#define S_FULL_CPU_STATE_FRAME_SIZE 288 		        //  Space needed on stack to save all the registers during ISR - must match size of 'FullCPUState'
+//  Import:
+//
+//      MAX_CORES, S_MAX_KERNEL_COMMAND_LINE_LENGTH, S_FULL_CPU_STATE_FRAME_SIZE, S_KERNEL_VA_BASE
 
+#include "asm_config.h"
+
+//  C++ only below
 
 #ifdef __cplusplus
 

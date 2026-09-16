@@ -43,6 +43,7 @@ void DumpDiagnostics()
     printf("\nMemory Info:\n");
     printf("Memory Size in bytes 0x%08lx\n", platformInfo.GetMemorySizeInBytes());
     printf("Memory Base Address 0x%08x\n", platformInfo.GetMemoryBaseAddress());
+    printf("Free Pages: %lu of %lu\n", GetMemoryManager().FreePages(), GetMemoryManager().NumberOfPages());
     printf("Code Start: %p\n", (uint8_t *)&__start);
     printf("BSS Start: %p\n", (uint8_t *)&__bss_start);
     printf("BSS End: %p\n", (uint8_t *)&__bss_end);
@@ -50,17 +51,17 @@ void DumpDiagnostics()
     printf("Init Array End: %p\n", (uint8_t *)&__init_array_end);
     printf("Static Heap Reserved Space Start: %p\n", (uint8_t *)&__static_heap_start);
     printf("Static Heap Reserved Space End: %p\n", (uint8_t *)&__static_heap_end);
-    printf("Static Heap Reserved Space Size: %p\n", (uint32_t *)&__static_heap_size_in_bytes);
+//    printf("Static Heap Reserved Space Size: %p\n", (uint32_t *)&__static_heap_size_in_bytes);       //  TODO - fix this after the virtual memory changes
     printf("Static Heap Start: %p\n", (void *)&__static_heap_start);
     printf("Static Heap End: %p\n", (void *)&__static_heap_end);
     printf("Dynamic Heap Reserved Space Start: %p\n", (uint8_t *)&__dynamic_heap_start);
     printf("Dynamic Heap Reserved Space End: %p\n", (uint8_t *)&__dynamic_heap_end);
-    printf("Dynamic Heap Reserved Space Size: %p\n", (uint32_t *)&__dynamic_heap_size_in_bytes);
+//    printf("Dynamic Heap Reserved Space Size: %p\n", (uint32_t *)&__dynamic_heap_size_in_bytes);       //  TODO - fix this after the virtual memory changes
     printf("Dynamic Heap Start: %p\n", (void *)&__dynamic_heap_start);
     printf("Dynamic Heap End: %p\n", (void *)&__dynamic_heap_end);
     printf("Filesystem Cache Heap Reserved Space Start: %p\n", (uint8_t *)&__filesystem_cache_heap_start);
     printf("Filesystem Cache Heap Reserved Space End: %p\n", (uint8_t *)&__filesystem_cache_heap_end);
-    printf("Filesystem Cache Heap Reserved Space Size: %p\n", (uint32_t *)&__filesystem_cache_heap_size_in_bytes);
+//    printf("Filesystem Cache Heap Reserved Space Size: %p\n", (uint32_t *)&__filesystem_cache_heap_size_in_bytes);       //  TODO - fix this after the virtual memory changes
     printf("Filesystem Cache Heap Start: %p\n", (void *)&__filesystem_cache_heap_start);
     printf("Filesystem Cache Heap End: %p\n", (void *)&__filesystem_cache_heap_end);
     printf("Core Initialization Stack Top: %p\n", (uint8_t *)&__per_core_initialization_stack_top);
@@ -70,6 +71,7 @@ void DumpDiagnostics()
 
     printf("\nHardware Info:\n");
     printf("MMIOBase: %p\n", platformInfo.GetMMIOBase());
+    printf("Counter Frequency (cntfrq_el0): %lu Hz (%lu ticks/ms)\n", GetCounterFrequency(), GetCounterFrequency() / 1000);
 
     printf("\nKernal Command Line: %s\n", KernelCommandLine::RawCommandLine().c_str());
     

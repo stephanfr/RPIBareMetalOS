@@ -399,16 +399,64 @@ el1_spin:
     add     x11, x11, :lo12:__kernel_page_table_base
     dc      civac, x11
     dsb     sy
-    ldr     x0, [x11]
-    cbnz    x0, use_page_tables_on_secondary_core
+    ldr     x1, [x11]                                           //  TTBR1: the kernel linear map
+    cbnz    x1, use_page_tables_on_secondary_core
 
-    adrp    x0, __early_l1_page_table
-    add     x0, x0, :lo12:__early_l1_page_table
+    //  Core 0 has not published yet: fall back to the early table in BOTH TTBRs.  Never
+    //      mix the early table with a board's final table -- they give the VideoCore/DMA
+    //      block different attributes (cached vs NORMAL_NO_CACHING), and the architecture
+    //      does not keep two attribute sets on one physical page coherent.
+
+    adrp    x1, __early_l1_page_table
+    add     x1, x1, :lo12:__early_l1_page_table
 
 use_page_tables_on_secondary_core:
 
-    mov     x1, #0
+    //  TTBR0 gets the SAME table as TTBR1 here -- BOTH paths above leave that table in x1
+    //      -- which identity-maps this core's low PC.  The memory model's TTBR0 is
+    //      installed further down, AFTER the jump to the high VA: under
+    //      kernel_high_user_low it is an all-zero table, and installing it now would unmap
+    //      the very next instruction this core fetches.  Core 0 needs no such dance -- it
+    //      reaches EnableMMUTables from MMUManager::Initialize(), already running high.
+
+    mov     x0, x1
+
     bl      EnableMMUTables
+
+    //  Same transition as core 0 (Step 1.3b): rebase the stack, jump high, re-derive
+    //      VBAR and the two table-base registers.
+
+    ldr     x9, =S_KERNEL_VA_BASE
+    add     x10, sp, x9
+    mov     sp, x10
+    ldr     x9, =secondary_running_at_high_va
+    br      x9
+
+secondary_running_at_high_va:
+
+    //  Executing high now, so TTBR0 is free to become whatever the memory model chose --
+    //      the kernel identity table under kernel_only_1_to_1, the all-zero table under
+    //      kernel_high_user_low.  A published VALUE, not a branch: this code does not know
+    //      the models exist.
+
+    adrp    x12, __boot_ttbr0_base
+    add     x12, x12, :lo12:__boot_ttbr0_base
+    dc      civac, x12
+    dsb     sy
+    ldr     x12, [x12]
+    msr     ttbr0_el1, x12
+    isb
+    tlbi    vmalle1
+    dsb     nsh
+    isb
+
+    adr     x9, __exception_vectors
+    msr     VBAR_EL1, x9
+
+    adrp    x21_coreStateTableAddress, __core_state
+    add     x21_coreStateTableAddress, x21_coreStateTableAddress, :lo12:__core_state
+    adrp    x22_coreJumpTableAddress, __core_jump_table
+    add     x22_coreJumpTableAddress, x22_coreJumpTableAddress, :lo12:__core_jump_table
 
     //  Mark the core as having jumped to application code
 
@@ -459,17 +507,41 @@ continue_on_core0:
 
     adrp    x0, __early_l1_page_table
     add     x0, x0, :lo12:__early_l1_page_table
-    mov     x1, #0                                              //  TTBR1 unused; TTBR0 covers all
+    mov     x1, x0                                              //  same table in both TTBRs (see address_space_layout.h)
     bl      EnableMMUTables
-    //  MMU, D-cache, and I-cache are now active with 1:1 identity mapping.
+
+    //  Move to the high VA.  From here on -- BSS clear, static constructors,
+    //      InitializePlatform -- every pointer C++ computes is a kernel VA.
+    //
+    //      `ldr x9, =label` is deliberate: it resolves to the LINKED (high) address,
+    //      which is the destination.  The literal pool itself is reached PC-relatively.
+
+    ldr     x9, =S_KERNEL_VA_BASE
+    add     x10, sp, x9
+    mov     sp, x10                                             //  the boot stack is in the image: rebase it
+    ldr     x9, =core0_running_at_high_va
+    br      x9
+
+core0_running_at_high_va:
+
+    //  Re-derive the three physical values still held from before the jump.  All were
+    //      computed with adr/adrp at a physical PC; recomputing at a high PC gives high.
+
+    adr     x9, __exception_vectors
+    msr     VBAR_EL1, x9
+
+    adrp    x21_coreStateTableAddress, __core_state
+    add     x21_coreStateTableAddress, x21_coreStateTableAddress, :lo12:__core_state
+    adrp    x22_coreJumpTableAddress, __core_jump_table
+    add     x22_coreJumpTableAddress, x22_coreJumpTableAddress, :lo12:__core_jump_table
 
     //  Clear BSS -this code assumes BSS segments are a multiple of 8 bytes in length
 
     adrp    x9, __bss_start
     add     x9, x9, :lo12:__bss_start
-    ldr     w10, =__bss_size_in_double_words
+    ldr     w10, =__bss_size_in_double_words                    //  LINKER-CONSTANT: a COUNT, not an address -- immediate load, not PC-relative (R2 n/a)
     cbz     w10, restore_globals_after_bss                      //  Skip the loop if the bss section is zero length
-
+    
 loop_for_bss_clear:
 
     str     xzr, [x9], #8                                       //  Set 8 bytes at a time - the section in the linker script must match
@@ -532,15 +604,18 @@ start_next_core:
     //  EL3 arrival: all cores started by armstub; fall through to the shared EL3 wait path.
     //  EL2-only arrival: only core 0 reached EL3; secondary cores are held by firmware and
     //      need releasing via PSCI CPU_ON below.
-    cbnz    x23_arrivedInEL3, check_el2_spin_table   //  EL3: same wait as RPi3/4
+
+    cbnz    x23_arrivedInEL3, check_el2_spin_table      //  EL3: same wait as RPi3/4
 
     //  EL2-only: secondary cores held by firmware; start via PSCI CPU_ON
+
     ldr     x0, =0xC4000003
-    lsl     x1, x9, #8                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
-    ldr     x2, =running_in_el2
-    mov     x3, #0
+    lsl     x1, x9, #8                                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
+    ldr     x2, =running_in_el2                         //  PHYSICAL-ENTRY-POINT: converted to physical just below
+    ldr     x16, =S_KERNEL_VA_BASE
+    sub     x2, x2, x16                                 //  target core starts with its MMU off, so it needs a physical entry (R1)    mov     x3, #0
     smc     #0
-    mov     w25, w0                    //  save the PSCI CPU_ON return status
+    mov     w25, w0                                     //  save the PSCI CPU_ON return status
     cbnz    w25, next_core
     mrs     x13, cntpct_el0
     ldr     x14, =270000000
@@ -566,10 +641,12 @@ check_el2_spin_table:
 write_spin_table:
 
     mov     x10, #armstub_el2_spin_table
-    ldr     x11, =running_in_el2
+    ldr     x11, =running_in_el2                        //  PHYSICAL-ENTRY-POINT: converted to physical just below
+    ldr     x16, =S_KERNEL_VA_BASE
+    sub     x11, x11, x16                               //  target core starts with its MMU off, so it needs a physical entry (R1)
     add     x12, x10, x9, lsl #3
     str     x11, [x12]
-    dc      civac, x12                                          //  flush: MMU is on when this runs
+    dc      civac, x12                                  //  flush: MMU is on when this runs
     dsb     sy
     sev
 
@@ -582,7 +659,7 @@ wait_core_ack:
 next_core:
 
     add x9, x9, #1
-    cmp x9, x24_numberOfCoresAvailable                         //  Loop until all cores are started
+    cmp x9, x24_numberOfCoresAvailable                  //  Loop until all cores are started
     b.lo start_next_core
 
 additional_cores_started:

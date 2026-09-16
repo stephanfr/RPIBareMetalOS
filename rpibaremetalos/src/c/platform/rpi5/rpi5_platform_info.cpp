@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include "platform/rpi5/rpi5_platform_info.h"
+#include "platform/address_space_layout.h"
 
 RPI5PlatformInfo::RPI5PlatformInfo()
 {
@@ -21,22 +22,22 @@ const char *RPI5PlatformInfo::GetBoardTypeName() const
 
 uint8_t *RPI5PlatformInfo::GetARMLocalBase() const
 {
-    return const_cast<uint8_t *>(BCM2712_ARM_LOCAL_BASE);
+    return (uint8_t *)PhysicalToKernelVirtualAddress((uint64_t)BCM2712_ARM_LOCAL_BASE);
 }
 
 uint8_t *RPI5PlatformInfo::GetMMIOBase() const
 {
-    return const_cast<uint8_t *>(BCM2712_IO_BASE);
+    return (uint8_t *)PhysicalToKernelVirtualAddress((uint64_t)BCM2712_IO_BASE);
 }
 
 uint8_t *RPI5PlatformInfo::GetMailboxRegisterBase() const
 {
-    return const_cast<uint8_t *>(BCM2712_MAILBOX_REGISTER_BASE);
+    return (uint8_t *)PhysicalToKernelVirtualAddress((uint64_t)BCM2712_MAILBOX_REGISTER_BASE);
 }
 
 uint8_t *RPI5PlatformInfo::GetEMMCBase() const
 {
-    return const_cast<uint8_t *>(BCM2712_EMMC_BASE);
+    return (uint8_t *)PhysicalToKernelVirtualAddress((uint64_t)BCM2712_EMMC_BASE);
 }
 
 uint32_t RPI5PlatformInfo::GetGPUClockRate() const

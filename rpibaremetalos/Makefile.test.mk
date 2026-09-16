@@ -14,23 +14,13 @@ TEST_BUILD_ROOT := test/build
 OBJ_DIR := test/build
 TEST_OBJ_DIR := test/build
 
-CPP_TEST_SRC_DIRS := test/src test/src/filesystem test/src/filesystem/fat32_filesystem test/src/utility
+CPP_TEST_SRC_DIRS := test/src
 
-C_SRC   :=  
+C_SRC   :=
 CPP_SRC :=  src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
-			src/c/services/uuid.cpp \
-			src/c/filesystem/filesystem_errors.cpp \
-			src/c/filesystem/master_boot_record.cpp \
-			src/c/filesystem/filesystem_path.cpp \
-			src/c/filesystem/file_map.cpp \
-			src/c/filesystem/fat32_blockio_adapter.cpp \
-			src/c/filesystem/fat32_filenames.cpp \
-			src/c/filesystem/fat32_directory_cluster.cpp \
-			src/c/filesystem/fat32_directory.cpp \
-			src/c/filesystem/fat32_file.cpp \
-			src/c/filesystem/fat32_filesystem.cpp
+			src/c/services/uuid.cpp
 
 CPP_TEST_SRC := $(foreach sdir,$(CPP_TEST_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
@@ -42,9 +32,9 @@ TEST_OBJ := $(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(TEST_BUILD_ROOT)/%.o,$(CPP_T
 
 TEST_EXE := $(TEST_OBJ_DIR)/cpputest_main.exe
 
-INCLUDE_DIRS := -Iinclude -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include 
-LDFLAGS += -L../deps/minimalclib/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
-LDLIBS = -lCppUTest -lCppUTestExt -lminimalclib -lminimalstdio -lminimalstdlib
+INCLUDE_DIRS := -Iinclude -I../deps/fat32filesystem/include -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include
+LDFLAGS += -L../deps/fat32filesystem/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalclib/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
+LDLIBS = -lCppUTest -lCppUTestExt -lfat32filesystem -lminimalclib -lminimalstdio -lminimalstdlib
 
 CDEFINES += -D__NO_LOGGING__
 

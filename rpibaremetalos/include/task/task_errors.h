@@ -20,6 +20,13 @@ namespace task
         UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK,
         UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK_STACK,
 
+        //  User binary loading (Step 2.6)
+
+        USER_BINARY_NOT_FOUND,
+        USER_BINARY_UNREADABLE,
+        USER_BINARY_MALFORMED,
+        UNABLE_TO_MAP_USER_BINARY,
+
         //
         //  End of error codes flag
         //
@@ -32,7 +39,7 @@ namespace task
     
     inline bool Success(TaskResultCodes result)
     {
-        return result != TaskResultCodes::SUCCESS;
+        return result == TaskResultCodes::SUCCESS;
     }
 
     inline bool Failed(TaskResultCodes result)

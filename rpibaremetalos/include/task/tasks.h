@@ -189,7 +189,7 @@ namespace task
         virtual minstd::optional<minstd::reference_wrapper<Task>> FindTask(const UUID &task_id) = 0;
 
         virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
-        virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
+        virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;
 
     protected:
         TaskManager()

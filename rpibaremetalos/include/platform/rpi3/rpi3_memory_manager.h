@@ -20,19 +20,22 @@ public:
 
     void EnableMMU() override
     {
-        PublishKernelPageTableBase((uint64_t)&kernel_page_table_1_to_1_[0]);
+        //  Decides TTBR0 from the memory model and publishes both bases for the
+        //      secondary cores.  Both arguments below are PHYSICAL (R1).
 
-        EnableMMUTables((uint64_t)&kernel_page_table_1_to_1_[0], 0);
+        PublishBootPageTableBases((uint64_t)&kernel_page_table_[0]);
+
+        EnableMMUTables(__boot_ttbr0_base, KernelVirtualAddressToPhysical((uint64_t)&kernel_page_table_[0]));
     }
 
     void *DMAUncachedMemoryBase() const override
     {
-        return (void *)(dma_block_ * level1_blocksize_);
+        return (void *)PhysicalToKernelVirtualAddress(dma_block_ * level1_blocksize_);
     }
 
     void *ARMToGPUAddress(void *ARMaddress) const override
     {
-        return (void *)((uintptr_t)ARMaddress | 0xC0000000);
+        return (void *)(KernelVirtualAddressToPhysical((uintptr_t)ARMaddress) | 0xC0000000);
     }
 
 };

@@ -64,8 +64,9 @@
 					 (0b11LL << 12)  |  /* SH0=3 inner ... .. options 00 = Non-shareable, 01 = INVALID, 10 = Outer Shareable, 11 = Inner Shareable */\
 					 (0b01LL << 10)  |  /* ORGN0=1 write back .. options 00 = Non-cacheable, 01 = Write back cacheable, 10 = Write thru cacheable, 11 = Write Back Non-cacheable */\
 					 (0b01LL << 8)   |  /* IRGN0=1 write back .. options 00 = Non-cacheable, 01 = Write back cacheable, 10 = Write thru cacheable, 11 = Write Back Non-cacheable */\
-					 (0b0LL  << 7)   |  /* EPD0  ... Translation table walk disable for translations using TTBR0_EL1  0 = walk, 1 = generate fault */\
-					 (25LL   << 0) ) 	/* T0SZ=25 (512G)  ... The region size is 2 POWER (64-T0SZ) bytes */
+					 (1LL    << 36)  |  /* AS=1: 16-bit ASIDs in TTBR0[63:48], one per user address space (Phase 2) */\
+					 (0b0LL  << 7)   |  /* EPD0=0: walks enabled.  TTBR0 is never zero -- kernel tasks get __empty_user_page_table */\
+                     (25LL   << 0) ) 	/* T0SZ=25 (512G)  ... The region size is 2 POWER (64-T0SZ) bytes */
 				     
     //  Ordinary Access Alignment (A) is not set in SCTLREL1VAL so that exceptions are not generated for unaligned
     //      memory access by default.  There is a kernel command line option to enable it which will cause exceptions
@@ -83,6 +84,12 @@
 .align	4
 
 EnableMMUTables:
+
+	//  A null translation table is a programming error, never a runtime state.
+
+	cbz     x0, ParkCore
+	cbz     x1, ParkCore
+
 	dsb     sy
 
 	// Set memory attribute register
@@ -132,6 +139,17 @@ EnableMMUTables:
 	ret
 .ltorg
 
+
+//	void SwitchUserAddressSpace(uint64_t ttbr0_value);   ASID in [63:48], PHYSICAL L1 in [47:0]
+.align	4
+.globl SwitchUserAddressSpace
+
+SwitchUserAddressSpace:
+	dsb     ishst                       //	page-table writes visible before the switch
+	msr     ttbr0_el1, x0
+	isb
+	ret
+.ltorg
 
 
 //	uint32_t ARMaddrToGPUaddr (void* ARMaddress);

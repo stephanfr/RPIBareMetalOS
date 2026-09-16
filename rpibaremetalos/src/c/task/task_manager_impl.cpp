@@ -62,9 +62,21 @@ namespace task
 
                 while (1)
                 {
-                    WAIT_FOR_EVENT;
-                    Yield();
-                    PhysicalTimer::Wait(milliseconds(100));
+                    WAIT_FOR_INTERRUPT;
+                }
+            }
+        };
+
+        class ReaperTask : public Runnable
+        {
+        public:
+            void Run() override
+            {
+                while (1)
+                {
+                    TaskManagerImpl::Instance().ReapZombies();
+
+                    Yield();                                            //  TODO add sleep to scheduler as Sleep(...) like Join
                 }
             }
         };
@@ -78,18 +90,16 @@ namespace task
             runnable->Exit();
         }
 
-        extern "C" void UserSpaceRunnableWrapperWithExit(Runnable *runnable)
+        extern "C" void StartUserTaskWrapper(Runnable *)
         {
-            runnable->Run();
-            sc_Exit();
-        }
+            TaskImpl &task = task::TaskManagerImpl::Instance().CurrentTask();
 
-        extern "C" void MoveToUserSpaceWrapper(Runnable *runnable)
-        {
-            auto err = task::TaskManagerImpl::Instance().CurrentTask().MoveToUserSpace(&UserSpaceRunnableWrapperWithExit, (unsigned long)runnable);
+            auto err = task.MoveToUserSpace(task.UserArg());
+
             if (Failed(err))
             {
-                LogError("Failed to move task to user space");
+                LogError("Failed to move task to user space: %s\n", ErrorMessage(err));
+                task.Exit();
             }
         }
 
@@ -121,8 +131,8 @@ namespace task
 
     TaskManagerImpl::TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc)
                 : number_of_cores_(GetPlatformInfo().GetNumberOfCores()),
-                    task_map_allocator_(alloc),
-                    task_map_(alloc.resource())
+                  task_map_allocator_(alloc),
+                  task_map_(alloc.resource())
     {
     }
 
@@ -177,6 +187,16 @@ namespace task
         //  Start the secondary cores
 
         instance_->get().StartSecondaryCores();
+
+        //  Create one reaper task to periodically clean up zombie tasks.
+
+        auto reaper_ = static_new<internal::ReaperTask>();
+
+        if (instance_->get().ForkKernelTask(reaper_, TaskDefinition{"Reaper"}).Failed())
+        {
+            LogFatal("Failed to create the reaper task\n");
+            ParkCore();
+        }
 
         return TaskResultCodes::SUCCESS;
     }
@@ -288,7 +308,12 @@ namespace task
 
         SetKernelTaskContext(task.get());
         task->cpu_state_.tpidr_el1 = (unsigned long)task.get();
-        task->cpu_state_.tpidrro_el0 = (unsigned long)task.get();
+
+        //  A core main task never reaches EL0, but it can be current when a user task's
+        //      syscall or fault is taken, so the EL0-readable register must not carry a
+        //      kernel pointer here either.  0 is the reserved "no user id".
+
+        task->cpu_state_.tpidrro_el0 = 0;
     }
 
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
@@ -310,12 +335,14 @@ namespace task
         return ForkKernelTaskInternal(runnable, &internal::KernelRunnableWrapperWithExit, task_definition);
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkUserTask(Runnable *runnable, const TaskDefinition &task_definition)
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkUserTask(const minstd::string &binary_path, unsigned long arg,
+                                                                     const TaskDefinition &task_definition)
     {
-        return ForkKernelTaskInternal(runnable, &internal::MoveToUserSpaceWrapper, task_definition);
+        return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg);
     }
 
-    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition &task_definition)
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition &task_definition,
+                                                                              const minstd::string *user_binary_path, unsigned long user_arg)
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
@@ -330,8 +357,11 @@ namespace task
 
         if (new_task.get() == nullptr)
         {
+            GetMemoryManager().ReleaseBlock(free_block, task_definition.stack_size_in_bytes_);
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
+
+        new_task->stack_ = free_block;
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
@@ -340,17 +370,33 @@ namespace task
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
-        new_task->preempt_count_ = 1; //	Preemption will be re-enabled in schedule_tail
+        new_task->preempt_count_ = 1;                           //	Preemption will be re-enabled in schedule_tail
+
+        //  TPIDRRO_EL0 is readable at EL0, so it never carries a kernel pointer -- it gets
+        //      an opaque monotonic id instead.  TPIDR_EL1 is the one the kernel reads back
+        //      through GetTaskContext() (see 2.3c).
+
+        new_task->user_visible_id_ = next_user_visible_id.fetch_add(1);
 
         new_task->cpu_state_.pc = (void *)(&TaskManagerImpl::ReturnFromFork);
         new_task->cpu_state_.sp = &childregs;
-        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task.get();
+        new_task->cpu_state_.tpidrro_el0 = new_task->user_visible_id_;
         new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Set the task context - this is a kernel task right now
 
         childregs.tpidr_el1 = (unsigned long)new_task.get();
-        childregs.tpidrro_el0 = (unsigned long)new_task.get();
+        childregs.tpidrro_el0 = new_task->user_visible_id_;
+
+        //  A user task's binary path and argument have to be in place BEFORE AddTask()
+        //      makes it schedulable -- another core can pick it up the instant AddTask()
+        //      returns, and StartUserTaskWrapper reads both on its very first run.
+
+        if (user_binary_path != nullptr)
+        {
+            new_task->binary_path_ = *user_binary_path;
+            new_task->user_arg_ = user_arg;
+        }
 
         //  Add the task to our task map
 
@@ -376,16 +422,22 @@ namespace task
 
         if (new_task.get() == nullptr)
         {
+            GetMemoryManager().ReleaseBlock(free_block, task_definition.stack_size_in_bytes_);
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
+
+        //  The task owns the KERNEL stack we just allocated -- that is what ReleaseResources()
+        //      gives back.  `stack` is the caller's USER stack and stays the caller's to free;
+        //      recording it here leaked free_block and double-freed the caller's block.
+
+        new_task->stack_ = free_block;
 
         TaskImpl::FullCPUState &childregs = new_task->AllocateTaskInitialFullCPUState(free_block);
 
         TaskImpl::FullCPUState &cur_regs = CurrentTask().GetTaskInitialFullCPUState();
         childregs = cur_regs;
-        childregs.regs[0] = SYS_CLONE_NEW_TASK; //  This sets x0 to the value which signals to callers that we have a net-new task
+        childregs.regs[0] = SYS_CLONE_NEW_TASK;
         childregs.sp = stack + task_definition.stack_size_in_bytes_;
-        new_task->stack_ = stack;
 
         new_task->priority_ = task_definition.priority_;
         new_task->counter_ = new_task->priority_;
@@ -393,12 +445,15 @@ namespace task
 
         new_task->cpu_state_.pc = (void *)&TaskManagerImpl::ReturnFromFork;
         new_task->cpu_state_.sp = &childregs;
-        new_task->cpu_state_.tpidrro_el0 = (unsigned long)new_task.get();
+
+        new_task->user_visible_id_ = next_user_visible_id.fetch_add(1);
+
+        new_task->cpu_state_.tpidrro_el0 = new_task->user_visible_id_;
         new_task->cpu_state_.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Set the task context based on if this is a kernel or user task
 
-        childregs.tpidrro_el0 = (unsigned long)new_task.get();
+        childregs.tpidrro_el0 = new_task->user_visible_id_;
         childregs.tpidr_el1 = (unsigned long)new_task.get();
 
         //  Add the task to the task map
@@ -484,15 +539,83 @@ namespace task
         }
     }
 
-    void TaskManagerImpl::SwitchToNextTask()
+    void TaskManagerImpl::SwitchToNextTask(bool voluntary)
     {
-        task_execution_contexts_[GetCoreID()].SwitchTasks();
+        task_execution_contexts_[GetCoreID()].SwitchTasks(voluntary);
+    }
+
+    extern "C" void *GetTaskInitialCPUStateFrame()
+    {
+        return &(TaskImpl::GetTask().GetTaskInitialFullCPUState());
     }
 
     void TaskManagerImpl::ReturnFromFork()
     {
         TaskManagerImpl::Instance().CurrentTask().PreemptEnable();
         ReturnFromForkASMStub(); //  Assembly function
+    }
+
+    uint32_t TaskManagerImpl::ReapZombies()
+    {
+        const auto now = PhysicalTimer::Now();
+
+        //  PASS 1 -- release RESOURCES.  This is the pass the free-page gate measures: it
+        //      returns the kernel stack and the AddressSpace with every frame it owns.  It
+        //      does NOT consult References(): a joiner only reads state_, and the TaskImpl
+        //      object is untouched.  ReleaseResources() is idempotent, so re-running it over
+        //      a retained zombie is harmless.
+
+        for (uint32_t i = 0; i < retained_zombie_count_; i++)
+        {
+            if (duration_cast<seconds>(now - retained_zombies_[i]->zombie_timestamp_) >= zombie_resource_grace_)
+            {
+                retained_zombies_[i]->ReleaseResources();
+            }
+        }
+
+        //  PASS 2 -- destroy the OBJECTS, and compact.  Safe now: the task is in no run
+        //      list (it only reaches this array via FindNextTask delisting it) and nothing
+        //      holds a reference.  Removing from task_map_ last is what keeps FindTask()
+        //      working for the whole retention window.
+
+        const bool over_cap = (retained_zombie_count_ >= MAX_RETAINED_ZOMBIES);
+
+        uint32_t reaped = 0;
+        uint32_t surviving = 0;
+
+        for (uint32_t i = 0; i < retained_zombie_count_; i++)
+        {
+            TaskImpl *task = retained_zombies_[i];
+
+            const bool old_enough =
+                duration_cast<seconds>(now - task->zombie_timestamp_) >= zombie_lifetime_;
+
+            if ((task->References() != 0) || (!old_enough && !over_cap))
+            {
+                retained_zombies_[surviving++] = task;
+                continue;
+            }
+
+            task_map_.remove(task->ID());
+            task->ReleaseResources();          //  no-op if pass 1 already ran
+            dynamic_delete(task);
+
+            reaped++;
+        }
+
+        retained_zombie_count_ = surviving;
+
+        //  DRAIN last, into the space pass 2 just freed.  Anything that will not fit stays
+        //      queued for the next sweep rather than being dropped.
+
+        TaskImpl *delisted = nullptr;
+
+        while ((retained_zombie_count_ < MAX_RETAINED_ZOMBIES) && delisted_zombies_.pop_front(delisted))
+        {
+            retained_zombies_[retained_zombie_count_++] = delisted;
+        }
+
+        return reaped;
     }
 
 } // namespace task

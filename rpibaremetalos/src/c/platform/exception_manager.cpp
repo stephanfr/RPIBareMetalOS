@@ -9,6 +9,9 @@
 
 #include "asm_utility.h"
 
+#include "devices/log.h"
+#include "task/task_impl.h"
+
 const char *entry_error_messages[] = {
     "SYNC_INVALID_EL1t",
     "IRQ_INVALID_EL1t",
@@ -43,13 +46,32 @@ extern "C" void HandleIRQ()
     GetExceptionManager().HandleInterrupt();
 }
 
+//  A fault taken at EL0 kills the TASK, not the core.  An EL1 fault is still fatal --
+//      a kernel fault is a bug -- but a user program faulting is an ordinary event, and
+//      the whole point of isolation is that the kernel survives it.
+//
+//  This runs on the faulting task's own kernel stack, on the frame KernelEntry EL0 built,
+//      which is byte-for-byte the frame a syscall runs on.  That is why Exit() works here
+//      unchanged: whatever makes it work for sc_Exit makes it work for this.  Exit() marks
+//      the task a ZOMBIE and spins until the task switch takes it away, so this never returns.
+
+extern "C" void HandleUserTaskFault(unsigned long esr, unsigned long elr, unsigned long far)
+{
+    task::TaskImpl &task = task::TaskImpl::GetTask();
+
+    LogWarning("Exception in User Task - task killed: %s: ESR=%016lx PC=%016lx FAR=%016lx\n",
+             task.Name().c_str(), esr, elr, far);
+
+    task.Exit();
+}
+
 //
 //  Methods for ExceptionManager follow
 //
 
 void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far)
 {
-    LogError("%s, Core: %d ESR: %x, PC: %x, FAR: %x\r\n", entry_error_messages[type], GetCoreID(), (unsigned int)esr, (unsigned int)address, (unsigned int)far);
+    LogError("%s, Core: %d ESR: %016lx PC: %016lx FAR: %016lx\r\n", entry_error_messages[type], GetCoreID(), esr, address, far);
 }
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)

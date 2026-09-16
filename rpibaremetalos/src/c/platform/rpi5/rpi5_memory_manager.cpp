@@ -66,14 +66,16 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
     dma_block_ = videocore_memory_start_block_ - 1;
     page_table_block_ = dma_block_ - 1;
 
-    kernel_page_table_1_to_1_ = (uint64_t *)(page_table_block_ * level1_blocksize_);
-    Stage2map1to1_ = (VMSAv8_64_DESCRIPTOR *)(kernel_page_table_1_to_1_ + number_of_pagetable_entries_);
+    //  Written through the kernel VA; every pointer INSIDE a descriptor is physical (R1).
+
+    kernel_page_table_ = (uint64_t *)PhysicalToKernelVirtualAddress(page_table_block_ * level1_blocksize_);
+    Stage2map1to1_ = (VMSAv8_64_DESCRIPTOR *)(kernel_page_table_ + number_of_pagetable_entries_);
 
     //  Initialize the page tables to invalid
 
     for (uint64_t i = 0; i < number_of_pagetable_entries_; i++)
     {
-        kernel_page_table_1_to_1_[i] = 0;
+        kernel_page_table_[i] = 0;
         Stage2map1to1_[i] = (VMSAv8_64_DESCRIPTOR){.Raw64 = 0};
     }
 
@@ -166,7 +168,7 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
 
     for (uint64_t i = 0; i < number_of_pagetable_entries_ / entries_per_level1_block; i++)
     {
-        kernel_page_table_1_to_1_[i] = (0x8000000000000000) | (uintptr_t)&Stage2map1to1_[i * entries_per_level1_block] | 3;
+        kernel_page_table_[i] = (0x8000000000000000) | KernelVirtualAddressToPhysical((uintptr_t)&Stage2map1to1_[i * entries_per_level1_block]) | 3;
     }
 
     //  RPi5-specific: two direct L1 1GB BLOCK descriptors, bypassing the
@@ -199,7 +201,7 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
             .Address = peripheral_index << 18,   //  (index << 30) >> 12, see Address field's bit offset
         };
 
-        kernel_page_table_1_to_1_[peripheral_index] = peripheral_block_descriptor.Raw64;
+        kernel_page_table_[peripheral_index] = peripheral_block_descriptor.Raw64;
     }
 
     for (uint64_t rp1_index = RPI5_RP1_WINDOW_L1_START; rp1_index < RPI5_RP1_WINDOW_L1_END; rp1_index++)
@@ -212,7 +214,7 @@ RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
             .Address = rp1_index << 18,
         };
 
-        kernel_page_table_1_to_1_[rp1_index] = rp1_block_descriptor.Raw64;
+        kernel_page_table_[rp1_index] = rp1_block_descriptor.Raw64;
     }
 
     //  Add the standard reserved regions (kernel, stack, etc.) -- no GPU window to reserve on RPi5, since the GPU-addressable window is already reserved above.

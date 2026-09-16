@@ -112,6 +112,17 @@ __kernel_command_line:                                      .space S_MAX_KERNEL_
 
 __kernel_page_table_base : .quad 0
 
+//  Physical base of the table core 0 decided TTBR0 should hold, per the memory model chosen
+//      on the kernel command line: the kernel identity table under kernel_only_1_to_1, the
+//      all-zero __empty_user_page_table under kernel_high_user_low.  Published as a VALUE so
+//      that no assembly here has to know what a memory model is.  Same cache-line treatment
+//      and same reason as __kernel_page_table_base directly above.
+
+.global __boot_ttbr0_base
+.data
+.balign 64
+
+__boot_ttbr0_base : .quad 0
 
 //  Global variable holding whether strict alignment checking (SCTLR_EL1.A) has been
 //      enabled via the "strict_align=1" kernel command-line flag. Read by EnableMMUTables

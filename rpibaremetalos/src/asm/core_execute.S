@@ -15,7 +15,8 @@ CoreExecute:
 
 	// Insure the core number is valid and the core is in the correct state
 
-	ldr		x9, =__number_of_cores_available
+	adrp	x9, __number_of_cores_available
+	add		x9, x9, :lo12:__number_of_cores_available
 	ldr		w10, [x9]
 	cmp		w0, w10
 	b.ge	core_execute_error

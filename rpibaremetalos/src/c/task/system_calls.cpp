@@ -4,36 +4,95 @@
 
 #include "task/system_calls.h"
 #include "task/task_manager_impl.h"
+#include "task/user_access.h"
+
+#include "platform/memory_model.h"
 
 #include "devices/std_streams.h"
+
 
 namespace syscall
 {
     void Write(const char *buf)
     {
-        *stdout << buf;
-    }
+        //  buf is a USER pointer when the caller is at EL0.  Copy it in through the task's
+        //      own address space before touching it -- *stdout << buf would otherwise let a
+        //      user task print arbitrary kernel memory by passing a kernel VA.
 
+        char local[task::MAX_USER_STRING_LENGTH];
+
+         //  TODO - do not copy but map memory between user and kernel space directly
+
+        if (!task::CopyStringFromUserSpaceToKernelSpace(local, (uint64_t)buf, sizeof(local)))             
+        {
+            return;                                 //  bad pointer: drop the write
+        }
+
+        *stdout << local;
+    }
+    
     int CloneTask( const char* name, MemoryPagePointer stack, task::TaskResultCodes &result_code, UUID &result)
     {
-        auto new_task = task::TaskManagerImpl::Instance().CloneTask(name, stack);
+        //  `name` is a USER pointer.  TaskDefinition's const char* constructor strlen()s and
+        //      copies it at EL1, so it has to be brought across first -- the same reason
+        //      Write() cannot hand `buf` straight to *stdout.
 
-        result_code = new_task.ResultCode();
-        result = new_task.Successful() ? new_task.Value() : UUID::NIL;
+        char local_name[task::MAX_USER_STRING_LENGTH];
 
+        if (!task::CopyStringFromUserSpaceToKernelSpace(local_name, (uint64_t)name, sizeof(local_name)))
+        {
+            return SYS_CLONE_FAILURE;
+        }
+
+        //  Now clone
+
+        auto new_task = task::TaskManagerImpl::Instance().CloneTask(local_name, stack);
+
+        //  Both of these are USER addresses.  Writing through the references directly is an
+        //      arbitrary kernel-mode write at an address EL0 chose.
+
+        const auto code = new_task.ResultCode();
+        const UUID id   = new_task.Successful() ? new_task.Value() : UUID::NIL;
+
+        if (!task::CopyToUserSpaceFromKernelSpace((uint64_t)&result_code, &code, sizeof(code)) ||
+            !task::CopyToUserSpaceFromKernelSpace((uint64_t)&result, &id, sizeof(id)))
+        {
+            return SYS_CLONE_FAILURE;
+        }
+        
         return new_task.Successful() ? SYS_CLONE_SUCCESS : SYS_CLONE_FAILURE;
     }
 
     unsigned long Malloc( unsigned long block_size )
     {
-        MemoryPagePointer new_page = GetMemoryManager().GetFreeBlock(block_size);
+        task::TaskImpl &task = task::TaskImpl::GetTask();
 
-        if (new_page == 0)
+        if (task.UserAddressSpace() == nullptr)
         {
-            return -1;
+            return (unsigned long)-1;                           //  kernel task: no user heap
         }
 
-        return static_cast<unsigned long>(new_page);
+        //  Through the model's hook, never GetMemoryManager() directly -- this is the seam
+        //      that lets Phase 6 give a model its own user pool without touching this code.
+
+        const MemoryModel &model = MemoryModel::Instance();
+
+        MemoryPagePointer frame = model.AllocateUserFrame(block_size);
+
+        if (frame == 0)
+        {
+            return (unsigned long)-1;
+        }
+
+        uint64_t user_va = task.MapIntoUserHeap(frame.Physical(), block_size);
+
+        if (user_va == 0)
+        {
+            model.ReleaseUserFrame(frame, block_size);
+            return (unsigned long)-1;
+        }
+
+        return user_va;
     }
 
     void Exit()
@@ -44,7 +103,7 @@ namespace syscall
     void Yield()
     {
         DisableIRQs();
-        task::TaskManagerImpl::Instance().SwitchToNextTask();
+        task::TaskManagerImpl::Instance().SwitchToNextTask(true);
         EnableIRQs();
     }
 }
