@@ -431,4 +431,21 @@ AddressSpace::~AddressSpace()
 
         asid_ = KERNEL_ASID;    //  prevent double-claim if destructor is re-entered
     }
+
+    //  owned_ records only frames THIS space allocated -- its L1, its L2/L3 tables, and the
+    //      blocks it mapped.  Under kernel_only_1_to_1 the L1 also contains kernel identity
+    //      entries, but those were copied as values and their L2/L3 tables were never added
+    //      to owned_, so teardown cannot free the kernel's own page tables.  Never walk the
+    //      L1 to decide what to free; walk owned_.
+
+    const MemoryModel &model = MemoryModel::Instance();
+
+    for (uint32_t i = 0; i < owned_count_; i++)
+    {
+        model.ReleaseUserFrame(MemoryPagePointer{owned_[i].physical}, owned_[i].size);
+    }
+
+    owned_count_ = 0;
+    l1_ = nullptr;
+    l1_physical_ = 0;
 }
