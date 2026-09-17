@@ -14,6 +14,9 @@ public:
     RPI4PlatformInfo();
 
     RPIBoardType GetBoardType() const override;
+    SchedulerClockSource GetSchedulerClockSource() const override;
+    EMMCControllerType GetEMMCControllerType() const override;
+    
     const char *GetBoardTypeName() const override;
     uint8_t *GetARMLocalBase() const override;
     uint8_t *GetMMIOBase() const override;
@@ -28,5 +31,6 @@ private:
     const uint8_t *BCM2711_IO_BASE = reinterpret_cast<const uint8_t *>(0xFE000000);
     const uint8_t *BCM2711_MAILBOX_REGISTER_BASE = reinterpret_cast<const uint8_t *>(BCM2711_IO_BASE + 0x0000B880);
     const uint8_t *BCM2711_EMMC_BASE = reinterpret_cast<const uint8_t *>(BCM2711_IO_BASE + 0x00340000);
+    const uint8_t *BCM2711_LEGACY_EMMC_BASE = reinterpret_cast<const uint8_t *>(BCM2711_IO_BASE + 0x00300000);
     const uint32_t BCM2711_SYSTEM_CLOCK = FREQUENCY_500MHZ;
 };

@@ -214,7 +214,8 @@ automatically via `postCreateCommand`.
 | `armstub_minimal.bin: No such file` | armstub not present | File is pre-committed; run `git lfs pull` |
 | `sd.img: No such file` | LFS file missing | Run `git lfs pull` |
 | Linker errors about undefined refs | Stale dep `.a` files | Rebuild deps with `make aarch64` |
-
+| `raspi4b` is not a valid machine | Distro QEMU predates RPi4 support | Build QEMU >= 9.1 (`.devcontainer/install_qemu.sh`) -- the first version whose BCM2838 model has EMMC2 |
+| SD card fails to initialize under QEMU | `host=qemu` missing from `-append` | Add it; the OS defaults to `host=hardware` and says so in the log |
 ---
 
 ## Full Clean-Slate Build Sequence

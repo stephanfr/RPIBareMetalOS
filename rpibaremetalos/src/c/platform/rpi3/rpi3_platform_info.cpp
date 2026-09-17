@@ -20,6 +20,19 @@ const char *RPI3PlatformInfo::GetBoardTypeName() const
     return "Raspberry Pi 3B";
 }
 
+SchedulerClockSource RPI3PlatformInfo::GetSchedulerClockSource() const
+{
+    //  BCM2837 routes the system timer's compare interrupts through the ARM control block,
+    //      on hardware and under QEMU's raspi3b alike.
+
+    return SchedulerClockSource::BCM_SYSTEM_TIMER_COMPARE_1;
+}
+
+EMMCControllerType RPI3PlatformInfo::GetEMMCControllerType() const
+{
+    return EMMCControllerType::BCM2837_ARASAN;
+}
+
 uint8_t *RPI3PlatformInfo::GetARMLocalBase() const
 {
     return (uint8_t *)PhysicalToKernelVirtualAddress((uint64_t)ARM_LOCAL_BASE);

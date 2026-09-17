@@ -10,6 +10,8 @@
 #include <fixed_string>
 
 #include "cpu_part_nums.h"
+#include "kernel_command_line.h"
+
 
 typedef enum class RPIBoardType : uint32_t
 {
@@ -19,14 +21,39 @@ typedef enum class RPIBoardType : uint32_t
     RPI5 = RPI_BOARD_ENUM_RPI5
 } RPIBoardType;
 
+typedef enum class SchedulerClockSource : uint32_t
+{
+    BCM_SYSTEM_TIMER_COMPARE_1 = 0,
+    ARM_GENERIC_TIMER
+} SchedulerClockSource;
+
+typedef enum class EMMCControllerType : uint32_t
+{
+    BCM2837_ARASAN = 0,
+    BCM2711_EMMC2,
+    BCM2712_SDHCI
+} EMMCControllerType;
+
+
 class PlatformInfo
 {
 public:
     PlatformInfo()
+        : host_(KernelCommandLine::Host())
     {
     }
 
+
+    HostType GetHostType() const
+    {
+        return host_;
+    }
+
+
     virtual RPIBoardType GetBoardType() const = 0;
+    virtual SchedulerClockSource GetSchedulerClockSource() const = 0;
+    virtual EMMCControllerType GetEMMCControllerType() const = 0;
+
     virtual const char *GetBoardTypeName() const = 0;
     virtual uint8_t *GetARMLocalBase() const = 0;
     virtual uint8_t *GetMMIOBase() const = 0;
@@ -92,6 +119,9 @@ protected:
     bool GetPlatformDetails(uint8_t *mailbox_register_base);
 
 private:
+    
+    HostType host_;
+
     uint32_t board_model_number_;
     uint32_t board_revision_;
     uint64_t board_serial_number_;

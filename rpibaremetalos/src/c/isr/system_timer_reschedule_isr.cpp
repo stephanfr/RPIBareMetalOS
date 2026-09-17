@@ -4,9 +4,9 @@
 
 #include "isr/system_timer_reschedule_isr.h"
 
-#include "devices/system_timer.h"
+#include "devices/scheduler_clock.h"
 
 void SystemTimerRescheduleISR::HandleInterrupt()
 {
-    GetSystemTimer().RescheduleRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1);
+    GetSchedulerClock().Rearm();
 }

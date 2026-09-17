@@ -14,6 +14,9 @@ public:
     RPI5PlatformInfo();
 
     RPIBoardType GetBoardType() const override;
+    SchedulerClockSource GetSchedulerClockSource() const override;
+    EMMCControllerType GetEMMCControllerType() const override;
+    
     const char *GetBoardTypeName() const override;
     uint8_t *GetARMLocalBase() const override;
     uint8_t *GetMMIOBase() const override;

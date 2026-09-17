@@ -12,7 +12,7 @@
 #include "devices/character_io.h"
 #include "devices/power_manager.h"
 #include "devices/std_streams.h"
-#include "devices/system_timer.h"
+#include "devices/scheduler_clock.h"
 
 #include "isr/core_task_switch_isr.h"
 #include "isr/halt_core_isr.h"
@@ -73,7 +73,7 @@ extern "C" void kernel_main()
     EnableIRQs();
     printf("IRQs Enabled\n");
 
-    GetSystemTimer().StartRecurringInterrupt(SystemTimerCompares::TIMER_COMPARE_1, milliseconds{50});
+    GetSchedulerClock().Start(milliseconds{50});
 
     printf("Interrupts enabled\n");
 

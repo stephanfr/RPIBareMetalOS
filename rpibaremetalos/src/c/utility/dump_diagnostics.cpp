@@ -32,6 +32,7 @@ void DumpDiagnostics()
 
     printf("Board Info: \n");
     printf("RPI Version: %s\n", platformInfo.GetBoardTypeName());
+    printf("Host: %s\n", ToString(platformInfo.GetHostType()));
     printf("Board Model: %u\n", platformInfo.GetBoardModelNumber());
     printf("Board Revision: 0x%08x : %s\n", platformInfo.GetBoardRevision(), board_revision.c_str());
     printf("Board Serial Number: %lu\n", platformInfo.GetBoardSerialNumber());

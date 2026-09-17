@@ -6,11 +6,35 @@
 
 #include "os_config.h"
 
+#include <array>
 #include <fixed_string>
+
+
+typedef enum class HostType : uint32_t
+{
+    RPI_HARDWARE = 0,
+    QEMU
+} HostType;
+
+const char *ToString(HostType host);
+
+//
+//  The kernel command line will typically also include additional settings populated by the firmware
+//      during the boot process.  These settings can be things like the videocore memory base, etc.
+//
 
 class KernelCommandLine
 {
 public:
+
+    static constexpr const char *HOST_HARDWARE_STRING = "hardware";
+    static constexpr const char *HOST_QEMU_STRING = "qemu";
+
+    static constexpr const char *HOST_SETTING = "host";
+    static constexpr const char *VC_MEM_BASE_SETTING = "vc_mem.mem_base";
+    static constexpr const char *VC_MEM_SIZE_SETTING = "vc_mem.mem_size";
+    static constexpr const char *MAC_ADDRESS_SETTING = "smsc95xx.macaddr";
+
     KernelCommandLine()
     {}
 
@@ -20,6 +44,13 @@ public:
     }
 
     static bool     FindSetting( const char* setting, minstd::string &value );
+
+    static HostType Host();
+
+    static bool VideocoreMemoryBase(uint32_t &value);                           //  Added by firmware
+    static bool VideocoreMemorySize(uint32_t &value);                           //  Added by firmware
+
+    static bool BoardMACAddress(minstd::array<uint8_t, 6> &out_mac);            //  Added by firmware
 
 private:
 

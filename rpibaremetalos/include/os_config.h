@@ -45,6 +45,20 @@ constexpr uint32_t FREQUENCY_250MHZ = 250000000;
 constexpr uint32_t FREQUENCY_4MHZ = 4000000;
 
 //
+//  Time unit conversions
+//
+
+constexpr uint64_t NANOSECONDS_PER_SECOND = 1000000000;
+constexpr uint64_t MICROSECONDS_PER_SECOND = 1000000;
+constexpr uint64_t MILLISECONDS_PER_SECOND = 1000;
+constexpr uint64_t SECONDS_IN_MINUTE = 60;
+constexpr uint64_t MINUTES_IN_HOUR = 60;
+constexpr uint64_t HOURS_IN_DAY = 24;
+constexpr uint64_t NANOSECONDS_PER_MICROSECOND = 1000;
+constexpr uint64_t NANOSECONDS_PER_MILLISECOND = 1000000;
+constexpr uint64_t MICROSECONDS_PER_MILLISECOND = 1000;
+
+//
 //  Structre sizes shared with assembly code
 //
 

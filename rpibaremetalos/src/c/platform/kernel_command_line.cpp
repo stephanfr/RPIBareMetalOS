@@ -5,6 +5,7 @@
 #include "platform/kernel_command_line.h"
 
 #include "asm_globals.h"
+#include "asm_utility.h"
 
 #include "utility/regex.h"
 
@@ -13,6 +14,21 @@
 //  Global for Kernel Command Line
 
 minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_LENGTH> KernelCommandLine::raw_command_line_(&__kernel_command_line);
+
+
+const char *ToString(HostType host)
+{
+    switch (host)
+    {
+    case HostType::RPI_HARDWARE:
+        return "Raspberry Pi hardware";
+
+    case HostType::QEMU:
+        return "QEMU";
+    }
+
+    return "Unknown";
+}
 
 
 bool KernelCommandLine::FindSetting(const char *setting, minstd::string &value)
@@ -39,4 +55,30 @@ bool KernelCommandLine::FindSetting(const char *setting, minstd::string &value)
     LogDebug1("Command line setting: %s\n", value.c_str() );
 
     return true;
+}
+
+HostType KernelCommandLine::Host()
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> host_string;
+
+    if (!FindSetting(HOST_SETTING, host_string))
+    {
+        return HostType::RPI_HARDWARE;
+    }
+
+    if (host_string == HOST_HARDWARE_STRING)
+    {
+        return HostType::RPI_HARDWARE;
+    }
+
+    if (host_string == HOST_QEMU_STRING)
+    {
+        return HostType::QEMU;
+    }
+
+    //  An unrecognized host is a configuration error, not something to guess about.
+
+    ParkCore();
+
+    return HostType::RPI_HARDWARE; //  not reached
 }

@@ -19,6 +19,15 @@ const char *RPI5PlatformInfo::GetBoardTypeName() const
 {
     return "Raspberry Pi 5";
 }
+SchedulerClockSource RPI5PlatformInfo::GetSchedulerClockSource() const
+{
+    return SchedulerClockSource::ARM_GENERIC_TIMER;
+}
+
+EMMCControllerType RPI5PlatformInfo::GetEMMCControllerType() const
+{
+    return EMMCControllerType::BCM2712_SDHCI;
+}
 
 uint8_t *RPI5PlatformInfo::GetARMLocalBase() const
 {
