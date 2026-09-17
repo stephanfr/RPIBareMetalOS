@@ -30,6 +30,50 @@ const char *ToString(HostType host)
     return "Unknown";
 }
 
+namespace
+{
+    int HexDigitValue(char c)
+    {
+        if ((c >= '0') && (c <= '9')) return c - '0';
+        if ((c >= 'a') && (c <= 'f')) return c - 'a' + 10;
+        if ((c >= 'A') && (c <= 'F')) return c - 'A' + 10;
+        return -1;
+    }
+
+    //  Parses "XX:XX:XX:XX:XX:XX" (case-insensitive hex) into 6 bytes.
+    //      Deliberately hand-rolled rather than sscanf("%hhx:...") -- this
+    //      minimal libc's format-specifier support isn't something to guess at.
+
+    bool ParseMACAddress(const char *text, minstd::array<uint8_t, 6> &out_mac)
+    {
+        for (uint32_t i = 0; i < 6; i++)
+        {
+            int high = HexDigitValue(text[0]);
+            int low = (high >= 0) ? HexDigitValue(text[1]) : -1;
+
+            if (low < 0)
+            {
+                return false;
+            }
+
+            out_mac[i] = static_cast<uint8_t>((high << 4) | low);
+
+            text += 2;
+
+            if (i < 5)
+            {
+                if (*text != ':')
+                {
+                    return false;
+                }
+
+                text += 1;
+            }
+        }
+
+        return true;
+    }
+}
 
 bool KernelCommandLine::FindSetting(const char *setting, minstd::string &value)
 {
@@ -81,4 +125,16 @@ HostType KernelCommandLine::Host()
     ParkCore();
 
     return HostType::RPI_HARDWARE; //  not reached
+}
+
+bool KernelCommandLine::BoardMACAddress(minstd::array<uint8_t, 6> &out_mac)
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> mac_setting;
+
+    if (!FindSetting(MAC_ADDRESS_SETTING, mac_setting))
+    {
+        return false;
+    }
+
+    return ParseMACAddress(mac_setting.c_str(), out_mac);
 }

@@ -128,9 +128,10 @@ namespace EmmcImpl
                          const char *alias,
                          const PlatformInfo &platform_info)
             : ExternalMassMediaController(permanent, name, alias),
+              registers_((EMMCRegisters *)platform_info.GetEMMCBase()),
               platform_info_(platform_info),
-              mmio_base_(platform_info.GetMMIOBase()),
-              registers_((EMMCRegisters *)platform_info.GetEMMCBase())
+              mmio_base_(platform_info.GetMMIOBase())
+              
         {
         }
 

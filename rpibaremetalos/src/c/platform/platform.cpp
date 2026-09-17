@@ -70,18 +70,40 @@ namespace
         minstd::xoroshiro128_plus_plus rng_;
     };
 
-    //  Cross-checks the VideoCore memory placement the early-boot mailbox call
-    //      (GetBootTimeSettings, via __videocore_memory_base/
-    //      __videocore_memory_size_in_bytes) established against the same
-    //      information the firmware independently embeds in the kernel command
-    //      line as vc_mem.mem_base=/vc_mem.mem_size=. Both describe the same
-    //      underlying firmware state through two different paths; on a board
-    //      where the mailbox answers some tags incorrectly or not at all (see
-    //      the board-info fix in the port plan), this is a free second opinion
-    //      that costs nothing to check. A mismatch does not halt the boot -- the
-    //      memory manager was already built on the mailbox-derived value by the
-    //      time this runs -- but it is loud, early evidence something is wrong,
-    //      rather than a stranger failure showing up later with no clear cause.
+    //  Records the two independent reports of VideoCore memory placement that the firmware
+    //      gives us: the early-boot mailbox call (GET_VC_MEMORY, landing in
+    //      __videocore_memory_base / __videocore_memory_size_in_bytes) and the
+    //      vc_mem.mem_base= / vc_mem.mem_size= settings the firmware embeds in the kernel
+    //      command line.
+    //
+    //      These are NOT two views of the same number, so a difference between them is
+    //      expected rather than a fault.  Observed on RPi4 and RPi5 hardware:
+    //
+    //        - The mailbox answers what the tag is specified to answer -- the VideoCore's own
+    //          RAM reservation.  On RPi4 that is base=0x3b400000, size=0x04c00000: 76MB,
+    //          summing to exactly 0x40000000, a gpu_mem= split sitting flush under the 1GB
+    //          boundary.
+    //
+    //        - vc_mem.mem_size reads exactly 1024MB on both boards, regardless of installed
+    //          RAM or the gpu_mem= setting.  That is not a plausible reservation size, but it
+    //          is exactly the size of the low-memory GPU-addressable aperture.
+    //
+    //      That second reading is inference, not documentation.  vc_mem.mem_base/mem_size are
+    //      an undocumented firmware-to-Linux pass-through -- drivers/char/broadcom/vc_mem.c
+    //      declares both module_param()s with no MODULE_PARM_DESC -- so nothing states what
+    //      they are contractually required to mean.  Treat them as observations, not as a
+    //      second opinion on the mailbox.
+    //
+    //      Nothing logged here can be acted on, by design.  Placement uses the mailbox value
+    //      alone: RPi3 and RPi4 take it unmodified (AARCH64PlatformMemoryManager's constructor
+    //      -> videocore_memory_start_), while RPi5's mailbox answer (~0xFDB00000) falls outside
+    //      the low-1GB window and is replaced by RPI5MemoryManager with a constant sourced from
+    //      BCM2712's dma-ranges.  The command-line values are read here and nowhere else.
+    //
+    //      Logged unconditionally at LogDebug1, as a record rather than a warning: the two
+    //      values differ by construction, so calling a difference a "mismatch" would be a
+    //      false alarm on every boot.  If a firmware update ever moves either side, this is
+    //      the record that shows it.
 
     void CrossCheckVideocoreMemoryLayout()
     {
@@ -97,42 +119,8 @@ namespace
         uint32_t cmdline_base = ParseHexUint32(base_setting.c_str());
         uint32_t cmdline_size = ParseHexUint32(size_setting.c_str());
 
-        //  Confirmed on RPI4 and 5 hardware: GET_VC_MEMORY (mailbox) and
-        //      vc_mem.mem_base/vc_mem.mem_size (kernel command line) are not two
-        //      reports of the same quantity, so a mismatch here is expected, not
-        //      a symptom of anything wrong. The mailbox tag answers what it is
-        //      actually specified to answer -- the VideoCore's own small private
-        //      RAM reservation (RPi4: base=0x3b400000, size=0x04c00000 -- these
-        //      sum to exactly 0x40000000, a clean ~76MB gpu_mem= split flush
-        //      against the low-1GB boundary). vc_mem.mem_base/mem_size instead
-        //      describe the size of the low-memory GPU-addressable aperture as a
-        //      whole -- consistent with mem_size reading exactly 1GB on every
-        //      board regardless of installed RAM or gpu_mem= setting, which is
-        //      not a plausible reservation size but is exactly the aperture size.
-        //
-        //      Which side is "correct" for OUR purposes still differs by board:
-        //      RPi4's mailbox value sits inside the low-1GB window and is used
-        //      directly for block placement, unmodified, in RPI4BMemoryManager.
-        //      RPi5's mailbox value (~0xFDB00000) sits OUTSIDE that window
-        //      entirely -- itself a real answer to the same question, just one
-        //      that happens to be useless for placement -- so RPI5MemoryManager
-        //      overrides it with a sourced constant instead (see that
-        //      constructor). Either way, neither board's placement logic reads
-        //      the command-line value, so this check can never be acted on --
-        //      demoted to LogDebug1 accordingly: worth keeping (a firmware update
-        //      could change either side), not worth a WARNING on every boot.
-
-        if (cmdline_base != __videocore_memory_base)
-        {
-            LogDebug1("VC memory base mismatch: mailbox=0x%08x cmdline=0x%08x\n",
-                     __videocore_memory_base, cmdline_base);
-        }
-
-        if (cmdline_size != __videocore_memory_size_in_bytes)
-        {
-            LogDebug1("VC memory size mismatch: mailbox=0x%08x cmdline=0x%08x\n",
-                     __videocore_memory_size_in_bytes, cmdline_size);
-        }
+        LogDebug1("VC memory: mailbox base=0x%08x size=0x%08x, cmdline base=0x%08x size=0x%08x\n",
+                  __videocore_memory_base, __videocore_memory_size_in_bytes, cmdline_base, cmdline_size);
     }
 }
 

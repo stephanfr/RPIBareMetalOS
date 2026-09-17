@@ -46,6 +46,7 @@ namespace cli::commands
         context.output_stream_ << "Board Info: \n";
 
         context.output_stream_ << minstd::format(format_buffer, "RPI Version: {}\n", platformInfo.GetBoardTypeName());
+        context.output_stream_ << minstd::format(format_buffer, "Host: {}\n", ToString(platformInfo.GetHostType()));
         context.output_stream_ << minstd::format(format_buffer, "Board Model: {}\n", platformInfo.GetBoardModelNumber());
         context.output_stream_ << minstd::format(format_buffer, "Board Revision: {:#010x} : {}\n", platformInfo.GetBoardRevision(), board_revision.c_str());
         context.output_stream_ << minstd::format(format_buffer, "Board Serial Number: {}\n", platformInfo.GetBoardSerialNumber());
