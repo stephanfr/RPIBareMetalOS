@@ -29,7 +29,7 @@ BOOT_READY_MARKER = 'Command Line Interface'
 TIMEOUT = 60  # seconds to wait for each response
 
 
-def run(qemu: str, kernel: str, sdimage: str,
+def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         machine: str = 'raspi3b',
         memory: str = '',
         memory_model: str = 'kernel_only_1_to_1',
@@ -37,7 +37,9 @@ def run(qemu: str, kernel: str, sdimage: str,
     cmd = (
         f'{qemu} -M {machine}'
         f'{f" -m {memory}" if memory else ""}'
-        f' -kernel {kernel}'
+        f' -kernel {armstub}'
+        f' -device loader,file={kernel},addr=0x80000,force-raw=on'
+        f' -device loader,addr=0xfc,data=0x80000,data-len=4'
         f' -drive file={sdimage},if=sd,format=raw'
         f' -serial stdio'
         f' -display none'
@@ -139,7 +141,8 @@ def run(qemu: str, kernel: str, sdimage: str,
 def main() -> int:
     parser = argparse.ArgumentParser(description='RPIBareMetalOS QEMU regression test')
     parser.add_argument('--qemu',    required=True, help='Path to qemu-system-aarch64')
-    parser.add_argument('--kernel',  required=True, help='Path to kernel8.elf')
+    parser.add_argument('--armstub', required=True, help='Path to armstub_minimal.elf')
+    parser.add_argument('--kernel',  required=True, help='Path to kernel8.img')
     parser.add_argument('--sdimage', required=True, help='Path to sd.img')
     parser.add_argument('--machine', default='raspi3b',
                         help='QEMU machine model (default: raspi3b)')
@@ -148,14 +151,14 @@ def main() -> int:
     args = parser.parse_args()
 
     print(f'=== {args.machine} Pass 1: kernel_only_1_to_1, default alignment ===')
-    result = run(args.qemu, args.kernel, args.sdimage,
+    result = run(args.qemu, args.armstub, args.kernel, args.sdimage,
                  machine=args.machine, memory=args.memory,
                  memory_model='kernel_only_1_to_1')
     if result != 0:
         return result
 
     print(f'\n=== {args.machine} Pass 2: kernel_only_1_to_1, strict_align=1 ===')
-    result = run(args.qemu, args.kernel, args.sdimage,
+    result = run(args.qemu, args.armstub, args.kernel, args.sdimage,
                  machine=args.machine, memory=args.memory,
                  memory_model='kernel_only_1_to_1',
                  extra_cmdline=' strict_align=1')
@@ -163,14 +166,14 @@ def main() -> int:
         return result
 
     print(f'\n=== {args.machine} Pass 3: kernel_high_user_low, default alignment ===')
-    result = run(args.qemu, args.kernel, args.sdimage,
+    result = run(args.qemu, args.armstub, args.kernel, args.sdimage,
                  machine=args.machine, memory=args.memory,
                  memory_model='kernel_high_user_low')
     if result != 0:
         return result
 
     print(f'\n=== {args.machine} Pass 4: kernel_high_user_low, strict_align=1 ===')
-    return run(args.qemu, args.kernel, args.sdimage,
+    return run(args.qemu, args.armstub, args.kernel, args.sdimage,
                machine=args.machine, memory=args.memory,
                memory_model='kernel_high_user_low',
                extra_cmdline=' strict_align=1')
