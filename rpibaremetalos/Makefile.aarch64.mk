@@ -313,7 +313,7 @@ qemu-rpi4: all
 		-display none \
 		-no-reboot \
 		-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
-		
+
 qemu-cli-soak: all
 	python3 $(QEMU_CLI_SOAK_SCRIPT) \
 		--qemu $(QEMU) \

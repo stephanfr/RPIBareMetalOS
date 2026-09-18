@@ -9,6 +9,8 @@
 #include <array>
 #include <fixed_string>
 
+#include "utility/mac_address.h"
+
 
 typedef enum class HostType : uint32_t
 {
@@ -50,8 +52,8 @@ public:
     static bool VideocoreMemoryBase(uint32_t &value);                           //  Added by firmware
     static bool VideocoreMemorySize(uint32_t &value);                           //  Added by firmware
 
-    static bool BoardMACAddress(minstd::array<uint8_t, 6> &out_mac);            //  Added by firmware
-
+    static bool BoardMACAddress(MACAddress &out_mac);                           //  Added by firmware
+    
 private:
 
     static minstd::fixed_string <MAX_KERNEL_COMMAND_LINE_LENGTH>  raw_command_line_;

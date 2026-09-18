@@ -37,10 +37,7 @@ public:
 
     explicit MACAddress(const minstd::array<uint8_t, MAC_ADDRESS_LENGTH> &bytes)
     {
-        for (size_t i = 0; i < MAC_ADDRESS_LENGTH; i++)
-        {
-            address_[i] = bytes[i];
-        }
+        memcpy(address_, bytes.data(), MAC_ADDRESS_LENGTH);
     }
 
     MACAddress(uint8_t byte0, uint8_t byte1, uint8_t byte2, uint8_t byte3, uint8_t byte4, uint8_t byte5)
@@ -48,17 +45,8 @@ public:
     {
     }
 
-    MACAddress(const MACAddress &address_to_copy)
-    {
-        memcpy(address_, address_to_copy.address_, MAC_ADDRESS_LENGTH);
-    }
-
-    MACAddress &operator=(const MACAddress &address_to_copy)
-    {
-        memcpy(address_, address_to_copy.address_, MAC_ADDRESS_LENGTH);
-
-        return *this;
-    }
+    MACAddress(const MACAddress &address_to_copy) = default;
+    MACAddress &operator=(const MACAddress &address_to_copy) = default;
 
     static const MACAddress NULL_ADDRESS;
 

@@ -29,7 +29,8 @@ const char *ToString(Interrupts interrupt)
     case Interrupts::SYSTEM_TIMER_3:
         return "SYSTEM_TIMER_3";
     case Interrupts::ARM_GENERIC_TIMER:
-        return "ARM_GENERIC_TIMER";    default:
+        return "ARM_GENERIC_TIMER";
+    default:
         return "NO_SUCH_INTERRUPT";
     }
 }

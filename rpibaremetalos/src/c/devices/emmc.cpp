@@ -1102,7 +1102,7 @@ namespace EmmcImpl
         return Result::Success(blocks_to_write);
     }
 
-        //
+    //
     //  BCM2837 (RPi3).  The Arasan controller comes up powered, so the Power Control write the
     //      SDHCI 3.0 parts need is not performed here.
     //

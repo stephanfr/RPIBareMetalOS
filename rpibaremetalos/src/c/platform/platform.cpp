@@ -8,8 +8,6 @@
 #include <fixed_string>
 #include <minimalstdio.h>
 
-#include "utility/hex_parsers.h"
-
 #include "platform/platform_info.h"
 #include "platform/exception_manager.h"
 #include "platform/memory_manager.h"

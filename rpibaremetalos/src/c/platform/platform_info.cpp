@@ -79,13 +79,7 @@ bool PlatformInfo::GetPlatformDetails(uint8_t *mailbox_register_base)
 
     if (!mac_address_valid)
     {
-        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> mac_setting;
-
-        if (KernelCommandLine::FindSetting("smsc95xx.macaddr", mac_setting) &&
-            MACAddress::FromString(mac_setting.c_str(), board_mac_address_))
-        {
-            mac_address_valid = true;
-        }
+        mac_address_valid = KernelCommandLine::BoardMACAddress(board_mac_address_);
     }
     
     RevisionCodeWithUint rc;
