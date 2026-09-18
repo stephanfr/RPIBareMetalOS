@@ -24,48 +24,6 @@ namespace
     {
         return (index < N) ? names[index] : "Unknown";
     }
-        
-    int HexDigitValue(char c)
-    {
-        if ((c >= '0') && (c <= '9')) return c - '0';
-        if ((c >= 'a') && (c <= 'f')) return c - 'a' + 10;
-        if ((c >= 'A') && (c <= 'F')) return c - 'A' + 10;
-        return -1;
-    }
-
-    //  Parses "XX:XX:XX:XX:XX:XX" (case-insensitive hex) into 6 bytes.
-    //      Deliberately hand-rolled rather than sscanf("%hhx:...") -- this
-    //      minimal libc's format-specifier support isn't something to guess at.
-
-    bool ParseMACAddress(const char *text, minstd::array<uint8_t, 6> &out_mac)
-    {
-        for (uint32_t i = 0; i < 6; i++)
-        {
-            int high = HexDigitValue(text[0]);
-            int low = (high >= 0) ? HexDigitValue(text[1]) : -1;
-
-            if (low < 0)
-            {
-                return false;
-            }
-
-            out_mac[i] = static_cast<uint8_t>((high << 4) | low);
-
-            text += 2;
-
-            if (i < 5)
-            {
-                if (*text != ':')
-                {
-                    return false;
-                }
-
-                text += 1;
-            }
-        }
-
-        return true;
-    }
 }
 
 typedef struct RevisionCode
@@ -121,15 +79,9 @@ bool PlatformInfo::GetPlatformDetails(uint8_t *mailbox_register_base)
 
     if (!mac_address_valid)
     {
-        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> mac_setting;
-        
-        if (KernelCommandLine::FindSetting("smsc95xx.macaddr", mac_setting) &&
-            ParseMACAddress(mac_setting.c_str(), board_mac_address_))
-        {
-            mac_address_valid = true;
-        }
+        mac_address_valid = KernelCommandLine::BoardMACAddress(board_mac_address_);
     }
-
+    
     RevisionCodeWithUint rc;
 
     rc.value = board_revision_;

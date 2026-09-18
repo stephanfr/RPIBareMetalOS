@@ -46,10 +46,11 @@ namespace cli::commands
         context.output_stream_ << "Board Info: \n";
 
         context.output_stream_ << minstd::format(format_buffer, "RPI Version: {}\n", platformInfo.GetBoardTypeName());
+        context.output_stream_ << minstd::format(format_buffer, "Host: {}\n", ToString(platformInfo.GetHostType()));
         context.output_stream_ << minstd::format(format_buffer, "Board Model: {}\n", platformInfo.GetBoardModelNumber());
         context.output_stream_ << minstd::format(format_buffer, "Board Revision: {:#010x} : {}\n", platformInfo.GetBoardRevision(), board_revision.c_str());
         context.output_stream_ << minstd::format(format_buffer, "Board Serial Number: {}\n", platformInfo.GetBoardSerialNumber());
-        context.output_stream_ << minstd::format(format_buffer, "Board MAC Address:  {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\n", platformInfo.GetBoardMACAddress()[0], platformInfo.GetBoardMACAddress()[1], platformInfo.GetBoardMACAddress()[2], platformInfo.GetBoardMACAddress()[3], platformInfo.GetBoardMACAddress()[4], platformInfo.GetBoardMACAddress()[5]);
+        context.output_stream_ << minstd::format(format_buffer, "Board MAC Address:  {}\n", platformInfo.GetBoardMACAddress());
 
         context.output_stream_ << "\nException Level Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Current Exception Level: {}\n", GetExceptionLevel());
@@ -60,6 +61,31 @@ namespace cli::commands
         context.output_stream_ << "\nMemory Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Memory Base Address {:#010x}\n", platformInfo.GetMemoryBaseAddress());
         context.output_stream_ << minstd::format(format_buffer, "Free Pages: {} of {}\n", GetMemoryManager().FreePages(), GetMemoryManager().NumberOfPages());
+
+        //  The firmware reports VideoCore memory placement two different ways, and they answer
+        //      two different questions -- the mailbox gives the VideoCore's own RAM reservation,
+        //      while vc_mem.mem_size reads exactly 1024MB on every board, which is the size of
+        //      the GPU-addressable aperture rather than any reservation.  Both are shown because
+        //      a difference between them is expected, not a fault.  Only the mailbox value is
+        //      used for placement (see AARCH64PlatformMemoryManager's constructor, and
+        //      RPI5MemoryManager which overrides it with a constant from BCM2712's dma-ranges).
+
+        context.output_stream_ << minstd::format(format_buffer, "VideoCore Memory (mailbox): base {:#010x} size {:#010x}\n",
+                                                 __videocore_memory_base, __videocore_memory_size_in_bytes);
+
+        uint32_t cmdline_vc_base;
+        uint32_t cmdline_vc_size;
+
+        if (KernelCommandLine::VideocoreMemoryBase(cmdline_vc_base) &&
+            KernelCommandLine::VideocoreMemorySize(cmdline_vc_size))
+        {
+            context.output_stream_ << minstd::format(format_buffer, "VideoCore Memory (cmdline): base {:#010x} size {:#010x}\n", cmdline_vc_base, cmdline_vc_size);
+        }
+        else
+        {
+            context.output_stream_ << "VideoCore Memory (cmdline): not supplied\n";
+        }
+
         context.output_stream_ << minstd::format(format_buffer, "Code Start: {}\n", (void *)&__start);
         context.output_stream_ << minstd::format(format_buffer, "BSS Start: {}\n", (void *)&__bss_start);
         context.output_stream_ << minstd::format(format_buffer, "BSS End: {}\n", (void *)&__bss_end);

@@ -166,6 +166,7 @@ private:
 
     static constexpr uint32_t GICC_IAR_INTID_MASK             = 0x3FF;
     static constexpr uint32_t GIC_SPURIOUS_INTID              = 1023;
+    static constexpr uint32_t ARM_GENERIC_TIMER_PPI_INTID     = 30;
 
     
     volatile uint32_t &GICD(uint32_t offset)
@@ -209,6 +210,9 @@ private:
         case Interrupts::SYSTEM_TIMER_3:
             return static_cast<int32_t>(system_timer_spi_base_ + 3);
 
+        case Interrupts::ARM_GENERIC_TIMER:
+            return static_cast<int32_t>(ARM_GENERIC_TIMER_PPI_INTID);
+            
         default:
             return -1;
         }
@@ -221,6 +225,11 @@ private:
             return AsInterrupt(static_cast<InterprocessorInterrupts>(intid));
         }
 
+        if (intid == ARM_GENERIC_TIMER_PPI_INTID)
+        {
+            return Interrupts::ARM_GENERIC_TIMER;
+        }
+        
         if (intid >= system_timer_spi_base_ && intid <= system_timer_spi_base_ + 3)
         {
             return static_cast<Interrupts>(static_cast<uint32_t>(Interrupts::SYSTEM_TIMER_0) +

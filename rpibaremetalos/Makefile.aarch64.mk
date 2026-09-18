@@ -8,7 +8,7 @@ SRC_ROOT := src
 BUILD_ROOT := build
 IMAGE_DIR   := image
 
-QEMU                   := qemu-system-aarch64
+QEMU                   ?= qemu-system-aarch64
 QEMU_REGRESSION_SCRIPT := test/tools/qemu_regression_test.py
 QEMU_CLI_SOAK_SCRIPT   := test/tools/qemu_cli_soak_test.py
 QEMU_RPI3_MACHINE      ?= raspi3b
@@ -303,7 +303,7 @@ qemu-rpi3: all
 		-serial stdio \
 		-display none \
 		-no-reboot \
-		-append "console=ttys0,57600 memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+		-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
 
 qemu-rpi4: all
 	$(QEMU) -M $(QEMU_RPI4_MACHINE) -m $(QEMU_RPI4_MEMORY) \
@@ -312,7 +312,7 @@ qemu-rpi4: all
 		-serial stdio \
 		-display none \
 		-no-reboot \
-		-append "console=ttys0,57600 memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+		-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
 
 qemu-cli-soak: all
 	python3 $(QEMU_CLI_SOAK_SCRIPT) \

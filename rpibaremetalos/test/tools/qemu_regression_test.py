@@ -42,7 +42,7 @@ def run(qemu: str, kernel: str, sdimage: str,
         f' -serial stdio'
         f' -display none'
         f' -no-reboot'
-        f' -append "console=ttys0,57600 memory_model={memory_model}{extra_cmdline}"'
+        f' -append "console=ttys0,57600 host=qemu memory_model={memory_model}{extra_cmdline}"'
     )
 
     print(f'Launching: {cmd}')

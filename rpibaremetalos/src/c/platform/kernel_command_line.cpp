@@ -5,7 +5,9 @@
 #include "platform/kernel_command_line.h"
 
 #include "asm_globals.h"
+#include "asm_utility.h"
 
+#include "utility/hex_parsers.h"
 #include "utility/regex.h"
 
 #include "devices/log.h"
@@ -14,6 +16,20 @@
 
 minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_LENGTH> KernelCommandLine::raw_command_line_(&__kernel_command_line);
 
+
+const char *ToString(HostType host)
+{
+    switch (host)
+    {
+    case HostType::RPI_HARDWARE:
+        return "Raspberry Pi hardware";
+
+    case HostType::QEMU:
+        return "QEMU";
+    }
+
+    return "Unknown";
+}
 
 bool KernelCommandLine::FindSetting(const char *setting, minstd::string &value)
 {
@@ -37,6 +53,72 @@ bool KernelCommandLine::FindSetting(const char *setting, minstd::string &value)
     raw_command_line_.substr(value, match_location + setting_length, match_length - setting_length);
 
     LogDebug1("Command line setting: %s\n", value.c_str() );
+
+    return true;
+}
+
+HostType KernelCommandLine::Host()
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> host_string;
+
+    if (!FindSetting(HOST_SETTING, host_string))
+    {
+        return HostType::RPI_HARDWARE;
+    }
+
+    if (host_string == HOST_HARDWARE_STRING)
+    {
+        return HostType::RPI_HARDWARE;
+    }
+
+    if (host_string == HOST_QEMU_STRING)
+    {
+        return HostType::QEMU;
+    }
+
+    //  An unrecognized host is a configuration error, not something to guess about.
+
+    ParkCore();
+
+    return HostType::RPI_HARDWARE; //  not reached
+}
+
+bool KernelCommandLine::BoardMACAddress(MACAddress &out_mac)
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> mac_setting;
+
+    if (!FindSetting(MAC_ADDRESS_SETTING, mac_setting))
+    {
+        return false;
+    }
+
+    return MACAddress::FromString(mac_setting.c_str(), out_mac);
+}
+
+bool KernelCommandLine::VideocoreMemoryBase(uint32_t &value)
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> setting;
+
+    if (!FindSetting(VC_MEM_BASE_SETTING, setting))
+    {
+        return false;
+    }
+
+    value = ParseHexUint32(setting.c_str());
+
+    return true;
+}
+
+bool KernelCommandLine::VideocoreMemorySize(uint32_t &value)
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> setting;
+
+    if (!FindSetting(VC_MEM_SIZE_SETTING, setting))
+    {
+        return false;
+    }
+
+    value = ParseHexUint32(setting.c_str());
 
     return true;
 }

@@ -199,6 +199,7 @@ private:
         case Interrupts::NO_SUCH_INTERRUPT:
         case Interrupts::SYSTEM_TIMER_0:
         case Interrupts::SYSTEM_TIMER_2:
+        case Interrupts::ARM_GENERIC_TIMER:
             return false;
 
         case Interrupts::CORE_HALT: //  Already enabled in 'Initialize'
@@ -279,6 +280,7 @@ private:
         case Interrupts::NO_SUCH_INTERRUPT:
         case Interrupts::SYSTEM_TIMER_0:
         case Interrupts::SYSTEM_TIMER_2:
+        case Interrupts::ARM_GENERIC_TIMER:
             return false;
 
         case Interrupts::CORE_HALT: 

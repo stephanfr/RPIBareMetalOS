@@ -1,14 +1,25 @@
 # Coding Agents Guide
 
-## Type Naming Convention (All Projects)
+## Type Naming Convention
 
-Use consistent, lowercase `snake_case` for new type names across the repository.
+Naming follows the layer a type lives in.  The libraries under `deps/` are standard-library
+shaped, so they use `snake_case`.  The OS under `rpibaremetalos/` uses CamelCase for its own
+domain types -- 167 CamelCase types to 7 snake_case, and all 50+ enums CamelCase.
 
-### Rules
+### Libraries -- `deps/` (minimalclib, minimalstdio, minimalstdlib, fat32filesystem, baremetalbase)
+
 - **Primary type names** (classes, structs, enums, aliases) use lowercase `snake_case` (e.g., `block_header`, `lru_cache`, `binary_semaphore_array`).
 - **Type aliases** should be descriptive and follow the same convention, often ending in `_type` or `_allocator_type` when it clarifies intent (e.g., `cache_entry_type`, `map_entry_allocator_type`).
 - **Type-trait aliases** may use the standard C++ `_t` suffix (e.g., `common_type_t`, `remove_cvref_t`).
 - **Avoid CamelCase** for new type names unless matching a standard-library type or existing external API.
+
+### OS -- `rpibaremetalos/`
+
+- **Classes, structs and enums** use `CamelCase` (e.g., `PlatformInfo`, `SDCardController`, `SchedulerClock`, `HostType`).  Acronyms stay upper-case: `EMMCControllerType`, `BCM2711ExceptionManager`, `RPI5PlatformInfo`.
+- **Enums** are declared `typedef enum class Name : uint32_t { ... } Name;` with **ALL_CAPS values** (e.g., `LogLevel::DEBUG_1`, `MemoryModelTypes::KERNEL_ONLY_1_TO_1`).
+- **Methods** are `PascalCase`.  **Member variables** are `snake_case_` with a trailing underscore.  **Local variables** are `snake_case`.
+- **File names** are `snake_case`, named for the primary type they declare (`platform_info.h` holds `PlatformInfo`).
+- **snake_case remains correct for library-style types written inside the OS** -- allocators and standard-library adapters (`dynamic_allocator`, `static_allocator`, `xoroshiro_random_device`, `numeric_limits`) -- and for names mirroring an external API (`iproc_rng200_dev`, after Linux's `iproc-rng200`).
 
 ## Class `static constexpr` Constants
 

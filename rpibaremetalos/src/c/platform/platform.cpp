@@ -8,8 +8,6 @@
 #include <fixed_string>
 #include <minimalstdio.h>
 
-#include "utility/hex_parsers.h"
-
 #include "platform/platform_info.h"
 #include "platform/exception_manager.h"
 #include "platform/memory_manager.h"
@@ -69,71 +67,6 @@ namespace
     private:
         minstd::xoroshiro128_plus_plus rng_;
     };
-
-    //  Cross-checks the VideoCore memory placement the early-boot mailbox call
-    //      (GetBootTimeSettings, via __videocore_memory_base/
-    //      __videocore_memory_size_in_bytes) established against the same
-    //      information the firmware independently embeds in the kernel command
-    //      line as vc_mem.mem_base=/vc_mem.mem_size=. Both describe the same
-    //      underlying firmware state through two different paths; on a board
-    //      where the mailbox answers some tags incorrectly or not at all (see
-    //      the board-info fix in the port plan), this is a free second opinion
-    //      that costs nothing to check. A mismatch does not halt the boot -- the
-    //      memory manager was already built on the mailbox-derived value by the
-    //      time this runs -- but it is loud, early evidence something is wrong,
-    //      rather than a stranger failure showing up later with no clear cause.
-
-    void CrossCheckVideocoreMemoryLayout()
-    {
-        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> base_setting;
-        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> size_setting;
-
-        if (!KernelCommandLine::FindSetting("vc_mem.mem_base", base_setting) ||
-            !KernelCommandLine::FindSetting("vc_mem.mem_size", size_setting))
-        {
-            return;
-        }
-
-        uint32_t cmdline_base = ParseHexUint32(base_setting.c_str());
-        uint32_t cmdline_size = ParseHexUint32(size_setting.c_str());
-
-        //  Confirmed on RPI4 and 5 hardware: GET_VC_MEMORY (mailbox) and
-        //      vc_mem.mem_base/vc_mem.mem_size (kernel command line) are not two
-        //      reports of the same quantity, so a mismatch here is expected, not
-        //      a symptom of anything wrong. The mailbox tag answers what it is
-        //      actually specified to answer -- the VideoCore's own small private
-        //      RAM reservation (RPi4: base=0x3b400000, size=0x04c00000 -- these
-        //      sum to exactly 0x40000000, a clean ~76MB gpu_mem= split flush
-        //      against the low-1GB boundary). vc_mem.mem_base/mem_size instead
-        //      describe the size of the low-memory GPU-addressable aperture as a
-        //      whole -- consistent with mem_size reading exactly 1GB on every
-        //      board regardless of installed RAM or gpu_mem= setting, which is
-        //      not a plausible reservation size but is exactly the aperture size.
-        //
-        //      Which side is "correct" for OUR purposes still differs by board:
-        //      RPi4's mailbox value sits inside the low-1GB window and is used
-        //      directly for block placement, unmodified, in RPI4BMemoryManager.
-        //      RPi5's mailbox value (~0xFDB00000) sits OUTSIDE that window
-        //      entirely -- itself a real answer to the same question, just one
-        //      that happens to be useless for placement -- so RPI5MemoryManager
-        //      overrides it with a sourced constant instead (see that
-        //      constructor). Either way, neither board's placement logic reads
-        //      the command-line value, so this check can never be acted on --
-        //      demoted to LogDebug1 accordingly: worth keeping (a firmware update
-        //      could change either side), not worth a WARNING on every boot.
-
-        if (cmdline_base != __videocore_memory_base)
-        {
-            LogDebug1("VC memory base mismatch: mailbox=0x%08x cmdline=0x%08x\n",
-                     __videocore_memory_base, cmdline_base);
-        }
-
-        if (cmdline_size != __videocore_memory_size_in_bytes)
-        {
-            LogDebug1("VC memory size mismatch: mailbox=0x%08x cmdline=0x%08x\n",
-                     __videocore_memory_size_in_bytes, cmdline_size);
-        }
-    }
 }
 
 //  To initialize SW RNG - implementation in 'platform_sw_rngs.cpp' but I do not want to expose in header.
@@ -323,16 +256,6 @@ void InitializePlatform()
 
         SetStandardStreams(tee_ptr, &serial_console);
     }
-
-    CrossCheckVideocoreMemoryLayout();
-
-    //  Insure that the number of cores available is less than the max and that they match the number according to the platform
-
-    //    if ((__number_of_cores_available > MAX_CORES) ||
-    //        (__number_of_cores_available != __platform_info->GetNumberOfCores()))
-    //    {
-    //        ParkCore();
-    //    }
 
     //  Initialize the memory manager
 

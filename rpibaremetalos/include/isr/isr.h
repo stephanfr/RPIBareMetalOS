@@ -20,6 +20,7 @@ typedef enum class Interrupts : uint32_t
     SYSTEM_TIMER_1 = 65,
     SYSTEM_TIMER_2 = 66,
     SYSTEM_TIMER_3 = 67,
+    ARM_GENERIC_TIMER = 128,
 } Interrupts;
 
 const char *ToString(Interrupts interrupt);

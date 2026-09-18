@@ -6,14 +6,16 @@
 
 #include "isr.h"
 
+#include "devices/scheduler_clock.h"
+
 class SystemTimerRescheduleISR : public InterruptServiceRoutine
 {
 public:
-    constexpr Interrupts InterruptType() const noexcept override
+    Interrupts InterruptType() const noexcept override
     {
-        return Interrupts::SYSTEM_TIMER_1;
+        return GetSchedulerClock().TickInterrupt();
     }
-
+    
     constexpr InterruptServiceRoutineType ISRType() const noexcept override
     {
         return InterruptServiceRoutineType::SYSTEM_TIMER_RESCHEDULE;
