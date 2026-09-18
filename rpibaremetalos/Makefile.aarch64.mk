@@ -170,11 +170,22 @@ $(USER_BIN): $(USER_SRC) $(USER_LD)
 
 user: checkdirs $(USER_BIN)
 
-$(IMG): $(ELF) $(USER_BIN)
+ARMSTUB_ROOT    := armstub
+ARMSTUB_ELF     := $(ARMSTUB_ROOT)/image/armstub_minimal.elf
+ARMSTUB_BIN     := $(ARMSTUB_ROOT)/image/armstub_minimal.bin
+
+.PHONY: armstub
+armstub:
+	$(MAKE) -C $(ARMSTUB_ROOT)
+
+$(ARMSTUB_ELF) $(ARMSTUB_BIN): armstub
+
+$(IMG): $(ELF) $(USER_BIN) $(ARMSTUB_ELF) $(ARMSTUB_BIN)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
 	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
-	/bin/cp armstub/image/armstub_minimal.elf image/.
+	/bin/cp $(ARMSTUB_ELF) image/.
+	/bin/cp $(ARMSTUB_BIN) image/.
 	/bin/cp resources/*.txt image/.
 	/bin/cp resources/sd.img image/.
 	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
@@ -276,12 +287,11 @@ QEMU_STRICT_ALIGN := $(if $(filter 1,$(SA)), strict_align=1,)
 QEMU_COMMON_FLAGS = \
 	-kernel $(IMAGE_DIR)/armstub_minimal.elf \
 	-device loader,file=$(IMAGE_DIR)/kernel8.img,addr=0x80000,force-raw=on \
-	-device loader,addr=0xfc,data=0x80000,data-len=4 \
 	-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
 	-serial stdio \
 	-display none \
 	-no-reboot \
-	-append "console=ttys0,57600 memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+	-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
 
 qemu-rpi3: all
 	$(QEMU) -M $(QEMU_RPI3_MACHINE) $(QEMU_COMMON_FLAGS)
