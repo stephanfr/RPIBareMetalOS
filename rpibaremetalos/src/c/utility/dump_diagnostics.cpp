@@ -27,6 +27,7 @@ void DumpDiagnostics()
     const PlatformInfo &platformInfo = GetPlatformInfo();
 
     minstd::fixed_string<128>   board_revision;
+    MACAddress::ToStringBuffer  mac_address_buffer;
 
     platformInfo.DecodeBoardRevision( board_revision );
 
@@ -36,7 +37,7 @@ void DumpDiagnostics()
     printf("Board Model: %u\n", platformInfo.GetBoardModelNumber());
     printf("Board Revision: 0x%08x : %s\n", platformInfo.GetBoardRevision(), board_revision.c_str());
     printf("Board Serial Number: %lu\n", platformInfo.GetBoardSerialNumber());
-    printf("Board MAC Address:  %02x:%02x:%02x:%02x:%02x:%02x\n", platformInfo.GetBoardMACAddress()[0], platformInfo.GetBoardMACAddress()[1], platformInfo.GetBoardMACAddress()[2], platformInfo.GetBoardMACAddress()[3], platformInfo.GetBoardMACAddress()[4], platformInfo.GetBoardMACAddress()[5] );
+    printf("Board MAC Address:  %s\n", platformInfo.GetBoardMACAddress().ToString(mac_address_buffer));
     
     printf("\nException Level Info:\n");
     printf("Current Exception Level: %u\n", GetExceptionLevel());

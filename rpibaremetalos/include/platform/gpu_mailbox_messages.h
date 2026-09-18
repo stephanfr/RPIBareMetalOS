@@ -6,6 +6,8 @@
 
 #include "platform/gpu_mailbox.h"
 
+#include "utility/mac_address.h"
+
 //
 //  Defining GPUMailbox Messages:
 //
@@ -100,9 +102,9 @@ public:
         return "GetBoardMACAddressTag";
     }
 
-    minstd::array<uint8_t, 6> GetBoardMACAddress() const
+    MACAddress GetBoardMACAddress() const
     {
-        return GetResponse().mac_address_;
+        return MACAddress(GetResponse().mac_address_);
     }
 };
 

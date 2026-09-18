@@ -11,6 +11,7 @@
 
 #include "cpu_part_nums.h"
 #include "kernel_command_line.h"
+#include "utility/mac_address.h"
 
 
 typedef enum class RPIBoardType : uint32_t
@@ -97,7 +98,7 @@ public:
         return board_serial_number_;
     }
 
-    minstd::array<uint8_t, 6> GetBoardMACAddress() const
+    const MACAddress &GetBoardMACAddress() const
     {
         return board_mac_address_;
     }
@@ -125,7 +126,7 @@ private:
     uint32_t board_model_number_;
     uint32_t board_revision_;
     uint64_t board_serial_number_;
-    minstd::array<uint8_t, 6> board_mac_address_;
+    MACAddress board_mac_address_;
 
     //  Populated from GET_ARM_MEMORY when the mailbox answers it. On every
     //      real Raspberry Pi to date this is 0 -- RAM always starts at

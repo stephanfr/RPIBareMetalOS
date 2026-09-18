@@ -50,7 +50,7 @@ namespace cli::commands
         context.output_stream_ << minstd::format(format_buffer, "Board Model: {}\n", platformInfo.GetBoardModelNumber());
         context.output_stream_ << minstd::format(format_buffer, "Board Revision: {:#010x} : {}\n", platformInfo.GetBoardRevision(), board_revision.c_str());
         context.output_stream_ << minstd::format(format_buffer, "Board Serial Number: {}\n", platformInfo.GetBoardSerialNumber());
-        context.output_stream_ << minstd::format(format_buffer, "Board MAC Address:  {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\n", platformInfo.GetBoardMACAddress()[0], platformInfo.GetBoardMACAddress()[1], platformInfo.GetBoardMACAddress()[2], platformInfo.GetBoardMACAddress()[3], platformInfo.GetBoardMACAddress()[4], platformInfo.GetBoardMACAddress()[5]);
+        context.output_stream_ << minstd::format(format_buffer, "Board MAC Address:  {}\n", platformInfo.GetBoardMACAddress());
 
         context.output_stream_ << "\nException Level Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Current Exception Level: {}\n", GetExceptionLevel());

@@ -7,6 +7,7 @@
 #include "asm_globals.h"
 #include "asm_utility.h"
 
+#include "utility/hex_parsers.h"
 #include "utility/regex.h"
 
 #include "devices/log.h"
@@ -32,14 +33,6 @@ const char *ToString(HostType host)
 
 namespace
 {
-    int HexDigitValue(char c)
-    {
-        if ((c >= '0') && (c <= '9')) return c - '0';
-        if ((c >= 'a') && (c <= 'f')) return c - 'a' + 10;
-        if ((c >= 'A') && (c <= 'F')) return c - 'A' + 10;
-        return -1;
-    }
-
     //  Parses "XX:XX:XX:XX:XX:XX" (case-insensitive hex) into 6 bytes.
     //      Deliberately hand-rolled rather than sscanf("%hhx:...") -- this
     //      minimal libc's format-specifier support isn't something to guess at.
@@ -137,4 +130,32 @@ bool KernelCommandLine::BoardMACAddress(minstd::array<uint8_t, 6> &out_mac)
     }
 
     return ParseMACAddress(mac_setting.c_str(), out_mac);
+}
+
+bool KernelCommandLine::VideocoreMemoryBase(uint32_t &value)
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> setting;
+
+    if (!FindSetting(VC_MEM_BASE_SETTING, setting))
+    {
+        return false;
+    }
+
+    value = ParseHexUint32(setting.c_str());
+
+    return true;
+}
+
+bool KernelCommandLine::VideocoreMemorySize(uint32_t &value)
+{
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> setting;
+
+    if (!FindSetting(VC_MEM_SIZE_SETTING, setting))
+    {
+        return false;
+    }
+
+    value = ParseHexUint32(setting.c_str());
+
+    return true;
 }

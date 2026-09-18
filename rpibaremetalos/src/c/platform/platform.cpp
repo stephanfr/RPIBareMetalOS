@@ -69,59 +69,6 @@ namespace
     private:
         minstd::xoroshiro128_plus_plus rng_;
     };
-
-    //  Records the two independent reports of VideoCore memory placement that the firmware
-    //      gives us: the early-boot mailbox call (GET_VC_MEMORY, landing in
-    //      __videocore_memory_base / __videocore_memory_size_in_bytes) and the
-    //      vc_mem.mem_base= / vc_mem.mem_size= settings the firmware embeds in the kernel
-    //      command line.
-    //
-    //      These are NOT two views of the same number, so a difference between them is
-    //      expected rather than a fault.  Observed on RPi4 and RPi5 hardware:
-    //
-    //        - The mailbox answers what the tag is specified to answer -- the VideoCore's own
-    //          RAM reservation.  On RPi4 that is base=0x3b400000, size=0x04c00000: 76MB,
-    //          summing to exactly 0x40000000, a gpu_mem= split sitting flush under the 1GB
-    //          boundary.
-    //
-    //        - vc_mem.mem_size reads exactly 1024MB on both boards, regardless of installed
-    //          RAM or the gpu_mem= setting.  That is not a plausible reservation size, but it
-    //          is exactly the size of the low-memory GPU-addressable aperture.
-    //
-    //      That second reading is inference, not documentation.  vc_mem.mem_base/mem_size are
-    //      an undocumented firmware-to-Linux pass-through -- drivers/char/broadcom/vc_mem.c
-    //      declares both module_param()s with no MODULE_PARM_DESC -- so nothing states what
-    //      they are contractually required to mean.  Treat them as observations, not as a
-    //      second opinion on the mailbox.
-    //
-    //      Nothing logged here can be acted on, by design.  Placement uses the mailbox value
-    //      alone: RPi3 and RPi4 take it unmodified (AARCH64PlatformMemoryManager's constructor
-    //      -> videocore_memory_start_), while RPi5's mailbox answer (~0xFDB00000) falls outside
-    //      the low-1GB window and is replaced by RPI5MemoryManager with a constant sourced from
-    //      BCM2712's dma-ranges.  The command-line values are read here and nowhere else.
-    //
-    //      Logged unconditionally at LogDebug1, as a record rather than a warning: the two
-    //      values differ by construction, so calling a difference a "mismatch" would be a
-    //      false alarm on every boot.  If a firmware update ever moves either side, this is
-    //      the record that shows it.
-
-    void CrossCheckVideocoreMemoryLayout()
-    {
-        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> base_setting;
-        minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> size_setting;
-
-        if (!KernelCommandLine::FindSetting("vc_mem.mem_base", base_setting) ||
-            !KernelCommandLine::FindSetting("vc_mem.mem_size", size_setting))
-        {
-            return;
-        }
-
-        uint32_t cmdline_base = ParseHexUint32(base_setting.c_str());
-        uint32_t cmdline_size = ParseHexUint32(size_setting.c_str());
-
-        LogDebug1("VC memory: mailbox base=0x%08x size=0x%08x, cmdline base=0x%08x size=0x%08x\n",
-                  __videocore_memory_base, __videocore_memory_size_in_bytes, cmdline_base, cmdline_size);
-    }
 }
 
 //  To initialize SW RNG - implementation in 'platform_sw_rngs.cpp' but I do not want to expose in header.
@@ -311,16 +258,6 @@ void InitializePlatform()
 
         SetStandardStreams(tee_ptr, &serial_console);
     }
-
-    CrossCheckVideocoreMemoryLayout();
-
-    //  Insure that the number of cores available is less than the max and that they match the number according to the platform
-
-    //    if ((__number_of_cores_available > MAX_CORES) ||
-    //        (__number_of_cores_available != __platform_info->GetNumberOfCores()))
-    //    {
-    //        ParkCore();
-    //    }
 
     //  Initialize the memory manager
 

@@ -4,11 +4,23 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include <string.h>
 
-uint32_t ParseHexUint32(const char *text)
+#include <fixed_string>
+
+
+inline int HexDigitValue(char c)
+{
+    if ((c >= '0') && (c <= '9')) return c - '0';
+    if ((c >= 'a') && (c <= 'f')) return c - 'a' + 10;
+    if ((c >= 'A') && (c <= 'F')) return c - 'A' + 10;
+    return -1;
+}
+
+inline uint32_t ParseHexUint32(const char *text)
 {
     if ((text[0] == '0') && ((text[1] == 'x') || (text[1] == 'X')))
     {
@@ -19,13 +31,12 @@ uint32_t ParseHexUint32(const char *text)
 
     while (*text)
     {
-        char c = *text;
-        int digit;
+        int digit = HexDigitValue(*text);
 
-        if ((c >= '0') && (c <= '9')) digit = c - '0';
-        else if ((c >= 'a') && (c <= 'f')) digit = c - 'a' + 10;
-        else if ((c >= 'A') && (c <= 'F')) digit = c - 'A' + 10;
-        else break;
+        if (digit < 0)
+        {
+            break;
+        }
 
         value = (value << 4) | static_cast<uint32_t>(digit);
         text++;
