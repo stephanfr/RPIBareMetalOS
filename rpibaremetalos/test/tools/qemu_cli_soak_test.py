@@ -37,8 +37,10 @@ COMMAND_POOL = (
 
 def run(
     qemu: str,
+    armstub: str,
     kernel: str,
     sdimage: str,
+    machine: str,
     duration_seconds: float,
     min_interval_seconds: float,
     max_interval_seconds: float,
@@ -59,8 +61,9 @@ def run(
 
     rng = random.Random(seed)
     cmd = (
-        f'{qemu} -M raspi3b'
-        f' -kernel {kernel}'
+        f'{qemu} -M {machine}'
+        f' -kernel {armstub}'
+        f' -device loader,file={kernel},addr=0x80000,force-raw=on'
         f' -drive file={sdimage},if=sd,format=raw'
         f' -serial stdio'
         f' -display none'
@@ -151,8 +154,10 @@ def run(
 def main() -> int:
     parser = argparse.ArgumentParser(description='RPIBareMetalOS long-running random CLI soak test')
     parser.add_argument('--qemu', required=True, help='Path to qemu-system-aarch64')
-    parser.add_argument('--kernel', required=True, help='Path to kernel8.elf')
+    parser.add_argument('--armstub', required=True, help='Path to supervisor.elf')
+    parser.add_argument('--kernel', required=True, help='Path to kernel8.img')
     parser.add_argument('--sdimage', required=True, help='Path to sd.img')
+    parser.add_argument('--machine', default='raspi3b', help='QEMU machine model (default: raspi3b)')
     parser.add_argument(
         '--duration-seconds',
         type=float,
@@ -184,8 +189,10 @@ def main() -> int:
     args = parser.parse_args()
     return run(
         qemu=args.qemu,
+        armstub=args.armstub,
         kernel=args.kernel,
         sdimage=args.sdimage,
+        machine=args.machine,
         duration_seconds=args.duration_seconds,
         min_interval_seconds=args.min_interval_seconds,
         max_interval_seconds=args.max_interval_seconds,

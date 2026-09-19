@@ -11,11 +11,15 @@
 # (kernel_only_1_to_1 and kernel_high_user_low) each paired with the default
 # (relaxed) alignment policy and strict_align=1 -- so regressions in any
 # combination are caught. Board selection in the OS is runtime (MIDR_EL1
-# PARTNUM), so the same kernel8.elf and sd.img serve every machine.
+# PARTNUM), so the same kernel8.img and sd.img serve every machine.
+#
+# The armstub is the -kernel image and the kernel is loaded beside it: an ELF keeps QEMU's
+# is_linux flag clear, which is what starts the cores at EL3 (hw/arm/boot.c:1238-1249).
 #
 # Usage:
 #   python3 qemu_regression_test.py --qemu <qemu-binary> \
-#                                   --kernel <kernel8.elf> \
+#                                   --armstub <supervisor.elf> \
+#                                   --kernel <kernel8.img> \
 #                                   --sdimage <sd.img> \
 #                                   [--machine raspi3b] [--memory 2G]
 
@@ -29,7 +33,7 @@ BOOT_READY_MARKER = 'Command Line Interface'
 TIMEOUT = 60  # seconds to wait for each response
 
 
-def run(qemu: str, kernel: str, sdimage: str,
+def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         machine: str = 'raspi3b',
         memory: str = '',
         memory_model: str = 'kernel_only_1_to_1',
@@ -37,7 +41,8 @@ def run(qemu: str, kernel: str, sdimage: str,
     cmd = (
         f'{qemu} -M {machine}'
         f'{f" -m {memory}" if memory else ""}'
-        f' -kernel {kernel}'
+        f' -kernel {armstub}'
+        f' -device loader,file={kernel},addr=0x80000,force-raw=on'
         f' -drive file={sdimage},if=sd,format=raw'
         f' -serial stdio'
         f' -display none'
@@ -119,15 +124,21 @@ def run(qemu: str, kernel: str, sdimage: str,
         output = send_command('test addrspace')
         check('test addrspace', output, 'PASS: address space test')
 
-        # halt
-        child.sendline('halt')
-        child.expect('Halting', timeout=TIMEOUT)
-
     except pexpect.TIMEOUT:
         print('\nFAIL: timed out waiting for expected output')
         failures += 1
     except pexpect.EOF:
         print('\nFAIL: QEMU exited unexpectedly')
+        failures += 1
+    finally:
+        child.terminate(force=True)
+
+    try:
+        # halt
+        child.sendline('halt')
+        child.expect(pexpect.EOF)
+    except pexpect.TIMEOUT:
+        print('\nFAIL: timed out waiting for halt')
         failures += 1
     finally:
         child.terminate(force=True)
@@ -139,7 +150,8 @@ def run(qemu: str, kernel: str, sdimage: str,
 def main() -> int:
     parser = argparse.ArgumentParser(description='RPIBareMetalOS QEMU regression test')
     parser.add_argument('--qemu',    required=True, help='Path to qemu-system-aarch64')
-    parser.add_argument('--kernel',  required=True, help='Path to kernel8.elf')
+    parser.add_argument('--armstub', required=True, help='Path to armstub_minimal.elf')
+    parser.add_argument('--kernel',  required=True, help='Path to kernel8.img')
     parser.add_argument('--sdimage', required=True, help='Path to sd.img')
     parser.add_argument('--machine', default='raspi3b',
                         help='QEMU machine model (default: raspi3b)')
@@ -148,14 +160,14 @@ def main() -> int:
     args = parser.parse_args()
 
     print(f'=== {args.machine} Pass 1: kernel_only_1_to_1, default alignment ===')
-    result = run(args.qemu, args.kernel, args.sdimage,
+    result = run(args.qemu, args.armstub, args.kernel, args.sdimage,
                  machine=args.machine, memory=args.memory,
                  memory_model='kernel_only_1_to_1')
     if result != 0:
         return result
 
     print(f'\n=== {args.machine} Pass 2: kernel_only_1_to_1, strict_align=1 ===')
-    result = run(args.qemu, args.kernel, args.sdimage,
+    result = run(args.qemu, args.armstub, args.kernel, args.sdimage,
                  machine=args.machine, memory=args.memory,
                  memory_model='kernel_only_1_to_1',
                  extra_cmdline=' strict_align=1')
@@ -163,14 +175,14 @@ def main() -> int:
         return result
 
     print(f'\n=== {args.machine} Pass 3: kernel_high_user_low, default alignment ===')
-    result = run(args.qemu, args.kernel, args.sdimage,
+    result = run(args.qemu, args.armstub, args.kernel, args.sdimage,
                  machine=args.machine, memory=args.memory,
                  memory_model='kernel_high_user_low')
     if result != 0:
         return result
 
     print(f'\n=== {args.machine} Pass 4: kernel_high_user_low, strict_align=1 ===')
-    return run(args.qemu, args.kernel, args.sdimage,
+    return run(args.qemu, args.armstub, args.kernel, args.sdimage,
                machine=args.machine, memory=args.memory,
                memory_model='kernel_high_user_low',
                extra_cmdline=' strict_align=1')

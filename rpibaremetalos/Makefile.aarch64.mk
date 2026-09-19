@@ -170,11 +170,22 @@ $(USER_BIN): $(USER_SRC) $(USER_LD)
 
 user: checkdirs $(USER_BIN)
 
-$(IMG): $(ELF) $(USER_BIN)
+SUPERVISOR_ROOT    := supervisor
+SUPERVISOR_ELF     := $(SUPERVISOR_ROOT)/image/supervisor.elf
+SUPERVISOR_BIN     := $(SUPERVISOR_ROOT)/image/supervisor.bin
+
+.PHONY: supervisor
+supervisor:
+	$(MAKE) -C $(SUPERVISOR_ROOT)
+
+$(SUPERVISOR_ELF) $(SUPERVISOR_BIN): supervisor
+
+$(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
 	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
-	/bin/cp armstub/image/armstub_minimal.bin image/.
+	/bin/cp $(SUPERVISOR_ELF) image/.
+	/bin/cp $(SUPERVISOR_BIN) image/.
 	/bin/cp resources/*.txt image/.
 	/bin/cp resources/sd.img image/.
 	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
@@ -231,32 +242,6 @@ echo:
 
 
 #
-#	ARM Stub build here at least temporarily
-#
-
-ARMSTUB_ROOT := armstub
-ARMSTUB_DIRS := $(ARMSTUB_ROOT)/build $(ARMSTUB_ROOT)/image
-
-
-armstub : armstub_clean armstub_checkdirs armstub_bin
-
-armstub/build/armstub_minimal.o: armstub/src/armstub_minimal.S
-	$(CC) $(ASMFLAGS) -c $< -o $@
-
-armstub_bin: armstub/build/armstub_minimal.o
-	$(LD) -nostdlib --section-start=.text=0 -o armstub/build/armstub_minimal.elf armstub/build/armstub_minimal.o
-	$(OBJCOPY) -O binary armstub/build/armstub_minimal.elf armstub/image/armstub_minimal.bin
-
-armstub_checkdirs: $(ARMSTUB_DIRS)
-
-$(ARMSTUB_DIRS):
-	@mkdir -p $@
-
-armstub_clean:
-	/bin/rm armstub/build/*.* armstub/image/*.* > /dev/null 2> /dev/null || true
-
-
-#
 #       QEMU regression test
 #
 
@@ -271,14 +256,16 @@ armstub_clean:
 qemu-regression-rpi3: all
 	python3 $(QEMU_REGRESSION_SCRIPT) \
 		--qemu $(QEMU) \
-		--kernel $(BUILD_ROOT)/kernel8.elf \
+		--armstub $(IMAGE_DIR)/supervisor.elf \
+		--kernel $(IMAGE_DIR)/kernel8.img \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI3_MACHINE)
 
 qemu-regression-rpi4: all
 	python3 $(QEMU_REGRESSION_SCRIPT) \
 		--qemu $(QEMU) \
-		--kernel $(BUILD_ROOT)/kernel8.elf \
+		--armstub $(IMAGE_DIR)/supervisor.elf \
+		--kernel $(IMAGE_DIR)/kernel8.img \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI4_MACHINE) \
 		--memory $(QEMU_RPI4_MEMORY)
@@ -294,35 +281,45 @@ QEMU_MEMORY_MODEL := kernel_high_user_low
 else
 QEMU_MEMORY_MODEL ?= kernel_only_1_to_1
 endif
+
 QEMU_STRICT_ALIGN := $(if $(filter 1,$(SA)), strict_align=1,)
 
+#  QEMU guest diagnostics: QD=1 to enable.  guest_errors surfaces bad MMIO passwords and
+#      writes to unassigned addresses; unimp surfaces registers QEMU models but does not implement.
+ifeq ($(QD),1)
+QEMU_DEBUG := -d int,guest_errors,unimp
+else
+QEMU_DEBUG :=
+endif
+
+#  Machine-independent flags shared by qemu-rpi3 and qemu-rpi4.
+QEMU_COMMON_FLAGS = \
+	-kernel $(IMAGE_DIR)/supervisor.elf \
+	-device loader,file=$(IMAGE_DIR)/kernel8.img,addr=0x80000,force-raw=on \
+	-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
+	-serial stdio \
+	-display none \
+	-no-reboot \
+	$(QEMU_DEBUG) \
+	-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+
 qemu-rpi3: all
-	$(QEMU) -M $(QEMU_RPI3_MACHINE) \
-		-kernel $(BUILD_ROOT)/kernel8.elf \
-		-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
-		-serial stdio \
-		-display none \
-		-no-reboot \
-		-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+	$(QEMU) -M $(QEMU_RPI3_MACHINE) $(QEMU_COMMON_FLAGS)
 
 qemu-rpi4: all
-	$(QEMU) -M $(QEMU_RPI4_MACHINE) -m $(QEMU_RPI4_MEMORY) \
-		-kernel $(BUILD_ROOT)/kernel8.elf \
-		-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
-		-serial stdio \
-		-display none \
-		-no-reboot \
-		-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+	$(QEMU) -M $(QEMU_RPI4_MACHINE) -m $(QEMU_RPI4_MEMORY) $(QEMU_COMMON_FLAGS)
+
 
 qemu-cli-soak: all
 	python3 $(QEMU_CLI_SOAK_SCRIPT) \
 		--qemu $(QEMU) \
-		--kernel $(BUILD_ROOT)/kernel8.elf \
+		--armstub $(IMAGE_DIR)/supervisor.elf \
+		--kernel $(IMAGE_DIR)/kernel8.img \
 		--sdimage $(IMAGE_DIR)/sd.img \
+		--machine $(QEMU_RPI3_MACHINE) \
 		--duration-seconds $(SOAK_DURATION_SECONDS) \
 		--min-interval-seconds $(SOAK_MIN_INTERVAL_SECONDS) \
 		--max-interval-seconds $(SOAK_MAX_INTERVAL_SECONDS) \
 		--progress-interval-seconds $(SOAK_PROGRESS_INTERVAL_SECONDS) \
 		$(if $(SOAK_SEED),--seed $(SOAK_SEED),) \
 		$(SOAK_EXTRA_ARGS)
-	

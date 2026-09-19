@@ -9,14 +9,6 @@
 
 #define BIT(x) (1 << (x))
 
-#define SCR_RW			    BIT(10)
-#define SCR_HCE			    BIT(8)
-#define SCR_SMD			    BIT(7)
-#define SCR_RES1_5		    BIT(5)
-#define SCR_RES1_4		    BIT(4)
-#define SCR_NS			    BIT(0)
-#define SCR_VAL             (SCR_RW | SCR_HCE | SCR_SMD | SCR_RES1_5 | SCR_RES1_4 | SCR_NS)
-
 #define ACTLR_VAL           (BIT(0) | BIT(1) | BIT(4) | BIT(5) | BIT(6))
 
 #define CPUECTLR_EL1		S3_1_C15_C2_1
@@ -56,12 +48,7 @@
 
 .section ".text.boot"
 
-//  The standard ARMSTUB will move to eL2 and then spin cores 1->3 watching addresses in the table
-//      at 'armstub_el2_spin_table' until a non-zero address is found.  If the minimal ARMSTUB with this
-//      project is used, then all cores will enter here at EL3 and cores 1->3 will spin on the core jump table addresses.
-//  I expect this to change when we get to RPIs with > 4 cores, as this table runs into the ARMSTUB magic number.
-
-.equ armstub_el2_spin_table, 0xd8
+.equ supervisor_el2_spin_table, 0xd8
 
 //  Register aliases to make the code a bit more readable
 
@@ -73,16 +60,17 @@ x23_arrivedInEL3 .req x23
 x24_numberOfCoresAvailable .req x24
 
 
-
 .macro InitializeLocalRegisterVariables
     bl      IdentifyBoardType
     mov     x20_boardHWId, x0
     mrs     x19_coreNumber, MPIDR_EL1
+
     //  Core index location depends on the CPU topology:
     //    A53 (RPi3) / A72 (RPi4): legacy layout, core index in Aff0 (bits 1:0).
     //    A76 (RPi5): DynamIQ, core index in Aff1 (bits 15:8); Aff0 is the thread.
     //  Extracting Aff0 on RPi5 yields 0 for every core, so secondary cores would
     //      all masquerade as core 0.
+
     cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
     b.eq    99f
     and     x19_coreNumber, x19_coreNumber, #3
@@ -139,8 +127,8 @@ x24_numberOfCoresAvailable .req x24
 //      improve readability or flow.
 //  There is a state machine, albeit a very simple one.  Core 0 does most of the heavy lifting, including bringing
 //      up the other cores.  Depending on the EL we enter, then either all secondary cores will arrive here in EL3
-//      or they will be spinning in EL2 and have to be released using a low memory location specified by the ARMSTUB
-//      to provide a jump address, when core 0 is ready to release them. Cores released from the ARMSTUB, or bypassing
+//      or they will be spinning in EL2 and have to be released using a low memory location specified by the SUPERVISOR
+//      to provide a jump address, when core 0 is ready to release them. Cores released from the SUPERVISOR, or bypassing
 //      from EL3, will flow seamlessly into stack configuration and drop down to EL1. They rendezvous by spinning in EL1
 //      waiting for another jump address, this time most likely from a call to CoreExecute() in the C/C++ code.
 //  Only Core 0 will make it to KernelMain, all other cores will spin in EL1 until they get a jump address to a different
@@ -164,9 +152,9 @@ _start:
     //
     //      This will require some config at EL3 and EL2, which is dependent on the EL level when we enter this code.
     //      The default armstub configures EL3 and then jumps to this code in EL2.
-    //      The armstub_base.bin with this project does not change the EL at all, so we will enter here at EL3.
+    //      The supervisor.bin with this project does not change the EL at all, so we will enter here at EL3.
 
-    //  Determine if we are running at EL3 - this can occur if the default ARMSTUB is replaced
+    //  Determine if we are running at EL3 - this can occur if the default armstub is replaced
 
     mov     x23_arrivedInEL3, #0
 
@@ -210,20 +198,6 @@ _start:
 	msr     L2CTLR_EL1, x9
 
 skip_a53_a72_imp_def_registers:
-
-	//  Enable Floating point instruction set and SIMD instructions
-
-	msr     CPTR_EL3, xzr
-
-	//  Set up SCR
-
-    mov     x9, #SCR_VAL
-    //  RPi5: clear SMD so SMC from EL1 routes to EL3 firmware (required for PSCI CPU_ON)
-    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
-    b.ne    set_scr_el3
-    bic     x9, x9, #SCR_SMD
-set_scr_el3:
-	msr     SCR_EL3, x9
 
 	//  Set up ACTLR
 
@@ -276,7 +250,7 @@ skip_gic_config:
 	msr     ELR_EL3, x9
 	eret
 
-    //  Running at EL2 - processor will be in EL2 on entry with the default ARMSTUB
+    //  Running at EL2 - processor will be in EL2 on entry with the default armstub
 
 .align 4
 running_in_el2:
@@ -601,7 +575,7 @@ start_next_core:
     cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
     b.ne    check_el2_spin_table
 
-    //  EL3 arrival: all cores started by armstub; fall through to the shared EL3 wait path.
+    //  EL3 arrival: all cores started by supervisor; fall through to the shared EL3 wait path.
     //  EL2-only arrival: only core 0 reached EL3; secondary cores are held by firmware and
     //      need releasing via PSCI CPU_ON below.
 
@@ -640,7 +614,7 @@ check_el2_spin_table:
 
 write_spin_table:
 
-    mov     x10, #armstub_el2_spin_table
+    mov     x10, #supervisor_el2_spin_table
     ldr     x11, =running_in_el2                        //  PHYSICAL-ENTRY-POINT: converted to physical just below
     ldr     x16, =S_KERNEL_VA_BASE
     sub     x11, x11, x16                               //  target core starts with its MMU off, so it needs a physical entry (R1)
