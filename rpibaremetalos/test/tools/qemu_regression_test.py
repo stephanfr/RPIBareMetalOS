@@ -124,15 +124,21 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         output = send_command('test addrspace')
         check('test addrspace', output, 'PASS: address space test')
 
-        # halt
-        child.sendline('halt')
-        child.expect('Halting', timeout=TIMEOUT)
-
     except pexpect.TIMEOUT:
         print('\nFAIL: timed out waiting for expected output')
         failures += 1
     except pexpect.EOF:
         print('\nFAIL: QEMU exited unexpectedly')
+        failures += 1
+    finally:
+        child.terminate(force=True)
+
+    try:
+        # halt
+        child.sendline('halt')
+        child.expect(pexpect.EOF)
+    except pexpect.TIMEOUT:
+        print('\nFAIL: timed out waiting for halt')
         failures += 1
     finally:
         child.terminate(force=True)

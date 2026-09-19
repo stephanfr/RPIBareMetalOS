@@ -64,7 +64,6 @@ def run(
         f'{qemu} -M {machine}'
         f' -kernel {armstub}'
         f' -device loader,file={kernel},addr=0x80000,force-raw=on'
-        f' -device loader,addr=0xfc,data=0x80000,data-len=4'
         f' -drive file={sdimage},if=sd,format=raw'
         f' -serial stdio'
         f' -display none'

@@ -48,11 +48,6 @@
 
 .section ".text.boot"
 
-//  The standard SUPERVISOR will move to eL2 and then spin cores 1->3 watching addresses in the table
-//      at 'supervisor_el2_spin_table' until a non-zero address is found.  If the minimal SUPERVISOR with this
-//      project is used, then all cores will enter here at EL3 and cores 1->3 will spin on the core jump table addresses.
-//  I expect this to change when we get to RPIs with > 4 cores, as this table runs into the SUPERVISOR magic number.
-
 .equ supervisor_el2_spin_table, 0xd8
 
 //  Register aliases to make the code a bit more readable
@@ -65,16 +60,17 @@ x23_arrivedInEL3 .req x23
 x24_numberOfCoresAvailable .req x24
 
 
-
 .macro InitializeLocalRegisterVariables
     bl      IdentifyBoardType
     mov     x20_boardHWId, x0
     mrs     x19_coreNumber, MPIDR_EL1
+
     //  Core index location depends on the CPU topology:
     //    A53 (RPi3) / A72 (RPi4): legacy layout, core index in Aff0 (bits 1:0).
     //    A76 (RPi5): DynamIQ, core index in Aff1 (bits 15:8); Aff0 is the thread.
     //  Extracting Aff0 on RPi5 yields 0 for every core, so secondary cores would
     //      all masquerade as core 0.
+
     cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
     b.eq    99f
     and     x19_coreNumber, x19_coreNumber, #3
@@ -155,10 +151,10 @@ _start:
     //  Set move to EL1
     //
     //      This will require some config at EL3 and EL2, which is dependent on the EL level when we enter this code.
-    //      The default supervisor configures EL3 and then jumps to this code in EL2.
-    //      The supervisor_base.bin with this project does not change the EL at all, so we will enter here at EL3.
+    //      The default armstub configures EL3 and then jumps to this code in EL2.
+    //      The supervisor.bin with this project does not change the EL at all, so we will enter here at EL3.
 
-    //  Determine if we are running at EL3 - this can occur if the default SUPERVISOR is replaced
+    //  Determine if we are running at EL3 - this can occur if the default armstub is replaced
 
     mov     x23_arrivedInEL3, #0
 
@@ -254,7 +250,7 @@ skip_gic_config:
 	msr     ELR_EL3, x9
 	eret
 
-    //  Running at EL2 - processor will be in EL2 on entry with the default SUPERVISOR
+    //  Running at EL2 - processor will be in EL2 on entry with the default armstub
 
 .align 4
 running_in_el2:
