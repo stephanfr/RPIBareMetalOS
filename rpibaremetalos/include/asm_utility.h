@@ -20,6 +20,20 @@ extern "C"
     void CPUTicksDelay(uint64_t ticks);
 
     void ParkCore();
+
+    //  Issues an SMC to whoever owns EL3 - our supervisor on RPi3/RPi4, the firmware on
+    //      RPi5.  SMCCC puts the function ID and up to three arguments in x0-x3 and returns
+    //      the result in x0, which is exactly the AAPCS64 mapping, so src/asm/psci_call.S is
+    //      one smc and one ret.
+    //
+    //  PSCI requires unused arguments to be zero, hence the defaults - a caller that needs
+    //      none writes PSCICall(PSCI_SYSTEM_OFF) and the zeros are materialised at the call
+    //      site.
+
+    int64_t PSCICall(uint64_t function_id,
+                     uint64_t arg0 = 0,
+                     uint64_t arg1 = 0,
+                     uint64_t arg2 = 0);
 }
 
 #define INVALIDATE_CACHE_LINE(address) asm volatile("dc cvau, %0" : : "r"(address) : "memory")

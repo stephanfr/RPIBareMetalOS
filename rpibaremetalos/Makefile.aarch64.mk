@@ -281,7 +281,16 @@ QEMU_MEMORY_MODEL := kernel_high_user_low
 else
 QEMU_MEMORY_MODEL ?= kernel_only_1_to_1
 endif
+
 QEMU_STRICT_ALIGN := $(if $(filter 1,$(SA)), strict_align=1,)
+
+#  QEMU guest diagnostics: QD=1 to enable.  guest_errors surfaces bad MMIO passwords and
+#      writes to unassigned addresses; unimp surfaces registers QEMU models but does not implement.
+ifeq ($(QD),1)
+QEMU_DEBUG := -d guest_errors,unimp
+else
+QEMU_DEBUG :=
+endif
 
 #  Machine-independent flags shared by qemu-rpi3 and qemu-rpi4.
 QEMU_COMMON_FLAGS = \
@@ -291,6 +300,7 @@ QEMU_COMMON_FLAGS = \
 	-serial stdio \
 	-display none \
 	-no-reboot \
+	$(QEMU_DEBUG) \
 	-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
 
 qemu-rpi3: all

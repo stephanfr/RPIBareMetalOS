@@ -26,7 +26,7 @@ IMAGE_DIR  := image
 #  board-specific logic cannot drift between the kernel and the monitor.  Phase 2 adds
 #  identify_board_type.S; Phase 3 adds setup_physical_timer.S and configure_gic.S.
 SHARED_SRC_ROOT := ../src/asm
-SHARED_ASM_SRC  := 
+SHARED_ASM_SRC  := $(SHARED_SRC_ROOT)/identify_board_type.S
 
 ASM_DIRS := asm
 C_DIRS   := c
@@ -63,6 +63,8 @@ LINKER_SCRIPT          := $(BUILD_ROOT)/supervisor.ld
 ELF := $(IMAGE_DIR)/supervisor.elf
 BIN := $(IMAGE_DIR)/supervisor.bin
 
+SUPERVISOR_LD_FLAGS := -nostdlib --no-warn-rwx-segments
+
 .PHONY: all clean echo
 
 all: $(BIN)
@@ -84,9 +86,9 @@ $(BUILD_ROOT)/c/%.o: $(SRC_ROOT)/c/%.c | $(BUILD_DIRS)
 
 $(LINKER_SCRIPT): $(LINKER_SCRIPT_TEMPLATE) include/supervisor_config.h | $(BUILD_DIRS)
 	$(CPREPROCESSOR) -P -Iinclude -I../include $< -o $@
-	
+
 $(ELF): $(OBJ) $(LINKER_SCRIPT) | $(BUILD_DIRS)
-	$(LD) -nostdlib -T $(LINKER_SCRIPT) -o $@ $(OBJ)
+	$(LD) $(SUPERVISOR_LD_FLAGS) -T $(LINKER_SCRIPT) -o $@ $(OBJ)
 
 $(BIN): $(ELF)
 	$(OBJCOPY) -O binary $< $@

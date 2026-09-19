@@ -6,6 +6,9 @@
 
 #include "psci.h"
 
+#include "power_management.h"
+
+
 //  PSCI_FEATURES(func_id) answers "is func_id implemented, and with what options".
 //      Return value per the PSCI spec:
 //          NOT_SUPPORTED (-1)  the function is not implemented
@@ -28,6 +31,8 @@ static int64_t MonitorPSCIFeatures(uint32_t queried_function_id)
     {
         case PSCI_VERSION:
         case PSCI_FEATURES:
+        case PSCI_SYSTEM_OFF:
+        case PSCI_SYSTEM_RESET:
             return 0;
 
         default:
@@ -59,12 +64,10 @@ int64_t MonitorHandleSMC(uint64_t function_id,
             return MonitorPSCIFeatures((uint32_t)arg0);
 
         case PSCI_SYSTEM_OFF:
-            MonitorSystemOff();                         //  No return
-            return PSCI_RET_INTERNAL_FAILURE;
+            return MonitorSystemOff();
 
         case PSCI_SYSTEM_RESET:
-            MonitorSystemReset();                       //  No return 
-            return PSCI_RET_INTERNAL_FAILURE;
+            return MonitorSystemReset();
             
         default:
             return PSCI_RET_NOT_SUPPORTED;

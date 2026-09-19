@@ -9,14 +9,6 @@
 
 #define BIT(x) (1 << (x))
 
-#define SCR_RW			    BIT(10)
-#define SCR_HCE			    BIT(8)
-#define SCR_SMD			    BIT(7)
-#define SCR_RES1_5		    BIT(5)
-#define SCR_RES1_4		    BIT(4)
-#define SCR_NS			    BIT(0)
-#define SCR_VAL             (SCR_RW | SCR_HCE | SCR_SMD | SCR_RES1_5 | SCR_RES1_4 | SCR_NS)
-
 #define ACTLR_VAL           (BIT(0) | BIT(1) | BIT(4) | BIT(5) | BIT(6))
 
 #define CPUECTLR_EL1		S3_1_C15_C2_1
@@ -210,20 +202,6 @@ _start:
 	msr     L2CTLR_EL1, x9
 
 skip_a53_a72_imp_def_registers:
-
-	//  Enable Floating point instruction set and SIMD instructions
-
-	msr     CPTR_EL3, xzr
-
-	//  Set up SCR
-
-    mov     x9, #SCR_VAL
-    //  RPi5: clear SMD so SMC from EL1 routes to EL3 firmware (required for PSCI CPU_ON)
-    cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
-    b.ne    set_scr_el3
-    bic     x9, x9, #SCR_SMD
-set_scr_el3:
-	msr     SCR_EL3, x9
 
 	//  Set up ACTLR
 

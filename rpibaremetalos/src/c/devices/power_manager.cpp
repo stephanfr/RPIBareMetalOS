@@ -4,6 +4,8 @@
 
 #include "devices/power_manager.h"
 
+#include "psci.h"
+
 #include "devices/gpio.h"
 #include "devices/physical_timer.h"
 #include "devices/log.h"

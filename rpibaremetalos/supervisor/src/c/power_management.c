@@ -16,23 +16,55 @@
 
 extern uint64_t IdentifyBoardType(void);     //  ../src/asm/identify_board_type.S
 
-static volatile uint32_t *PMRegister(uint32_t offset)
+//  Physical base of this board's PM block, or 0 when it has no BCM2835-style watchdog at
+//      these offsets.  EL3 runs with the MMU off, so the address is used directly.
+//
+//  BCM2712 is deliberately not mapped to a base: it has no such block, and on an RPi5 the
+//      firmware normally keeps EL3 and services SYSTEM_OFF/SYSTEM_RESET itself, so this
+//      supervisor should not be the one answering.  Reporting NOT_SUPPORTED beats writing
+//      to an address that does nothing.
+
+static uint32_t PMBaseAddress(void)
 {
-    uint32_t base = (IdentifyBoardType() == RPI_BOARD_ENUM_RPI3) ? BCM2837_IO_BASE
-                                                                 : BCM2711_IO_BASE;
+    switch (IdentifyBoardType())
+    {
+        case RPI_BOARD_ENUM_RPI3:
+            return BCM2837_IO_BASE;
+
+        case RPI_BOARD_ENUM_RPI4:
+            return BCM2711_IO_BASE;
+
+        case RPI_BOARD_ENUM_RPI5:
+        default:
+            return 0;
+    }
+}
+
+static volatile uint32_t *PMRegister(uint32_t base,
+                                     uint32_t offset)
+{
     return (volatile uint32_t *)(uintptr_t)(base + offset);
 }
 
-static void WatchdogReset(uint32_t partition)
+//  Returns only on failure - the success path ends in the wfe loop below.
+
+static int64_t WatchdogReset(uint32_t partition)
 {
-    uint32_t rsts = *PMRegister(PM_RSTS);
+    const uint32_t base = PMBaseAddress();
+
+    if (base == 0)
+    {
+        return PSCI_RET_NOT_SUPPORTED;
+    }
+
+    uint32_t rsts = *PMRegister(base, PM_RSTS);
 
     rsts &= ~PM_RSTS_PART_CLEAR;
     rsts |= partition;
 
-    *PMRegister(PM_RSTS) = PM_PASSWD | rsts;
-    *PMRegister(PM_WDOG) = PM_PASSWD | 0x10;
-    *PMRegister(PM_RSTC) = PM_PASSWD | PM_RSTC_REBOOT;
+    *PMRegister(base, PM_RSTS) = PM_PASSWD | rsts;
+    *PMRegister(base, PM_WDOG) = PM_PASSWD | 0x10;
+    *PMRegister(base, PM_RSTC) = PM_PASSWD | PM_RSTC_REBOOT;
 
     for (;;)
     {
@@ -40,5 +72,5 @@ static void WatchdogReset(uint32_t partition)
     }
 }
 
-void MonitorSystemOff(void)   { WatchdogReset(PM_PART_63); }
-void MonitorSystemReset(void) { WatchdogReset(0); }
+int64_t MonitorSystemOff(void)   { return WatchdogReset(PM_PART_63); }
+int64_t MonitorSystemReset(void) { return WatchdogReset(0); }
