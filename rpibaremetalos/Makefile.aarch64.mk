@@ -287,7 +287,7 @@ QEMU_STRICT_ALIGN := $(if $(filter 1,$(SA)), strict_align=1,)
 #  QEMU guest diagnostics: QD=1 to enable.  guest_errors surfaces bad MMIO passwords and
 #      writes to unassigned addresses; unimp surfaces registers QEMU models but does not implement.
 ifeq ($(QD),1)
-QEMU_DEBUG := -d guest_errors,unimp
+QEMU_DEBUG := -d int,guest_errors,unimp
 else
 QEMU_DEBUG :=
 endif

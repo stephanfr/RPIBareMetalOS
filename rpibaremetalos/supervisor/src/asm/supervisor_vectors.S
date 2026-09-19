@@ -7,7 +7,7 @@
 	b	\label
 .endm
 
-.section ".vectors"
+.section ".vectors", "ax", %progbits
 .align 11
 .globl __monitor_vectors
 __monitor_vectors:
@@ -32,7 +32,7 @@ __monitor_vectors:
 	MonitorVectorEntry MonitorParkCore        // Lower EL, AArch32, FIQ
 	MonitorVectorEntry MonitorParkCore        // Lower EL, AArch32, SError
 
-.section ".text"
+.section ".text", "ax", %progbits
 
 #define ESR_EC_SMC64 0x17
 

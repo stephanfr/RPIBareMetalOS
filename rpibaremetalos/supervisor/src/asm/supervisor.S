@@ -4,7 +4,7 @@
 
 #include "supervisor_config.h"
 
-.section ".text.boot"
+.section ".text.boot", "ax", %progbits
 
 .globl _start
 _start:

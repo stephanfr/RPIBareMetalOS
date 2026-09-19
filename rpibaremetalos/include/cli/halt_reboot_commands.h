@@ -28,7 +28,7 @@ namespace cli::commands
         static const CLIRebootCommand instance;
 
         CLIRebootCommand()
-            : CLICommandExecutor("halt")
+            : CLICommandExecutor("reboot")
         {
         }
 
