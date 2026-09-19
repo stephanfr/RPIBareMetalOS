@@ -155,7 +155,7 @@ def run(
 def main() -> int:
     parser = argparse.ArgumentParser(description='RPIBareMetalOS long-running random CLI soak test')
     parser.add_argument('--qemu', required=True, help='Path to qemu-system-aarch64')
-    parser.add_argument('--armstub', required=True, help='Path to armstub_minimal.elf')
+    parser.add_argument('--armstub', required=True, help='Path to supervisor.elf')
     parser.add_argument('--kernel', required=True, help='Path to kernel8.img')
     parser.add_argument('--sdimage', required=True, help='Path to sd.img')
     parser.add_argument('--machine', default='raspi3b', help='QEMU machine model (default: raspi3b)')

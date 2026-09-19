@@ -44,7 +44,7 @@ written in C++20 / C17 / AArch64 assembly. It is cross-compiled from a Linux x86
     ├── Makefile.test.mk            ← unit-test build rules
     ├── src/                        ← OS source (asm/, c/ sub-trees)
     ├── include/                    ← OS headers
-    ├── armstub/image/armstub_minimal.bin  ← pre-built ARM stub
+    ├── supervisor/image/supervisor.bin  ← pre-built ARM stub
     ├── redistrib/                  ← pre-built Broadcom firmware blobs + DTBs
     ├── resources/                  ← config.txt, cmdline.txt, sd.img (QEMU disk)
     └── image/                      ← OUTPUT: all files to copy to the SD card
@@ -161,7 +161,7 @@ the RPi:
 | File | Description |
 |------|-------------|
 | `kernel8.img` | The OS kernel binary (loaded by the GPU bootloader) |
-| `armstub_minimal.bin` | ARM stub — runs before the kernel on all 4 cores |
+| `supervisor.bin` | ARM stub — runs before the kernel on all 4 cores |
 | `bcm2710-rpi-3-b-plus.dtb` | Device tree — RPi 3B+ |
 | `bcm2711-rpi-4-b.dtb` | Device tree — RPi 4B |
 | `config.txt` | GPU/bootloader configuration |
@@ -211,7 +211,7 @@ automatically via `postCreateCommand`.
 |---------|-------|-----|
 | `aarch64-none-elf-gcc: not found` | `TOOLS` points to wrong location | Set `TOOLS` or create `~/dev_tools` symlink (see Toolchain section) |
 | `cannot find -lminimalclib` | Dep libraries not built | Run dep build steps above |
-| `armstub_minimal.bin: No such file` | armstub not present | File is pre-committed; run `git lfs pull` |
+| `supervisor.bin: No such file` | supervisor not present | File is pre-committed; run `git lfs pull` |
 | `sd.img: No such file` | LFS file missing | Run `git lfs pull` |
 | Linker errors about undefined refs | Stale dep `.a` files | Rebuild deps with `make aarch64` |
 | `raspi4b` is not a valid machine | Distro QEMU predates RPi4 support | Build QEMU >= 9.1 (`.devcontainer/install_qemu.sh`) -- the first version whose BCM2838 model has EMMC2 |

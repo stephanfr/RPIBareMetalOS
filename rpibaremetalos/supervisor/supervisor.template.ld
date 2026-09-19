@@ -1,3 +1,10 @@
+/*
+ *   Preprocessed into build/supervisor.ld by the Makefile, so that MONITOR_STACK_SIZE and
+ *   MONITOR_MAX_CORES come from include/supervisor_config.h rather than being duplicated here.
+ */
+
+#include "supervisor_config.h"
+
 ENTRY(_start)
 
 SECTIONS
@@ -20,11 +27,17 @@ SECTIONS
      */
     .data : { *(.data .data.*) }
 
+    /*  VBAR_EL3[10:0] are RES0, so the vector table must be 2KB-aligned.  It has contents,
+     *  so it has to sit inside the loaded image - ahead of the NOLOAD tail below.
+     */
     . = ALIGN(2048);
     .vectors : { KEEP(*(.vectors)) }
 
-    /*  Stacks last, NOLOAD: uninitialised memory is fine for a stack, and keeping this at the
-     *  end means objcopy -O binary stops before it.
+    /*  Stacks LAST among allocated sections, and NOLOAD.  Uninitialised memory is fine for a
+     *  stack, and objcopy -O binary emits from the lowest to the highest section that has
+     *  contents - so a NOBITS section at the end is simply skipped, while one in the middle
+     *  would make objcopy pad the gap and bloat the .bin by MONITOR_STACK_SIZE *
+     *  MONITOR_MAX_CORES bytes.
      */
     . = ALIGN(16);
     .stacks (NOLOAD) : {

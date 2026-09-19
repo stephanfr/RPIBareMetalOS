@@ -6,7 +6,7 @@
 //  The GIC-400 Generic Interrupt Controller (GIC) is present on the RPI4 and later.
 //		We want to use the GIC for the RPI4 and beyond, so it must be enabled.
 //		The RPI3 does not have the GIC-400, so the code below should not be
-//		invoked for it.  That test is done in the armstub code.
+//		invoked for it.  That test is done in the supervisor code.
 //
 //   The GIC can only be enabled when the processor is in secure mode, i.e. EL3.
 //

@@ -170,22 +170,22 @@ $(USER_BIN): $(USER_SRC) $(USER_LD)
 
 user: checkdirs $(USER_BIN)
 
-ARMSTUB_ROOT    := armstub
-ARMSTUB_ELF     := $(ARMSTUB_ROOT)/image/armstub_minimal.elf
-ARMSTUB_BIN     := $(ARMSTUB_ROOT)/image/armstub_minimal.bin
+SUPERVISOR_ROOT    := supervisor
+SUPERVISOR_ELF     := $(SUPERVISOR_ROOT)/image/supervisor.elf
+SUPERVISOR_BIN     := $(SUPERVISOR_ROOT)/image/supervisor.bin
 
-.PHONY: armstub
-armstub:
-	$(MAKE) -C $(ARMSTUB_ROOT)
+.PHONY: supervisor
+supervisor:
+	$(MAKE) -C $(SUPERVISOR_ROOT)
 
-$(ARMSTUB_ELF) $(ARMSTUB_BIN): armstub
+$(SUPERVISOR_ELF) $(SUPERVISOR_BIN): supervisor
 
-$(IMG): $(ELF) $(USER_BIN) $(ARMSTUB_ELF) $(ARMSTUB_BIN)
+$(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
 	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
-	/bin/cp $(ARMSTUB_ELF) image/.
-	/bin/cp $(ARMSTUB_BIN) image/.
+	/bin/cp $(SUPERVISOR_ELF) image/.
+	/bin/cp $(SUPERVISOR_BIN) image/.
 	/bin/cp resources/*.txt image/.
 	/bin/cp resources/sd.img image/.
 	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
@@ -256,7 +256,7 @@ echo:
 qemu-regression-rpi3: all
 	python3 $(QEMU_REGRESSION_SCRIPT) \
 		--qemu $(QEMU) \
-		--armstub $(IMAGE_DIR)/armstub_minimal.elf \
+		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI3_MACHINE)
@@ -264,7 +264,7 @@ qemu-regression-rpi3: all
 qemu-regression-rpi4: all
 	python3 $(QEMU_REGRESSION_SCRIPT) \
 		--qemu $(QEMU) \
-		--armstub $(IMAGE_DIR)/armstub_minimal.elf \
+		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI4_MACHINE) \
@@ -285,7 +285,7 @@ QEMU_STRICT_ALIGN := $(if $(filter 1,$(SA)), strict_align=1,)
 
 #  Machine-independent flags shared by qemu-rpi3 and qemu-rpi4.
 QEMU_COMMON_FLAGS = \
-	-kernel $(IMAGE_DIR)/armstub_minimal.elf \
+	-kernel $(IMAGE_DIR)/supervisor.elf \
 	-device loader,file=$(IMAGE_DIR)/kernel8.img,addr=0x80000,force-raw=on \
 	-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
 	-serial stdio \
@@ -303,7 +303,7 @@ qemu-rpi4: all
 qemu-cli-soak: all
 	python3 $(QEMU_CLI_SOAK_SCRIPT) \
 		--qemu $(QEMU) \
-		--armstub $(IMAGE_DIR)/armstub_minimal.elf \
+		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI3_MACHINE) \

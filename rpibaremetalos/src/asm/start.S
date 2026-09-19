@@ -56,12 +56,12 @@
 
 .section ".text.boot"
 
-//  The standard ARMSTUB will move to eL2 and then spin cores 1->3 watching addresses in the table
-//      at 'armstub_el2_spin_table' until a non-zero address is found.  If the minimal ARMSTUB with this
+//  The standard SUPERVISOR will move to eL2 and then spin cores 1->3 watching addresses in the table
+//      at 'supervisor_el2_spin_table' until a non-zero address is found.  If the minimal SUPERVISOR with this
 //      project is used, then all cores will enter here at EL3 and cores 1->3 will spin on the core jump table addresses.
-//  I expect this to change when we get to RPIs with > 4 cores, as this table runs into the ARMSTUB magic number.
+//  I expect this to change when we get to RPIs with > 4 cores, as this table runs into the SUPERVISOR magic number.
 
-.equ armstub_el2_spin_table, 0xd8
+.equ supervisor_el2_spin_table, 0xd8
 
 //  Register aliases to make the code a bit more readable
 
@@ -139,8 +139,8 @@ x24_numberOfCoresAvailable .req x24
 //      improve readability or flow.
 //  There is a state machine, albeit a very simple one.  Core 0 does most of the heavy lifting, including bringing
 //      up the other cores.  Depending on the EL we enter, then either all secondary cores will arrive here in EL3
-//      or they will be spinning in EL2 and have to be released using a low memory location specified by the ARMSTUB
-//      to provide a jump address, when core 0 is ready to release them. Cores released from the ARMSTUB, or bypassing
+//      or they will be spinning in EL2 and have to be released using a low memory location specified by the SUPERVISOR
+//      to provide a jump address, when core 0 is ready to release them. Cores released from the SUPERVISOR, or bypassing
 //      from EL3, will flow seamlessly into stack configuration and drop down to EL1. They rendezvous by spinning in EL1
 //      waiting for another jump address, this time most likely from a call to CoreExecute() in the C/C++ code.
 //  Only Core 0 will make it to KernelMain, all other cores will spin in EL1 until they get a jump address to a different
@@ -163,10 +163,10 @@ _start:
     //  Set move to EL1
     //
     //      This will require some config at EL3 and EL2, which is dependent on the EL level when we enter this code.
-    //      The default armstub configures EL3 and then jumps to this code in EL2.
-    //      The armstub_base.bin with this project does not change the EL at all, so we will enter here at EL3.
+    //      The default supervisor configures EL3 and then jumps to this code in EL2.
+    //      The supervisor_base.bin with this project does not change the EL at all, so we will enter here at EL3.
 
-    //  Determine if we are running at EL3 - this can occur if the default ARMSTUB is replaced
+    //  Determine if we are running at EL3 - this can occur if the default SUPERVISOR is replaced
 
     mov     x23_arrivedInEL3, #0
 
@@ -276,7 +276,7 @@ skip_gic_config:
 	msr     ELR_EL3, x9
 	eret
 
-    //  Running at EL2 - processor will be in EL2 on entry with the default ARMSTUB
+    //  Running at EL2 - processor will be in EL2 on entry with the default SUPERVISOR
 
 .align 4
 running_in_el2:
@@ -601,7 +601,7 @@ start_next_core:
     cmp     x20_boardHWId, #RPI_BOARD_ENUM_RPI5
     b.ne    check_el2_spin_table
 
-    //  EL3 arrival: all cores started by armstub; fall through to the shared EL3 wait path.
+    //  EL3 arrival: all cores started by supervisor; fall through to the shared EL3 wait path.
     //  EL2-only arrival: only core 0 reached EL3; secondary cores are held by firmware and
     //      need releasing via PSCI CPU_ON below.
 
@@ -640,7 +640,7 @@ check_el2_spin_table:
 
 write_spin_table:
 
-    mov     x10, #armstub_el2_spin_table
+    mov     x10, #supervisor_el2_spin_table
     ldr     x11, =running_in_el2                        //  PHYSICAL-ENTRY-POINT: converted to physical just below
     ldr     x16, =S_KERNEL_VA_BASE
     sub     x11, x11, x16                               //  target core starts with its MMU off, so it needs a physical entry (R1)

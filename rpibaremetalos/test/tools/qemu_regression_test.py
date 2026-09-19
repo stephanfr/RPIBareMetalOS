@@ -11,11 +11,15 @@
 # (kernel_only_1_to_1 and kernel_high_user_low) each paired with the default
 # (relaxed) alignment policy and strict_align=1 -- so regressions in any
 # combination are caught. Board selection in the OS is runtime (MIDR_EL1
-# PARTNUM), so the same kernel8.elf and sd.img serve every machine.
+# PARTNUM), so the same kernel8.img and sd.img serve every machine.
+#
+# The armstub is the -kernel image and the kernel is loaded beside it: an ELF keeps QEMU's
+# is_linux flag clear, which is what starts the cores at EL3 (hw/arm/boot.c:1238-1249).
 #
 # Usage:
 #   python3 qemu_regression_test.py --qemu <qemu-binary> \
-#                                   --kernel <kernel8.elf> \
+#                                   --armstub <supervisor.elf> \
+#                                   --kernel <kernel8.img> \
 #                                   --sdimage <sd.img> \
 #                                   [--machine raspi3b] [--memory 2G]
 
@@ -39,7 +43,6 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         f'{f" -m {memory}" if memory else ""}'
         f' -kernel {armstub}'
         f' -device loader,file={kernel},addr=0x80000,force-raw=on'
-        f' -device loader,addr=0xfc,data=0x80000,data-len=4'
         f' -drive file={sdimage},if=sd,format=raw'
         f' -serial stdio'
         f' -display none'
