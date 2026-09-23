@@ -8,24 +8,12 @@
 
 #include <single_block_memory_heap>
 
-#include <filesystem/fat32_blockio_adapter.h>
-
 //
 //  Test bootstrap exposes the underlying single_block_memory_heap so test
 //  fixtures can assert leak-freedom via bytes_in_use(). The PMR
 //  __os_dynamic_heap_resource on heaps.h does not expose bookkeeping.
 //
 extern minstd::single_block_memory_heap __os_dynamic_heap_core;
-
-inline SimpleString StringFrom(const filesystems::fat32::FAT32ClusterIndex &value)
-{
-    return StringFrom(static_cast<uint32_t>(value));
-}
-
-inline SimpleString StringFrom(filesystems::FilesystemResultCodes value)
-{
-    return StringFrom(static_cast<uint32_t>(value));
-}
 
 template <typename T, typename U>
 void CHECK_SUCCESSFUL_AND_EQUAL(T expected, U actual)

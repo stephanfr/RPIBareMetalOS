@@ -88,3 +88,17 @@ Always remove temporary, debug, and junk files before creating any commit.
 - **Inspect before staging**: Run `git status` and review all untracked and modified files. Remove anything that is not intentional source, documentation, or build configuration.
 - **Use `.gitignore`**: If a category of temp file recurs, add a pattern to `.gitignore` rather than relying on manual cleanup each time.
 - **No "I'll clean it up later" commits**: Every commit should leave the repository in a clean, reviewable state with no leftover investigation artifacts.
+
+## Unit Test Creation
+
+### Guidelines
+- Use `CPPUNIT_TEST_SUITE()` for test suite definition
+- Use `CPPUNIT_TEST()` for individual test cases
+- Use `CPPUNIT_ASSERT()` and `CPPUNIT_ASSERT_EQUAL()` for assertions
+- Include `#include "../cpputest_support.h"` for test utilities
+- Create tests for:
+  - Success paths
+  - Failure paths
+  - Edge cases
+  - Invalid input handling
+- Validate with `make test` after creation
