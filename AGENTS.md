@@ -91,14 +91,169 @@ Always remove temporary, debug, and junk files before creating any commit.
 
 ## Unit Test Creation
 
-### Guidelines
-- Use `CPPUNIT_TEST_SUITE()` for test suite definition
-- Use `CPPUNIT_TEST()` for individual test cases
-- Use `CPPUNIT_ASSERT()` and `CPPUNIT_ASSERT_EQUAL()` for assertions
-- Include `#include "../cpputest_support.h"` for test utilities
-- Create tests for:
-  - Success paths
-  - Failure paths
-  - Edge cases
-  - Invalid input handling
-- Validate with `make test` after creation
+Tests live in `rpibaremetalos/test/src/` and use the CppUTest framework.  They run natively
+(x86-64 host) via `make test` from `rpibaremetalos/`.
+
+### File Template
+
+```cpp
+// Copyright <year> Stephan Friedl. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+#include "cpputest_support.h"        //  Always first -- pulls in TestHarness + heap helpers
+
+#include "path/to/header_under_test.h"
+
+//  Additional includes as needed (e.g. <string.h>, <limits>, "heaps.h")
+
+namespace
+{
+    //  …all test groups and tests…
+}
+```
+
+Every test file is wrapped in an anonymous namespace.  Files are auto-discovered by the
+Makefile (`wildcard test/src/*.cpp`), so no Makefile change is needed to add a new test
+file.  However, if the module under test is not already compiled into the test binary,
+add its `.cpp` to `CPP_SRC` (or `C_SRC`) in `Makefile.test.mk`.
+
+### Test Groups
+
+One `TEST_GROUP` per logical aspect of the API (constants, parsing, formatting,
+comparison, copy semantics, etc.).  Wrap each group in the diagnostic pragmas because
+CppUTest generates a variable that triggers `-Wunused-variable`:
+
+```cpp
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+    TEST_GROUP(MyFeatureTests)
+    {};
+#pragma GCC diagnostic pop
+```
+
+### Naming Conventions
+
+- **Group names**: `CamelCase` + `Tests` suffix, named for the feature being tested
+  (e.g., `UUIDConstantTests`, `ParseHexUint32PrefixTests`, `PointerResultExpandedTests`).
+- **Test names**: `PascalCase` verb phrase describing the *behavior* under test
+  (e.g., `NumericDigitsMapToTheirValue`, `ReseedingReproducesFirstUuid`,
+  `TrichotomyHoldsAcrossGeneratedSet`).  Avoid names that describe a single input value;
+  name the behavior instead.
+
+### Grouping Principle -- One Test Per Behavior, Not Per Input
+
+This is the most important rule.  A test should verify one *behavior* and may contain
+multiple `CHECK_*` calls covering several related inputs.  Do **not** create one test
+per input value.
+
+**Good** -- one behavior, many inputs:
+```cpp
+TEST(ParseHexUint32StopTests, StopsAtWhitespaceAndControlChars)
+{
+    CHECK_EQUAL(0x1A, ParseHexUint32("1A BC"));
+    CHECK_EQUAL(0x1A, ParseHexUint32("1A\tBC"));
+    CHECK_EQUAL(0x1A, ParseHexUint32("1A\nBC"));
+    CHECK_EQUAL(0x1A, ParseHexUint32("1A\rBC"));
+}
+```
+
+**Good** -- exhaustive range via loop:
+```cpp
+TEST(HexDigitValueTests, NumericDigitsMapToTheirValue)
+{
+    for (char c = '0'; c <= '9'; ++c)
+    {
+        CHECK_EQUAL(c - '0', HexDigitValue(c));
+    }
+}
+```
+
+**Bad** -- one test per input:
+```cpp
+TEST(HexDigitValueTests, DigitZeroReturnsZero)  { CHECK_EQUAL(0, HexDigitValue('0')); }
+TEST(HexDigitValueTests, DigitOneReturnsOne)    { CHECK_EQUAL(1, HexDigitValue('1')); }
+// …ten more identical tests…
+```
+
+When in doubt, ask: *if this test fails, does the failure message tell me which specific
+input was wrong?*  If yes, the inputs belong in the same test.  `CHECK_EQUAL` prints both
+expected and actual values, so the failing line identifies the exact input.
+
+### Assertions
+
+| Macro | Use for | Example |
+|---|---|---|
+| `CHECK_EQUAL(a, b)` | Numeric equality (most common) | `CHECK_EQUAL(42, result.Value());` |
+| `CHECK_TRUE(expr)` | Boolean true | `CHECK_TRUE(result.Successful());` |
+| `CHECK_FALSE(expr)` | Boolean false | `CHECK_FALSE(a == b);` |
+| `CHECK(expr)` | General truthiness | `CHECK(a != b);` |
+| `STRCMP_EQUAL(a, b)` | C-string equality | `STRCMP_EQUAL("de:ad:be:ef:01:23", buf);` |
+| `POINTERS_EQUAL(a, b)` | Pointer identity | `POINTERS_EQUAL(buf, ret);` |
+
+**Enum comparisons**: cast both sides to `int` (or the underlying type) to avoid
+CppUTest printing the enum name instead of the value:
+```cpp
+CHECK_EQUAL(static_cast<int>(SimpleSuccessOrFailure::SUCCESS),
+            static_cast<int>(result.ResultCode()));
+```
+
+### What to Cover
+
+For every class or function under test, aim for these categories (skip any that don't
+apply):
+
+1. **Constants and defaults** -- static members, default-constructed state, sentinel
+   values (e.g., `NIL`, `MAX`, all-zeros).
+2. **Core functionality** -- the primary operation with representative inputs.
+3. **String / formatting** -- `ToString`, buffer lengths, dash positions, case.
+4. **Bit-level invariants** -- version bits, variant bits, flag fields.  Verify both
+   the accessor method *and* the string representation agree.
+5. **Comparison operators** -- reflexivity (`a == a`, `!(a < a)`), ordering between
+   known sentinels, trichotomy (for every pair exactly one of `<`, `==`, `>` holds),
+   anti-symmetry (`a < b` iff `b > a`).
+6. **Determinism** -- seed → generate → record; re-seed → generate → compare.  Also
+   verify that `SeedRNG(0)` or equivalent falls back to a default.
+7. **Copy / move semantics** -- copy constructor, assignment, move constructor,
+   move assignment.  Verify the value survives and (for move) the source is valid.
+8. **Edge cases** -- empty input, max-length input, overflow / wrap-around, leading
+   zeros, sign characters, whitespace-only.
+9. **Error / failure paths** -- failure codes, null pointers, missing entities.
+10. **Integration / real-world patterns** -- the way the code is actually called in
+    production (chained results, sequential operations).
+
+### Build Environment Constraints
+
+The test build uses a non-standard toolchain configuration.  Be aware of these
+limitations:
+
+- **`-DCPPUTEST_USE_STD_C_LIB=0`** -- the standard C library is *not* linked.
+  `strlen`, `strchr`, etc. are unavailable.  Use the minimalclib equivalents declared
+  in `deps/minimalclib/include/string.h` (e.g., `strnlen`, `strncmp`, `strtoklit`).
+  Include them with `#include <string.h>` (resolves to minimalclib's header via
+  `-I../deps/minimalclib/include`).
+- **`-fno-exceptions -fno-rtti`** -- no `try/catch`, no `dynamic_cast` on polymorphic
+  types at runtime (compile-time casts are fine).
+- **`-D__NO_LOGGING__`** -- logging macros compile to nothing.
+- **Heap resources** -- `__os_dynamic_heap_resource`, `__os_static_heap_resource`,
+  `__os_filesystem_cache_heap_resource` are defined in `cpputest_main.cpp`.  Do not
+  redefine them in test files.  If you need `dynamic_new<T>()` (from `heaps.h`),
+  include `heaps.h` which declares the resources `extern` -- but do **not** also write
+  your own `extern` declaration in the test file, as the by-value vs by-reference
+  forms conflict.
+- **`putchar_`** -- stubbed in `cpputest_main.cpp`; required by minimalstdio's `printf`.
+  No action needed in test files.
+
+### Validation
+
+After creating or modifying tests, always run:
+
+```bash
+cd rpibaremetalos && make test
+```
+
+The full suite must pass.  To run only the new test group during development:
+
+```bash
+./test/build/cpputest_main.exe -g MyNewGroupTests
+```

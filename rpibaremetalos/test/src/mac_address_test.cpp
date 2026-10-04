@@ -8,7 +8,10 @@
 
 namespace
 {
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
     TEST_GROUP(MACAddressTests){};
+#pragma GCC diagnostic pop
 
     TEST(MACAddressTests, DefaultConstructorIsAllZeroes)
     {

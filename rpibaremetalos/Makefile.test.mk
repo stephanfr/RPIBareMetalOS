@@ -17,11 +17,13 @@ TEST_OBJ_DIR := test/build
 CPP_TEST_SRC_DIRS := test/src
 
 C_SRC   :=
-CPP_SRC :=  src/c/platform/platform_sw_rngs.cpp \
+CPP_SRC :=  src/c/cli/command_parser.cpp \
+			src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
 			src/c/services/uuid.cpp \
-			src/c/utility/mac_address.cpp
+			src/c/utility/mac_address.cpp \
+			src/c/utility/regex.cpp
 
 CPP_TEST_SRC := $(foreach sdir,$(CPP_TEST_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
