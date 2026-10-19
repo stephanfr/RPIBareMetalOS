@@ -587,7 +587,8 @@ start_next_core:
     lsl     x1, x9, #8                                  //  A76 DynamIQ: target core index in MPIDR Aff1 (bits 15:8)
     ldr     x2, =running_in_el2                         //  PHYSICAL-ENTRY-POINT: converted to physical just below
     ldr     x16, =S_KERNEL_VA_BASE
-    sub     x2, x2, x16                                 //  target core starts with its MMU off, so it needs a physical entry (R1)    mov     x3, #0
+    sub     x2, x2, x16                                 //  target core starts with its MMU off, so it needs a physical entry (R1)
+    mov     x3, #0                                      //  context_id - unused
     smc     #0
     mov     w25, w0                                     //  save the PSCI CPU_ON return status
     cbnz    w25, next_core

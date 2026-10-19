@@ -31,9 +31,13 @@ static int64_t MonitorPSCIFeatures(uint32_t queried_function_id)
     {
         case PSCI_VERSION:
         case PSCI_FEATURES:
+            return 0;
+
+        //  Only advertised on a board whose PM block the supervisor knows how to drive.
+
         case PSCI_SYSTEM_OFF:
         case PSCI_SYSTEM_RESET:
-            return 0;
+            return (MonitorPMBaseAddress() != 0) ? 0 : PSCI_RET_NOT_SUPPORTED;
 
         default:
             return PSCI_RET_NOT_SUPPORTED;
@@ -68,7 +72,13 @@ int64_t MonitorHandleSMC(uint64_t function_id,
 
         case PSCI_SYSTEM_RESET:
             return MonitorSystemReset();
-            
+
+        case SUPERVISOR_SIP_VERSION:
+            return SUPERVISOR_VERSION;
+
+        case SUPERVISOR_SIP_PM_BASE:
+            return (int64_t)MonitorPMBaseAddress();
+
         default:
             return PSCI_RET_NOT_SUPPORTED;
     }

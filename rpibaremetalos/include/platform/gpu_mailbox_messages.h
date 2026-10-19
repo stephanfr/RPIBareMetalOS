@@ -365,6 +365,31 @@ public:
 };
 
 //
+//  Notify Reboot Tag
+//
+//  Tells the VideoCore firmware the ARM side is about to reset or power off, so it can quiesce
+//      first.  Linux's firmware driver sends it from its reboot notifier and shutdown hook.  The
+//      tag carries no data; the one unused word is only there because the value buffer must be
+//      a multiple of 4 bytes, and the firmware accepts a buffer larger than the tag needs.
+//
+
+typedef struct NotifyRebootTagRequestOrResponse
+{
+    uint32_t unused_;
+} NotifyRebootTagRequestOrResponse;
+
+class NotifyRebootTag : public GPUMailboxPropertyMessageTagBase<NotifyRebootTagRequestOrResponse, NotifyRebootTagRequestOrResponse, MailboxTags::NOTIFY_REBOOT>
+{
+public:
+    NotifyRebootTag() = default;
+
+    const char *Name() const override
+    {
+        return "NotifyRebootTag";
+    }
+};
+
+//
 //  Framebuffer Tags
 //
 //  These map to the mailbox framebuffer allocation sequence documented at:

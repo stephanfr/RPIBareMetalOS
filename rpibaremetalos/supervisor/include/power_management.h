@@ -7,5 +7,7 @@
 //  Functions return only if the board has no supported power-control block; on success neither
 //      returns, because the machine is off or resetting.
 
+uint64_t MonitorPMBaseAddress(void);
+
 int64_t MonitorSystemOff(void);
 int64_t MonitorSystemReset(void);
