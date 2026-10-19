@@ -13,6 +13,15 @@
 #include <__memory_resource/monotonic_buffer_resource.h>
 #include <__memory_resource/polymorphic_allocator.h>
 
+#include "os_memory_config.h"
+
+//  Every FAT32 partition gets its own directory cache, allocated in full when it is mounted.  Leave a
+//      tenth of the heap for the allocator's own rounding.
+
+static_assert(MAX_PARTITIONS_ON_MASS_STORAGE_DEVICE * filesystems::fat32::FAT32DirectoryCache::BytesForCapacity(DEFAULT_DIRECTORY_CACHE_SIZE) <= (FILESYSTEM_CACHE_HEAP_SIZE_IN_BYTES / 10) * 9,
+              "The filesystem cache heap cannot hold a full directory cache for every partition");
+
+
 namespace filesystems
 {
 

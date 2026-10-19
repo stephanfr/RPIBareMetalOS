@@ -6,6 +6,7 @@
 
 #include "asm_globals.h"
 #include "asm_utility.h"
+#include "psci.h"
 
 #include "platform/platform_info.h"
 #include "processor_cores.h"
@@ -54,6 +55,26 @@ namespace cli::commands
 
         context.output_stream_ << "\nException Level Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Current Exception Level: {}\n", GetExceptionLevel());
+
+        //  Which EL3 is answering SMCs.  Only our supervisor implements the SiP calls; anything
+        //      else - the firmware's TF-A, an older supervisor.bin - returns NOT_SUPPORTED (-1).
+
+        const int64_t supervisor_version = PSCICall(SUPERVISOR_SIP_VERSION);
+
+        context.output_stream_ << "\nEL3 Info:\n";
+        context.output_stream_ << minstd::format(format_buffer, "PSCI Version: {:#010x}\n", static_cast<uint32_t>(PSCICall(PSCI_VERSION)));
+
+        if (supervisor_version > 0)
+        {
+            context.output_stream_ << minstd::format(format_buffer, "Supervisor Version: {}\n", supervisor_version);
+            context.output_stream_ << minstd::format(format_buffer, "Supervisor PM Base: {:#x}\n", static_cast<uint64_t>(PSCICall(SUPERVISOR_SIP_PM_BASE)));
+        }
+        else
+        {
+            context.output_stream_ << minstd::format(format_buffer, "Supervisor Version: not reported ({}) - not this build's supervisor\n", supervisor_version);
+        }
+
+        context.output_stream_ << minstd::format(format_buffer, "PSCI SYSTEM_RESET supported: {}\n", PSCICall(PSCI_FEATURES, PSCI_SYSTEM_RESET) == PSCI_RET_SUCCESS ? "yes" : "no");
 
         context.output_stream_ << "\nTimer Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Counter Frequency (cntfrq_el0): {} Hz ({} ticks/ms)\n", GetCounterFrequency(), GetCounterFrequency() / 1000);

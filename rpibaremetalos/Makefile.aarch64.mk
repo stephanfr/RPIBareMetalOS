@@ -101,6 +101,16 @@ INCLUDE_DIRS := -I../deps/fat32filesystem/include -I../deps/minimalclib/include 
 LDFLAGS += -L../deps/fat32filesystem/lib/aarch64 -L../deps/minimalclib/lib/aarch64 -L../deps/minimalstdio/lib/aarch64 -L../deps/minimalstdlib/lib/aarch64
 LDLIBS = -lfat32filesystem -lminimalstdio -lminimalclib -lminimalstdlib
 
+#  The libraries under ../deps are built here rather than trusted as prebuilt archives.  They
+#  share headers with the kernel -- minstd::unique_ptr, for one, is inline and its layout is
+#  baked into both sides -- so an archive built against older headers links cleanly and then
+#  corrupts memory at runtime.  Each sub-make is incremental (a no-op when nothing changed),
+#  and the kernel relinks only when an archive's timestamp actually moves.
+
+DEPS_ROOT := ../deps
+DEP_LIB_NAMES := minimalclib minimalstdio minimalstdlib fat32filesystem
+DEP_LIBS := $(foreach lib,$(DEP_LIB_NAMES),$(DEPS_ROOT)/$(lib)/lib/aarch64/lib$(lib).a)
+
 LINKER_SCRIPT_TEMPLATE=link.template.ld
 LINKER_SCRIPT=$(BUILD_ROOT)/link.ld
 
@@ -190,8 +200,23 @@ $(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN)
 	/bin/cp resources/sd.img image/.
 	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
 
-$(ELF): $(OBJ) $(LINKER_SCRIPT)
+$(ELF): $(OBJ) $(LINKER_SCRIPT) $(DEP_LIBS)
 	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -g -T $(LINKER_SCRIPT) -o $(ELF)
+
+#  $(@D) is <lib>/lib/aarch64, so the library's own Makefile is two levels up.
+
+.PHONY: FORCE deps deps_clean
+FORCE:
+
+$(DEP_LIBS): FORCE
+	$(MAKE) -C $(@D)/../..
+
+deps: $(DEP_LIBS)
+
+#  'clean' leaves the libraries alone; this is the full-rebuild escape hatch.
+
+deps_clean:
+	@for lib in $(DEP_LIB_NAMES); do $(MAKE) -C $(DEPS_ROOT)/$$lib clean || exit 1; done
 
 $(LINKER_SCRIPT): 
 	$(CPREPROCESSOR) -Iinclude  $(LINKER_SCRIPT_TEMPLATE) -o $(LINKER_SCRIPT)

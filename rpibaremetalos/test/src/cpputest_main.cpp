@@ -47,9 +47,12 @@ extern void InitializeSWRandomNumberGenerators(MurmurHash64ASeed os_entity_hash_
 static char static_heap_buffer[TEST_STATIC_HEAP_SIZE];
 static char dynamic_heap_buffer[TEST_DYNAMIC_HEAP_SIZE];
 
-minstd::single_block_memory_heap __os_static_heap_core(static_heap_buffer, TEST_STATIC_HEAP_SIZE, 4);
+//  Default block alignment (alignof(max_align_t)).  A smaller one lets the heap's end drift off an
+//      8-byte boundary, after which the resource adapter refuses every 8-aligned request.
 
-minstd::single_block_memory_heap __os_dynamic_heap_core(dynamic_heap_buffer, TEST_DYNAMIC_HEAP_SIZE, 4);
+minstd::single_block_memory_heap __os_static_heap_core(static_heap_buffer, TEST_STATIC_HEAP_SIZE);
+
+minstd::single_block_memory_heap __os_dynamic_heap_core(dynamic_heap_buffer, TEST_DYNAMIC_HEAP_SIZE);
 
 minstd::pmr::memory_heap_resource_adapter __os_static_heap_resource_core(__os_static_heap_core);
 minstd::pmr::memory_heap_resource_adapter __os_dynamic_heap_resource_core(__os_dynamic_heap_core);

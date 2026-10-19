@@ -32,6 +32,11 @@ UUID GetCurrentTaskId(void)
     return task::TaskManagerImpl::Instance().CurrentTask().ID();
 }
 
+uintptr_t GetCurrentTaskOwnerId() noexcept
+{
+    return reinterpret_cast<uintptr_t>(&task::TaskManagerImpl::Instance().CurrentTask());
+}
+
 namespace task
 {
 

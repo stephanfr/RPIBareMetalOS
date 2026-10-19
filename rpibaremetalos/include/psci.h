@@ -17,6 +17,16 @@
 
 #define PSCI_VERSION_1_1        0x00010001
 
+//  Supervisor-specific calls, in the SMCCC SiP (silicon provider) range.  Any other EL3 - the
+//      RPi firmware's TF-A, an older supervisor - answers them NOT_SUPPORTED, so a successful
+//      SUPERVISOR_SIP_VERSION proves which build owns EL3.  Bump SUPERVISOR_VERSION whenever the
+//      supervisor's behaviour changes.
+
+#define SUPERVISOR_SIP_VERSION  0xC2000000u     //  returns SUPERVISOR_VERSION
+#define SUPERVISOR_SIP_PM_BASE  0xC2000001u     //  returns the PM block base used for OFF/RESET, 0 if none
+
+#define SUPERVISOR_VERSION      2
+
 #define PSCI_RET_SUCCESS              0
 #define PSCI_RET_NOT_SUPPORTED      (-1)
 #define PSCI_RET_INVALID_PARAMETERS (-2)

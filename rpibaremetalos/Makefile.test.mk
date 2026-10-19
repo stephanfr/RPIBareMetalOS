@@ -17,10 +17,13 @@ TEST_OBJ_DIR := test/build
 CPP_TEST_SRC_DIRS := test/src
 
 C_SRC   :=
-CPP_SRC :=  src/c/platform/platform_sw_rngs.cpp \
+CPP_SRC :=  src/c/cli/command_parser.cpp \
+			src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
-			src/c/services/uuid.cpp
+			src/c/services/uuid.cpp \
+			src/c/utility/mac_address.cpp \
+			src/c/utility/regex.cpp
 
 CPP_TEST_SRC := $(foreach sdir,$(CPP_TEST_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
@@ -45,12 +48,9 @@ CDEFINES += -D__NO_LOGGING__
 # 		file in the C_SRC or CPP_SRC list.
 #
 
-fat32-library-tests:
-	$(MAKE) -C ../deps/fat32filesystem -f Makefile.test.mk test CPPUTEST_PATH=$(CPPUTEST_PATH)
-
 test-local: clean checkdirs $(TEST_EXE)
 
-test: fat32-library-tests test-local
+test: test-local
 
 $(TEST_EXE) : $(TEST_OBJ) $(OBJ)
 	$(LD) $(OBJ) $(TEST_OBJ) $(LDFLAGS) $(LDLIBS) $(TEST_LIB) -o $(TEST_EXE)
