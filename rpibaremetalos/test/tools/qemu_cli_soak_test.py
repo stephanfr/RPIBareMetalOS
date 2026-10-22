@@ -68,7 +68,7 @@ def run(
         f' -serial stdio'
         f' -display none'
         f' -no-reboot'
-        f' -append "console=ttys0,57600 host=qemu memory_model=kernel_only_1_to_1"'
+        f' -append "console=ttys0,57600 host=qemu"'
     )
 
     print(f'Launching: {cmd}')

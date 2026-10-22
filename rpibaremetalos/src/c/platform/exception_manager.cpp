@@ -11,6 +11,8 @@
 
 #include "devices/log.h"
 #include "task/task_impl.h"
+#include "sysregs.h"
+#include "platform/address_space_layout.h"
 
 const char *entry_error_messages[] = {
     "SYNC_INVALID_EL1t",
@@ -72,6 +74,19 @@ extern "C" void HandleUserTaskFault(unsigned long esr, unsigned long elr, unsign
 void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far)
 {
     LogError("%s, Core: %d ESR: %016lx PC: %016lx FAR: %016lx\r\n", entry_error_messages[type], GetCoreID(), esr, address, far);
+
+    //  TTBR0 holds no kernel mapping, so a kernel pointer never converted with
+    //      PhysicalToKernelVirtualAddress() faults rather than silently working.  An EL1 data
+    //      abort on a low-half VA below the user window is almost always exactly that (or a
+    //      NULL-based pointer when FAR is tiny), so say so.
+
+    const unsigned long ec = (esr >> ESR_ELx_EC_SHIFT) & 0x3F;
+
+    if ((ec == ESR_ELx_EC_DABT_CUR) && (far < USER_SPACE_BASE))
+    {
+        LogError("  FAR %016lx is below the user window: a raw PHYSICAL address (missing "
+                 "PhysicalToKernelVirtualAddress()?) or a NULL-based pointer\r\n", far);
+    }
 }
 
 bool ExceptionManager::AddISR(InterruptServiceRoutine *isr, CoreList on_cores)

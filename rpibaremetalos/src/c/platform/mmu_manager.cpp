@@ -10,7 +10,6 @@
 #include "cpu_part_nums.h"
 
 #include "platform/kernel_command_line.h"
-#include "platform/memory_model.h"
 
 #include "platform/rpi3/rpi3_memory_manager.h"
 #include "platform/rpi4/rpi4_memory_manager.h"
@@ -37,28 +36,6 @@ void MMUManager::Initialize()
         return;
     }
 
-    //  Get the memory model from the kernel command line
-
-    MemoryModelTypes memory_model = MemoryModelTypes::KERNEL_HIGH_USER_LOW;
-
-    minstd::fixed_string<64> memory_model_string;
-
-    if( KernelCommandLine::FindSetting("memory_model", memory_model_string))
-    {
-        if( memory_model_string == KERNEL_ONLY_1_TO_1_STRING)
-        {
-            memory_model = MemoryModelTypes::KERNEL_ONLY_1_TO_1;
-        }
-        else if( memory_model_string == KERNEL_HIGH_USER_LOW_STRING)
-        {
-            memory_model = MemoryModelTypes::KERNEL_HIGH_USER_LOW;
-        }
-        else
-        {
-            ParkCore();
-        }
-    }
-
     //  Check for a "strict_align=1" kernel command-line opt-in to SCTLR_EL1.A
     //      (alignment-fault-on-every-access). Default is OFF -- a normal production
     //      ARM64 kernel tolerates unaligned ordinary accesses; enable this for
@@ -78,25 +55,21 @@ void MMUManager::Initialize()
         }
     }
 
-    //  Construct the memory model BEFORE the board memory manager, EnableMMU() requires it exist.
-
-    MemoryModel::Initialize(memory_model);
-
     //  Create the platform specific memory manager
     //      Use placement new to create the object in the storage buffer allocaated above.
 
     switch (__hw_board_type)
     {
         case RPI_BOARD_ENUM_RPI3 :
-            platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI3BPlusMemoryManager(memory_model);
+            platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI3BPlusMemoryManager();
             break;
 
         case RPI_BOARD_ENUM_RPI4 :
-            platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI4BMemoryManager(memory_model);
+            platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI4BMemoryManager();
             break;
 
         case RPI_BOARD_ENUM_RPI5 :
-            platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI5MemoryManager(memory_model);
+            platform_memory_manager_ = new( (void*)__mmu_manager_storage ) RPI5MemoryManager();
             break;
 
         default:

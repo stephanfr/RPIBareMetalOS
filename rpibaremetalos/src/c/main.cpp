@@ -40,8 +40,6 @@ extern "C" void kernel_main()
 
     printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
 
-    printf("Memory Model: %s\n", ToString(MMUManager::Instance().MemoryModel()));
-
     SetLogLevel(LogLevel::ERROR);
 
     //  Setup the ISRs

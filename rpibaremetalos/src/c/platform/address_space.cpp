@@ -16,10 +16,9 @@
 //      L2 index = VA[29:21]   512 entries, 2MB each
 //      L3 index = VA[20:12]   512 entries, 4KB each
 //
-//  MapPages() and Translate() touch only the L2/L3 chain hanging off
-//      l1_[UserSpace().l1_index].  They never write another L1 slot, in any model --
-//      under kernel_only_1_to_1 the other slots are aliases of the kernel's own tables
-//      and writing through them would corrupt every task at once.
+//  MapPages() and Translate() touch only the L2/L3 chain hanging off l1_[UserSpace().l1_index].
+//      They never write another L1 slot.
+
 
 namespace
 {
@@ -124,10 +123,10 @@ uint64_t *AddressSpace::AllocateTable(uint64_t &physical_out)
         return nullptr;
     }
 
-    //  Through the model's hook, never GetMemoryManager() directly -- that indirection is
-    //      what makes Phase 6 an implementation change with no call-site churn.
+    //  Through MemoryModel::AllocateUserFrame, never GetMemoryManager() directly, so a change
+    //      to how user frames are sourced (a dedicated pool, accounting) touches no call site.
 
-    MemoryPagePointer frame = MemoryModel::Instance().AllocateUserFrame(PAGE_SIZE);
+    MemoryPagePointer frame = MemoryModel::AllocateUserFrame(PAGE_SIZE);
 
     if (frame == 0)
     {
@@ -149,9 +148,7 @@ uint64_t *AddressSpace::AllocateTable(uint64_t &physical_out)
 
 bool AddressSpace::Initialize()
 {
-    const MemoryModel &model = MemoryModel::Instance();
-
-    MemoryPagePointer l1_page = model.AllocateUserFrame(PAGE_SIZE);
+    MemoryPagePointer l1_page = MemoryModel::AllocateUserFrame(PAGE_SIZE);
 
     if (l1_page == 0)
     {
@@ -162,23 +159,13 @@ bool AddressSpace::Initialize()
     l1_physical_ = l1_page.Physical();
     owned_[owned_count_++] = OwnedBlock{l1_physical_, PAGE_SIZE};
 
-    //  The model decides what a task's L1 starts as -- all zero under kernel_high_user_low,
-    //      a verbatim copy of the kernel L1 under kernel_only_1_to_1.  A third model answers
-    //      differently and nothing here changes.
+    //  A task's L1 starts ALL ZERO: the kernel lives entirely in TTBR1, so a task sees its own
+    //      window and nothing else.  From here on, every non-zero slot was written by this
+    //      space.
 
-    if (!model.SeedTaskL1(l1_))
+    for (uint32_t i = 0; i < ENTRIES_PER_TABLE; i++)
     {
-        return false;
-    }
-
-    //  The user window must land in a free L1 slot whatever the model just wrote.  Confirmed
-    //      free on every board today (slots 0-3, plus RPi5's 64, 65 and 124-127, are the only
-    //      ones ever written), but a future board or a future model could change that and the
-    //      failure would be silent memory corruption.
-
-    if (l1_[model.UserSpace().l1_index] != 0)
-    {
-        return false;
+        l1_[i] = 0;
     }
 
     asid_ = NextASID();
@@ -195,7 +182,7 @@ uint64_t *AddressSpace::L3EntryFor(uint64_t user_va, bool create)
         return nullptr;
     }
 
-    const UserSpaceLayout &layout = MemoryModel::Instance().UserSpace();
+    const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
     //  Everything we own hangs off exactly one L1 slot; refuse anything else outright so a
     //      bad VA can never reach another slot's descriptors.
@@ -276,7 +263,7 @@ const uint64_t *AddressSpace::L3EntryFor(uint64_t user_va) const
 bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t size,
                             Stage2AccessPermission ap, bool executable)
 {
-    const UserSpaceLayout &layout = MemoryModel::Instance().UserSpace();
+    const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
     if ((size == 0) ||
         ((user_va & (PAGE_SIZE - 1)) != 0) ||
@@ -288,7 +275,7 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
 
     //  Overflow-safe range check against the user window.  Nothing below USER_IMAGE_BASE is
     //      mappable: the gap under it is the guard that makes a small-offset null pointer
-    //      fault in both models.
+    //      fault.
 
     if ((user_va < layout.image_base) ||
         (user_va > layout.space_top) ||
@@ -345,11 +332,9 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
 
 bool AddressSpace::Translate(uint64_t user_va, uint64_t &physical_out) const
 {
-    const UserSpaceLayout &layout = MemoryModel::Instance().UserSpace();
+    const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
-    //  Range check FIRST, walk second, always -- see the header.  Under
-    //      kernel_only_1_to_1 this table really does map the kernel identity range, and
-    //      only this check keeps a user pointer of 0x80000 out.
+    //  Range check FIRST, walk second, always -- see the header.
 
     if ((user_va < layout.space_base) || (user_va >= layout.space_top))
     {
@@ -370,7 +355,7 @@ bool AddressSpace::Translate(uint64_t user_va, uint64_t &physical_out) const
 
 bool AddressSpace::TranslateForWrite(uint64_t user_va, uint64_t &physical_out) const
 {
-    const UserSpaceLayout &layout = MemoryModel::Instance().UserSpace();
+    const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
     if ((user_va < layout.space_base) || (user_va >= layout.space_top))
     {
@@ -433,16 +418,11 @@ AddressSpace::~AddressSpace()
     }
 
     //  owned_ records only frames THIS space allocated -- its L1, its L2/L3 tables, and the
-    //      blocks it mapped.  Under kernel_only_1_to_1 the L1 also contains kernel identity
-    //      entries, but those were copied as values and their L2/L3 tables were never added
-    //      to owned_, so teardown cannot free the kernel's own page tables.  Never walk the
-    //      L1 to decide what to free; walk owned_.
-
-    const MemoryModel &model = MemoryModel::Instance();
+    //      blocks it mapped.  Walk owned_ to decide what to free.
 
     for (uint32_t i = 0; i < owned_count_; i++)
     {
-        model.ReleaseUserFrame(MemoryPagePointer{owned_[i].physical}, owned_[i].size);
+        MemoryModel::ReleaseUserFrame(MemoryPagePointer{owned_[i].physical}, owned_[i].size);
     }
 
     owned_count_ = 0;

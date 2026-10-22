@@ -387,10 +387,9 @@ el1_spin:
 use_page_tables_on_secondary_core:
 
     //  TTBR0 gets the SAME table as TTBR1 here -- BOTH paths above leave that table in x1
-    //      -- which identity-maps this core's low PC.  The memory model's TTBR0 is
-    //      installed further down, AFTER the jump to the high VA: under
-    //      kernel_high_user_low it is an all-zero table, and installing it now would unmap
-    //      the very next instruction this core fetches.  Core 0 needs no such dance -- it
+    //      -- which identity-maps this core's low PC.  The final TTBR0 (the all-zero
+    //      __empty_user_page_table) is installed further down, AFTER the jump to the high
+    //      VA: installing it now would unmap the very next instruction this core fetches.  Core 0 needs no such dance -- it
     //      reaches EnableMMUTables from MMUManager::Initialize(), already running high.
 
     mov     x0, x1
@@ -408,10 +407,10 @@ use_page_tables_on_secondary_core:
 
 secondary_running_at_high_va:
 
-    //  Executing high now, so TTBR0 is free to become whatever the memory model chose --
-    //      the kernel identity table under kernel_only_1_to_1, the all-zero table under
-    //      kernel_high_user_low.  A published VALUE, not a branch: this code does not know
-    //      the models exist.
+    //  Executing high now, so TTBR0 can drop the boot identity map and take
+    //      __boot_ttbr0_base: the all-zero __empty_user_page_table, published by core 0
+    //      (MemoryModel::BootTTBR0Physical()).
+
 
     adrp    x12, __boot_ttbr0_base
     add     x12, x12, :lo12:__boot_ttbr0_base

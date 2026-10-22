@@ -20,14 +20,11 @@
 
 constexpr uint64_t KERNEL_VA_BASE = S_KERNEL_VA_BASE;
 
-//  User address space (per task, TTBR0, T0SZ=25).  IDENTICAL under both memory models.
+//  User address space (per task, TTBR0, T0SZ=25).
 //
-//  The window sits at 256GB rather than at a natural low base because under
-//      kernel_only_1_to_1 a task's TTBR0 ALSO carries the kernel identity map, which
-//      occupies physical RAM and MMIO at their own addresses -- a 4MB user image would
-//      collide with the identity mapping of physical 4MB.  256GB is L1 index 256, which
-//      is zero on every board (only slots 0-3, and RPi5's 64, 65, 124-127, are ever
-//      written).  AddressSpace::Initialize() asserts that at runtime.
+//  The window sits at 256GB (L1 index 256).  A task's L1 starts all zero, so nothing
+//      requires it to sit that high; moving it lower is possible, but user.ld, hello.c and
+//      the tests encode the address.
 //
 //  The whole 512MB window lies inside the single 1GB span of L1 index 256, so one L1
 //      slot per task is all the user side ever consumes.
