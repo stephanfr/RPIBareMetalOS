@@ -12,15 +12,14 @@ class RPI4BMemoryManager : public AARCH64PlatformMemoryManager
 {
 
     using VMSAv8_64_DESCRIPTOR = AARCH64PlatformMemoryManager::VMSAv8_64_DESCRIPTOR;
-    using MemoryModelTypes = MMUManager::MemoryModelTypes;
 
 public:
-    RPI4BMemoryManager(MemoryModelTypes memory_model);
+    RPI4BMemoryManager();
 
     void EnableMMU() override
     {
-        //  Decides TTBR0 from the memory model and publishes both bases for the
-        //      secondary cores.  Both arguments below are PHYSICAL (R1).
+        //  Publishes the kernel and boot-TTBR0 table bases for the secondary cores.  Both
+        //      arguments below are PHYSICAL (R1).
 
         PublishBootPageTableBases((uint64_t)&kernel_page_table_[0]);
 

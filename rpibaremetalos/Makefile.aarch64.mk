@@ -270,9 +270,8 @@ echo:
 #       QEMU regression test
 #
 
-#  Each board runs the suite four times -- both memory models
-#  (kernel_only_1_to_1 and kernel_high_user_low) each paired with default
-#  (relaxed) alignment and strict_align=1. RPi3 and RPi4 have materially
+#  Each board runs the suite twice -- default (relaxed) alignment and
+#  strict_align=1. RPi3 and RPi4 have materially
 #  different reserved-memory topologies: RPi3's holes both sit at the top of
 #  its 1GB, leaving one unbroken span, while RPi4's straddle the low-middle
 #  and the top, splitting usable RAM. Only the RPi4 layout exercises the
@@ -299,14 +298,7 @@ qemu-regression: qemu-regression-rpi3 qemu-regression-rpi4
 
 #  Interactive QEMU session: serial I/O on stdin/stdout, no display.
 #  Override QEMU_RPI4_MACHINE/QEMU_RPI4_MEMORY or use qemu-rpi3 for RPi3.
-#  Memory model: MM=1to1 (default) or MM=isolated
 #  Strict alignment: SA=1 to enable
-ifeq ($(MM),isolated)
-QEMU_MEMORY_MODEL := kernel_high_user_low
-else
-QEMU_MEMORY_MODEL ?= kernel_only_1_to_1
-endif
-
 QEMU_STRICT_ALIGN := $(if $(filter 1,$(SA)), strict_align=1,)
 
 #  QEMU guest diagnostics: QD=1 to enable.  guest_errors surfaces bad MMIO passwords and
@@ -326,7 +318,7 @@ QEMU_COMMON_FLAGS = \
 	-display none \
 	-no-reboot \
 	$(QEMU_DEBUG) \
-	-append "console=ttys0,57600 host=qemu memory_model=$(QEMU_MEMORY_MODEL)$(QEMU_STRICT_ALIGN)"
+	-append "console=ttys0,57600 host=qemu$(QEMU_STRICT_ALIGN)"
 
 qemu-rpi3: all
 	$(QEMU) -M $(QEMU_RPI3_MACHINE) $(QEMU_COMMON_FLAGS)

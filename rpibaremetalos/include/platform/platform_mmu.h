@@ -100,8 +100,6 @@ typedef union VMSAv8_64_DESCRIPTOR
 
 class AARCH64PlatformMemoryManager : public MMUManager
 {
-    using MemoryModelTypes = MMUManager::MemoryModelTypes;
-
     protected:
     //  The definition is at file scope (see above); this alias keeps the existing
     //      AARCH64PlatformMemoryManager::VMSAv8_64_DESCRIPTOR spelling working in the
@@ -111,8 +109,7 @@ class AARCH64PlatformMemoryManager : public MMUManager
 
 public:
 
-    AARCH64PlatformMemoryManager(MemoryModelTypes memory_model)
-        : memory_model_(memory_model)
+    AARCH64PlatformMemoryManager()
     {
         //  Get the memory size from the board revision
         //      Memory size is in bits 20 though 22
@@ -162,13 +159,6 @@ public:
         videocore_memory_size_ = (uint32_t)__videocore_memory_size_in_bytes;
     }
 
-    AARCH64PlatformMemoryManager() = delete;
-
-    MemoryModelTypes MemoryModel() const override
-    {
-        return memory_model_;
-    }
-
     uint64_t AllocatableMemoryTop() const override
     {
         return platform_memory_in_bytes_;
@@ -190,7 +180,6 @@ public:
     }
 
 protected:
-    MemoryModelTypes memory_model_;
 
     uint32_t board_revision_;
     uint64_t platform_memory_in_bytes_;
@@ -213,15 +202,13 @@ protected:
     //  Both values are read by secondary cores with their MMU and caches OFF, so both must
     //      be PHYSICAL (R1) and both must be pushed to DRAM.
     //
-    //  TTBR0 is the ONLY thing a memory model changes at boot.  The model answers; this
-    //      code does not branch, and start.S installs a published value and never learns
-    //      that models exist.  A third model changes nothing below this line.
+    //  TTBR0 at boot is MemoryModel's empty user table; start.S installs the published value.
 
     void PublishBootPageTableBases(uint64_t kernel_page_table_va)
     {
         __kernel_page_table_base = KernelVirtualAddressToPhysical(kernel_page_table_va);
 
-        __boot_ttbr0_base = MemoryModel::Instance().BootTTBR0Physical((const uint64_t *)kernel_page_table_va);
+        __boot_ttbr0_base = MemoryModel::BootTTBR0Physical();
 
         asm volatile("dc civac, %0" ::"r"(&__kernel_page_table_base) : "memory");
         asm volatile("dc civac, %0" ::"r"(&__boot_ttbr0_base) : "memory");

@@ -16,7 +16,7 @@ domain types -- 167 CamelCase types to 7 snake_case, and all 50+ enums CamelCase
 ### OS -- `rpibaremetalos/`
 
 - **Classes, structs and enums** use `CamelCase` (e.g., `PlatformInfo`, `SDCardController`, `SchedulerClock`, `HostType`).  Acronyms stay upper-case: `EMMCControllerType`, `BCM2711ExceptionManager`, `RPI5PlatformInfo`.
-- **Enums** are declared `typedef enum class Name : uint32_t { ... } Name;` with **ALL_CAPS values** (e.g., `LogLevel::DEBUG_1`, `MemoryModelTypes::KERNEL_ONLY_1_TO_1`).
+- **Enums** are declared `typedef enum class Name : uint32_t { ... } Name;` with **ALL_CAPS values** (e.g., `LogLevel::DEBUG_1`, `TaskResultCodes::USER_BINARY_NOT_FOUND`).
 - **Methods** are `PascalCase`.  **Member variables** are `snake_case_` with a trailing underscore.  **Local variables** are `snake_case`.
 - **File names** are `snake_case`, named for the primary type they declare (`platform_info.h` holds `PlatformInfo`).
 - **snake_case remains correct for library-style types written inside the OS** -- allocators and standard-library adapters (`dynamic_allocator`, `static_allocator`, `xoroshiro_random_device`, `numeric_limits`) -- and for names mirroring an external API (`iproc_rng200_dev`, after Linux's `iproc-rng200`).

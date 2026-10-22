@@ -6,8 +6,7 @@
 
 extern "C" uint32_t GetVideocoreMemoryStart(uint32_t board_type);
 
-RPI3BPlusMemoryManager::RPI3BPlusMemoryManager(MemoryModelTypes memory_model)
-    : AARCH64PlatformMemoryManager(memory_model)
+RPI3BPlusMemoryManager::RPI3BPlusMemoryManager()
 {
     level1_blocksize_ = BYTES_1M * 2; //  2MB
     level2_blocksize_ = BYTES_4K;     //  4KB granule

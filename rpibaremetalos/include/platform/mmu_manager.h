@@ -15,17 +15,8 @@ extern "C" void EnableMMUForCore();
 class MMUManager
 {
 public:
-    typedef enum class MemoryModelTypes : uint32_t
-    {
-        UNKNOWN = 0,
-        KERNEL_ONLY_1_TO_1,
-        KERNEL_HIGH_USER_LOW
-    } MemoryModelTypes;
 
     static constexpr uint32_t MAX_RESERVED_MEMORY_REGIONS = 4;
-    static constexpr const char* UNKNOWN_STRING = "unknown";
-    static constexpr const char* KERNEL_ONLY_1_TO_1_STRING = "kernel_only_1_to_1";
-    static constexpr const char* KERNEL_HIGH_USER_LOW_STRING = "kernel_high_user_low";
 
     static void Initialize();
 
@@ -61,7 +52,6 @@ public:
 
     virtual uint32_t ReservedMemoryRegionCount() const = 0;
     virtual ReservedMemoryRegion ReservedMemoryRegionAt(uint32_t index) const = 0;
-    virtual MemoryModelTypes MemoryModel() const = 0;
 
     static bool IsMMUEnabled()
     {
@@ -76,20 +66,3 @@ private:
     virtual void EnableMMU() = 0;
 };
 
-
-inline const char *ToString(MMUManager::MemoryModelTypes model)
-{
-    switch(  model )
-    {
-        case MMUManager::MemoryModelTypes::UNKNOWN:
-            return MMUManager::UNKNOWN_STRING;
-            
-        case MMUManager::MemoryModelTypes::KERNEL_ONLY_1_TO_1:
-            return MMUManager::KERNEL_ONLY_1_TO_1_STRING;
-
-        case MMUManager::MemoryModelTypes::KERNEL_HIGH_USER_LOW:
-            return MMUManager::KERNEL_HIGH_USER_LOW_STRING;
-    }
-
-    return MMUManager::UNKNOWN_STRING;
-}

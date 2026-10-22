@@ -4,8 +4,7 @@
 
 #include "platform/rpi5/rpi5_memory_manager.h"
 
-RPI5MemoryManager::RPI5MemoryManager(MemoryModelTypes memory_model)
-    : AARCH64PlatformMemoryManager(memory_model)
+RPI5MemoryManager::RPI5MemoryManager()
 {
     level1_blocksize_ = BYTES_1M * 2;   //  2MB
     level2_blocksize_ = BYTES_4K;       //  4KB granule

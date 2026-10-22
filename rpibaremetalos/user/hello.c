@@ -14,18 +14,13 @@
 //  Case numbering follows the plan's labels:
 //
 //      0  -> plan case 0    the positive case: it just prints
-//      1  -> plan case 1    read the kernel linear map        -> permission fault, both models
-//      2  -> plan case 1b   read 0x80000, the kernel image PA -> translation fault under
-//                                kernel_high_user_low, permission fault under
-//                                kernel_only_1_to_1.  Different fault, same outcome: the
-//                                task is killed.  This is the case that proves the
-//                                compatibility model did not quietly become a hole.
+//      1  -> plan case 1    read the kernel linear map        -> permission fault (EL1-only)
+//      2  -> plan case 1b   read 0x80000, the kernel image PA -> translation fault: nothing
+//                                is mapped there in a task's TTBR0
 //      3  -> plan case 2    write user text                   -> permission fault (RO)
 //      4  -> plan case 3    execute from the stack            -> permission fault (UXN)
 //      5  -> plan case 4    per-task heap isolation           -> must print "isolated"
-//
-//  Every case must produce the same outcome under BOTH memory models.  That is the whole
-//      point of the design.
+
 
 typedef unsigned long uint64_t;
 typedef unsigned int uint32_t;
@@ -102,9 +97,7 @@ int main(unsigned long arg)
         {
             //  Two tasks run this concurrently with different payloads.  Both must print
             //      "isolated": the heap page each one gets must be its own.  This is what
-            //      proves the spaces are DISTINCT rather than merely permission-protected,
-            //      and it must hold under kernel_only_1_to_1 too -- the two tasks have
-            //      separate L1 tables there as well, differing only in the kernel slots.
+            //      proves the spaces are DISTINCT rather than merely permission-protected.
 
             unsigned long address = sc_Malloc(4096);
 

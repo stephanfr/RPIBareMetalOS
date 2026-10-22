@@ -28,9 +28,9 @@ namespace task
         }
 
         //  minstd::buffer over memory we already own.  File::Read() takes a buffer<uint8_t>&,
-        //      and the image goes into a page block from the model's frame hook rather than
-        //      the dynamic heap -- a user binary can be far larger than a heap allocation
-        //      should be.
+        //      and the image goes into a page block from MemoryModel::AllocateUserFrame rather
+        //      than the dynamic heap -- a user binary can be far larger than a heap
+        //      allocation should be.
 
         class raw_buffer : public minstd::buffer<uint8_t>
         {
@@ -146,8 +146,7 @@ namespace task
     {
         using Result = ValueResult<TaskResultCodes, uint64_t>;
 
-        const MemoryModel &model = MemoryModel::Instance();
-        const UserSpaceLayout &layout = model.UserSpace();
+        const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
         filesystems::Filesystem *filesystem = FindBootFilesystem();
 
@@ -183,7 +182,7 @@ namespace task
 
         //  Read the whole file into a kernel buffer, dereferenced through the kernel VA.
 
-        MemoryPagePointer file_block = model.AllocateUserFrame(RoundUpToPage(image_size));
+        MemoryPagePointer file_block = MemoryModel::AllocateUserFrame(RoundUpToPage(image_size));
 
         if (file_block == 0)
         {
@@ -195,7 +194,7 @@ namespace task
 
         if (file->Read(image_buffer) != filesystems::FilesystemResultCodes::SUCCESS)
         {
-            model.ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+            MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
             return Result::Failure(TaskResultCodes::USER_BINARY_UNREADABLE);
         }
 
@@ -219,17 +218,17 @@ namespace task
         if (!valid)
         {
             LogError("LoadUserBinary: '%s' is not a valid user image\n", path.c_str());
-            model.ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+            MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
             return Result::Failure(TaskResultCodes::USER_BINARY_MALFORMED);
         }
 
         //  Text: header + code + rodata, mapped read-only and EL0-executable.
 
-        MemoryPagePointer text_block = model.AllocateUserFrame(text_size);
+        MemoryPagePointer text_block = MemoryModel::AllocateUserFrame(text_size);
 
         if (text_block == 0)
         {
-            model.ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+            MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
 
@@ -239,8 +238,8 @@ namespace task
         if (!address_space.MapPages(layout.image_base, text_block.Physical(), text_size,
                                     Stage2AccessPermission::EL1_READ_ONLY_EL0_READ_ONLY, true))
         {
-            model.ReleaseUserFrame(text_block, text_size);
-            model.ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+            MemoryModel::ReleaseUserFrame(text_block, text_size);
+            MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
             return Result::Failure(TaskResultCodes::UNABLE_TO_MAP_USER_BINARY);
         }
 
@@ -248,11 +247,11 @@ namespace task
 
         if (data_span > 0)
         {
-            MemoryPagePointer data_block = model.AllocateUserFrame(data_span);
+            MemoryPagePointer data_block = MemoryModel::AllocateUserFrame(data_span);
 
             if (data_block == 0)
             {
-                model.ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+                MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                 return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
             }
 
@@ -268,13 +267,13 @@ namespace task
             if (!address_space.MapPages(layout.image_base + text_size, data_block.Physical(), data_span,
                                         Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false))
             {
-                model.ReleaseUserFrame(data_block, data_span);
-                model.ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+                MemoryModel::ReleaseUserFrame(data_block, data_span);
+                MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                 return Result::Failure(TaskResultCodes::UNABLE_TO_MAP_USER_BINARY);
             }
         }
 
-        model.ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+        MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
 
         return Result::Success(layout.image_base + UserImageHeader::SIZE);
     }

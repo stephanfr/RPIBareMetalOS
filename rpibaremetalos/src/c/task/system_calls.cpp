@@ -72,12 +72,10 @@ namespace syscall
             return (unsigned long)-1;                           //  kernel task: no user heap
         }
 
-        //  Through the model's hook, never GetMemoryManager() directly -- this is the seam
-        //      that lets Phase 6 give a model its own user pool without touching this code.
+        //  Through MemoryModel::AllocateUserFrame, never GetMemoryManager() directly, so a
+        //      change to how user frames are sourced touches no call site.
 
-        const MemoryModel &model = MemoryModel::Instance();
-
-        MemoryPagePointer frame = model.AllocateUserFrame(block_size);
+        MemoryPagePointer frame = MemoryModel::AllocateUserFrame(block_size);
 
         if (frame == 0)
         {
@@ -88,7 +86,7 @@ namespace syscall
 
         if (user_va == 0)
         {
-            model.ReleaseUserFrame(frame, block_size);
+            MemoryModel::ReleaseUserFrame(frame, block_size);
             return (unsigned long)-1;
         }
 

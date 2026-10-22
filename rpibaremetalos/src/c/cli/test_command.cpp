@@ -1011,10 +1011,9 @@ namespace cli::commands
     // -------------------------------------------------------------------------
     //  test addrspace
     //
-    //  Model-independence check.  Under kernel_only_1_to_1 a task's L1 really does
-    //      contain the kernel identity map, so rows 3 and 4 below are only "unmapped"
-    //      because Translate() range-checks BEFORE it walks.  If either ever reports
-    //      "mapped", the syscall boundary has a hole.
+    //  Translate() must range-check BEFORE it walks: rows 3 and 4 below (0x80000 and
+    //      KERNEL_VA_BASE) must report "unmapped".  If either ever reports "mapped", the
+    //      syscall boundary has a hole.
     // -------------------------------------------------------------------------
 
     void CLITestAddressSpaceCommand::ProcessToken( CommandParser &parser,
@@ -1022,8 +1021,7 @@ namespace cli::commands
     {
         minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
-        context << minstd::format(buffer, "\nAddress space test [{}]\n",
-                                  ToString(MMUManager::Instance().MemoryModel()));
+        context << minstd::format(buffer, "\nAddress space test\n");
 
         uint32_t failures = 0;
 
@@ -1037,7 +1035,7 @@ namespace cli::commands
 
         //  Map exactly one page at the user image base.
 
-        MemoryPagePointer frame = MemoryModel::Instance().AllocateUserFrame(BYTES_4K);
+        MemoryPagePointer frame = MemoryModel::AllocateUserFrame(BYTES_4K);
 
         if (frame == 0)
         {
@@ -1050,7 +1048,7 @@ namespace cli::commands
                              Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false))
         {
             context << "FAIL: MapPages rejected a valid single-page mapping\n";
-            MemoryModel::Instance().ReleaseUserFrame(frame, BYTES_4K);
+            MemoryModel::ReleaseUserFrame(frame, BYTES_4K);
             dynamic_delete(space);
             return;
         }
@@ -1210,8 +1208,7 @@ namespace cli::commands
     {
         minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
-        context << minstd::format(buffer, "\nUser task test [{}]\n",
-                                  ToString(MMUManager::Instance().MemoryModel()));
+        context << minstd::format(buffer, "\nUser task test\n");
 
         const UserTaskCase cases[] = {
             {"case 0 (hello)",       0, "runs to completion, prints 'hello from EL0'"},
@@ -1236,7 +1233,7 @@ namespace cli::commands
 
         //  Case 4 -- two tasks, concurrently, with different payloads.  Both must report
         //      "isolated": this is what proves the spaces are DISTINCT rather than merely
-        //      permission-protected, and it has to hold under kernel_only_1_to_1 too.
+        //      permission-protected.
 
         context << "-- case 4 (heap isolation, x2)\n";
 

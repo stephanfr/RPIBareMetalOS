@@ -1,7 +1,7 @@
 /*
  *  ORIGIN must equal USER_IMAGE_BASE in address_space_layout.h (USER_SPACE_BASE + 4MB).
  *      This is a FIXED-ADDRESS flat binary -- it is not relocatable -- which is exactly why
- *      both memory models share one user window.
+ *      every task shares one user window layout.
  */
 
 ENTRY(_start)

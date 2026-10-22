@@ -106,7 +106,7 @@ namespace task
         //      stack this task is executing on right now (stack_) is untouched -- it is
         //      SP_EL1 for the task's syscalls and interrupts.
 
-        MemoryPagePointer user_stack = MemoryModel::Instance().AllocateUserFrame(stack_size_in_bytes_);
+        MemoryPagePointer user_stack = MemoryModel::AllocateUserFrame(stack_size_in_bytes_);
 
         if (user_stack == 0)
         {
@@ -119,7 +119,7 @@ namespace task
         {
             //  MapPages failed, so the space never took ownership -- give the stack back here.
 
-            MemoryModel::Instance().ReleaseUserFrame(user_stack, stack_size_in_bytes_);
+            MemoryModel::ReleaseUserFrame(user_stack, stack_size_in_bytes_);
             return Result::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK_STACK;
         }
 

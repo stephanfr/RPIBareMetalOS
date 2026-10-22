@@ -34,7 +34,7 @@ public:
     AddressSpace(const AddressSpace &) = delete;
     AddressSpace &operator=(const AddressSpace &) = delete;
 
-    //  Allocate the L1, seed it per the memory model, take an ASID.
+    //  Allocate an all-zero L1, take an ASID.
 
     bool Initialize();
 
@@ -45,10 +45,9 @@ public:
     //      outside [USER_SPACE_BASE, USER_SPACE_TOP).  This is how the kernel reads user
     //      memory without ever using a user VA itself.
     //
-    //  The range check is what makes the syscall boundary MODEL-INDEPENDENT: under
-    //      kernel_only_1_to_1 this table also contains the kernel identity map, and
-    //      without the check a user pointer of 0x80000 would translate happily and hand
-    //      the kernel its own image.  Range-check FIRST, walk second, always.
+    //  Range-check FIRST, walk second, always: the walk must never be asked about a VA
+    //      outside the window.
+
 
     bool Translate(uint64_t user_va, uint64_t &physical_out) const;
 
@@ -57,9 +56,9 @@ public:
 
     uint64_t TTBR0Value() const { return ((uint64_t)asid_ << 48) | l1_physical_; }   //  ASID [63:48], PHYSICAL L1 [47:0]
 
-    //  What TTBR0 holds while a KERNEL task runs.  This is the whole of the runtime
-    //      difference between the two memory models; Step 1B.2b already published it as
-    //      __boot_ttbr0_base, so just return that.
+    //  What TTBR0 holds while a KERNEL task runs: MemoryModel::BootTTBR0Physical(), already
+    //      published at boot as __boot_ttbr0_base.
+
 
     static uint64_t KernelTTBR0Value() { return __boot_ttbr0_base; }                  //  ASID 0
 
@@ -76,8 +75,9 @@ private:
 
     static uint16_t NextASID();
 
-    //  Allocates and zeroes one 4KB table frame through the model's hook, records it in
-    //      owned_, and returns it as a kernel VA.  Null on failure or when owned_ is full.
+    //  Allocates and zeroes one 4KB table frame through MemoryModel::AllocateUserFrame,
+    //      records it in owned_, and returns it as a kernel VA.  Null on failure or when
+    //      owned_ is full.
 
     uint64_t *AllocateTable(uint64_t &physical_out);
 

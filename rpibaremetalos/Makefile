@@ -9,8 +9,3 @@ include Makefile.aarch64.mk
 else
 include Makefile.test.mk
 endif
-
-# Optional: Include build check targets
-ifeq ($(BUILD_CHECKS),1)
-include Makefile.target.mk
-endif
