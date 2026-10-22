@@ -29,10 +29,14 @@ struct UserSpaceLayout
 {
     uint64_t space_base;        //  first VA of the user window
     uint64_t space_top;         //  exclusive
-    uint64_t l1_index;          //  space_base >> 30
-    uint64_t image_base;        //  header + text
+    uint64_t l1_index_start;    //  space_base >> 30  (first L1 slot the window occupies)
+    uint64_t l1_index_end;      //  (space_top - 1) >> 30  (last L1 slot, inclusive)
+    uint64_t image_base;        //  header + text (fixed)
     uint64_t heap_base;         //  sc_Malloc grows up from here
-    uint64_t stack_top;         //  user stack grows down from here
+    uint64_t heap_top;          //  exclusive ceiling for the heap (== guard_bottom)
+    uint64_t guard_bottom;      //  [guard_bottom, stack_bottom) is never mapped
+    uint64_t stack_bottom;      //  [stack_bottom, stack_top) is the user stack
+    uint64_t stack_top;         //  exclusive; user stack grows down from here
 };
 
 class MemoryModel
@@ -52,13 +56,19 @@ public:
 
     static const UserSpaceLayout &UserSpace()
     {
-        static const UserSpaceLayout layout{
+        static const UserSpaceLayout layout
+        {
             USER_SPACE_BASE,
             USER_SPACE_TOP,
-            USER_SPACE_L1_INDEX,
+            USER_SPACE_L1_INDEX_START,
+            USER_SPACE_L1_INDEX_END,
             USER_IMAGE_BASE,
             USER_HEAP_BASE,
-            USER_STACK_TOP};
+            USER_HEAP_TOP,
+            USER_GUARD_BOTTOM,
+            USER_STACK_BOTTOM,
+            USER_STACK_TOP
+        };
 
         return layout;
     }

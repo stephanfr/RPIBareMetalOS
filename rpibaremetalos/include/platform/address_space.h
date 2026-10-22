@@ -41,6 +41,17 @@ public:
     bool MapPages(uint64_t user_va, uint64_t physical_base, uint64_t size,
                   Stage2AccessPermission ap, bool executable);
 
+    //  Demand paging.  Maps ONE zeroed 4KB frame, RW+XN, at the page containing user_va when
+    //      that page is UNMAPPED and lies in the live heap [heap_base, heap_break) or the stack
+    //      [stack_bottom, stack_top).  Returns false for anything else -- the guard gap, heap
+    //      above the break, an already-mapped page -- or when a frame/table cannot be
+    //      allocated.  The leaf is marked SoftwareDemandPaged and is NOT added to owned_;
+    //      ~AddressSpace frees it by walking the tables.
+    //
+    //  heap_break comes from the owning TaskImpl; the space itself does not track the break.
+
+    bool FaultInUserPage(uint64_t user_va, uint64_t heap_break);
+
     //  Software walk of THIS space's tables.  Returns false if user_va is unmapped OR
     //      outside [USER_SPACE_BASE, USER_SPACE_TOP).  This is how the kernel reads user
     //      memory without ever using a user VA itself.
@@ -70,14 +81,14 @@ private:
     uint64_t l1_physical_ = 0;
     uint16_t asid_ = KERNEL_ASID;
 
-    minstd::array<OwnedBlock, MAX_OWNED_BLOCKS> owned_;         //  table frames and mapped blocks alike
+    minstd::array<OwnedBlock, MAX_OWNED_BLOCKS> owned_;         //  the L1 and MapPages blocks; NOT L2/L3 tables or demand leaves
     uint32_t owned_count_ = 0;
 
     static uint16_t NextASID();
 
-    //  Allocates and zeroes one 4KB table frame through MemoryModel::AllocateUserFrame,
-    //      records it in owned_, and returns it as a kernel VA.  Null on failure or when
-    //      owned_ is full.
+    //  Allocates and zeroes one 4KB table frame through MemoryModel::AllocateUserFrame and
+    //      returns it as a kernel VA, or null on failure.  NOT recorded in owned_: every table hangs off one
+    //      of the window's L1 slots and ~AddressSpace frees it by walking them.
 
     uint64_t *AllocateTable(uint64_t &physical_out);
 

@@ -80,7 +80,7 @@ void ExceptionManager::HandleException(unsigned int type, unsigned long esr, uns
     //      abort on a low-half VA below the user window is almost always exactly that (or a
     //      NULL-based pointer when FAR is tiny), so say so.
 
-    const unsigned long ec = (esr >> ESR_ELx_EC_SHIFT) & 0x3F;
+    const unsigned long ec = (esr >> ESR_ELx_EC_SHIFT) & ESR_ELx_EC_MASK;
 
     if ((ec == ESR_ELx_EC_DABT_CUR) && (far < USER_SPACE_BASE))
     {

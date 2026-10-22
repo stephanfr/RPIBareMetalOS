@@ -7,18 +7,18 @@
 #include "platform/address_space.h"
 
 #include <atomic>
+#include <string.h>
 
 #include "devices/log.h"
 
 //  4KB granule, T0SZ = 25 (a 39-bit user VA):
 //
-//      L1 index = VA[38:30]   512 entries, 1GB each   -- only ONE is ever ours
+//      L1 index = VA[38:30]   512 entries, 1GB each   -- only [l1_index_start, l1_index_end] are ours
 //      L2 index = VA[29:21]   512 entries, 2MB each
 //      L3 index = VA[20:12]   512 entries, 4KB each
 //
-//  MapPages() and Translate() touch only the L2/L3 chain hanging off l1_[UserSpace().l1_index].
-//      They never write another L1 slot.
-
+//  MapPages(), FaultInUserPage(), Translate() and the ~AddressSpace walk touch only the
+//      L2/L3 chains hanging off the window's L1 slots.  They never read or write another L1 slot.
 
 namespace
 {
@@ -118,11 +118,6 @@ uint16_t AddressSpace::NextASID()
 
 uint64_t *AddressSpace::AllocateTable(uint64_t &physical_out)
 {
-    if (owned_count_ >= MAX_OWNED_BLOCKS)
-    {
-        return nullptr;
-    }
-
     //  Through MemoryModel::AllocateUserFrame, never GetMemoryManager() directly, so a change
     //      to how user frames are sourced (a dedicated pool, accounting) touches no call site.
 
@@ -140,8 +135,6 @@ uint64_t *AddressSpace::AllocateTable(uint64_t &physical_out)
     {
         table[i] = 0;
     }
-
-    owned_[owned_count_++] = OwnedBlock{physical_out, PAGE_SIZE};
 
     return table;
 }
@@ -184,15 +177,17 @@ uint64_t *AddressSpace::L3EntryFor(uint64_t user_va, bool create)
 
     const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
-    //  Everything we own hangs off exactly one L1 slot; refuse anything else outright so a
+    //  Everything we own hangs off the window's L1 slots; refuse anything else outright so a
     //      bad VA can never reach another slot's descriptors.
 
-    if (L1IndexOf(user_va) != layout.l1_index)
+    const uint64_t l1_index = L1IndexOf(user_va);
+
+    if ((l1_index < layout.l1_index_start) || (l1_index > layout.l1_index_end))
     {
         return nullptr;
     }
 
-    uint64_t *l1_entry = &l1_[layout.l1_index];
+    uint64_t *l1_entry = &l1_[l1_index];
     uint64_t *l2 = nullptr;
 
     if (*l1_entry == 0)
@@ -284,6 +279,15 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
         return false;
     }
 
+    //  The guard gap is never mapped: refuse any mapping that would overlap it, so a bug
+    //      cannot silently turn the safety gap into live memory.  (user_va + size cannot
+    //      overflow -- the check above bounds it by space_top.)
+
+    if ((user_va < layout.stack_bottom) && ((user_va + size) > layout.guard_bottom))
+    {
+        return false;
+    }
+
     //  Refuse BEFORE mapping anything: on a full owned_ the block could not be recorded,
     //      and an unrecorded block is exactly the leak this check exists to prevent.
 
@@ -298,6 +302,15 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
 
         if (entry == nullptr)
         {
+            //  The caller releases the block on false, so the descriptors already written
+            //      must not keep pointing at it.  No TLBI: MapPages only runs on a space that
+            //      is not yet installed (loader, test addrspace), so nothing is cached.
+
+            for (uint64_t undo = 0; undo < offset; undo += PAGE_SIZE)
+            {
+                *L3EntryFor(user_va + undo, false) = 0;
+            }
+
             return false;
         }
 
@@ -326,6 +339,66 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
     asm volatile("dsb ishst" ::: "memory");
 
     owned_[owned_count_++] = OwnedBlock{physical_base, size};
+
+    return true;
+}
+
+bool AddressSpace::FaultInUserPage(uint64_t user_va, uint64_t heap_break)
+{
+    const UserSpaceLayout &layout = MemoryModel::UserSpace();
+
+    const uint64_t page_va = user_va & ~(PAGE_SIZE - 1);
+
+    //  Only the LIVE heap and the stack are demand-paged.  The image is mapped eagerly at
+    //      load; heap above the break, the guard gap and everything else must keep faulting.
+
+    const bool in_heap = (page_va >= layout.heap_base) && (page_va < heap_break) && (heap_break <= layout.heap_top);
+    const bool in_stack = (page_va >= layout.stack_bottom) && (page_va < layout.stack_top);
+
+    if (!in_heap && !in_stack)
+    {
+        return false;
+    }
+
+    uint64_t *entry = L3EntryFor(page_va, true);
+
+    if ((entry == nullptr) || (*entry != 0))                                    //  null: no table; nonzero: already mapped
+    {
+        return false;
+    }
+
+    MemoryPagePointer frame = MemoryModel::AllocateUserFrame(PAGE_SIZE);
+
+    if (frame == 0)
+    {
+        return false;                                                           //  OOM: caller kills the task
+    }
+
+    //  GetFreeBlock does not clear memory.  Without this the previous owner's stack or heap
+    //      contents would be readable by this task.
+
+    memset((uint8_t *)frame, 0, PAGE_SIZE);
+
+    VMSAv8_64_DESCRIPTOR page{};
+    page.Raw64 = 0;
+    page.EntryType = TableType::PAGE_TABLE;                                     //  level-3 page descriptor (bits[1:0] = 0b11)
+    page.MemAttr = MemoryAttribute::NORMAL;
+    page.S2AP = Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE;
+    page.SH = Stage2Sharability::INNER_SHAREABLE;
+    page.AF = AccessFlag::ACCESSED;                                             //  set now, or the retry takes an access-flag fault
+    page.NonGlobalFlag = 1;                                                     //  per-ASID, not global
+    page.Address = AddressField(frame.Physical());
+    page.PXN = 1;                                                               //  EL1 never executes user pages
+    page.UXN = 1;                                                               //  heap/stack are never executable
+    page.SoftwareDemandPaged = 1;                                               //  ~AddressSpace frees this leaf on the walk
+
+    *entry = page.Raw64;
+
+    //  No TLBI: the entry was invalid, and invalid entries are never cached.  The dsb orders
+    //      the zeroing and the descriptor before the retry; the eret back to EL0 is context
+    //      synchronizing.
+
+    asm volatile("dsb ish" ::: "memory");
 
     return true;
 }
@@ -417,8 +490,56 @@ AddressSpace::~AddressSpace()
         asid_ = KERNEL_ASID;    //  prevent double-claim if destructor is re-entered
     }
 
-    //  owned_ records only frames THIS space allocated -- its L1, its L2/L3 tables, and the
-    //      blocks it mapped.  Walk owned_ to decide what to free.
+    //  Walk ONLY the window's L1 slots.  Initialize() zeroed the whole L1 before anything was
+    //      mapped, so every table and demand-paged leaf under them is ours; l1_ is non-null
+    //      exactly when Initialize() got that far.  Leaves without SoftwareDemandPaged belong
+    //      to an owned_ block (image) and are freed whole below, not page by page.
+
+    if (l1_ != nullptr)
+    {
+        const UserSpaceLayout &layout = MemoryModel::UserSpace();
+
+        for (uint64_t slot = layout.l1_index_start; slot <= layout.l1_index_end; slot++)
+        {
+            const uint64_t l1v = l1_[slot];
+
+            if ((l1v & 0x3) != (uint64_t)TableType::PAGE_TABLE)       //  empty (we never write blocks here)
+            {
+                continue;
+            }
+
+            uint64_t *l2 = (uint64_t *)PhysicalToKernelVirtualAddress(DescriptorPhysical(l1v));
+
+            for (uint32_t i = 0; i < ENTRIES_PER_TABLE; i++)
+            {
+                const uint64_t l2v = l2[i];
+
+                if ((l2v & 0x3) != (uint64_t)TableType::PAGE_TABLE)
+                {
+                    continue;
+                }
+
+                const uint64_t *l3 = (const uint64_t *)PhysicalToKernelVirtualAddress(DescriptorPhysical(l2v));
+
+                for (uint32_t j = 0; j < ENTRIES_PER_TABLE; j++)
+                {
+                    VMSAv8_64_DESCRIPTOR leaf{};
+                    leaf.Raw64 = l3[j];
+
+                    if (((l3[j] & 0x3) == (uint64_t)TableType::PAGE_TABLE) && leaf.SoftwareDemandPaged)
+                    {
+                        MemoryModel::ReleaseUserFrame(MemoryPagePointer{DescriptorPhysical(l3[j])}, PAGE_SIZE);
+                    }
+                }
+
+                MemoryModel::ReleaseUserFrame(MemoryPagePointer{DescriptorPhysical(l2v)}, PAGE_SIZE);    //  the L3 table
+            }
+
+            MemoryModel::ReleaseUserFrame(MemoryPagePointer{DescriptorPhysical(l1v)}, PAGE_SIZE);        //  the L2 table
+        }
+    }
+
+    //  Now owned_: the L1 (read by the walk above, so freed only now) and every MapPages block.
 
     for (uint32_t i = 0; i < owned_count_; i++)
     {

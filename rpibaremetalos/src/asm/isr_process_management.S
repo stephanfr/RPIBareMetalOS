@@ -354,15 +354,39 @@ EL0_SynchronousException:
 	cmp		x24, #ESR_ELx_EC_SVC64								//	If the exception is from SVC in 64-bit state, then
 	b.eq	EL0_SyscallDispatcher								//		branch to the syscall dispatcher
 
-	//	Not a syscall, so a genuine fault taken at EL0.  Kill the TASK, not the core: an
-	//		EL1 fault is fatal, but a user program faulting is an ordinary event.  The
-	//		frame KernelEntry EL0 just built is the SAME frame a syscall runs on, which is
-	//		why HandleUserTaskFault can simply call Exit() the way sc_Exit does.
-	//		HandleUserTaskFault never returns.
+	//	Not a syscall.  Before treating it as fatal, try demand paging: an unmapped heap or
+	//		stack page is a normal, recoverable event.  The C handler returns 1 only when it
+	//		has mapped the page; then KernelExit EL0 restores the full CPU state (including the
+	//		faulting PC saved in the frame's ELR slot) and eret re-runs the faulting instruction,
+	//		which now succeeds.
+	//		It returns 0 for anything else and we fall through to the kill-the-task path.
+	//
+	//	ESR/ELR/FAR are kept in x19-x21 so they survive the C call for the kill path.  These
+	//		are callee-saved, and KernelEntry EL0 already saved the user's values to the frame
+	//		that KernelExit EL0 restores, so using them here is free.
 
-	mrs		x0, esr_el1
-	mrs		x1, elr_el1
-	mrs		x2, far_el1
+	mrs		x19, esr_el1
+	mrs		x20, elr_el1
+	mrs		x21, far_el1
+
+	mov		x0, x19
+	mov		x1, x20
+	mov		x2, x21
+	bl		HandleDemandPageFault
+	cbz		w0, EL0_UserFault									//	int return: only w0 is defined (AAPCS64)
+
+	KernelExit EL0												//	page faulted in: retry the instruction
+
+EL0_UserFault:
+
+	//	A genuine fault taken at EL0.  Kill the TASK, not the core: an EL1 fault is fatal,
+	//		but a user program faulting is an ordinary event.  The frame KernelEntry EL0 built
+	//		is the SAME frame a syscall runs on, which is why HandleUserTaskFault can simply
+	//		call Exit() the way sc_Exit does.  HandleUserTaskFault never returns.
+
+	mov		x0, x19
+	mov		x1, x20
+	mov		x2, x21
 	bl		HandleUserTaskFault
 
 	HandleInvalidEntryNoFrame EL0, SYNC_ERROR								//	unreachable -- Exit() does not return

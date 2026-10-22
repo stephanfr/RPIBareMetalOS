@@ -25,12 +25,52 @@
 
 import argparse
 import sys
+import re
 import pexpect
 
 
 PROMPT = '> '
 BOOT_READY_MARKER = 'Command Line Interface'
 TIMEOUT = 60  # seconds to wait for each response
+
+
+def is_interleaving_of_two(text: str, expected: str) -> bool:
+    """True if text can be split into two copies of expected, characters in order.
+
+    Two tasks writing to the console at once have no lock between them, so their lines come
+    out shuffled together character by character.  Each task's own characters stay in order,
+    which is exactly what this checks (a small DP over how much of each copy has been seen).
+    Anything else -- a different message such as ALIASED, one task missing, extra output -- is
+    not a shuffle of two copies and returns False.
+    """
+    n = len(expected)
+
+    if len(text) != 2 * n:
+        return False
+
+    states = {(0, 0)}
+
+    for ch in text:
+        states = ({(i + 1, j) for i, j in states if i < n and expected[i] == ch} |
+                  {(i, j + 1) for i, j in states if j < n and expected[j] == ch})
+
+        if not states:
+            return False
+
+    return (n, n) in states
+
+
+def case4_result_ok(output: str) -> bool:
+    """Both case 4 tasks reported 'isolated', whether or not their lines interleaved."""
+    match = re.search(r'-- case 4 \(heap isolation, x2\)(.*?)(?:PASS|FAIL): user task test',
+                      output, re.S)
+
+    if match is None:
+        return False
+
+    # Console output is CR/LF-terminated and the two lines can split anywhere, so compare with
+    # all whitespace removed.
+    return is_interleaving_of_two(re.sub(r'\s+', '', match.group(1)), 'case4:isolated')
 
 
 def run(qemu: str, armstub: str, kernel: str, sdimage: str,
@@ -102,18 +142,57 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         # and heap isolation across different argument scenarios. Exercises the
         # complete user-task lifecycle from EL1 fork to EL0 execution and back.
         output = send_command('test usertask', timeout=240)
-        check('test usertask', output, 'PASS: user task test', 'hello from EL0')
+        check('test usertask', output, 'PASS: user task test')
+
+        # "hello from EL0" also appears inside case 0's own "[expect: ... 'hello from EL0']"
+        # label, so a plain substring test passes even when case 0 never ran.  Require it as
+        # a whole line, which only the task itself produces.
+        if re.search(r'^hello from EL0\s*$', output, re.M):
+            print('\nPASS [test usertask]: found line "hello from EL0"')
+        else:
+            print('\nFAIL [test usertask]: line "hello from EL0" not found in output')
+            failures += 1
 
         # Cases 1-3 are SUPPOSED to be killed, so the real pass condition is the ABSENCE of
         # the "NOT KILLED" line hello.c prints when an expected fault did not happen. The
         # kernel counts forks, not arrivals, which is what let this command report PASS on a
         # run where a case-4 task never reached EL0.
 
-        if output.count('case 4: isolated') != 2:
-            print('\nFAIL [test usertask]: case 4 did not run both tasks')
+        # Case 4 runs two tasks at once and the console has no lock, so their two lines can
+        # come out interleaved character by character.  Accept any such shuffle of exactly
+        # two "case 4: isolated" lines; ALIASED, MALLOC FAILED or a missing task are not.
+
+        if not case4_result_ok(output):
+            print('\nFAIL [test usertask]: case 4 did not report "isolated" from both tasks')
             failures += 1
 
-        for bad in ('Failed to move task to user space', 'NOT KILLED'):
+        # The demand-paging cases must report OK in every pass.
+        # Cases 8 and 9 (wild heap pointer, guard gap) are caught by the 'NOT KILLED' scan below.
+        for good in ('case 7: demand paging OK',
+                     'case 10: deep stack OK',
+                     'case 11: kernel first touch OK'):
+            if good not in output:
+                print(f'\nFAIL [test usertask]: missing "{good}"')
+                failures += 1
+
+        # Seven cases are SUPPOSED to be killed (args 1, 2, 3, 4, 6, 8, 9).  Each announces
+        # itself just before the faulting access and prints "NOT KILLED" if it survives, so
+        # require every announcement exactly once; the 'NOT KILLED' scan below then proves each
+        # one died.  (The kernel's own "task killed" message is a warning and the OS runs at
+        # log level ERROR, so it can't be counted here.)  A positive case dying early is caught
+        # by the "OK" lines above, 'hello from EL0', and the case 4 check.
+        for announced in ('case 1: reading the kernel linear map',
+                          'case 1b: reading 0x80000',
+                          'case 2: writing to user text',
+                          'case 3: executing from the stack',
+                          'case 5: invalid syscall',
+                          'case 8: writing above the heap break',
+                          'case 9: writing into the guard gap'):
+            if output.count(announced) != 1:
+                print(f'\nFAIL [test usertask]: expected exactly one "{announced}"')
+                failures += 1
+
+        for bad in ('Failed to move task to user space', 'NOT KILLED', 'FAILED'):
             if bad in output:
                 print(f'\nFAIL [test usertask]: unexpected "{bad}" in output')
                 failures += 1

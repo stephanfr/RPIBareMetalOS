@@ -265,10 +265,17 @@ namespace task
 
         unsigned long UserArg() const { return user_arg_; }
 
-        //  Maps size bytes of physical memory at the current user heap break and returns the
-        //      USER VA it landed at, or 0 if it will not fit.  Implemented in Step 2.8.
+        //  Reserve `size` bytes of user heap at the current break and return the USER VA, or
+        //      0 if it will not fit below the guard gap.  Nothing is mapped: each page is
+        //      faulted in on first touch (demand paging).
 
-        uint64_t MapIntoUserHeap(uint64_t physical, uint64_t size);
+        uint64_t GrowUserHeap(uint64_t size);
+
+        //  Demand-page the page containing user_va if it is an unmapped live-heap or stack
+        //      page.  The ONE entry point for both first-touch paths: the EL0 fault handler
+        //      and the kernel's user_access copies.  False for a kernel task.
+
+        bool FaultInUserPage(uint64_t user_va);
 
         ALIGN TaskContextCPUState cpu_state_;
     };

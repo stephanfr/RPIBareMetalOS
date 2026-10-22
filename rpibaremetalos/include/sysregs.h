@@ -47,12 +47,25 @@
 //  Exception Syndrome Register
 
 #define ESR_ELx_EC_SHIFT		26
+#define ESR_ELx_EC_MASK			0x3F    //  EC[5:0], after shifting right by ESR_ELx_EC_SHIFT
 #define ESR_ELx_EC_SVC64		0x15    //  SVC instruction executed in AArch64 state
-#define ESR_ELx_EC_DABT_CUR	0x25        //  Data Aborted Taken Without Change (current transaction)
+#define ESR_ELx_EC_IABT_LOW		0x20    //  Instruction Abort from a LOWER exception level (EL0 -> EL1)
+#define ESR_ELx_EC_DABT_LOW		0x24    //  Data Abort from a LOWER exception level (EL0 -> EL1)
+#define ESR_ELx_EC_DABT_CUR		0x25    //  Data Abort taken without a change in exception level (EL1 -> EL1)
 
+//  Data Abort ISS fields (EC == DABT_*).
 //
+//  DFSC = ISS[5:0].  0b0001LL (0x04-0x07) is "translation fault, level LL" -- the signature
+//      of an unmapped page, which is exactly what demand paging recovers from.  NOTE 0x00-0x03
+//      are ADDRESS SIZE faults, not translation faults.  Anything else (access flag 0x08-0x0B,
+//      permission 0x0C-0x0F, external abort, alignment) is a real fault and kills the task.
+//  FnV = ISS[10]: when set, FAR_EL1 is not valid and the fault cannot be resolved.
+
+#define ESR_ELx_DFSC_MASK		0x3F
+#define ESR_ELx_DFSC_IS_TRANSLATION(dfsc)	(((dfsc) & 0x3C) == 0x04)
+#define ESR_ELx_FnV				(1UL << 10)
+
 //  PSR bits
-//
 
 #define PSR_MODE_EL0t 0x00000000
 #define PSR_MODE_EL1t 0x00000004
