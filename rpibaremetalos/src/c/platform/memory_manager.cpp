@@ -182,8 +182,20 @@ void MemoryManager::ReleaseBlock(MemoryPagePointer page_to_free, uint64_t block_
     const uint64_t num_pages_in_block = PagesInBlock(block_size);
     const uint64_t starting_page = (page_to_free.Physical() - free_memory_start_) / page_size_;
 
+    //  starting_page wraps to a huge value if the pointer is below the managed range, so one
+    //      comparison covers both ends.
+
+    if ((starting_page >= num_pages_) || (num_pages_in_block > (num_pages_ - starting_page)))
+    {
+        invalid_release_count_.fetch_add(1);
+        return;
+    }
+
     for (uint64_t i = starting_page; i < starting_page + num_pages_in_block; i++)
     {
-        page_map_[i].store(0, minstd::memory_order_release);
+        if (page_map_[i].exchange(0, minstd::memory_order_acq_rel) == 0)
+        {
+            invalid_release_count_.fetch_add(1);        //  it was already free
+        }
     }
 }

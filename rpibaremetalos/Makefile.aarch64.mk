@@ -197,6 +197,7 @@ $(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN)
 	/bin/cp $(SUPERVISOR_ELF) image/.
 	/bin/cp $(SUPERVISOR_BIN) image/.
 	/bin/cp resources/*.txt image/.
+	/bin/cp $(USER_BIN) image/hello.bin
 	/bin/cp resources/sd.img image/.
 	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
 

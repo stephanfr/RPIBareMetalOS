@@ -79,7 +79,8 @@ typedef union VMSAv8_64_DESCRIPTOR
         uint64_t Contiguous : 1 = 0;            // @52		Contiguous flag, set to zero
         uint64_t PXN : 1 = 0;                   // @53		Privileged Execute Never, set to 0
         uint64_t UXN : 1 = 0;                   // @54		Unprivileged Execute Never, set to 0
-        uint64_t _reserved55_58 : 4 = 0;        // @55-58	Set to 0
+        uint64_t SoftwareDemandPaged : 1 = 0;   // @55		Software use (ignored by the MMU): leaf frame was faulted in by AddressSpace::FaultInUserPage and is freed by the teardown walk
+        uint64_t _reserved56_58 : 3 = 0;        // @56-58	Software use, set to 0
 
         // These are only valid on PAGE DESCRIPTOR
 

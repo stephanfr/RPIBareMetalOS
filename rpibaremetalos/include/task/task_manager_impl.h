@@ -105,6 +105,12 @@ namespace task
 
         uint32_t ReapZombies();
 
+        //  Zombies that could not be queued for the reaper because its queue was full.  Such a
+        //      task is never reaped, so its kernel stack and address space leak.  Diagnostics
+        //      for tests; must stay zero.
+
+        uint32_t DelistedDropCount() const { return delisted_drop_count_.load(); }
+
     private:
         using TaskMap = minstd::skip_list<UUID, TaskImpl*, MAX_CORES>;
 

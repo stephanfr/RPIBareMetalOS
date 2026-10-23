@@ -30,10 +30,35 @@ extern unsigned long sc_Malloc(unsigned long block_size);
 extern void sc_Yield(void);
 extern void sc_Exit(void);
 
-//  Must match USER_IMAGE_BASE in include/platform/address_space_layout.h.
+//  Must match include/platform/address_space_layout.h (and os_memory_config.h).
 
-#define USER_IMAGE_BASE 0x0000004000400000UL
-#define KERNEL_VA_BASE  0xFFFFFF8000000000UL
+#define USER_SPACE_BASE   0x0000004000000000UL
+#define USER_IMAGE_BASE   (USER_SPACE_BASE + (4UL    << 20))
+#define USER_GUARD_BOTTOM (USER_SPACE_BASE + (62UL << 30))     //  base + 62GB (64GB window, 1GB guard, 1GB stack)
+#define KERNEL_VA_BASE    0xFFFFFF8000000000UL
+
+//  1MB of stack, touched one page at a time from the top down: 256 demand faults.
+
+static __attribute__((noinline)) int TouchDeepStack(void)
+{
+    volatile unsigned char frame[1024 * 1024];
+
+    for (unsigned long i = 0; i < 256; i++)
+    {
+        frame[sizeof(frame) - 1 - (i * 4096)] = (unsigned char)i;
+    }
+
+    for (unsigned long i = 0; i < 256; i++)
+    {
+        if (frame[sizeof(frame) - 1 - (i * 4096)] != (unsigned char)i)
+        {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 
 int main(unsigned long arg)
 {
@@ -128,6 +153,109 @@ int main(unsigned long arg)
                          :
                          : "x8", "memory");
             sc_Write("case 5: NOT KILLED\n");
+            break;
+        }
+
+        case 7:
+        {
+            //  Demand paging at scale.  Allocate 64 heap pages and touch each one for the
+            //      first time (a translation fault), then read it back.  If any page-in failed
+            //      the store would fault fatally and the OK line would never print.
+
+            sc_Write("case 7: demand paging\n");
+
+            int ok = 1;
+
+            for (unsigned long i = 0; i < 64; i++)
+            {
+                unsigned long p = sc_Malloc(4096);
+
+                if (p == (unsigned long)-1)
+                {
+                    ok = 0;
+                    break;
+                }
+
+                volatile uint64_t *q = (volatile uint64_t *)p;
+
+                if (*q != 0)                        //  first touch is a READ: must be a zeroed frame
+                {
+                    ok = 0;
+                    break;
+                }
+
+                *q = 0x1000UL + i;
+
+                if (*q != (0x1000UL + i))
+                {
+                    ok = 0;
+                    break;
+                }
+            }
+
+            sc_Write(ok ? "case 7: demand paging OK\n" : "case 7: demand paging FAILED\n");
+            break;
+        }
+
+        case 8:
+        {
+            //  One page past the heap break is a wild pointer, not a page-in.
+
+            sc_Write("case 8: writing above the heap break\n");
+            unsigned long p = sc_Malloc(4096);
+
+            if (p == (unsigned long)-1)
+            {
+                sc_Write("case 8: MALLOC FAILED\n");    //  otherwise *(-1) would "pass" by dying
+                break;
+            }
+
+            *(volatile uint64_t *)p = 1;            //  inside the break: faults in, survives
+            *(volatile uint64_t *)(p + 4096) = 1;   //  at the break: must be killed
+            sc_Write("case 8: NOT KILLED\n");
+            break;
+        }
+
+        case 9:
+        {
+            sc_Write("case 9: writing into the guard gap\n");
+            *(volatile uint64_t *)USER_GUARD_BOTTOM = 1;
+            sc_Write("case 9: NOT KILLED\n");
+            break;
+        }
+
+        case 10:
+        {
+            sc_Write(TouchDeepStack() ? "case 10: deep stack OK\n" : "case 10: deep stack FAILED\n");
+            break;
+        }
+
+        case 11:
+        {
+            //  The KERNEL is the first to touch a page.  The message sits at the very end of
+            //      page one and its terminator is the first byte of page two, which nothing has
+            //      touched.  sc_Write's string copy must fault page two in (zero-filled) to
+            //      find the '\0'; otherwise the copy fails and the line silently never prints.
+
+            static const char message[] = "case 11: kernel first touch OK\n";
+            const unsigned long length = sizeof(message) - 1;
+
+            unsigned long p = sc_Malloc(8192);
+
+            if (p == (unsigned long)-1)
+            {
+                sc_Write("case 11: MALLOC FAILED\n");
+                break;
+            }
+
+            char *s = (char *)(p + 4096 - length);
+
+            for (unsigned long i = 0; i < length; i++)
+            {
+                s[i] = message[i];
+            }
+
+            sc_Write(s);
             break;
         }
 

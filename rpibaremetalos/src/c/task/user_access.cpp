@@ -55,6 +55,24 @@ namespace task
         {
             return (uint8_t *)(PhysicalToKernelVirtualAddress(physical) + offset_in_page);
         }
+
+        //  Demand paging: an untouched heap or stack page is UNMAPPED, and the kernel's first
+        //      touch through a syscall pointer is as legitimate as the task's own.  On a miss,
+        //      fault the page in exactly as the EL0 handler would, then translate again.
+        //      Whatever FaultInUserPage refuses (guard gap, above the break, read-only image,
+        //      OOM) stays a failure.
+
+        bool TranslateOrFaultIn(const AddressSpace &space, uint64_t page_base, uint64_t &physical)
+        {
+            return space.Translate(page_base, physical) ||
+                   (TaskImpl::GetTask().FaultInUserPage(page_base) && space.Translate(page_base, physical));
+        }
+
+        bool TranslateForWriteOrFaultIn(const AddressSpace &space, uint64_t page_base, uint64_t &physical)
+        {
+            return space.TranslateForWrite(page_base, physical) ||
+                   (TaskImpl::GetTask().FaultInUserPage(page_base) && space.TranslateForWrite(page_base, physical));
+        }
     }
 
     bool CopyToKernelSpaceFromUserSpace(void *dst, uint64_t user_va, size_t size)
@@ -89,7 +107,7 @@ namespace task
 
             uint64_t physical = 0;
 
-            if (!space->Translate(span.page_base, physical))
+            if (!TranslateOrFaultIn(*space, span.page_base, physical))
             {
                 return false;
             }
@@ -138,7 +156,7 @@ namespace task
 
                 uint64_t physical = 0;
 
-                if (!space->TranslateForWrite(span.page_base, physical))
+                if (!TranslateForWriteOrFaultIn(*space, span.page_base, physical))
                 {
                     return false;
                 }
@@ -221,7 +239,7 @@ namespace task
 
                 uint64_t physical = 0;
 
-                if (!space->Translate(span.page_base, physical))
+                if (!TranslateOrFaultIn(*space, span.page_base, physical))
                 {
                     return false;
                 }

@@ -1093,6 +1093,149 @@ namespace cli::commands
                                       mapped ? "mapped" : "unmapped");
         }
 
+        //  Demand paging: FaultInUserPage maps a live-heap page and a stack page, and nothing
+        //      else.  The space is then destroyed, which exercises the teardown walk.
+
+        {
+            const uint64_t heap_break = USER_HEAP_BASE + BYTES_4K;
+
+            //  Order matters: the "already faulted" row relies on the first row having run.
+
+            const Expectation faults[] = {
+                {"fault-in heap below the break",    USER_HEAP_BASE,      true},
+                {"fault-in already-faulted page",    USER_HEAP_BASE,      false},
+                {"fault-in heap AT the break",       heap_break,          false},
+                {"fault-in top stack page",          USER_STACK_TOP - 8,  true},
+                {"fault-in stack bottom page",       USER_STACK_BOTTOM,   true},
+                {"fault-in guard gap (top page)",    USER_STACK_BOTTOM - 8, false},
+                {"fault-in guard gap (bottom page)", USER_GUARD_BOTTOM,   false},
+                {"fault-in image page",              USER_IMAGE_BASE,     false},
+            };
+
+            for (const Expectation &fault : faults)
+            {
+                uint64_t physical = 0;
+                const bool mapped = space->FaultInUserPage(fault.va, heap_break) &&
+                                    space->Translate(fault.va, physical);
+
+                if (mapped != fault.expect_mapped)
+                {
+                    context << minstd::format(buffer, "FAIL: {} -- expected {}, got {}\n",
+                                              fault.label,
+                                              fault.expect_mapped ? "mapped" : "refused",
+                                              mapped ? "mapped" : "refused");
+                    failures++;
+                    continue;
+                }
+
+                context << minstd::format(buffer, "  {}: {}\n", fault.label,
+                                          mapped ? "mapped" : "refused");
+            }
+        }
+
+        //  Page accounting -- proves the teardown walk is leak-free and covers the WHOLE slot
+        //      range.  A fresh space that faults in one heap page (L1 slot 256, the first) and
+        //      one stack page (L1 slot 319, the last) must take exactly 7 pages -- L1, 2 x L2, 2 x L3, 2 leaves -- and
+        //      return every one on destruction.  The AddressSpace object itself comes from the
+        //      kernel heap, not the page allocator, so it is allocated BEFORE the snapshot.
+        //
+        //  FreePages() is global, so anything else allocating or freeing pages during the
+        //      measurement skews it -- notably the Reaper still tearing down tasks killed by an
+        //      earlier test (test usertask runs just before this).  So wait for the count to
+        //      hold still, and retry the whole measurement a few times rather than fail on one
+        //      noisy sample.  A real leak is deterministic and fails every attempt.
+
+        {
+            constexpr uint32_t ACCOUNTING_ATTEMPTS = 5;
+            constexpr uint32_t SETTLE_POLL_MS = 100;
+            constexpr uint32_t SETTLE_MAX_POLLS = 300;
+            constexpr int64_t SETTLE_QUIET_MS = 2000;
+
+            const uint64_t expected_pages = (7 * BYTES_4K) / GetMemoryManager().PageSize();
+
+            bool allocated = true;
+            bool faulted = false;
+            bool accounted = false;
+            int64_t used = 0;
+            int64_t leaked = 0;
+
+            for (uint32_t attempt = 0; (attempt < ACCOUNTING_ATTEMPTS) && !accounted; attempt++)
+            {
+                //  Wait for the free-page count to be QUIET for SETTLE_QUIET_MS.  The Reaper
+                //      releases a dead task's stack and address space in steps a few hundred ms
+                //      apart, after a 1s grace period, so a short "unchanged" window can fall
+                //      between two steps.  The quiet period has to outlast both.
+
+                uint64_t settled = GetMemoryManager().FreePages();
+                auto quiet_since = PhysicalTimer::Now();
+
+                for (uint32_t poll = 0; poll < SETTLE_MAX_POLLS; poll++)
+                {
+                    task::Task::GetTask().Yield();
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(SETTLE_POLL_MS));
+
+                    const uint64_t now = GetMemoryManager().FreePages();
+
+                    if (now != settled)
+                    {
+                        settled = now;
+                        quiet_since = PhysicalTimer::Now();
+                    }
+                    else if (minstd::chrono::duration_cast<minstd::chrono::milliseconds>(
+                                 PhysicalTimer::Now() - quiet_since).count() >= SETTLE_QUIET_MS)
+                    {
+                        break;
+                    }
+                }
+
+                AddressSpace *accounting_space = dynamic_new<AddressSpace>().release();
+
+                if (accounting_space == nullptr)
+                {
+                    allocated = false;
+                    break;
+                }
+
+                const uint64_t free_before = GetMemoryManager().FreePages();
+
+                faulted = accounting_space->Initialize() &&
+                          accounting_space->FaultInUserPage(USER_HEAP_BASE, USER_HEAP_BASE + BYTES_4K) &&
+                          accounting_space->FaultInUserPage(USER_STACK_TOP - 8, USER_HEAP_BASE + BYTES_4K);
+
+                const uint64_t free_during = GetMemoryManager().FreePages();
+
+                dynamic_delete(accounting_space);
+
+                const uint64_t free_after = GetMemoryManager().FreePages();
+
+                used = (int64_t)(free_before - free_during);
+                leaked = (int64_t)(free_before - free_after);
+                accounted = faulted && (used == (int64_t)expected_pages) && (leaked == 0);
+
+                if (!accounted)
+                {
+                    context << minstd::format(buffer, "  page accounting attempt {}: faulted {}, used {}, leaked {}\n",
+                                              attempt + 1, faulted, used, leaked);
+                }
+            }
+
+            if (!allocated)
+            {
+                context << "FAIL: could not allocate the accounting AddressSpace\n";
+                failures++;
+            }
+            else if (!accounted)
+            {
+                context << minstd::format(buffer, "FAIL: page accounting -- faulted {}, used {} (expected {}), leaked {}\n",
+                                          faulted, used, expected_pages, leaked);
+                failures++;
+            }
+            else
+            {
+                context << minstd::format(buffer, "  page accounting: {} pages used, all returned\n", expected_pages);
+            }
+        }
+
         //  Step 2.6 -- load hello.bin into a scratch space and confirm the two-region map.
         //      A fresh space, because the one above already has USER_IMAGE_BASE occupied.
 
@@ -1211,12 +1354,17 @@ namespace cli::commands
         context << minstd::format(buffer, "\nUser task test\n");
 
         const UserTaskCase cases[] = {
-            {"case 0 (hello)",       0, "runs to completion, prints 'hello from EL0'"},
-            {"case 1 (kernel VA)",   1, "KILLED -- permission fault reading the kernel linear map"},
-            {"case 1b (0x80000)",    2, "KILLED -- fault reading the kernel image PA"},
-            {"case 2 (write text)",  3, "KILLED -- permission fault writing read-only user text"},
-            {"case 3 (exec stack)",  4, "KILLED -- permission fault executing from a UXN stack"},
-            {"case 5 (bad syscall)", 6, "KILLED -- out-of-range syscall number 99, core survives"},
+            {"case 0 (hello)",             0, "runs to completion, prints 'hello from EL0'"},
+            {"case 1 (kernel VA)",         1, "KILLED -- permission fault reading the kernel linear map"},
+            {"case 1b (0x80000)",          2, "KILLED -- fault reading the kernel image PA"},
+            {"case 2 (write text)",        3, "KILLED -- permission fault writing read-only user text"},
+            {"case 3 (exec stack)",        4, "KILLED -- permission fault executing from a UXN stack"},
+            {"case 5 (bad syscall)",       6, "KILLED -- out-of-range syscall number 99, core survives"},
+            {"case 7 (demand paging)",     7, "mallocs + touches 64 heap pages, each faulted in zeroed"},
+            {"case 8 (above heap break)",  8, "KILLED -- translation fault one page past the heap break"},
+            {"case 9 (guard gap)",         9, "KILLED -- translation fault in the heap/stack guard gap"},
+            {"case 10 (deep stack)",      10, "touches 1MB of stack, 256 pages faulted in"},
+            {"case 11 (kernel 1st touch)",11, "sc_Write's copy faults in an untouched heap page"},
         };
 
         uint32_t failures = 0;

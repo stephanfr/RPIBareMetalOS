@@ -72,25 +72,12 @@ namespace syscall
             return (unsigned long)-1;                           //  kernel task: no user heap
         }
 
-        //  Through MemoryModel::AllocateUserFrame, never GetMemoryManager() directly, so a
-        //      change to how user frames are sourced touches no call site.
+        //  Reserve VA only.  Frames still come through MemoryModel::AllocateUserFrame --
+        //      at first touch, in AddressSpace::FaultInUserPage.
 
-        MemoryPagePointer frame = MemoryModel::AllocateUserFrame(block_size);
+        uint64_t user_va = task.GrowUserHeap(block_size);
 
-        if (frame == 0)
-        {
-            return (unsigned long)-1;
-        }
-
-        uint64_t user_va = task.MapIntoUserHeap(frame.Physical(), block_size);
-
-        if (user_va == 0)
-        {
-            MemoryModel::ReleaseUserFrame(frame, block_size);
-            return (unsigned long)-1;
-        }
-
-        return user_va;
+        return user_va ? user_va : (unsigned long)-1;
     }
 
     void Exit()
