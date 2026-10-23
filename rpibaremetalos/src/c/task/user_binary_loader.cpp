@@ -52,14 +52,21 @@ namespace task
             uint8_t *data() override { return data_; }
             const uint8_t *data() const override { return data_; }
 
+            //  Both append() overloads return how many elements were appended, as
+            //      minstd::buffer's contract says -- NOT the new size.  File::Read() adds the
+            //      return value to its file offset, so returning the size made it believe it
+            //      had read far more than it had and stop early, silently truncating every
+            //      image after its first couple of KB.
+
             size_t append(uint8_t element) override
             {
                 if (size_ < capacity_)
                 {
                     data_[size_++] = element;
+                    return 1;
                 }
 
-                return size_;
+                return 0;
             }
 
             size_t append(const uint8_t *block, size_t count) override
@@ -72,7 +79,7 @@ namespace task
                 memcpy(data_ + size_, block, count);
                 size_ += count;
 
-                return size_;
+                return count;
             }
 
             void pop_back() override
@@ -199,6 +206,17 @@ namespace task
         }
 
         file->Close();
+
+        //  Read() reports success for a short read too, so check that every byte arrived: a
+        //      truncated image would otherwise run with its tail silently zero.
+
+        if (image_buffer.size() != image_size)
+        {
+            LogError("LoadUserBinary: read %lu of %lu bytes of '%s'\n",
+                     (unsigned long)image_buffer.size(), (unsigned long)image_size, path.c_str());
+            MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+            return Result::Failure(TaskResultCodes::USER_BINARY_UNREADABLE);
+        }
 
         //  Validate before mapping anything.
 

@@ -130,3 +130,8 @@ protected:
 };
 
 ExceptionManager &GetExceptionManager();
+
+//  Number of user tasks killed by a fault since boot.  The kill itself is only a warning-level
+//      log line, which a normal run does not print, so this is the way to see that it happened.
+
+uint64_t GetUserTaskFaultCount();

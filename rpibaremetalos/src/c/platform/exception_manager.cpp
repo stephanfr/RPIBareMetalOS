@@ -4,6 +4,8 @@
 
 #include "platform/exception_manager.h"
 
+#include <atomic>
+
 #include "platform/rpi3/rpi3_exception_manager.h"
 #include "platform/rpi4/rpi4_exception_manager.h"
 
@@ -57,9 +59,21 @@ extern "C" void HandleIRQ()
 //      unchanged: whatever makes it work for sc_Exit makes it work for this.  Exit() marks
 //      the task a ZOMBIE and spins until the task switch takes it away, so this never returns.
 
+namespace
+{
+    minstd::atomic<uint64_t> user_task_fault_count{0};
+}
+
+uint64_t GetUserTaskFaultCount()
+{
+    return user_task_fault_count.load();
+}
+
 extern "C" void HandleUserTaskFault(unsigned long esr, unsigned long elr, unsigned long far)
 {
     task::TaskImpl &task = task::TaskImpl::GetTask();
+
+    user_task_fault_count.fetch_add(1);
 
     LogWarning("Exception in User Task - task killed: %s: ESR=%016lx PC=%016lx FAR=%016lx\n",
              task.Name().c_str(), esr, elr, far);

@@ -73,6 +73,12 @@ public:
 
     static uint64_t KernelTTBR0Value() { return __boot_ttbr0_base; }                  //  ASID 0
 
+    //  ASIDs currently held by live address spaces (the kernel's ASID 0 is not counted).  A count
+    //      that does not return to its starting value once every space has been destroyed is an
+    //      ASID leak, which no page count would show.
+
+    static uint32_t AllocatedASIDCount();
+
 private:
     static constexpr uint32_t ENTRIES_PER_TABLE = 512;
     static constexpr uint64_t PAGE_SIZE = BYTES_4K;

@@ -67,6 +67,25 @@ namespace
     minstd::atomic<uint32_t> asid_hint(1);
 }
 
+uint32_t AddressSpace::AllocatedASIDCount()
+{
+    uint32_t count = 0;
+
+    for (uint32_t i = 0; i < ASID_BITMAP_WORDS; i++)
+    {
+        count += (uint32_t)__builtin_popcountll(asid_in_use[i].load(minstd::memory_order_relaxed));
+    }
+
+    //  Bit 0 is the kernel's, claimed permanently on the first allocation.
+
+    if ((asid_in_use[0].load(minstd::memory_order_relaxed) & 1ULL) != 0)
+    {
+        count--;
+    }
+
+    return count;
+}
+
 uint16_t AddressSpace::NextASID()
 {
     //  No wrap case and no vmalle1is: there is no monotonic counter to wrap, and every ASID

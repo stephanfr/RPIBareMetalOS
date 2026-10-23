@@ -88,7 +88,19 @@ public:
 
     void ReleaseBlock(MemoryPagePointer first_page, uint64_t block_size);
 
+    //  Pages passed to ReleaseBlock that were already free, or that lie outside the managed
+    //      range.  Every one is a double free or a stray pointer somewhere in the kernel, so
+    //      it must stay zero; tests check it.  (A double free that is not noticed here goes on
+    //      to free the page's NEXT owner's memory.)
+
+    uint64_t InvalidReleaseCount() const
+    {
+        return invalid_release_count_.load();
+    }
+
 private:
+    minstd::atomic<uint64_t> invalid_release_count_{0};
+
     uint64_t page_size_;
     uint64_t total_memory_in_bytes_ = 0;
     void *mmio_base_ = 0;

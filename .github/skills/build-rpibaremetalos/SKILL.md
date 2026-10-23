@@ -167,6 +167,7 @@ the RPi:
 | `config.txt` | GPU/bootloader configuration |
 | `cmdline.txt` | Kernel command line |
 | `sd.img` | Virtual FAT32 disk image (used by QEMU; also on real hardware) |
+| `hello.bin` | The EL0 test program (`user/hello.c`) that user tasks load from the boot partition. On a real card it is a separate file: copy it every time `hello.c` changes, or `test usertask` runs an old program |
 | `LICENCE.broadcom` | Required licence file for Broadcom firmware |
 
 ---
