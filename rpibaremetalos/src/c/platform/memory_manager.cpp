@@ -12,7 +12,29 @@
 #include "platform/platform_info.h"
 #include "platform/mmu_manager.h"
 
+#include "services/stats_db/kernel_statistic_ids.h"
+#include "services/stats_db/system_stats.h"
+
 #include "devices/log.h"
+
+namespace
+{
+    //  Kept as running statistics rather than scanned out of the page map on demand: a full scan is
+    //      O(pages) and would be paid by every reader.  The gauge is seeded in the constructor and
+    //      adjusted on every claim and release, so it stays exact.
+
+    system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_FREE_PAGES)>
+        free_pages_gauge("memory", "free_pages", "Free pages in the page allocator", 0);
+
+    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_ALLOC_FAILURES)>
+        alloc_failures_counter("memory", "alloc_failures", "GetFreeBlock calls that could not satisfy the request", 0);
+
+    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_INVALID_RELEASES)>
+        invalid_releases_counter("memory", "invalid_releases", "ReleaseBlock calls on already-free or out-of-range pages", 0);
+
+    system_stats::TimestampStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_LAST_INVALID_RELEASE)>
+        last_invalid_release_stamp("memory", "last_invalid_release", "Tick of the most recent invalid ReleaseBlock");
+}
 
 MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
                              void *mmio_base)
@@ -95,6 +117,26 @@ MemoryManager::MemoryManager(uint64_t total_memory_in_bytes,
             page_map_[i].store(1, minstd::memory_order_relaxed);
         }
     }
+
+    //  Seed the free-page gauge from the page map.  The reserved regions were just marked occupied
+    //      above, so every zero byte left here is genuinely allocatable.
+
+    int64_t free_count = 0;
+
+    for (uint64_t i = 0; i < num_pages_; i++)
+    {
+        if (page_map_[i].load(minstd::memory_order_relaxed) == 0)
+        {
+            free_count++;
+        }
+    }
+
+    free_pages_gauge.Set(free_count);
+}
+
+uint64_t MemoryManager::FreePages() const
+{
+    return static_cast<uint64_t>(free_pages_gauge.Get());
 }
 
 MemoryPagePointer MemoryManager::GetFreeBlock(uint64_t block_size)
@@ -142,6 +184,7 @@ MemoryPagePointer MemoryManager::GetFreeBlock(uint64_t block_size)
 
         if (!found)
         {
+            alloc_failures_counter.Increment();
             return MemoryPagePointer{0};
         }
 
@@ -164,6 +207,7 @@ MemoryPagePointer MemoryManager::GetFreeBlock(uint64_t block_size)
 
         if (claimed == num_pages_in_block)
         {
+            free_pages_gauge.Increment(-(int64_t)num_pages_in_block);
             return MemoryPagePointer{(free_memory_start_ + (starting_page * page_size_))};
         }
 
@@ -187,7 +231,8 @@ void MemoryManager::ReleaseBlock(MemoryPagePointer page_to_free, uint64_t block_
 
     if ((starting_page >= num_pages_) || (num_pages_in_block > (num_pages_ - starting_page)))
     {
-        invalid_release_count_.fetch_add(1);
+        invalid_releases_counter.Increment();
+        last_invalid_release_stamp.Stamp();
         return;
     }
 
@@ -195,7 +240,12 @@ void MemoryManager::ReleaseBlock(MemoryPagePointer page_to_free, uint64_t block_
     {
         if (page_map_[i].exchange(0, minstd::memory_order_acq_rel) == 0)
         {
-            invalid_release_count_.fetch_add(1);        //  it was already free
+            invalid_releases_counter.Increment();       //  it was already free
+            last_invalid_release_stamp.Stamp();
+        }
+        else
+        {
+            free_pages_gauge.Increment(1);              //  a genuinely allocated page just went free
         }
     }
 }

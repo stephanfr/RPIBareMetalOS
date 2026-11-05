@@ -243,6 +243,80 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         else:
             print('\nPASS [list statistics]: tasks.user_faults is 7')
 
+        # The memory metrics are maintained by the page allocator itself.  free_pages is a running
+        # gauge, so it must be a plausible nonzero count; invalid_releases and last_invalid_release
+        # are correctness canaries that must stay zero -- a nonzero value means a double free or a
+        # stray pointer freed a page the kernel did not own.  (The console wraps the 82-column
+        # listing lines, so the value lands on the line after the name; \s+ spans that.)
+        def stat_value(stat_id: int, kind: str, name: str) -> int | None:
+            m = re.search(rf'^\s*0\s+{stat_id}\s+{kind}\s+{re.escape(name)}\s+(\d+)\s*$',
+                          output, re.MULTILINE)
+            return int(m.group(1)) if m else None
+
+        free_pages = stat_value(2, 'gauge', 'memory.free_pages')
+        if free_pages is None or free_pages <= 0:
+            print(f'\nFAIL [list statistics]: expected memory.free_pages > 0, got {free_pages}')
+            failures += 1
+        else:
+            print(f'\nPASS [list statistics]: memory.free_pages is {free_pages}')
+
+        invalid_releases = stat_value(3, 'counter', 'memory.invalid_releases')
+        if invalid_releases != 0:
+            print(f'\nFAIL [list statistics]: expected memory.invalid_releases to be 0, got {invalid_releases}')
+            failures += 1
+        else:
+            print('\nPASS [list statistics]: memory.invalid_releases is 0')
+
+        if stat_value(4, 'counter', 'memory.alloc_failures') is None:
+            print('\nFAIL [list statistics]: memory.alloc_failures line missing')
+            failures += 1
+        else:
+            print('\nPASS [list statistics]: memory.alloc_failures present')
+
+        last_invalid_release = stat_value(5, 'timestamp', 'memory.last_invalid_release')
+        if last_invalid_release != 0:
+            print(f'\nFAIL [list statistics]: expected memory.last_invalid_release to be 0 (never), got {last_invalid_release}')
+            failures += 1
+        else:
+            print('\nPASS [list statistics]: memory.last_invalid_release is 0 (never)')
+
+        # The scheduling metrics are maintained in the scheduler itself.  By now every one must
+        # have moved: the run exercised voluntary yields, timer-tick preemption, and dozens of
+        # short-lived user tasks.  running counts the cores whose current task is RUNNING -- it
+        # can briefly dip below the core count while a zombie spins awaiting its next switch,
+        # but it can never exceed it.  Each core's run list keeps its idle task forever, so its
+        # depth never reaches zero.  dropped_zombies is a correctness canary that must stay zero
+        # -- a nonzero value means a zombie leaked its stack and address space.
+        def expect_stat(stat_id: int, kind: str, name: str, ok, describe: str) -> None:
+            nonlocal failures
+            value = stat_value(stat_id, kind, name)
+            if value is None or not ok(value):
+                print(f'\nFAIL [list statistics]: {name} {describe}, got {value}')
+                failures += 1
+            else:
+                print(f'\nPASS [list statistics]: {name} {describe} ({value})')
+
+        expect_stat(6, 'counter', 'tasks.voluntary_switches', lambda v: v > 0, '> 0')
+        expect_stat(7, 'counter', 'tasks.preemptive_switches', lambda v: v > 0, '> 0')
+        expect_stat(8, 'counter', 'tasks.timeslices_granted', lambda v: v > 0, '> 0')
+        expect_stat(9, 'gauge', 'tasks.running', lambda v: 1 <= v <= 4, 'in 1..4')
+        expect_stat(10, 'gauge', 'tasks.zombies', lambda v: v > 0, '> 0')
+        expect_stat(11, 'counter', 'tasks.dropped_zombies', lambda v: v == 0, '== 0')
+        for core in range(4):
+            expect_stat(12 + core, 'gauge', f'tasks.runlist_depth_{core}', lambda v: v >= 1, '>= 1')
+        expect_stat(16, 'counter', 'scheduler.missed_interrupts', lambda v: v >= 0, 'present')
+
+        # The address-space metrics.  demand_page_faults must have moved -- test usertask
+        # demand-pages heap and stack pages in several cases.  demand_page_failures is a
+        # correctness canary that must stay zero: a nonzero value means a page-in lost a
+        # frame or table allocation.  address_spaces is racy in the instant sense (a zombie
+        # keeps its space for the reaper's one-second grace), but it must never accumulate:
+        # a space not returned once its task is gone is an ASID leak, which no page count
+        # would show.
+        expect_stat(17, 'gauge', 'mmu.address_spaces', lambda v: v <= 8, '<= 8')
+        expect_stat(18, 'counter', 'mmu.demand_page_faults', lambda v: v > 0, '> 0')
+        expect_stat(19, 'counter', 'mmu.demand_page_failures', lambda v: v == 0, '== 0')
+
         # test addrspace — checks the address space / page table layer, including
         # that the syscall boundary range-checks before it walks.
         output = send_command('test addrspace')

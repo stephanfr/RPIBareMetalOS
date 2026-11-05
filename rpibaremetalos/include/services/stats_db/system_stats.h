@@ -343,6 +343,15 @@ namespace system_stats {
             value_.store(new_value, minstd::memory_order_relaxed);
         }
 
+        //  Adds amount atomically; returns the previous value.  For a gauge that moves in both
+        //      directions (a free-page count, say) where a read-modify-write through Set() would
+        //      race between cores.
+
+        int64_t Increment( int64_t amount = 1 )
+        {
+            return value_.fetch_add(amount, minstd::memory_order_relaxed);
+        }
+
         int64_t Get() const
         {
             return value_.load(minstd::memory_order_relaxed);

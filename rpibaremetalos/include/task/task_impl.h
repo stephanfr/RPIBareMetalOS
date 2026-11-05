@@ -18,6 +18,8 @@
 #include "platform/address_space_layout.h"
 #include "platform/memory_manager.h"
 
+#include "services/stats_db/task_statistics.h"
+
 #include "task/runnable.h"
 #include "task/task_errors.h"
 #include "task/tasks.h"
@@ -140,6 +142,17 @@ namespace task
             counter_ = 0;
             
             zombie_timestamp_ = PhysicalTimer::Now();
+
+            //  We are our own core's current task, so we were counted as running unless we died
+            //      before the first switch ever ran us (the boot core's main task).
+
+            if (state_ == Task::ExecutionState::RUNNING)
+            {
+                system_stats::task_running.Increment(-1);
+            }
+
+            system_stats::task_zombies.Increment(1);
+
             state_ = Task::ExecutionState::ZOMBIE;
 
             GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);

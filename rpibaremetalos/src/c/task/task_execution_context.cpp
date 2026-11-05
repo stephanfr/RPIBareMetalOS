@@ -7,6 +7,10 @@
 #include "devices/log.h"
 #include "devices/physical_timer.h"
 
+#include "services/stats_db/kernel_statistic_ids.h"
+#include "services/stats_db/system_stats.h"
+#include "services/stats_db/task_statistics.h"
+
 #include "task/task_manager_impl.h"
 
 #include <minimalstdio.h>
@@ -15,6 +19,49 @@ extern "C" void SwitchCPUState(task::TaskImpl::TaskContextCPUState *prev, task::
 
 namespace task
 {
+    namespace
+    {
+        //  Scheduler activity, kept as running statistics rather than summed from the per-task
+        //      counters on demand.  Every increment happens in SwitchTasks(), the single choke
+        //      point every switch goes through, voluntary yields and preemption alike.
+
+        system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::TASK_VOLUNTARY_SWITCHES)>
+            voluntary_switches("tasks", "voluntary_switches", "Context switches caused by a voluntary yield", 0);
+
+        system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES)>
+            preemptive_switches("tasks", "preemptive_switches", "Context switches caused by preemption or timeslice expiry", 0);
+
+        system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::TASK_TIMESLICES_GRANTED)>
+            timeslices_granted("tasks", "timeslices_granted", "Timeslices granted to tasks by the scheduler", 0);
+
+        //  Per-core run list depth.  Supported boards have at most four cores; a higher core id
+        //      would simply have no gauge.
+
+        system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::TASK_RUNLIST_DEPTH_CORE0)>
+            runlist_depth_0("tasks", "runlist_depth_0", "Tasks on core 0's run list", 0);
+
+        system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::TASK_RUNLIST_DEPTH_CORE1)>
+            runlist_depth_1("tasks", "runlist_depth_1", "Tasks on core 1's run list", 0);
+
+        system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::TASK_RUNLIST_DEPTH_CORE2)>
+            runlist_depth_2("tasks", "runlist_depth_2", "Tasks on core 2's run list", 0);
+
+        system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::TASK_RUNLIST_DEPTH_CORE3)>
+            runlist_depth_3("tasks", "runlist_depth_3", "Tasks on core 3's run list", 0);
+
+        void UpdateRunlistDepth(uint32_t core, int64_t delta)
+        {
+            switch (core)
+            {
+            case 0: runlist_depth_0.Increment(delta); break;
+            case 1: runlist_depth_1.Increment(delta); break;
+            case 2: runlist_depth_2.Increment(delta); break;
+            case 3: runlist_depth_3.Increment(delta); break;
+            default: break;
+            }
+        }
+    }
+
     void TaskExecutionContext::ServiceMessages()
     {
         //  Process any queued messages
@@ -33,6 +80,8 @@ namespace task
                     LogFatal("TaskExecutionContext::ServiceMessages - core %u run list full, dropping task\n", GetCoreID());
                     ParkCore();
                 }
+
+                UpdateRunlistDepth(GetCoreID(), 1);
                 break;
 
             case InterContextMessage::MessageType::SURRENDER_TASK:
@@ -64,6 +113,7 @@ namespace task
 
                 TaskManagerImpl::Instance().NotifyTaskDelisted(*task);
                 task_list_.RemoveTaskByIndex(i);
+                UpdateRunlistDepth(GetCoreID(), -1);
 
                 if (i >= task_list_.NumTasks())
                 {
@@ -171,6 +221,7 @@ namespace task
         if ((prev->counter_ > 0) || (prev->preempt_count_ > 0))
         {
             prev->timeslices_granted_++; //  Bump the timeslice count
+            timeslices_granted.Increment();
             prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
@@ -180,6 +231,7 @@ namespace task
         TaskImpl *next = &FindNextTask();
 
         next->timeslices_granted_++;
+        timeslices_granted.Increment();
 
         if (prev == next)
         {
@@ -187,9 +239,31 @@ namespace task
             return;
         }
 
+        //  An actual context change happened: count it as voluntary or preemptive by what asked
+        //      for it.
+
+        if (voluntary)
+        {
+            voluntary_switches.Increment();
+        }
+        else
+        {
+            preemptive_switches.Increment();
+        }
+
         //  Switch the tasks
 
+        if (next->state_ != Task::ExecutionState::RUNNING)
+        {
+            system_stats::task_running.Increment(1);
+        }
+
         next->state_ = Task::ExecutionState::RUNNING;
+
+        if (prev->state_ == Task::ExecutionState::RUNNING)
+        {
+            system_stats::task_running.Increment(-1);
+        }
 
         if (prev->state_ != Task::ExecutionState::ZOMBIE)
         {

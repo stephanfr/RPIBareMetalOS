@@ -35,6 +35,8 @@
 
 #include "synchronization.h"
 
+#include "services/stats_db/task_statistics.h"
+
 #include "os_memory_config.h"
 
 namespace task
@@ -103,19 +105,16 @@ namespace task
         {
             TaskImpl *entry = &task;
 
+            //  A zombie that cannot be queued is never reaped: its kernel stack and address space
+            //      leak.  Counted by tasks.dropped_zombies, which must stay zero.
+
             if (!delisted_zombies_.push_back(entry))
             {
-                delisted_drop_count_.fetch_add(1);
+                system_stats::task_dropped_zombies.Increment();
             }
         }
 
         uint32_t ReapZombies();
-
-        //  Zombies that could not be queued for the reaper because its queue was full.  Such a
-        //      task is never reaped, so its kernel stack and address space leak.  Diagnostics
-        //      for tests; must stay zero.
-
-        uint32_t DelistedDropCount() const { return delisted_drop_count_.load(); }
 
     private:
         using TaskMap = minstd::skip_list<UUID, TaskImpl*, MAX_CORES>;
@@ -159,8 +158,6 @@ namespace task
 
         DelistedZombieQueueAllocator delisted_zombies_allocator_{&__os_static_heap_resource};
         DelistedZombieQueue delisted_zombies_{delisted_zombies_allocator_, MAX_DELISTED_ZOMBIE_QUEUE};
-
-        minstd::atomic<uint32_t> delisted_drop_count_{0};
 
         //  Owned SOLELY by the reaper.  Drained from the queue above and then worked freely,
         //      with no synchronisation, because nothing else ever touches it.  An array

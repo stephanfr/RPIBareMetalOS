@@ -13,6 +13,18 @@
 #include "devices/system_timer.h"
 #include "platform/platform_info.h"
 
+#include "services/stats_db/kernel_statistic_ids.h"
+#include "services/stats_db/task_statistics.h"
+
+namespace system_stats
+{
+    //  Defined here, the scheduler clock's home, and declared in task_statistics.h so the RPi3
+    //      system-timer path (system_timer.cpp) counts into the same statistic.
+
+    CounterStatistic<KernelStatistic(KernelStatisticId::SCHEDULER_MISSED_INTERRUPTS)>
+        scheduler_missed_interrupts("scheduler", "missed_interrupts", "Scheduler ticks missed; the deadline was re-based on now", 0);
+}
+
 namespace
 {
     //
@@ -95,6 +107,7 @@ namespace
             if (next_deadline_ < (now + (period_in_ticks_ / 10)))
             {
                 LogWarning("******Missed interrupt******\n");
+                system_stats::scheduler_missed_interrupts.Increment();
 
                 next_deadline_ = now + period_in_ticks_;
             }

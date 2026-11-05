@@ -10,6 +10,8 @@
 #include "devices/log.h"
 #include "heaps.h"
 
+#include "services/stats_db/task_statistics.h"
+
 class SystemTimerImpl : public SystemTimer
 {
 public:
@@ -107,6 +109,7 @@ public:
                 if (config.next_interrupt_ < (Now() + duration_cast<nanoseconds>(config.period_ / 10)))
                 {
                     LogWarning("******Missed interrupt******\n");
+                    system_stats::scheduler_missed_interrupts.Increment();
                     config.next_interrupt_ = duration_cast<microseconds>(Now() + config.period_);
                 }
 
