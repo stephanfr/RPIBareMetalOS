@@ -20,6 +20,9 @@
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 
+#include "services/stats_db/kernel_statistic_ids.h"
+#include "services/stats_db/system_stats.h"
+#include "services/stats_db/task_statistics.h"
 #include "services/stats_db/user_statistics.h"
 
 #include <minimalstdio.h>
@@ -29,6 +32,22 @@
 extern "C" void ReturnFromForkASMStub(void);
 extern "C" void SetKernelTaskContext(task::TaskImpl *task);
 extern "C" bool CoreExecute(uint32_t core, void (*func)(void));
+
+namespace system_stats
+{
+    //  The task-state statistics, defined here, the task subsystem's home, and declared in
+    //      task_statistics.h for the other files that move a task's state.  Like every other
+    //      kernel statistic they are recorded during static initialisation and registered at boot.
+
+    GaugeStatistic<KernelStatistic(KernelStatisticId::TASK_RUNNING)>
+        task_running("tasks", "running", "Tasks currently running on a core", 0);
+
+    GaugeStatistic<KernelStatistic(KernelStatisticId::TASK_ZOMBIES)>
+        task_zombies("tasks", "zombies", "Zombie tasks awaiting the reaper", 0);
+
+    CounterStatistic<KernelStatistic(KernelStatisticId::TASK_DROPPED_ZOMBIES)>
+        task_dropped_zombies("tasks", "dropped_zombies", "Zombies dropped because the reaper queue was full (leak)", 0);
+}
 
 UUID GetCurrentTaskId(void)
 {
@@ -652,6 +671,8 @@ namespace task
             task_map_.remove(task->ID());
             task->ReleaseResources();          //  no-op if pass 1 already ran
             task->Destroy();                   //  frees it as its own type: it may be a ServiceTaskImpl
+
+            system_stats::task_zombies.Increment(-1);
 
             reaped++;
         }

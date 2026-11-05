@@ -11,6 +11,9 @@
 
 #include "devices/log.h"
 
+#include "services/stats_db/kernel_statistic_ids.h"
+#include "services/stats_db/system_stats.h"
+
 //  4KB granule, T0SZ = 25 (a 39-bit user VA):
 //
 //      L1 index = VA[38:30]   512 entries, 1GB each   -- only [l1_index_start, l1_index_end] are ours
@@ -65,25 +68,17 @@ namespace
     //      only -- correctness never depends on it.
 
     minstd::atomic<uint32_t> asid_hint(1);
-}
 
-uint32_t AddressSpace::AllocatedASIDCount()
-{
-    uint32_t count = 0;
+    //  Address-space activity, kept as running statistics rather than recomputed on demand.
 
-    for (uint32_t i = 0; i < ASID_BITMAP_WORDS; i++)
-    {
-        count += (uint32_t)__builtin_popcountll(asid_in_use[i].load(minstd::memory_order_relaxed));
-    }
+    system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MMU_ADDRESS_SPACES)>
+        address_spaces("mmu", "address_spaces", "Live non-kernel address spaces (one ASID each)", 0);
 
-    //  Bit 0 is the kernel's, claimed permanently on the first allocation.
+    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS)>
+        demand_page_faults("mmu", "demand_page_faults", "Demand-paged user pages faulted in", 0);
 
-    if ((asid_in_use[0].load(minstd::memory_order_relaxed) & 1ULL) != 0)
-    {
-        count--;
-    }
-
-    return count;
+    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAILURES)>
+        demand_page_failures("mmu", "demand_page_failures", "Demand page-ins that failed to allocate a frame or table", 0);
 }
 
 uint16_t AddressSpace::NextASID()
@@ -181,6 +176,8 @@ bool AddressSpace::Initialize()
     }
 
     asid_ = NextASID();
+
+    address_spaces.Increment(1);
 
     asm volatile("dsb ishst" ::: "memory");
 
@@ -387,16 +384,25 @@ bool AddressSpace::FaultInUserPage(uint64_t user_va, uint64_t heap_break)
 
     uint64_t *entry = L3EntryFor(page_va, true);
 
-    if ((entry == nullptr) || (*entry != 0))                                    //  null: no table; nonzero: already mapped
+    if (entry == nullptr)
     {
+        //  Past the range check above, a null entry means a table frame could not be allocated.
+
+        demand_page_failures.Increment();
         return false;
+    }
+
+    if (*entry != 0)
+    {
+        return false;                                                          //  already mapped: not a page-in
     }
 
     MemoryPagePointer frame = MemoryModel::AllocateUserFrame(PAGE_SIZE);
 
     if (frame == 0)
     {
-        return false;                                                           //  OOM: caller kills the task
+        demand_page_failures.Increment();                                      //  OOM: caller kills the task
+        return false;
     }
 
     //  GetFreeBlock does not clear memory.  Without this the previous owner's stack or heap
@@ -424,6 +430,8 @@ bool AddressSpace::FaultInUserPage(uint64_t user_va, uint64_t heap_break)
     //      synchronizing.
 
     asm volatile("dsb ish" ::: "memory");
+
+    demand_page_faults.Increment();
 
     return true;
 }
@@ -511,6 +519,8 @@ AddressSpace::~AddressSpace()
         //      from any core against any other core's fetch_or.
 
         asid_in_use[asid_ / 64].fetch_and(~(1ULL << (asid_ % 64)), minstd::memory_order_release);
+
+        address_spaces.Increment(-1);
 
         asid_ = KERNEL_ASID;    //  prevent double-claim if destructor is re-entered
     }

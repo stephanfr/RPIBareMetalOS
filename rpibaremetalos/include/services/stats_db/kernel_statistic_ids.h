@@ -14,7 +14,29 @@ namespace system_stats
 
     typedef enum class KernelStatisticId : uint32_t
     {
-        USER_TASK_FAULTS = 1,           //  tasks.user_faults
+        USER_TASK_FAULTS                = 1,
+
+        MEMORY_FREE_PAGES               = 2,
+        MEMORY_INVALID_RELEASES         = 3,
+        MEMORY_ALLOC_FAILURES           = 4,
+        MEMORY_LAST_INVALID_RELEASE     = 5,
+
+        TASK_VOLUNTARY_SWITCHES         = 6,
+        TASK_PREEMPTIVE_SWITCHES        = 7,
+        TASK_TIMESLICES_GRANTED         = 8,
+        TASK_RUNNING                    = 9,
+        TASK_ZOMBIES                    = 10,
+        TASK_DROPPED_ZOMBIES            = 11,
+        TASK_RUNLIST_DEPTH_CORE0        = 12,
+        TASK_RUNLIST_DEPTH_CORE1        = 13,
+        TASK_RUNLIST_DEPTH_CORE2        = 14,
+        TASK_RUNLIST_DEPTH_CORE3        = 15,
+
+        SCHEDULER_MISSED_INTERRUPTS     = 16,
+
+        MMU_ADDRESS_SPACES              = 17,
+        MMU_DEMAND_PAGE_FAULTS          = 18,
+        MMU_DEMAND_PAGE_FAILURES        = 19,
     } KernelStatisticId;
 
     //  For the statistic templates, which take the id as a uint32_t.

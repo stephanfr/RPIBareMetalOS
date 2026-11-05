@@ -69,38 +69,16 @@ public:
         return num_pages_;
     }
 
-    uint64_t FreePages() const
-    {
-        uint64_t free_pages = 0;
+    //  Current free-page count, kept as a running gauge (memory.free_pages) rather than scanned
+    //      out of the page map on every call.
 
-        for (uint64_t i = 0; i < num_pages_; i++)
-        {
-            if (page_map_[i].load(minstd::memory_order_relaxed) == 0)
-            {
-                free_pages++;
-            }
-        }
-
-        return free_pages;
-    }
+    uint64_t FreePages() const;
 
     MemoryPagePointer GetFreeBlock(uint64_t block_size);
 
     void ReleaseBlock(MemoryPagePointer first_page, uint64_t block_size);
 
-    //  Pages passed to ReleaseBlock that were already free, or that lie outside the managed
-    //      range.  Every one is a double free or a stray pointer somewhere in the kernel, so
-    //      it must stay zero; tests check it.  (A double free that is not noticed here goes on
-    //      to free the page's NEXT owner's memory.)
-
-    uint64_t InvalidReleaseCount() const
-    {
-        return invalid_release_count_.load();
-    }
-
 private:
-    minstd::atomic<uint64_t> invalid_release_count_{0};
-
     uint64_t page_size_;
     uint64_t total_memory_in_bytes_ = 0;
     void *mmio_base_ = 0;
