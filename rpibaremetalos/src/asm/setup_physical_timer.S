@@ -4,6 +4,12 @@
 
 #include "cpu_part_nums.h"
 
+//  EL0PCTEN (bit 0): EL0 may read CNTPCT_EL0 and CNTFRQ_EL0, so user programs can stamp their
+//      statistics on the same clock as the kernel's (uapi/user_statistics.h).
+//      Every other EL0 timer access still traps.
+
+#define CNTKCTL_EL1_VALUE   1
+
 //
 //  Constants for setting up the physical timer on BCM2837 or BCM2711 SOCs
 //
@@ -68,7 +74,7 @@ SetupPhysicalTimer :
 	ldr x9, =BCM2837_OSC_FREQ
 	msr CNTFRQ_EL0, x9
 
-    ldr x9, =0
+    ldr x9, =CNTKCTL_EL1_VALUE
     msr CNTKCTL_EL1, x9
 
     ldr x9, =3
@@ -100,7 +106,7 @@ spt_notRpi3 :
 	ldr x9, =BCM2711_OSC_FREQ
 	msr CNTFRQ_EL0, x9
 
-    ldr x9, =0
+    ldr x9, =CNTKCTL_EL1_VALUE
     msr CNTKCTL_EL1, x9
 
     ldr x9, =3
@@ -132,7 +138,7 @@ spt_notRpi4 :
 	ldr x9, =BCM2712_OSC_FREQ
 	msr CNTFRQ_EL0, x9
 
-    ldr x9, =0
+    ldr x9, =CNTKCTL_EL1_VALUE
     msr CNTKCTL_EL1, x9
 
     ldr x9, =3

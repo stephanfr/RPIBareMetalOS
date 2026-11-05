@@ -53,9 +53,26 @@ namespace cli::commands
                           CLISessionContext &context) const override;
     };
 
+    //  Every statistic in the system statistics database, kernel and service, with its current value.
+
+    class CLIListStatisticsCommand : public CLICommandExecutor
+    {
+    public:
+
+        static const CLIListStatisticsCommand instance;
+
+        CLIListStatisticsCommand()
+            : CLICommandExecutor("statistics")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
+
     //  Create the top-level list command
 
-    class CLIListCommand : public CLIParentCommand<3>
+    class CLIListCommand : public CLIParentCommand<4>
     {
     public:
 
@@ -64,7 +81,8 @@ namespace cli::commands
         CLIListCommand()
             : CLIParentCommand("list", {CLIListFilesystemsCommand::instance,
                                         CLIListDirectoryCommand::instance,
-                                        CLIListTasksCommand::instance})
+                                        CLIListTasksCommand::instance,
+                                        CLIListStatisticsCommand::instance})
         {
         }
     };

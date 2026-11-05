@@ -113,6 +113,7 @@ namespace task
             KERNEL_TASK = 1,
             IDLE_TASK = 2,
             USER_TASK = 3,
+            SERVICE_TASK = 4,
         } TaskType;
 
         Task() = default;
@@ -150,6 +151,8 @@ namespace task
             return "Idle Task";
         case Task::TaskType::USER_TASK:
             return "User Task";
+        case Task::TaskType::SERVICE_TASK:
+            return "Service Task";
         default:
             return "Unknown Task Type";
         }
@@ -190,6 +193,7 @@ namespace task
 
         virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
         virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;
+        virtual ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;
 
     protected:
         TaskManager()

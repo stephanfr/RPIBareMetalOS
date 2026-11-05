@@ -3,6 +3,7 @@
 // license that can be found in the LICENSE file.
 
 #include "task/task_manager_impl.h"
+#include "task/service_task_impl.h"
 
 #include <string.h>
 
@@ -18,6 +19,8 @@
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
+
+#include "services/stats_db/user_statistics.h"
 
 #include <minimalstdio.h>
 
@@ -80,6 +83,10 @@ namespace task
                 while (1)
                 {
                     TaskManagerImpl::Instance().ReapZombies();
+
+                    //  Statistics of reaped user tasks wait here until no reader can reach them.
+
+                    system_stats::ReclaimRetiredUserStatisticsRegions();
 
                     Yield();                                            //  TODO add sleep to scheduler as Sleep(...) like Join
                 }
@@ -335,6 +342,37 @@ namespace task
         }
     }
 
+    uint32_t TaskManagerImpl::FindUserProcess(const char *binary_path, uint32_t after_process_id) const
+    {
+        uint32_t found_process_id = 0;
+
+        //  A task not loaded from a binary has an empty path.
+
+        if ((binary_path == nullptr) || (binary_path[0] == '\0'))
+        {
+            return 0;
+        }
+
+        //  The map is keyed by UUID, not process id, so every task is looked at.
+
+        for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
+        {
+            const TaskImpl &task = *task_itr->second;
+
+            if ((task.state_ == Task::ExecutionState::ZOMBIE) ||
+                (task.user_visible_id_ <= after_process_id) ||
+                ((found_process_id != 0) && (task.user_visible_id_ >= found_process_id)) ||
+                (strncmp(task.binary_path_.c_str(), binary_path, MAX_FILENAME_LENGTH) != 0))
+            {
+                continue;
+            }
+
+            found_process_id = task.user_visible_id_;
+        }
+
+        return found_process_id;
+    }
+
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTask(Runnable *runnable, const TaskDefinition &task_definition)
     {
         return ForkKernelTaskInternal(runnable, &internal::KernelRunnableWrapperWithExit, task_definition);
@@ -346,8 +384,15 @@ namespace task
         return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg);
     }
 
+    ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkServiceTask(const minstd::string &binary_path, unsigned long arg,
+                                                                        const TaskDefinition &task_definition)
+    {
+        return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg, true);
+    }
+
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition &task_definition,
-                                                                              const minstd::string *user_binary_path, unsigned long user_arg)
+                                                                              const minstd::string *user_binary_path, unsigned long user_arg,
+                                                                              bool service)
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
@@ -358,7 +403,8 @@ namespace task
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
 
-        minstd::unique_ptr<TaskImpl> new_task = dynamic_new<TaskImpl>(task_definition, Task::TaskType::KERNEL_TASK);
+        minstd::unique_ptr<TaskImpl> new_task = service ? minstd::unique_ptr<TaskImpl>(dynamic_new<ServiceTaskImpl>(task_definition, Task::TaskType::KERNEL_TASK))
+                                                        : dynamic_new<TaskImpl>(task_definition, Task::TaskType::KERNEL_TASK);
 
         if (new_task.get() == nullptr)
         {
@@ -422,6 +468,8 @@ namespace task
         {
             return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
         }
+
+        //  Always a plain TaskImpl, even cloned from a service: statistics belong to the process that loaded the binary.
 
         minstd::unique_ptr<TaskImpl> new_task = dynamic_new<TaskImpl>(task_definition, CurrentTask().type_);
 
@@ -603,7 +651,7 @@ namespace task
 
             task_map_.remove(task->ID());
             task->ReleaseResources();          //  no-op if pass 1 already ran
-            dynamic_delete(task);
+            task->Destroy();                   //  frees it as its own type: it may be a ServiceTaskImpl
 
             reaped++;
         }

@@ -275,7 +275,7 @@ const uint64_t *AddressSpace::L3EntryFor(uint64_t user_va) const
 }
 
 bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t size,
-                            Stage2AccessPermission ap, bool executable)
+                            Stage2AccessPermission ap, bool executable, bool take_ownership)
 {
     const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
@@ -310,7 +310,7 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
     //  Refuse BEFORE mapping anything: on a full owned_ the block could not be recorded,
     //      and an unrecorded block is exactly the leak this check exists to prevent.
 
-    if (owned_count_ >= MAX_OWNED_BLOCKS)
+    if (take_ownership && (owned_count_ >= MAX_OWNED_BLOCKS))
     {
         return false;
     }
@@ -357,7 +357,13 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
 
     asm volatile("dsb ishst" ::: "memory");
 
-    owned_[owned_count_++] = OwnedBlock{physical_base, size};
+    //  An unowned block's leaves are not SoftwareDemandPaged either, so the teardown walk
+    //      leaves them alone.
+
+    if (take_ownership)
+    {
+        owned_[owned_count_++] = OwnedBlock{physical_base, size};
+    }
 
     return true;
 }

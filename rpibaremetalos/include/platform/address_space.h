@@ -38,8 +38,13 @@ public:
 
     bool Initialize();
 
+    //  Maps [physical_base, physical_base + size) at user_va.  With take_ownership the block is
+    //      recorded in owned_ and freed by ~AddressSpace; without it the caller keeps it and
+    //      frees it after the space is gone -- for pages something else still reads through
+    //      the kernel's own mapping, like a process's statistics.
+
     bool MapPages(uint64_t user_va, uint64_t physical_base, uint64_t size,
-                  Stage2AccessPermission ap, bool executable);
+                  Stage2AccessPermission ap, bool executable, bool take_ownership = true);
 
     //  Demand paging.  Maps ONE zeroed 4KB frame, RW+XN, at the page containing user_va when
     //      that page is UNMAPPED and lies in the live heap [heap_base, heap_break) or the stack

@@ -38,6 +38,7 @@ $(BUILD_ROOT)/c/devices/video \
 $(BUILD_ROOT)/c/isr \
 $(BUILD_ROOT)/c/filesystem \
 $(BUILD_ROOT)/c/services \
+$(BUILD_ROOT)/c/services/stats_db \
 $(BUILD_ROOT)/c/task \
 $(BUILD_ROOT)/c/userspace_api \
 $(BUILD_ROOT)/c/cli
@@ -57,6 +58,7 @@ C_DIRS     := c \
 			  c/isr \
 			  c/filesystem \
 			  c/services \
+			  c/services/stats_db \
 			  c/task \
 			  c/userspace_api \
 			  c/cli
@@ -74,6 +76,7 @@ CPP_DIRS   := c \
 			  c/isr \
 			  c/filesystem \
 			  c/services \
+			  c/services/stats_db \
 			  c/task \
 			  c/userspace_api \
 			  c/cli
@@ -153,19 +156,21 @@ all_clean: clean all
 #  ---- User space ------------------------------------------------------------
 #
 #  A user image is a FIXED-ADDRESS flat binary linked at USER_IMAGE_BASE, with a
-#  32-byte UserImageHeader at offset 0 so the loader can tell text from data (a flat
-#  binary has no section table).  It is built with its own flags and its own linker
+#  40-byte UserImageHeader at offset 0 so the loader can tell text, statistics and data
+#  apart (a flat binary has no section table).  It is built with its own flags and its own linker
 #  script and shares NOTHING with the kernel link -- user/syscalls.S deliberately
-#  duplicates the four sc_* stubs rather than linking the kernel's copies.
+#  duplicates the sc_* stubs rather than linking the kernel's copies.  Its only include
+#  path is include/uapi, the user ABI, so a user program cannot include a kernel header.
 
 USER_DIR      := user
 USER_BUILD    := $(BUILD_ROOT)/user
 USER_BIN      := $(USER_BUILD)/hello.bin
 USER_ELF      := $(USER_BUILD)/hello.elf
-USER_LD       := $(USER_DIR)/user.ld
+USER_LD_TEMPLATE := $(USER_DIR)/user.template.ld
+USER_LD       := $(USER_BUILD)/user.ld
 USER_SRC      := $(USER_DIR)/crt0.S $(USER_DIR)/syscalls.S $(USER_DIR)/hello.c
 USER_FLAGS    := -ffreestanding -nostdlib -nostartfiles -static -no-pie -Wl,--build-id=none \
-                 -mcpu=cortex-a53 -mstrict-align -O1 -Wall -Iinclude
+                 -mcpu=cortex-a53 -mstrict-align -mno-outline-atomics -O1 -Wall -Iinclude/uapi
 
 #  sd.img is a whole-disk image with an MBR, not a bare filesystem, so mtools needs the
 #  byte offset of the partition to write into -- plain "::" gives "non DOS media".
@@ -174,7 +179,14 @@ USER_FLAGS    := -ffreestanding -nostdlib -nostartfiles -static -no-pie -Wl,--bu
 
 SD_BOOT_PARTITION_OFFSET ?= 1048576
 
-$(USER_BIN): $(USER_SRC) $(USER_LD)
+#  The user linker script is a template, so the image's link address comes from
+#  include/uapi/user_address_space.h, the same header the kernel loads it by.
+
+$(USER_LD): $(USER_LD_TEMPLATE) $(wildcard include/uapi/*.h)
+	@mkdir -p $(USER_BUILD)
+	$(CPREPROCESSOR) -P -Iinclude/uapi $(USER_LD_TEMPLATE) -o $(USER_LD)
+
+$(USER_BIN): $(USER_SRC) $(USER_LD) $(wildcard include/uapi/*.h)
 	$(CC) $(USER_FLAGS) -T $(USER_LD) -o $(USER_ELF) $(USER_SRC)
 	$(OBJCOPY) -O binary $(USER_ELF) $(USER_BIN)
 

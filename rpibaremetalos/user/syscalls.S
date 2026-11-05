@@ -2,15 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//  Deliberate copies of the four sc_* stubs from src/asm/system_calls.S.
+//  Deliberate copies of the sc_* stubs from src/asm/system_calls.S.
 //
 //  They are duplicated rather than shared because the KERNEL's copy must never be linked
 //      into a user image: everything in src/ is built for the kernel's link address and
 //      its includes, and a user binary that pulled any of it in would be linking kernel
-//      code into EL0.  The ABI is the contract, not the file -- w8 holds the syscall
-//      number, x0..x3 the arguments, and svc #0 makes the call.
+//      code into EL0.  The ABI is the contract, not the file (see include/uapi/system_calls.h).
 
-#include "task/system_calls.h"
+#include "system_calls.h"
 
     .section .text, "ax"
 
@@ -38,3 +37,21 @@ sc_Yield:
     svc     #0
     ret
     
+
+    .globl sc_FindStatistic
+sc_FindStatistic:
+    mov     w8, #SYS_FIND_STATISTIC_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_ReadStatistic
+sc_ReadStatistic:
+    mov     w8, #SYS_READ_STATISTIC_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_FindProcess
+sc_FindProcess:
+    mov     w8, #SYS_FIND_PROCESS_NUMBER
+    svc     #0
+    ret

@@ -197,6 +197,10 @@ namespace task
                 address_space_ = nullptr;
             }
 
+            //  After the address space: nothing maps the process's pages any more.
+
+            ReleaseResourcesAfterAddressSpace();
+
             if (stack_ != 0)
             {
                 GetMemoryManager().ReleaseBlock(stack_, stack_size_in_bytes_);
@@ -221,6 +225,25 @@ namespace task
         TaskResultCodes MoveToUserSpace(unsigned long arg);
 
     private:
+        //  Overridden by ServiceTaskImpl.  Loads the binary into address_space for MoveToUserSpace().
+
+        virtual ValueResult<TaskResultCodes, uint64_t> LoadBinary(const minstd::string &path, AddressSpace &address_space);
+
+        //  Overridden by ServiceTaskImpl.  The type MoveToUserSpace() gives the task as it enters EL0.
+
+        virtual TaskType UserSpaceType() const
+        {
+            return TaskType::USER_TASK;
+        }
+
+        //  Run by ReleaseResources() once the address space is gone, and so possibly more than once.
+
+        virtual void ReleaseResourcesAfterAddressSpace() {}
+
+        //  Destroys the task and frees it as the type it was allocated as.  Used by the reaper.
+
+        virtual void Destroy();
+
         friend class TaskManagerImpl;
         friend class TaskSchedulingQueue;
         friend class TaskExecutionContext;
@@ -249,7 +272,7 @@ namespace task
         long preempt_count_;
         MemoryPagePointer stack_;                               //  KERNEL stack; every task has one
 
-        AddressSpace *address_space_ = nullptr;                 //  USER_TASK only; null = empty TTBR0
+        AddressSpace *address_space_ = nullptr;                 //  USER_TASK or SERVICE_TASK only; null = empty TTBR0
         minstd::fixed_string<128> binary_path_;                 //  set by ForkUserTask, read by MoveToUserSpace
         unsigned long user_arg_ = 0;                            //  the single argument a user task receives in x0
         uint64_t user_heap_break_ = USER_HEAP_BASE;
@@ -259,6 +282,11 @@ namespace task
 
     public:
         AddressSpace *UserAddressSpace() const { return address_space_; }
+
+        //  The user-visible id: what the task reads from tpidrro_el0, and what its statistics carry.
+        //      0 for a task that is not a user task.
+
+        uint32_t ProcessId() const { return user_visible_id_; }
 
         //  The single argument a user task receives in x0.  Read by StartUserTaskWrapper,
         //      which is a free function rather than a member and so cannot see user_arg_.

@@ -33,8 +33,10 @@
 #include "platform/mmu_manager.h"
 
 #include "services/uuid.h"
+#include "services/stats_db/stats_db.h"
 
 #include "devices/physical_timer.h"
+#include "devices/log.h"
 
 //  Global flag to indicate if the platform has been initialized
 
@@ -236,6 +238,30 @@ void InitializePlatform()
     if (!SetupSerialConsole())
     {
         ParkCore();
+    }
+
+    //  The statistics database lives in the static heap with a fixed capacity.  Register the statistics recorded
+    //      during static initialisation -- device registration included -- while this is still the only core
+    //      running: it must happen before the task manager starts the other cores.
+
+    const system_stats::SystemStatisticsDB::StatsDBResultCodes statistics_db_result = system_stats::GetSystemStatisticsDB().Initialize(__os_static_heap_resource);
+
+    if (statistics_db_result != system_stats::SystemStatisticsDB::StatsDBResultCodes::SUCCESS)
+    {
+        LogError("System statistics database could not be initialized: result %u\n", static_cast<uint32_t>(statistics_db_result));
+    }
+    else
+    {
+        system_stats::StaticRegistrationSummary statistics_registration_summary;
+
+        const system_stats::SystemStatisticsDB::StatsDBResultCodes statistics_registration_result = system_stats::RegisterStaticStatistics(system_stats::GetSystemStatisticsDB(), statistics_registration_summary);
+
+        if (statistics_registration_result != system_stats::SystemStatisticsDB::StatsDBResultCodes::SUCCESS)
+        {
+            LogError("System statistics registration failed: result %u, %u registered, %u duplicate ids (first %u), %u failed\n",
+                     static_cast<uint32_t>(statistics_registration_result), statistics_registration_summary.registered_count_, statistics_registration_summary.duplicate_count_,
+                     statistics_registration_summary.first_duplicate_id_, statistics_registration_summary.failed_count_);
+        }
     }
 
     //  Tee the serial console and framebuffer console together if both are available,
