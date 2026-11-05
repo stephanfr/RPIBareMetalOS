@@ -62,7 +62,7 @@ def is_interleaving_of_two(text: str, expected: str) -> bool:
 
 def case4_result_ok(output: str) -> bool:
     """Both case 4 tasks reported 'isolated', whether or not their lines interleaved."""
-    match = re.search(r'-- case 4 \(heap isolation, x2\)(.*?)(?:PASS|FAIL): user task test',
+    match = re.search(r'-- case 4 \(heap isolation, x2\)(.*?)(?:-- case |(?:PASS|FAIL): user task test)',
                       output, re.S)
 
     if match is None:
@@ -166,6 +166,38 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
             print('\nFAIL [test usertask]: case 4 did not report "isolated" from both tasks')
             failures += 1
 
+        # Case 12: statistics a user program defines are registered at load, read by the kernel
+        # through its own mapping, written back to the process, and removed and freed once the
+        # task is reaped.  The process prints TIMED OUT if it never sees the kernel's write.
+        check('test usertask', output,
+              'case 12: statistics set',
+              'user statistics read through the kernel mapping',
+              'case 12: kernel write seen',
+              'user statistics removed and freed after the task was reaped')
+
+        # Case 13: a second process, run while case 12 waits, uses the statistics system calls.
+        # It reads its own statistics, finds both processes by binary path, cannot see the other
+        # process's private statistics, can read its public one, and has kernel pointers refused.
+        # Any failure prints "case 13: FAIL".
+        check('test usertask', output,
+              'case 13: own statistic readable',
+              'case 13: processes found by binary',
+              'case 13: other process private statistics hidden',
+              'case 13: other process public statistic readable',
+              'case 13: bad arguments refused')
+
+        if 'case 13: FAIL' in output:
+            print('\nFAIL [test usertask]: case 13 reported a failure')
+            failures += 1
+
+        # Case 14: an ordinary process, not a service.  Its statistics are writable private data,
+        # and none of them is registered, so the system calls do not find them.
+        check('test usertask', output, 'case 14: statistics private to an ordinary process')
+
+        if 'case 14: FAIL' in output:
+            print('\nFAIL [test usertask]: case 14 reported a failure')
+            failures += 1
+
         # The demand-paging cases must report OK in every pass.
         # Cases 8 and 9 (wild heap pointer, guard gap) are caught by the 'NOT KILLED' scan below.
         for good in ('case 7: demand paging OK',
@@ -179,8 +211,9 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         # itself just before the faulting access and prints "NOT KILLED" if it survives, so
         # require every announcement exactly once; the 'NOT KILLED' scan below then proves each
         # one died.  (The kernel's own "task killed" message is a warning and the OS runs at
-        # log level ERROR, so it can't be counted here.)  A positive case dying early is caught
-        # by the "OK" lines above, 'hello from EL0', and the case 4 check.
+        # log level ERROR, so it is counted by the tasks.user_faults statistic instead, below.)
+        # A positive case dying early is caught by the "OK" lines above, 'hello from EL0', and
+        # the case 4 check.
         for announced in ('case 1: reading the kernel linear map',
                           'case 1b: reading 0x80000',
                           'case 2: writing to user text',
@@ -197,10 +230,23 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
                 print(f'\nFAIL [test usertask]: unexpected "{bad}" in output')
                 failures += 1
 
+        # list statistics — the kernel counts every user task a fault killed, and test usertask
+        # is the only thing that kills one: exactly the seven cases above.
+        output = send_command('list statistics')
+        check('list statistics', output, 'Statistics:', 'tasks.user_faults')
+
+        faults = re.search(r'^\s*0\s+1\s+counter\s+tasks\.user_faults\s+(\d+)\s*$', output, re.MULTILINE)
+        if faults is None or int(faults.group(1)) != 7:
+            print(f'\nFAIL [list statistics]: expected tasks.user_faults to be 7, got '
+                  f'{faults.group(1) if faults else "no tasks.user_faults line"}')
+            failures += 1
+        else:
+            print('\nPASS [list statistics]: tasks.user_faults is 7')
+
         # test addrspace — checks the address space / page table layer, including
         # that the syscall boundary range-checks before it walks.
         output = send_command('test addrspace')
-        check('test addrspace', output, 'PASS: address space test')
+        check('test addrspace', output, 'PASS: address space test', 'loaded statistics: 4 registered')
 
     except pexpect.TIMEOUT:
         print('\nFAIL: timed out waiting for expected output')

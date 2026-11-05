@@ -15,6 +15,8 @@
 #include "task/task_impl.h"
 #include "sysregs.h"
 #include "platform/address_space_layout.h"
+#include "services/stats_db/kernel_statistic_ids.h"
+#include "services/stats_db/system_stats.h"
 
 const char *entry_error_messages[] = {
     "SYNC_INVALID_EL1t",
@@ -50,6 +52,15 @@ extern "C" void HandleIRQ()
     GetExceptionManager().HandleInterrupt();
 }
 
+namespace
+{
+    //  The kill itself is only a warning-level log line, which a normal run does not print, so this is the way to
+    //      see that it happened: 'list statistics'.
+
+    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS)>
+        user_task_faults("tasks", "user_faults", "User tasks killed by a fault taken at EL0", 0);
+}
+
 //  A fault taken at EL0 kills the TASK, not the core.  An EL1 fault is still fatal --
 //      a kernel fault is a bug -- but a user program faulting is an ordinary event, and
 //      the whole point of isolation is that the kernel survives it.
@@ -59,21 +70,11 @@ extern "C" void HandleIRQ()
 //      unchanged: whatever makes it work for sc_Exit makes it work for this.  Exit() marks
 //      the task a ZOMBIE and spins until the task switch takes it away, so this never returns.
 
-namespace
-{
-    minstd::atomic<uint64_t> user_task_fault_count{0};
-}
-
-uint64_t GetUserTaskFaultCount()
-{
-    return user_task_fault_count.load();
-}
-
 extern "C" void HandleUserTaskFault(unsigned long esr, unsigned long elr, unsigned long far)
 {
     task::TaskImpl &task = task::TaskImpl::GetTask();
 
-    user_task_fault_count.fetch_add(1);
+    user_task_faults.Increment();
 
     LogWarning("Exception in User Task - task killed: %s: ESR=%016lx PC=%016lx FAR=%016lx\n",
              task.Name().c_str(), esr, elr, far);

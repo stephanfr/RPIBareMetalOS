@@ -15,12 +15,14 @@
 #include "heaps.h"
 
 #include "platform/address_space.h"
+#include "task/task_impl.h"
 #include "task/user_binary_loader.h"
 #include "platform/memory_manager.h"
 #include "platform/memory_model.h"
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
+#include "services/stats_db/user_statistics.h"
 
 namespace cli::commands
 {
@@ -1250,7 +1252,11 @@ namespace cli::commands
         {
             minstd::fixed_string<MAX_FILENAME_LENGTH> binary_name("hello.bin");
 
-            auto entry = task::LoadUserBinary(binary_name, *load_space);
+            system_stats::UserStatisticsRegion *load_statistics = nullptr;
+
+            //  No task of its own: the statistics go under this CLI task's process id, which nothing else uses.
+
+            auto entry = task::LoadUserBinary(binary_name, *load_space, task::TaskImpl::GetTask().ProcessId(), load_statistics);
 
             if (!entry.Successful())
             {
@@ -1283,9 +1289,31 @@ namespace cli::commands
                 {
                     context << "  loader left the heap unmapped\n";
                 }
+
+                //  hello.bin defines four statistics; each must be in the database already.
+
+                if ((load_statistics == nullptr) || (load_statistics->Count() != 4) || (load_statistics->Registered() != 4))
+                {
+                    context << minstd::format(buffer, "FAIL: loaded statistics -- {} defined, {} registered (expected 4)\n",
+                                              load_statistics != nullptr ? load_statistics->Count() : 0,
+                                              load_statistics != nullptr ? load_statistics->Registered() : 0);
+                    failures++;
+                }
+                else
+                {
+                    context << "  loaded statistics: 4 registered\n";
+                }
             }
 
+            //  The statistics pages are not the address space's: retire them once it is gone.
+
             dynamic_delete(load_space);
+
+            if (system_stats::RetireUserStatisticsRegion(load_statistics) != system_stats::SystemStatisticsDB::StatsDBResultCodes::SUCCESS)
+            {
+                context << "FAIL: the loaded statistics could not be retired\n";
+                failures++;
+            }
         }
 
         dynamic_delete(space);
@@ -1344,6 +1372,194 @@ namespace cli::commands
 
             return true;
         }
+
+        //  Case 12 -- statistics defined by a user program.  The process sets them and waits; this
+        //      reads them through the database, i.e. through the kernel's mapping of the page the
+        //      process writes, then zeroes the gauge, which the process must see.  Once the task
+        //      is reaped its statistics must leave the database and their memory be freed.
+
+        //  Runs hello.bin case 13 against the case 12 process other_process_id and waits for it to exit.
+
+        bool RunStatisticsSystemCallCase(CLISessionContext &context, uint32_t other_process_id)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+            minstd::fixed_string<MAX_TASK_NAME_LENGTH> task_name("statistics syscalls");
+
+            auto forked = context.task_manager_.ForkServiceTask(binary, 13 | ((unsigned long)other_process_id << 8), task::TaskDefinition{task_name});
+
+            if (forked.Failed())
+            {
+                context << minstd::format(buffer, "FAIL: ForkServiceTask(statistics syscalls) -- {}\n", task::ErrorMessage(forked.ResultCode()));
+                return false;
+            }
+
+            auto task = context.task_manager_.FindTask(forked.Value());
+
+            if (task.has_value())
+            {
+                task.value().get().Join();
+            }
+
+            return true;
+        }
+
+        bool CheckUserStatistics(CLISessionContext &context)
+        {
+            constexpr int64_t PAYLOAD = 0x5747;
+            constexpr int64_t COUNTER_TARGET = 1000;
+            constexpr uint32_t POLL_MS = 50;
+            constexpr uint32_t MAX_POLLS = 200;                 //  10 s
+
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+            minstd::fixed_string<MAX_TASK_NAME_LENGTH> task_name("user statistics");
+
+            system_stats::SystemStatisticsDB &db = system_stats::GetSystemStatisticsDB();
+
+            //  A service: only a service's statistics are registered.
+
+            auto forked = context.task_manager_.ForkServiceTask(binary, 12 | (PAYLOAD << 8), task::TaskDefinition{task_name});
+
+            if (forked.Failed())
+            {
+                context << minstd::format(buffer, "FAIL: ForkServiceTask(user statistics) -- {}\n", task::ErrorMessage(forked.ResultCode()));
+                return false;
+            }
+
+            //  Every process loaded from hello.bin has its own four "hello" statistics; this task's carry
+            //      its process id.  Take it now and look the task up again to join it: it may exit while
+            //      this polls.
+
+            uint32_t process_id = 0;
+
+            {
+                auto task = context.task_manager_.FindTask(forked.Value());
+
+                if (!task.has_value())
+                {
+                    context << "FAIL: the user statistics task disappeared\n";
+                    return false;
+                }
+
+                process_id = static_cast<task::TaskImpl &>(task.value().get()).ProcessId();
+            }
+
+            //  The task loads its binary -- and so registers its statistics -- when it first runs, before
+            //      its first EL0 instruction.  Find them once they appear, then wait for the values the
+            //      process sets.  The handles are kept across the whole test.
+
+            system_stats::UserStatisticHandle gauge;
+            system_stats::UserStatisticHandle counter;
+            system_stats::UserStatisticHandle stamp;
+
+            bool registered = false;
+            bool values_seen = false;
+
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && !values_seen; poll++)
+            {
+                if (!registered)
+                {
+                    const auto found_gauge = system_stats::FindUserStatistic(db, process_id, "hello", "gauge");
+                    const auto found_counter = system_stats::FindUserStatistic(db, process_id, "hello", "counter");
+                    const auto found_stamp = system_stats::FindUserStatistic(db, process_id, "hello", "stamp");
+
+                    registered = found_gauge.Successful() && found_counter.Successful() && found_stamp.Successful();
+
+                    if (registered)
+                    {
+                        gauge = *found_gauge;
+                        counter = *found_counter;
+                        stamp = *found_stamp;
+                    }
+                }
+
+                if (registered)
+                {
+                    const auto gauge_value = gauge.Get();
+                    const auto counter_value = counter.Get();
+                    const auto stamp_value = stamp.Get();
+
+                    values_seen = gauge_value.Successful() && (*gauge_value == PAYLOAD) &&
+                                  counter_value.Successful() && (*counter_value == COUNTER_TARGET) &&
+                                  stamp_value.Successful() && (*stamp_value != 0);
+                }
+
+                if (!values_seen)
+                {
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                }
+            }
+
+            bool passed = true;
+
+            if (!registered)
+            {
+                context << "FAIL: user statistics were never registered\n";
+                passed = false;
+            }
+            else if (!values_seen)
+            {
+                context << "FAIL: user statistics never showed the values case 12 sets\n";
+                passed = false;
+            }
+
+            if (passed)
+            {
+                context << "  user statistics read through the kernel mapping\n";
+
+                //  While this process waits, a second one reads statistics through the system calls: its own,
+                //      and this one's -- the private ones must be hidden, the public one readable.  It reports
+                //      on the console.
+
+                passed = RunStatisticsSystemCallCase(context, process_id);
+
+                gauge.Visit([](const system_stats::UserStatistic &stat) { stat.SetValue(0); });
+            }
+
+            //  Without the write above the process gives up after 10 s on its own.
+
+            auto task = context.task_manager_.FindTask(forked.Value());
+
+            if (task.has_value())
+            {
+                task.value().get().Join();
+            }
+
+            if (!passed)
+            {
+                return false;
+            }
+
+            //  The Reaper releases the task after its zombie grace period, then frees the region once
+            //      no reader is in the database.  The handles outlive the statistics and must say so.
+            //      Every user task has been joined by now, so every region must go.
+
+            bool removed = false;
+            bool freed = false;
+
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && !(removed && freed); poll++)
+            {
+                removed = !gauge.Exists() && !counter.Exists() && !stamp.Exists();
+                freed = (system_stats::UserStatisticsRegion::LiveRegions() == 0);
+
+                if (!(removed && freed))
+                {
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                }
+            }
+
+            if (!removed || !freed || gauge.Get().Successful())
+            {
+                context << minstd::format(buffer, "FAIL: user statistics after exit -- removed {}, {} region(s) still live\n",
+                                          removed, system_stats::UserStatisticsRegion::LiveRegions());
+                return false;
+            }
+
+            context << "  user statistics removed and freed after the task was reaped\n";
+
+            return true;
+        }
     }
 
     void CLITestUserTaskCommand::ProcessToken(CommandParser &parser,
@@ -1365,6 +1581,7 @@ namespace cli::commands
             {"case 9 (guard gap)",         9, "KILLED -- translation fault in the heap/stack guard gap"},
             {"case 10 (deep stack)",      10, "touches 1MB of stack, 256 pages faulted in"},
             {"case 11 (kernel 1st touch)",11, "sc_Write's copy faults in an untouched heap page"},
+            {"case 14 (not a service)",   14, "its statistics are private data, never registered"},
         };
 
         uint32_t failures = 0;
@@ -1411,6 +1628,13 @@ namespace cli::commands
                     task.value().get().Join();
                 }
             }
+        }
+
+        context << "-- case 12 (user statistics)\n";
+
+        if (!CheckUserStatistics(context))
+        {
+            failures++;
         }
 
         if (failures == 0)

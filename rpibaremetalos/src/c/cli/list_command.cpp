@@ -10,6 +10,7 @@
 
 #include "filesystem/filesystems.h"
 #include "task/tasks.h"
+#include "services/stats_db/stats_db.h"
 
 #include <format>
 #include <list>
@@ -23,6 +24,7 @@ namespace cli::commands
     const CLIListDirectoryCommand CLIListDirectoryCommand::instance;
     const CLIListFilesystemsCommand CLIListFilesystemsCommand::instance;
     const CLIListTasksCommand CLIListTasksCommand::instance;
+    const CLIListStatisticsCommand CLIListStatisticsCommand::instance;
 
     //  Now for the parent command
 
@@ -187,5 +189,46 @@ namespace cli::commands
         };
 
         context.task_manager_.VisitTaskList(callback);
+    }
+
+    void CLIListStatisticsCommand::ProcessToken(CommandParser &parser,
+                                                CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        if (parser.NextToken() != nullptr)
+        {
+            context.output_stream_ << "list statistics takes no arguments\n";
+            return;
+        }
+
+        const system_stats::SystemStatisticsDB &db = system_stats::GetSystemStatisticsDB();
+
+        context.output_stream_ << minstd::format(buffer, "Statistics: {} registered\n", db.Size());
+        context.output_stream_ << minstd::format(buffer, "{:>7} {:>5} {:<9} {:<57} {}\n", "process", "id", "kind", "group.name", "value");
+
+        //  Printed from inside ForEach(): this is a diagnostic, and the only cost is that a service's statistics
+        //      removed meanwhile are freed once the listing ends instead of at once.
+
+        db.ForEach([&](const system_stats::SystemStatistic &stat)
+        {
+            minstd::fixed_string<system_stats::SystemStatistic::GROUP_MAX + system_stats::SystemStatistic::NAME_MAX + 2> group_and_name(stat.Group());
+
+            group_and_name += ".";
+            group_and_name += stat.Name();
+
+            int64_t value = 0;
+
+            if (stat.NumericValue(value))
+            {
+                context.output_stream_ << minstd::format(buffer, "{:>7} {:>5} {:<9} {:<57} {}\n", stat.ProcessId(), stat.id(), system_stats::ToString(stat.Kind()), group_and_name, value);
+            }
+            else
+            {
+                context.output_stream_ << minstd::format(buffer, "{:>7} {:>5} {:<9} {:<57} -\n", stat.ProcessId(), stat.id(), system_stats::ToString(stat.Kind()), group_and_name);
+            }
+
+            return system_stats::SystemStatisticsDB::VisitAction::CONTINUE;
+        });
     }
 } // namespace cli

@@ -28,6 +28,24 @@ sc_Yield:
 	svc #0
 	ret
 
+.globl sc_FindStatistic
+sc_FindStatistic:
+	mov w8, #SYS_FIND_STATISTIC_NUMBER
+	svc #0
+	ret
+
+.globl sc_ReadStatistic
+sc_ReadStatistic:
+	mov w8, #SYS_READ_STATISTIC_NUMBER
+	svc #0
+	ret
+
+.globl sc_FindProcess
+sc_FindProcess:
+	mov w8, #SYS_FIND_PROCESS_NUMBER
+	svc #0
+	ret
+
 .globl sc_CloneTask
 sc_CloneTask:
 	//	Save arguments for the child in scratch registers.  We use them in thread_start below.

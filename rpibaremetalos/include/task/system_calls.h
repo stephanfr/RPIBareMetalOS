@@ -4,32 +4,19 @@
 
 #pragma once
 
-#define SYS_WRITE_NUMBER    0 
-#define SYS_MALLOC_NUMBER   1 	
-#define SYS_CLONE_NUMBER    2 	
-#define SYS_EXIT_NUMBER     3
-#define SYS_YIELD_NUMBER    4
+//  The kernel's view of the system calls: the user ABI (uapi/system_calls.h) plus the kernel-only clone call.
 
-#define NUMBER_OF_SYSTEM_CALLS 5
+#include "uapi/system_calls.h"
 
 #define SYS_CLONE_FAILURE   -1
 #define SYS_CLONE_SUCCESS   1
 #define SYS_CLONE_NEW_TASK  0x0ccc
 
-#ifndef __ASSEMBLER__
-
-#include <stddef.h>
-#include <stdint.h>
+#if defined(__cplusplus) && !defined(__ASSEMBLER__)
 
 #include "services/uuid.h"
 #include "task/task_errors.h"
 
-
 extern "C" int sc_CloneTask(const char* name, unsigned long fn, unsigned long arg, unsigned long stack, task::TaskResultCodes &result_code, UUID &result);
-extern "C" unsigned long sc_Malloc(unsigned long block_size);
-extern "C" void sc_Exit();
-extern "C" void sc_Yield();
-
-extern "C" void sc_Write(const char * buf);
 
 #endif

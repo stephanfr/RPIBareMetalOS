@@ -7,6 +7,8 @@
 #include "task/task_impl.h"
 #include "task/task_manager_impl.h"
 
+#include "task/user_binary_loader.h"
+
 #include "sysregs.h"
 
 namespace task
@@ -81,6 +83,16 @@ namespace task
         return allocated_at;
     }
 
+    ValueResult<TaskResultCodes, uint64_t> TaskImpl::LoadBinary(const minstd::string &path, AddressSpace &address_space)
+    {
+        return LoadUserBinary(path, address_space);
+    }
+
+    void TaskImpl::Destroy()
+    {
+        dynamic_delete(this);
+    }
+
     bool TaskImpl::FaultInUserPage(uint64_t user_va)
     {
         return (address_space_ != nullptr) && address_space_->FaultInUserPage(user_va, user_heap_break_);
@@ -102,7 +114,7 @@ namespace task
             return Result::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK;
         }
 
-        auto entry = LoadUserBinary(binary_path_, *address_space_);
+        auto entry = LoadBinary(binary_path_, *address_space_);
 
         if (!entry.Successful())
         {
@@ -122,7 +134,7 @@ namespace task
         regs.tpidr_el1 = (unsigned long)this;
         regs.tpidrro_el0 = user_visible_id_;                    //  never a kernel pointer
 
-        type_ = Task::TaskType::USER_TASK;
+        type_ = UserSpaceType();
 
         //  This task is already the running task on this core; the scheduler installed
         //      the empty TTBR0 for it.  Install the real one now, or the eret to EL0

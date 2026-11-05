@@ -74,6 +74,11 @@ namespace task
         void VisitTaskList(TaskListVisitorCallback callback) const override;
         minstd::optional<minstd::reference_wrapper<Task>> FindTask(const UUID &task_id) override;
 
+        //  The lowest process id above after_process_id of a task loaded from binary_path that has not exited, or
+        //      0 if there is none: 0 is never a user task's id.
+
+        uint32_t FindUserProcess(const char *binary_path, uint32_t after_process_id) const;
+
         void PreemptiveSchedule(void);
 
         void Schedule(void);
@@ -81,6 +86,7 @@ namespace task
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
         ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
+        ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
 
         ValueResult<TaskResultCodes, UUID> CloneTask(const TaskDefinition& task_definition, MemoryPagePointer stack);
 
@@ -120,7 +126,7 @@ namespace task
 
         static minstd::optional<minstd::reference_wrapper<TaskManagerImpl>> instance_;
 
-        static inline minstd::atomic<uint32_t> next_user_visible_id{1};                //  Starts at 1: 0 is reserved for "not a user task" (SetCoreMainTaskContext).
+        static inline minstd::atomic<uint32_t> next_user_visible_id{1};                //  Starts at 1: 0 is reserved for "not a user task" (SetCoreMainTaskContext), and is the kernel's process id for statistics.
 
         const uint32_t number_of_cores_;
 
@@ -177,6 +183,7 @@ namespace task
                                                                    void (*wrapper)(Runnable *),
                                                                    const TaskDefinition& task_definition,
                                                                    const minstd::string *user_binary_path = nullptr,
-                                                                   unsigned long user_arg = 0 );
+                                                                   unsigned long user_arg = 0,
+                                                                   bool service = false );
     };
 } // namespace task

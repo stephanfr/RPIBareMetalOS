@@ -21,6 +21,8 @@ CPP_SRC :=  src/c/cli/command_parser.cpp \
 			src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
+			src/c/services/stats_db/stats_db.cpp \
+			src/c/services/stats_db/user_statistics.cpp \
 			src/c/services/uuid.cpp \
 			src/c/utility/mac_address.cpp \
 			src/c/utility/regex.cpp
@@ -37,7 +39,7 @@ TEST_EXE := $(TEST_OBJ_DIR)/cpputest_main.exe
 
 INCLUDE_DIRS := -Iinclude -I../deps/fat32filesystem/include -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include
 LDFLAGS += -L../deps/fat32filesystem/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalclib/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
-LDLIBS = -lCppUTest -lCppUTestExt -lfat32filesystem -lminimalclib -lminimalstdio -lminimalstdlib
+LDLIBS = -lCppUTest -lCppUTestExt -lfat32filesystem -lminimalclib -lminimalstdio -lminimalstdlib -lpthread
 
 CDEFINES += -D__NO_LOGGING__
 

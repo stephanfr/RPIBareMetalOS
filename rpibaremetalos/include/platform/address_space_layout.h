@@ -8,6 +8,7 @@
 
 #include "os_config.h"
 #include "os_memory_config.h"
+#include "uapi/user_address_space.h"
 
 //  TCR_EL1.T1SZ is 25 (TCREL1VAL in mmu.S): TTBR1_EL1 translates the top
 //      2^(64-25) = 512GB of VA space, 0xFFFFFF80_00000000 upward.  The kernel is a
@@ -23,29 +24,30 @@ constexpr uint64_t KERNEL_VA_BASE = S_KERNEL_VA_BASE;
 //  User address space (per task, TTBR0, T0SZ=25).
 //
 //  The window sits at 256GB (L1 index 256).  A task's L1 starts all zero, so nothing
-//      requires it to sit that high; moving it lower is possible, but user.ld, hello.c and
-//      the tests encode the address.
+//      requires it to sit that high; moving it lower is possible, but the tests
+//      encode the address.  The geometry is part of the user ABI, so its values are set in
+//      uapi/user_address_space.h; these are the kernel's names for them.
 
-constexpr uint64_t USER_SPACE_BASE = 0x0000004000000000ULL;                                                         //  256GB, L1 index 256
+constexpr uint64_t USER_SPACE_BASE = S_USER_SPACE_BASE;                                                             //  256GB, L1 index 256
 
 //  The window is 64GB: it SPANS L1 SLOTS 256..319 ([256GB, 320GB)).  It is a virtual budget
 //      for everything the task can address; with demand paging, untouched VA costs nothing.
-//      Anything up to slot 511 (a 256GB window) needs only a new TOTAL_USER_SPACE_IN_MB.
+//      Anything up to slot 511 (a 256GB window) needs only a new S_USER_SPACE_SIZE.
 
 constexpr uint64_t USER_SPACE_L1_INDEX_START = USER_SPACE_BASE >> 30;                                               //  256
-constexpr uint64_t USER_SPACE_TOP            = USER_SPACE_BASE + ((uint64_t)TOTAL_USER_SPACE_IN_MB * BYTES_1M);     //  base + 64GB = 320GB
+constexpr uint64_t USER_SPACE_TOP            = S_USER_SPACE_TOP;                                                    //  base + 64GB = 320GB
 constexpr uint64_t USER_SPACE_L1_INDEX_END   = (USER_SPACE_TOP - 1) >> 30;                                          //  319
 
 //  Regions, low to high.  image is fixed (the flat binary links here); heap grows UP to
 //      heap_top; the guard gap is never mapped (a wild pointer faults instead of clobbering);
 //      the stack grows DOWN from stack_top.
 
-constexpr uint64_t USER_IMAGE_BASE   = USER_SPACE_BASE + ((uint64_t)USER_IMAGE_OFFSET_MB * BYTES_1M);               //  +4MB    header+text RO+X, then data+bss RW+XN
-constexpr uint64_t USER_HEAP_BASE    = USER_SPACE_BASE + ((uint64_t)USER_HEAP_OFFSET_MB * BYTES_1M);                //  +256MB  RW+XN, grows up
-constexpr uint64_t USER_STACK_TOP    = USER_SPACE_TOP;                                                              //  top of window
-constexpr uint64_t USER_STACK_BOTTOM = USER_STACK_TOP - ((uint64_t)USER_MAX_STACK_SIZE_MB * BYTES_1M);              //  stack grows down to here
-constexpr uint64_t USER_GUARD_BOTTOM = USER_STACK_BOTTOM - ((uint64_t)USER_GUARD_SIZE_MB * BYTES_1M);               //  [guard_bottom, stack_bottom) unmapped
-constexpr uint64_t USER_HEAP_TOP     = USER_GUARD_BOTTOM;                                                           //  exclusive heap ceiling
+constexpr uint64_t USER_IMAGE_BASE   = S_USER_IMAGE_BASE;                                                           //  +4MB    header+text RO+X, then data+bss RW+XN
+constexpr uint64_t USER_HEAP_BASE    = S_USER_HEAP_BASE;                                                            //  +256MB  RW+XN, grows up
+constexpr uint64_t USER_STACK_TOP    = S_USER_STACK_TOP;                                                            //  top of window
+constexpr uint64_t USER_STACK_BOTTOM = S_USER_STACK_BOTTOM;                                                         //  stack grows down to here
+constexpr uint64_t USER_GUARD_BOTTOM = S_USER_GUARD_BOTTOM;                                                         //  [guard_bottom, stack_bottom) unmapped
+constexpr uint64_t USER_HEAP_TOP     = S_USER_HEAP_TOP;                                                             //  exclusive heap ceiling
 
 static_assert(USER_IMAGE_BASE < USER_HEAP_BASE,        "image must sit below the heap");
 static_assert(USER_HEAP_BASE < USER_HEAP_TOP,          "heap region must be non-empty");
