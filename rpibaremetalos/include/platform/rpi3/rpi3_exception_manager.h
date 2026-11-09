@@ -44,6 +44,7 @@ inline BCM2837ARMLocalInterruptSources operator&(uint32_t lhs, BCM2837ARMLocalIn
 
 typedef enum class BCM2837ARMCoreLocalPeripheralRegisterOffsets : uint32_t
 {
+    GPU_INTERRUPT_ROUTING_OFFSET = 0x0C,
     CORE_TIMER_INTERRUPT_CONTROL_OFFSET = 0x40,
     MAILBOX_INTERRUPT_CONTROL_OFFSET = 0x50,
     INTERRUPT_SOURCE_OFFSET = 0x60,
@@ -68,13 +69,16 @@ typedef enum class BCM2837ARMCInterruptRequestRegisters
 //
 //	System Timers 0 and 2 are reserved for the GPU on the 2837
 //
+//  Bit masks in the ARMC pending and enable registers: the system timers in bank 1, the PL011 (GPU IRQ 57)
+//      in bank 2.  Read from the bank registers directly, not the basic-pending shortcut bits.
+//
 
-typedef enum class BCM2837Interrupts : int32_t
+typedef enum class BCM2837Interrupts : uint32_t
 {
-    NO_SUCH_INTERRUPT = -1,
+    SYSTEM_TIMER_1 = 1u << 1,
+    SYSTEM_TIMER_3 = 1u << 3,
 
-    SYSTEM_TIMER_1 = 2,
-    SYSTEM_TIMER_3 = 8
+    UART0 = 1u << (57 - 32),
 } BCM2837Interrupts;
 
 class BCM2837ExceptionManager : public ExceptionManager
@@ -155,42 +159,6 @@ private:
         default:
             return -1;
         }
-    }
-
-    BCM2837Interrupts GetBCM2837InterruptType(Interrupts interrupt)
-    {
-        switch (interrupt)
-        {
-        case Interrupts::SYSTEM_TIMER_1:
-            return BCM2837Interrupts::SYSTEM_TIMER_1;
-
-        case Interrupts::SYSTEM_TIMER_3:
-            return BCM2837Interrupts::SYSTEM_TIMER_3;
-
-        default:
-            return BCM2837Interrupts::NO_SUCH_INTERRUPT;
-        }
-
-        return BCM2837Interrupts::NO_SUCH_INTERRUPT;
-    }
-
-    Interrupts AsInterrupt(BCM2837Interrupts interrupt)
-    {
-        switch (interrupt)
-        {
-        case BCM2837Interrupts::SYSTEM_TIMER_1:
-            return Interrupts::SYSTEM_TIMER_1;
-
-        case BCM2837Interrupts::SYSTEM_TIMER_3:
-            return Interrupts::SYSTEM_TIMER_3;
-
-        default:
-            LogError("No such interrupt: %d\n", interrupt);
-
-            return Interrupts::NO_SUCH_INTERRUPT;
-        }
-
-        return Interrupts::NO_SUCH_INTERRUPT;
     }
 
     bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) override
@@ -286,6 +254,12 @@ private:
 
         case Interrupts::SYSTEM_TIMER_3:
             SetRegister(BCM2837ARMCInterruptRequestRegisters::ENABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_3);
+            return true;
+
+        //  GPU interrupts all reach core 0 (Initialize()), whatever on_cores asks for.
+
+        case Interrupts::UART0:
+            SetRegister(BCM2837ARMCInterruptRequestRegisters::ENABLE_IRQS_2, (uint32_t)BCM2837Interrupts::UART0);
             return true;
         }
 
@@ -388,6 +362,10 @@ private:
 
         case Interrupts::SYSTEM_TIMER_3:
             SetRegister(BCM2837ARMCInterruptRequestRegisters::DISABLE_IRQS_1, (uint32_t)BCM2837Interrupts::SYSTEM_TIMER_3);
+            return true;
+
+        case Interrupts::UART0:
+            SetRegister(BCM2837ARMCInterruptRequestRegisters::DISABLE_IRQS_2, (uint32_t)BCM2837Interrupts::UART0);
             return true;
         }
 

@@ -29,6 +29,14 @@ public:
         return OSEntityTypes::CHARACTER_DEVICE;
     }
 
+    //  Stops polling for input, so a reader with nothing to read blocks instead of spinning.  False if the device
+    //      cannot.  Once, before any task reads.
+
+    virtual bool EnableInterruptDrivenInput()
+    {
+        return false;
+    }
+
     CharacterIODevice &operator <<(const char *str)
     {
         while (*str)

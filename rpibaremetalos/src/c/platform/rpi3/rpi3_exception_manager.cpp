@@ -17,6 +17,10 @@ bool BCM2837ExceptionManager::Initialize()
     *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + 8) = 0x00000001 << IPI_MAILBOX_ID;
     *reinterpret_cast<uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + 12) = 0x00000001 << IPI_MAILBOX_ID;
 
+    //  GPU IRQs and FIQs to core 0.  This is the reset value; set it anyway rather than trust the firmware.
+
+    *reinterpret_cast<volatile uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::GPU_INTERRUPT_ROUTING_OFFSET) = 0;
+
     return true;
 }
 
@@ -68,15 +72,35 @@ void BCM2837ExceptionManager::HandleInterrupt()
     }
     else if ((interrupt_source & BCM2837ARMLocalInterruptSources::GPU_INTERRUPT) != BCM2837ARMLocalInterruptSources::NONE)
     {
-        Interrupts interrupt = AsInterrupt(static_cast<BCM2837Interrupts>(GetRegister(BCM2837ARMCInterruptRequestRegisters::REQUEST_PENDING_1)));
+        //  Several GPU interrupts may be pending at once: dispatch each.
 
-        if (interrupt == Interrupts::NO_SUCH_INTERRUPT)
+        const uint32_t pending_1 = GetRegister(BCM2837ARMCInterruptRequestRegisters::REQUEST_PENDING_1);
+        const uint32_t pending_2 = GetRegister(BCM2837ARMCInterruptRequestRegisters::REQUEST_PENDING_2);
+
+        bool dispatched_any = false;
+
+        auto dispatch_if_pending = [&](uint32_t pending, BCM2837Interrupts bit, Interrupts interrupt)
         {
-            LogWarning("Unhandled interrupt source: %d\n", interrupt_source);
-        }
-        else if (!DispatchInterruptType(interrupt, core_task_switch_isr))
+            if ((pending & static_cast<uint32_t>(bit)) == 0)
+            {
+                return;
+            }
+
+            if (!DispatchInterruptType(interrupt, core_task_switch_isr))
+            {
+                LogError("No ISRs found for Interrupt: %s\n", ToString(interrupt));
+            }
+
+            dispatched_any = true;
+        };
+
+        dispatch_if_pending(pending_1, BCM2837Interrupts::SYSTEM_TIMER_1, Interrupts::SYSTEM_TIMER_1);
+        dispatch_if_pending(pending_1, BCM2837Interrupts::SYSTEM_TIMER_3, Interrupts::SYSTEM_TIMER_3);
+        dispatch_if_pending(pending_2, BCM2837Interrupts::UART0, Interrupts::UART0);
+
+        if (!dispatched_any)
         {
-            LogError("No ISRs found for Interrupt: %s\n", ToString(interrupt));
+            LogWarning("Unhandled GPU interrupt: pending 1 %08x, pending 2 %08x\n", pending_1, pending_2);
         }
     }
 

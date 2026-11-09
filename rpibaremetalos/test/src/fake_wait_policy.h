@@ -4,7 +4,7 @@
 
 #pragma once
 
-//  A single-threaded stand-in for the scheduler, for testing BasicWaitQueue and BasicMutex.  Concurrency is
+//  A single-threaded stand-in for the scheduler, for testing BasicWaitQueue, BasicMutex and BasicIODoorbell.  Concurrency is
 //      simulated by hooks: when a task blocks, its on_block hook runs "while it is blocked", typically switching
 //      FakeWaitPolicy::current to another task and acting as it.  When the hook returns, the blocked task resumes
 //      with whatever status the hook left it: WOKEN if something woke it, TIMED_OUT if it had a deadline and
@@ -38,7 +38,8 @@ namespace fake_wait
         uint64_t deadline_ = 0;
         uint32_t blocks_ = 0;
 
-        BlockHook on_block_ = nullptr; //  one-shot
+        BlockHook on_block_ = nullptr;   //  one-shot
+        BlockHook on_prepare_ = nullptr; //  one-shot; runs as PrepareToBlock() returns
     };
 
     class FakeLock
@@ -119,6 +120,12 @@ namespace fake_wait
             task.status_ = task::WaitStatus::WAITING;
             task.reason_ = reason;
             task.deadline_ = deadline_ticks;
+
+            if (BlockHook hook = task.on_prepare_)
+            {
+                task.on_prepare_ = nullptr;
+                hook(task);
+            }
         }
 
         static task::WaitStatus CommitBlock(FakeTask &task)

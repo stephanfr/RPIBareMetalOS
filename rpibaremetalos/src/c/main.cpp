@@ -61,6 +61,16 @@ extern "C" void kernel_main()
     DeadlineTimer::Disarm();
     GetExceptionManager().AddInterruptServiceRoutine(&deadlineTimerISR, CoreList(CoreList::CoreID::ALL_CORES));
 
+    //  This registers an ISR too.  The ISR map is not locked against concurrent dispatch, so every registration
+    //      happens here, before interrupts flow.
+
+    auto console = GetOSEntityRegistry().GetEntityByAlias<CharacterIODevice>("CONSOLE");
+
+    if (console.Successful() && console->EnableInterruptDrivenInput())
+    {
+        printf("Console input is interrupt driven\n");
+    }
+
     printf("ISRs started\n");
 
     //  Initialize the task manager

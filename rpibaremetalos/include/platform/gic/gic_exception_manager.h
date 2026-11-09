@@ -11,12 +11,28 @@
 
 #include <devices/log.h>
 
+typedef enum class InterruptTrigger : uint32_t
+{
+    LEVEL = 0,
+    EDGE,
+} InterruptTrigger;
+
+//  A board's peripheral interrupt: the GIC INTID it arrives on and how the GIC must latch it.
+
+struct GICPeripheralInterrupt
+{
+    Interrupts interrupt;
+    uint32_t intid;
+    InterruptTrigger trigger;
+};
+
 //
 //  Shared GICv2 (GIC-400) exception manager base for RPi4 and RPi5.
 //
-//  Subclasses supply GICD and GICC base addresses and the system-timer SPI
-//  base INTID via the protected constructor.  All GIC register access, IPI
-//  dispatch, and interrupt routing logic lives here once.
+//  Subclasses supply GICD and GICC base addresses, the system-timer SPI
+//  base INTID and their peripheral interrupt table via the protected
+//  constructor.  All GIC register access, IPI dispatch, and interrupt
+//  routing logic lives here once.
 //
 //  IPIs use SGIs (INTIDs 0-15).  The InterprocessorInterrupts enum value
 //  doubles as the SGI INTID: HALT=1, CORE_TASK_SWITCH=2.
@@ -62,7 +78,12 @@ public:
         {
             GICDBytes(GICD_ITARGETSR)[intid] = static_cast<uint8_t>(on_cores.Cores() & 0xFF);
         }
-        
+
+        if (const GICPeripheralInterrupt *peripheral = FindPeripheral(interrupt_to_enable))
+        {
+            ConfigureTrigger(peripheral->intid, peripheral->trigger);
+        }
+
         GICD(GICD_ISENABLER + ((intid / 32) * 4)) = (1u << (intid % 32));
 
         return true;
@@ -136,8 +157,18 @@ public:
     }
 
 protected:
-    gic_exception_manager(uint64_t gicd_base, uint64_t gicc_base, uint32_t system_timer_spi_base)
-        : gicd_base_(gicd_base), gicc_base_(gicc_base), system_timer_spi_base_(system_timer_spi_base)
+    //  'peripherals' must outlive the exception manager.
+
+    gic_exception_manager(uint64_t gicd_base,
+                          uint64_t gicc_base,
+                          uint32_t system_timer_spi_base,
+                          const GICPeripheralInterrupt *peripherals,
+                          uint32_t peripheral_count)
+        : gicd_base_(gicd_base),
+          gicc_base_(gicc_base),
+          system_timer_spi_base_(system_timer_spi_base),
+          peripherals_(peripherals),
+          peripheral_count_(peripheral_count)
     {
     }
 
@@ -146,12 +177,16 @@ private:
     uint64_t gicc_base_;
     uint32_t system_timer_spi_base_;
 
+    const GICPeripheralInterrupt *peripherals_;
+    uint32_t peripheral_count_;
+
     //  GIC distributor register offsets
 
     static constexpr uint32_t GICD_IPRIORITYR                 = 0x400;
     static constexpr uint32_t GICD_ITARGETSR                  = 0x800;
     static constexpr uint32_t GICD_ISENABLER                  = 0x100;
     static constexpr uint32_t GICD_ICENABLER                  = 0x180;
+    static constexpr uint32_t GICD_ICFGR                      = 0xC00;
     static constexpr uint32_t GICD_SGIR                       = 0xF00;
     static constexpr uint32_t GICD_SGIR_CPU_TARGET_LIST_SHIFT = 16;
 
@@ -185,8 +220,37 @@ private:
         return reinterpret_cast<volatile uint8_t *>(PhysicalToKernelVirtualAddress(gicd_base_ + offset));
     }
 
+    const GICPeripheralInterrupt *FindPeripheral(Interrupts interrupt) const
+    {
+        for (uint32_t i = 0; i < peripheral_count_; i++)
+        {
+            if (peripherals_[i].interrupt == interrupt)
+            {
+                return &peripherals_[i];
+            }
+        }
+
+        return nullptr;
+    }
+
+    //  Two bits per INTID; the upper one selects edge.  Only while the INTID is disabled: changing the
+    //      configuration of an enabled interrupt is UNPREDICTABLE on a GICv2.
+
+    void ConfigureTrigger(uint32_t intid, InterruptTrigger trigger)
+    {
+        volatile uint32_t &icfgr = GICD(GICD_ICFGR + ((intid / 16) * 4));
+        const uint32_t edge_bit = 2u << ((intid % 16) * 2);
+
+        icfgr = (trigger == InterruptTrigger::EDGE) ? (icfgr | edge_bit) : (icfgr & ~edge_bit);
+    }
+
     int32_t InterruptToINTID(Interrupts interrupt)
     {
+        if (const GICPeripheralInterrupt *peripheral = FindPeripheral(interrupt))
+        {
+            return static_cast<int32_t>(peripheral->intid);
+        }
+
         switch (interrupt)
         {
         case Interrupts::CORE_HALT:
@@ -239,6 +303,14 @@ private:
         {
             return static_cast<Interrupts>(static_cast<uint32_t>(Interrupts::SYSTEM_TIMER_0) +
                                            (intid - system_timer_spi_base_));
+        }
+
+        for (uint32_t i = 0; i < peripheral_count_; i++)
+        {
+            if (peripherals_[i].intid == intid)
+            {
+                return peripherals_[i].interrupt;
+            }
         }
 
         return Interrupts::NO_SUCH_INTERRUPT;

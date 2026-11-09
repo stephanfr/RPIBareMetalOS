@@ -48,6 +48,11 @@ public:
         return PL011UARTBase::getc();
     }
 
+    bool EnableInterruptDrivenInput() override
+    {
+        return EnableRxInterrupt(Interrupts::UART0);
+    }
+
     /**
      * @brief Initialize UART0 on RPi4.
      * 

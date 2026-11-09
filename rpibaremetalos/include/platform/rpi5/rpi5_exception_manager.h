@@ -19,7 +19,7 @@ class RPI5ExceptionManager : public gic_exception_manager
 {
 public:
     RPI5ExceptionManager()
-        : gic_exception_manager(GICD_BASE, GICC_BASE, SYSTEM_TIMER_SPI_BASE_INTID)
+        : gic_exception_manager(GICD_BASE, GICC_BASE, SYSTEM_TIMER_SPI_BASE_INTID, nullptr, 0)
     {
     }
 

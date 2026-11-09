@@ -12,19 +12,24 @@
 //  GIC-400 distributor base: 0xFF841000
 //  GIC-400 CPU interface base: 0xFF842000
 //  System timer SPIs map to GIC INTIDs 96-99 (same as RPi5).
+//  Every PL011 shares VC IRQ 57 = SPI 121 = INTID 153, so their ISRs check their own MIS.
 //
 
 class BCM2711ExceptionManager : public gic_exception_manager
 {
 public:
     BCM2711ExceptionManager()
-        : gic_exception_manager(GICD_BASE, GICC_BASE, SYSTEM_TIMER_SPI_BASE_INTID)
+        : gic_exception_manager(GICD_BASE, GICC_BASE, SYSTEM_TIMER_SPI_BASE_INTID, PERIPHERALS, PERIPHERAL_COUNT)
     {
     }
-
 
 private:
     static constexpr uint64_t GICD_BASE                = 0xFF841000;
     static constexpr uint64_t GICC_BASE                = 0xFF842000;
     static constexpr uint32_t SYSTEM_TIMER_SPI_BASE_INTID = 96;
+
+    static constexpr uint32_t PERIPHERAL_COUNT = 1;
+    static constexpr GICPeripheralInterrupt PERIPHERALS[PERIPHERAL_COUNT] = {
+        {Interrupts::UART0, 153, InterruptTrigger::LEVEL},
+    };
 };
