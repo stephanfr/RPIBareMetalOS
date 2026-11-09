@@ -201,6 +201,15 @@ make qemu-regression-rpi4   # RPi4 only (raspi4b, 2GB)
 make qemu-cli-soak          # long-running CLI soak (RPi3)
 ```
 
+The same soak runs on a board over its serial console (57600 baud, as in `cmdline.txt`).  It
+does not build or deploy: copy `image/` to the SD card first, boot to the CLI, then:
+
+```bash
+make hw-cli-soak SERIAL_PORT=/dev/ttyUSB0                    # one hour; console saved to soak-<time>.log
+make hw-cli-soak SOAK_EXTRA_ARGS=--wait-for-boot             # start first, then power the board on
+make hw-cli-soak SOAK_DURATION_SECONDS=600 SOAK_LOG=run.log
+```
+
 QEMU must be installed (`qemu-system-aarch64`). The dev container installs it
 automatically via `postCreateCommand`.
 
