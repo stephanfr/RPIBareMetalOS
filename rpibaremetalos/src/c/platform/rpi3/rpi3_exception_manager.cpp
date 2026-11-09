@@ -76,11 +76,7 @@ void BCM2837ExceptionManager::HandleInterrupt()
         }
     }
 
-    if (core_task_switch_isr != nullptr)
-    {
-        LogDebug1("Executing Core Task Switch ISR\n");
-        core_task_switch_isr->HandleInterrupt();
-    }
+    ExitInterrupt(core_task_switch_isr);
 
     EnableIRQs();
 }

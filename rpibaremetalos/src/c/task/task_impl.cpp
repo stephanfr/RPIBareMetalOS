@@ -27,6 +27,21 @@ namespace task
         return *context;
     }
 
+    void TaskImpl::PreemptionPoint()
+    {
+        if ((preempt_count_ != 0) || InInterrupt() || !AreIRQsEnabled())
+        {
+            return;
+        }
+
+        if (TaskManagerImpl::IsReschedPending(GetCoreID()))
+        {
+            DisableIRQs();
+            TaskManagerImpl::Instance().SwitchToNextTask(SwitchReason::PREEMPT);
+            EnableIRQs();
+        }
+    }
+
     TaskImpl::FullCPUState &TaskImpl::AllocateTaskInitialFullCPUState( MemoryPagePointer initial_stack )
     {
         //  This reserves space for a complete KernelEntry stack frame at the task top of stack.

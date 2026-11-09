@@ -14,6 +14,7 @@ namespace system_stats
     //
     //      task_running / task_zombies   move in TaskImpl::Exit(), TaskExecutionContext::SwitchTasks()
     //                                    and TaskManagerImpl::ReapZombies()
+    //      task_waiting / task_waiting_io  rise when a task blocks, fall when its core commits the wake
     //      task_dropped_zombies          moves in TaskManagerImpl::NotifyTaskDelisted()
     //      scheduler_missed_interrupts   moves in both scheduler clocks (scheduler_clock.cpp, system_timer.cpp)
     //
@@ -23,6 +24,8 @@ namespace system_stats
 
     extern KernelGaugeStatistic<KernelStatisticId::TASK_RUNNING> task_running;
     extern KernelGaugeStatistic<KernelStatisticId::TASK_ZOMBIES> task_zombies;
+    extern KernelGaugeStatistic<KernelStatisticId::TASK_WAITING> task_waiting;
+    extern KernelGaugeStatistic<KernelStatisticId::TASK_WAITING_IO> task_waiting_io;
     extern KernelCounterStatistic<KernelStatisticId::TASK_DROPPED_ZOMBIES> task_dropped_zombies;
     extern KernelCounterStatistic<KernelStatisticId::SCHEDULER_MISSED_INTERRUPTS> scheduler_missed_interrupts;
 } // namespace system_stats

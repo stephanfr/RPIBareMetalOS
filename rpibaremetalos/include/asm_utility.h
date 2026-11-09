@@ -45,6 +45,13 @@ extern "C"
 #define EnableIRQs() asm volatile("msr daifclr, #2")
 #define DisableIRQs() asm volatile("msr daifset, #2")
 
+inline bool AreIRQsEnabled()
+{
+    uint64_t daif;
+    asm volatile("mrs %0, daif" : "=r"(daif));
+    return (daif & (1UL << 7)) == 0;
+}
+
 //  Inline ASM functions
 
 inline uint32_t GetCoreID()

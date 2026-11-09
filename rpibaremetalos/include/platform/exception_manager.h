@@ -8,6 +8,8 @@
 #include <map>
 #include <memory>
 
+#include "asm_config.h"
+#include "asm_utility.h"
 #include "heaps.h"
 #include "processor_cores.h"
 
@@ -36,6 +38,19 @@ public:
     virtual void HandleInterrupt() = 0;
 
     void HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far);
+
+    //  Interrupt nesting depth per core, touched only by the owning core.  Static so it can be read before
+    //      the exception manager exists.
+
+    static void EnterInterrupt(uint32_t core)
+    {
+        irq_depth_[core]++;
+    }
+
+    static bool InInterrupt(uint32_t core)
+    {
+        return irq_depth_[core] != 0;
+    }
 
 protected:
     using ISRPointerList = minstd::forward_list<InterruptServiceRoutine *>;
@@ -97,6 +112,11 @@ protected:
 
     bool DispatchInterruptType(Interrupts interrupt, InterruptServiceRoutine *&core_task_switch_isr);
 
+    //  The last step of every HandleInterrupt(), after EOI: leaves interrupt context, then runs the deferred
+    //      core task switch ISR, or switches if a wake from an ISR on this core asked for it.  May not return.
+
+    void ExitInterrupt(InterruptServiceRoutine *core_task_switch_isr);
+
     //  A raw IPI mailbox payload may be the bitwise OR of multiple pending
     //      IPI values, since the mailbox register hardware accumulates
     //      every value written to it until it is explicitly cleared (e.g.
@@ -127,6 +147,14 @@ protected:
 
         return dispatched_any;
     }
+
+private:
+    static inline uint32_t irq_depth_[MAX_CORES] = {};
 };
 
 ExceptionManager &GetExceptionManager();
+
+inline bool InInterrupt()
+{
+    return ExceptionManager::InInterrupt(GetCoreID());
+}

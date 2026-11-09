@@ -188,7 +188,7 @@ namespace syscall
     void Yield()
     {
         DisableIRQs();
-        task::TaskManagerImpl::Instance().SwitchToNextTask(true);
+        task::TaskManagerImpl::Instance().SwitchToNextTask(task::SwitchReason::YIELD);
         EnableIRQs();
     }
 }

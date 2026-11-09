@@ -112,6 +112,7 @@ public:
 
         if (intid == GIC_SPURIOUS_INTID)
         {
+            ExitInterrupt(nullptr);
             return;
         }
 
@@ -131,12 +132,7 @@ public:
 
         GICC(GICC_EOIR) = iar;
 
-        //  A deferred core task switch ISR may never return -- run it last.
-
-        if (core_task_switch_isr != nullptr)
-        {
-            core_task_switch_isr->HandleInterrupt();
-        }
+        ExitInterrupt(core_task_switch_isr);
     }
 
 protected:

@@ -8,6 +8,17 @@
 
 namespace task
 {
+    //  Why SwitchTasks() was called.  Only TICK charges the running task's timeslice; YIELD gives up the rest
+    //      of it; BLOCK keeps it.
+
+    typedef enum class SwitchReason : uint32_t
+    {
+        TICK = 0,
+        PREEMPT,
+        YIELD,
+        BLOCK,
+    } SwitchReason;
+
     class PerCoreTaskList
     {
         public :
@@ -78,7 +89,7 @@ namespace task
             inter_context_message_queue_.QueueMessage(message);
         }
 
-        void SwitchTasks(bool voluntary = false);
+        void SwitchTasks(SwitchReason reason);
 
     private:
 

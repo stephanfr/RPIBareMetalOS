@@ -26,6 +26,9 @@ namespace
         microseconds Runtime() const override { return microseconds::zero(); }
         uint64_t TimeslicesGranted() const override { return 0; }
 
+        task::WaitReason CurrentWaitReason() const override { return task::WaitReason::NONE; }
+        microseconds IOWaitTime() const override { return microseconds::zero(); }
+
         void Yield() override {}
         void Exit() override {}
         void Join() override { joins_++; }

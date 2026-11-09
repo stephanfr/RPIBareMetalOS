@@ -48,6 +48,21 @@ namespace system_stats
 
     KernelCounterStatistic<KernelStatisticId::TASK_DROPPED_ZOMBIES>
         task_dropped_zombies("tasks", "dropped_zombies", "Zombies dropped because the reaper queue was full (leak)", 0);
+
+    KernelGaugeStatistic<KernelStatisticId::TASK_WAITING>
+        task_waiting("tasks", "waiting", "Tasks blocked in a wait", 0);
+
+    KernelGaugeStatistic<KernelStatisticId::TASK_WAITING_IO>
+        task_waiting_io("tasks", "waiting_io", "Tasks blocked waiting for storage I/O", 0);
+}
+
+namespace
+{
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_WAKEUPS>
+        task_wakeups("tasks", "wakeups", "Waits ended by a wake", 0);
+
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS>
+        task_wait_timeouts("tasks", "wait_timeouts", "Waits ended by their timeout", 0);
 }
 
 UUID GetCurrentTaskId(void)
@@ -614,13 +629,49 @@ namespace task
     {
         for (uint32_t core_id = 0; core_id < number_of_cores_; core_id++)
         {
+            tick_pending_[core_id].store(true, minstd::memory_order_release);
             GetExceptionManager().SendInterprocessorInterrupt(core_id, InterprocessorInterrupts::CORE_TASK_SWITCH);
         }
     }
 
-    void TaskManagerImpl::SwitchToNextTask(bool voluntary)
+    void TaskManagerImpl::SwitchToNextTask(SwitchReason reason)
     {
-        task_execution_contexts_[GetCoreID()].SwitchTasks(voluntary);
+        task_execution_contexts_[GetCoreID()].SwitchTasks(reason);
+    }
+
+    bool TaskManagerImpl::WakeTask(TaskImpl &task, WaitStatus how)
+    {
+        if (!task.TryEndWait(how))
+        {
+            return false;
+        }
+
+        if (how == WaitStatus::TIMED_OUT)
+        {
+            task_wait_timeouts.Increment();
+        }
+        else
+        {
+            task_wakeups.Increment();
+        }
+
+        NudgeCore(task.schedule_on_core_.load());
+
+        return true;
+    }
+
+    void TaskManagerImpl::NudgeCore(uint32_t core)
+    {
+        //  Set before the IPI, so the target core sees it when the IPI lands.
+
+        need_resched_[core].store(true, minstd::memory_order_release);
+
+        //  No IPI to ourselves: an ISR switches at IRQ exit, task context at its next preemption point.
+
+        if (core != GetCoreID())
+        {
+            GetExceptionManager().SendInterprocessorInterrupt(core, InterprocessorInterrupts::CORE_TASK_SWITCH);
+        }
     }
 
     extern "C" void *GetTaskInitialCPUStateFrame()
