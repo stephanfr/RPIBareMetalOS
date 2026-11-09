@@ -102,12 +102,10 @@ namespace task
             wait_deadlines_.Insert(task);
         }
 
-        //  A task with no deadline listed is left alone.
+        //  A task with no deadline listed is left alone.  Re-arms the deadline timer, so a wait that ended early
+        //      leaves no interrupt behind.
 
-        void RemoveWaitDeadline(TaskImpl &task)
-        {
-            wait_deadlines_.Remove(task);
-        }
+        void RemoveWaitDeadline(TaskImpl &task);
 
     private:
 
@@ -130,6 +128,7 @@ namespace task
         void MakeRunnableIfWaitEnded(TaskImpl &task);
         void MarkRunning(TaskImpl &task);
         void MarkSwitchedOut(TaskImpl &task);
+        void GrantTimeslice(TaskImpl &task);
 
         TaskImpl &FindNextTask(void);
     };

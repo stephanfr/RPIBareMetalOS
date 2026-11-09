@@ -89,6 +89,9 @@ namespace fake_wait
         static inline uint32_t preemption_points_ = 0;
         static inline uint32_t handoffs_ = 0;
 
+        //  When set, Fatal() checks its message against this and ends the test as a pass, without returning.
+        static inline const char *expected_fatal_ = nullptr;
+
         //  The order tasks were woken in, by name.
         static inline char wake_log_[32] = {};
         static inline uint32_t wakes_logged_ = 0;
@@ -99,6 +102,7 @@ namespace fake_wait
             now_ticks_ = 1000;
             preemption_points_ = 0;
             handoffs_ = 0;
+            expected_fatal_ = nullptr;
             wakes_logged_ = 0;
             wake_log_[0] = '\0';
             FakeLock::before_lock_ = nullptr;
@@ -192,6 +196,12 @@ namespace fake_wait
 
         [[noreturn]] static void Fatal(const char *message)
         {
+            if (expected_fatal_ != nullptr)
+            {
+                STRCMP_EQUAL(expected_fatal_, message);
+                TEST_EXIT;
+            }
+
             FAIL(message);
             __builtin_unreachable();
         }

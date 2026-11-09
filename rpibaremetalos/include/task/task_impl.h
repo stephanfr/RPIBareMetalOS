@@ -170,6 +170,7 @@ namespace task
             system_stats::task_zombies.Increment(1);
 
             state_ = Task::ExecutionState::ZOMBIE;
+            has_exited_.store(true, minstd::memory_order_release);
 
             exit_waiters_.WakeAll();
 
@@ -212,7 +213,7 @@ namespace task
         {
             AddReference();
 
-            exit_waiters_.Wait([this]() { return state_ == Task::ExecutionState::ZOMBIE; }, WaitReason::JOIN);
+            exit_waiters_.Wait([this]() { return has_exited_.load(minstd::memory_order_acquire); }, WaitReason::JOIN);
 
             ReleaseReference();
         }
@@ -372,6 +373,9 @@ namespace task
         TaskImpl *timer_list_prev_ = nullptr;
         uint64_t wake_deadline_ticks_ = 0;
 
+        //  Join() runs on any core, so it reads this rather than state_, which only the owning core may touch.
+
+        minstd::atomic<bool> has_exited_{false};
         WaitQueue exit_waiters_;
 
         long counter_;

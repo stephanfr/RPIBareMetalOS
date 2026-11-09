@@ -91,6 +91,18 @@ namespace task
         DeadlineTimer::ArmAt(wait_deadlines_.EarliestDeadline());
     }
 
+    void TaskExecutionContext::RemoveWaitDeadline(TaskImpl &task)
+    {
+        if (!wait_deadlines_.Contains(task))
+        {
+            return;
+        }
+
+        wait_deadlines_.Remove(task);
+
+        DeadlineTimer::ArmAt(wait_deadlines_.EarliestDeadline());
+    }
+
     //  A waker ends a wait by changing wait_status_ only; this core alone moves the task's state.
 
     void TaskExecutionContext::MakeRunnableIfWaitEnded(TaskImpl &task)
@@ -128,6 +140,12 @@ namespace task
             task.state_ = Task::ExecutionState::RUNNABLE_WAITING;
             system_stats::task_running.Increment(-1);
         }
+    }
+
+    void TaskExecutionContext::GrantTimeslice(TaskImpl &task)
+    {
+        task.timeslices_granted_++;
+        timeslices_granted.Increment();
     }
 
     TaskImpl &TaskExecutionContext::FindNextTask(void)
@@ -271,10 +289,16 @@ namespace task
         //  Keep running if not preemptible, or if the timeslice remains and no reschedule was requested.  A request
         //      that cannot preempt stays set for PreemptEnable() to act on.
 
+        //  A timeslice is granted by a tick, or by switching a task in.  Any other pass that keeps the running task
+        //      running, such as a wake IPI or a deadline interrupt, grants nothing.
+
         if (!prev_is_blocking && ((prev->preempt_count_ > 0) || (!reschedule_requested && (prev->counter_ > 0))))
         {
-            prev->timeslices_granted_++; //  Bump the timeslice count
-            timeslices_granted.Increment();
+            if (reason == SwitchReason::TICK)
+            {
+                GrantTimeslice(*prev);
+            }
+
             prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
@@ -288,16 +312,22 @@ namespace task
 
         TaskImpl *next = &FindNextTask();
 
-        next->timeslices_granted_++;
-        timeslices_granted.Increment();
-
         if (prev == next)
         {
+            //  A yield that is chosen again starts a fresh timeslice.
+
+            if ((reason == SwitchReason::TICK) || (reason == SwitchReason::YIELD))
+            {
+                GrantTimeslice(*prev);
+            }
+
             MarkRunning(*prev);
 
             prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
+
+        GrantTimeslice(*next);
 
         //  An actual context change happened: count it by what asked for it.
 

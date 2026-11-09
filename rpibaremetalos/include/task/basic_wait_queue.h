@@ -19,9 +19,11 @@ namespace task
     //  The condition runs under the queue's spinlock with IRQs off: keep it to a few loads.  A waker that changes
     //      the condition before calling WakeOne() / WakeAll() cannot be missed.
     //
+    //  Destroying a queue that a task is still waiting on, or still leaving a wait on, is fatal.
+    //
     //  Policy supplies the scheduler: the Task type, a Lock, an IRQGuard, Current(), PrepareToBlock(),
-    //      CommitBlock(), Wake(), NowTicks(), DeadlineAfter(), PreemptionPoint().  The kernel's is
-    //      KernelWaitPolicy (wait_queue.h); the host tests supply a fake.
+    //      CommitBlock(), Wake(), NowTicks(), DeadlineAfter(), PreemptionPoint() and a [[noreturn]] Fatal(message).
+    //      The kernel's is KernelWaitPolicy (wait_queue.h); the host tests supply a fake.
 
     template <typename Policy>
     class BasicWaitQueue
@@ -43,6 +45,22 @@ namespace task
         } Position;
 
         BasicWaitQueue() = default;
+
+        ~BasicWaitQueue()
+        {
+            typename Policy::IRQGuard irqs;
+
+            lock_.Lock();
+
+            const bool in_use = (waiters_inside_ != 0);
+
+            lock_.Unlock();
+
+            if (in_use)
+            {
+                Policy::Fatal("WaitQueue destroyed while a task waits on it");
+            }
+        }
 
         BasicWaitQueue(const BasicWaitQueue &) = delete;
         BasicWaitQueue(BasicWaitQueue &&) = delete;
@@ -110,6 +128,7 @@ namespace task
 
             Policy::PrepareToBlock(self, reason, deadline_ticks);
             Link(self, position);
+            waiters_inside_++;
 
             lock_.Unlock();
 
@@ -121,6 +140,8 @@ namespace task
             lock_.Lock();
 
             Unlink(self);
+            waiters_inside_--;
+
             const bool condition_met = condition();
 
             lock_.Unlock();
@@ -207,6 +228,11 @@ namespace task
 
         Task *head_ = nullptr;
         Task *tail_ = nullptr;
+
+        //  Under lock_: tasks between linking themselves and their final unlink.  A woken task is unlinked by its
+        //      waker but still has to take lock_ again, so an empty list alone does not make the queue safe to
+        //      destroy.
+        uint32_t waiters_inside_ = 0;
 
         //  Both under lock_.
 

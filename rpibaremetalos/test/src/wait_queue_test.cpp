@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include <new>
+
 namespace
 {
     using fake_wait::FakeTask;
@@ -326,5 +328,92 @@ namespace
             popped[count] = '\0';
             STRCMP_EQUAL("AB-", popped);
         }, FakeWaitPolicy::now_ticks_ + 10);
+    }
+
+    //  The queue under test lives in raw storage: a destroy test ends the test from inside a wait, so nothing may
+    //      destroy the queue a second time.
+
+    alignas(WaitQueue) unsigned char destroyed_queue_storage[sizeof(WaitQueue)];
+
+    constexpr const char *DESTROYED_IN_USE = "WaitQueue destroyed while a task waits on it";
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+    TEST_GROUP(WaitQueueDestructionTests)
+    {
+        void setup() override
+        {
+            ResetAll();
+        }
+    };
+#pragma GCC diagnostic pop
+
+    TEST(WaitQueueDestructionTests, AQueueEveryWaiterHasLeftIsDestroyedQuietly)
+    {
+        WaitQueue *const queue = new (destroyed_queue_storage) WaitQueue;
+
+        //  One waiter woken, one timed out, one whose condition was already met.
+
+        Chain::Start(*queue, 2, []()
+        {
+            FakeWaitPolicy::current_ = &waker;
+            CHECK_EQUAL(1U, Chain::queue_->WakeOne());
+        }, FakeWaitPolicy::now_ticks_ + 10);
+
+        FakeWaitPolicy::current_ = &c;
+        CHECK_EQUAL(AsInt(Outcome::CONDITION_MET), AsInt(queue->WaitOnce([]() { return true; }, task::WaitReason::EVENT, 0, Position::TAIL)));
+
+        CHECK_EQUAL(AsInt(Outcome::WOKEN), AsInt(Chain::outcomes_[0]));
+        CHECK_EQUAL(AsInt(Outcome::TIMED_OUT), AsInt(Chain::outcomes_[1]));
+
+        queue->~WaitQueue();
+    }
+
+    TEST(WaitQueueDestructionTests, DestroyingAQueueWithALinkedWaiterIsFatal)
+    {
+        static WaitQueue *queue = nullptr;
+        queue = new (destroyed_queue_storage) WaitQueue;
+
+        a.on_block_ = [](FakeTask &)
+        {
+            FakeWaitPolicy::expected_fatal_ = DESTROYED_IN_USE;
+            queue->~WaitQueue();
+
+            FAIL("destroying a queue with a linked waiter was not fatal");
+        };
+
+        FakeWaitPolicy::current_ = &a;
+        queue->WaitOnce([]() { return false; }, task::WaitReason::EVENT, 0, Position::TAIL);
+
+        FAIL("the waiter came back from a destroyed queue");
+    }
+
+    TEST(WaitQueueDestructionTests, DestroyingAQueueAWokenWaiterHasNotLeftIsFatal)
+    {
+        static WaitQueue *queue = nullptr;
+        queue = new (destroyed_queue_storage) WaitQueue;
+
+        a.on_block_ = [](FakeTask &)
+        {
+            FakeWaitPolicy::current_ = &waker;
+            CHECK_EQUAL(1U, queue->WakeOne());
+
+            //  The waker has unlinked the waiter, which still has to take the lock again to leave.  Destroy the
+            //      queue in that window.
+
+            fake_wait::FakeLock::before_lock_ = []()
+            {
+                FakeWaitPolicy::expected_fatal_ = DESTROYED_IN_USE;
+                queue->~WaitQueue();
+
+                FAIL("destroying a queue a woken waiter had not left was not fatal");
+            };
+            fake_wait::FakeLock::before_lock_skip_ = 0;
+        };
+
+        FakeWaitPolicy::current_ = &a;
+        queue->WaitOnce([]() { return false; }, task::WaitReason::EVENT, 0, Position::TAIL);
+
+        FAIL("the waiter came back from a destroyed queue");
     }
 }

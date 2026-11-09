@@ -91,7 +91,7 @@ namespace task
         TaskManagerImpl::Instance().SwitchToNextTask(SwitchReason::BLOCK);
 
         //  Running again, on the same core, IRQs still disabled.  A wake that beat the deadline leaves the
-        //      deadline to remove.
+        //      deadline to remove and the timer to re-arm.
 
         TaskManagerImpl::Instance().ExecutionContextForCurrentCore().RemoveWaitDeadline(*this);
 

@@ -104,7 +104,7 @@ namespace task
         TIMED_OUT,
     } WaitStatus;
 
-    //  IO is storage I/O the task started and that is certain to finish (Linux iowait); only it is
+    //  IO is storage I/O the task started and that is certain to finish; only it is
     //      counted as I/O wait.  DEVICE is a device event that may never come, such as console input.
 
     typedef enum class WaitReason : uint32_t

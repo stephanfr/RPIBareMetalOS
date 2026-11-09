@@ -137,9 +137,12 @@ namespace task
             return reschedule_requested_[core].load(minstd::memory_order_acquire);
         }
 
+        //  An exchange, not a store: it reads the request it clears, so that waker's wake is visible to the scan
+        //      that follows.
+
         static void ClearRescheduleRequest(uint32_t core)
         {
-            reschedule_requested_[core].store(false, minstd::memory_order_release);
+            reschedule_requested_[core].exchange(false, minstd::memory_order_acq_rel);
         }
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
