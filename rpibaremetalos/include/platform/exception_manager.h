@@ -29,6 +29,15 @@ public:
     virtual bool Initialize() = 0;
 
     virtual bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) = 0;
+
+    //  For an interrupt with a separate enable on each core, such as a GIC PPI: registering its ISR enables it only
+    //      on the registering core, so every other core calls this for itself.
+
+    bool EnableInterruptOnThisCore(Interrupts interrupt)
+    {
+        return EnableInterrupt(interrupt, CoreList(GetCoreID()));
+    }
+    
     virtual bool DisableInterrupt(Interrupts interrupt_to_disable, CoreList on_cores) = 0;
 
     virtual bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) = 0;

@@ -10,6 +10,7 @@
 #include "processor_cores.h"
 #include "task/system_calls.h"
 
+#include "devices/deadline_timer.h"
 #include "devices/log.h"
 #include "devices/physical_timer.h"
 
@@ -167,6 +168,12 @@ namespace task
             auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
             
             task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
+
+            //  Core 0 enabled the deadline timer's interrupt when it registered the ISR; on the GIC that enable is
+            //      per core.
+
+            DeadlineTimer::Disarm();
+            GetExceptionManager().EnableInterruptOnThisCore(Interrupts::ARM_VIRTUAL_TIMER);
 
             //  Wait for an interrupt - this will be the first task switch message
 

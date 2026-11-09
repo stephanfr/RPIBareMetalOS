@@ -21,6 +21,7 @@ typedef enum class Interrupts : uint32_t
     SYSTEM_TIMER_2 = 66,
     SYSTEM_TIMER_3 = 67,
     ARM_GENERIC_TIMER = 128,
+    ARM_VIRTUAL_TIMER = 129,
 } Interrupts;
 
 const char *ToString(Interrupts interrupt);
@@ -32,7 +33,8 @@ typedef enum InterruptServiceRoutineType : uint32_t
     HALT_CORE = 1,
     IMPERATIVE_CORE_TASK_SWITCH = 2,
     SYSTEM_TIMER_RESCHEDULE = 3,
-    TASK_SCHEDULER = 4
+    TASK_SCHEDULER = 4,
+    DEADLINE_TIMER = 5
 } InterruptServiceRoutineType;
 
 class InterruptServiceRoutine

@@ -132,6 +132,11 @@ namespace task
             return need_resched_[core].load(minstd::memory_order_acquire);
         }
 
+        static void SetReschedPending(uint32_t core)
+        {
+            need_resched_[core].store(true, minstd::memory_order_release);
+        }
+
         static void ClearReschedPending(uint32_t core)
         {
             need_resched_[core].store(false, minstd::memory_order_release);

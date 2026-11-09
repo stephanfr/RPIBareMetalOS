@@ -338,6 +338,7 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         expect_stat(37, 'counter', 'tasks.wakeups', lambda v: v >= 0, 'present')
         expect_stat(38, 'counter', 'tasks.wait_timeouts', lambda v: v > 0, '> 0')
         expect_stat(39, 'counter', 'mutex.handoffs', lambda v: v >= 0, 'present')
+        expect_stat(40, 'counter', 'scheduler.deadline_interrupts', lambda v: v > 0, '> 0')
 
         # The address-space metrics.  demand_page_faults must have moved -- test usertask
         # demand-pages heap and stack pages in several cases.  demand_page_failures is a

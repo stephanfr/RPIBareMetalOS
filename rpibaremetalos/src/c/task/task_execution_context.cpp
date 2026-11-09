@@ -6,6 +6,7 @@
 
 #include "asm_globals.h"
 #include "devices/log.h"
+#include "devices/deadline_timer.h"
 #include "devices/physical_timer.h"
 
 #include "services/stats_db/kernel_statistic_ids.h"
@@ -86,6 +87,8 @@ namespace task
         {
             TaskManagerImpl::Instance().WakeTask(task, WaitStatus::TIMED_OUT);
         });
+
+        DeadlineTimer::ArmAt(timer_list_.EarliestDeadline());
     }
 
     TaskImpl &TaskExecutionContext::FindNextTask(void)

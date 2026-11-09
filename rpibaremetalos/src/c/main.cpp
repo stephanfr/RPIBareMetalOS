@@ -14,7 +14,10 @@
 #include "devices/std_streams.h"
 #include "devices/scheduler_clock.h"
 
+#include "devices/deadline_timer.h"
+
 #include "isr/core_task_switch_isr.h"
+#include "isr/deadline_timer_isr.h"
 #include "isr/halt_core_isr.h"
 #include "isr/system_timer_reschedule_isr.h"
 #include "isr/task_switch_isr.h"
@@ -48,11 +51,15 @@ extern "C" void kernel_main()
     TaskSwitchISR taskSwitchISR;
     HaltCoreISR haltCoreISR;
     CoreTaskSwitchISR coreTaskSwitchISR;
+    DeadlineTimerISR deadlineTimerISR;
 
     GetExceptionManager().AddInterruptServiceRoutine(&taskSwitchISR, CoreList(CoreList::CoreID::CORE0));
     GetExceptionManager().AddInterruptServiceRoutine(&timerRescheduleISR, CoreList(CoreList::CoreID::CORE0));
     GetExceptionManager().AddInterruptServiceRoutine(&haltCoreISR, CoreList(CoreList::CoreID::ALL_CORES));
     GetExceptionManager().AddInterruptServiceRoutine(&coreTaskSwitchISR, CoreList(CoreList::CoreID::ALL_CORES));
+
+    DeadlineTimer::Disarm();
+    GetExceptionManager().AddInterruptServiceRoutine(&deadlineTimerISR, CoreList(CoreList::CoreID::ALL_CORES));
 
     printf("ISRs started\n");
 
