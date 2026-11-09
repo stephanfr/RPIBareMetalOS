@@ -184,6 +184,7 @@ namespace task
 
         void SleepFor(microseconds duration) override;
         void SleepUntil(time_point<nanoseconds> deadline) override;
+        void SleepUntilTicks(uint64_t deadline_ticks);
 
         //  The blocking protocol every wait primitive is built on.  With IRQs disabled, in task context, preempt
         //      count zero:
@@ -229,8 +230,8 @@ namespace task
             }
         }
 
-        //  Switches now if a wake is pending for this core and the task is preemptible: task context, IRQs
-        //      enabled, preempt count zero.  Otherwise a later preemption point or the IRQ exit acts on it.
+        //  Switches now if a reschedule was requested for this core and the task is preemptible: task context,
+        //      IRQs enabled, preempt count zero.  Otherwise a later preemption point or the IRQ exit acts on it.
 
         void PreemptionPoint();
 
@@ -319,6 +320,11 @@ namespace task
             return static_cast<WaitStatus>(wait_status_.load(minstd::memory_order_acquire));
         }
 
+        bool IsRunnable() const
+        {
+            return (state_ == ExecutionState::RUNNING) || (state_ == ExecutionState::RUNNABLE_WAITING);
+        }
+
         //  The only way a wait ends: WAITING -> how.  False if the wait already ended or never began.
 
         bool TryEndWait(WaitStatus how)
@@ -354,15 +360,16 @@ namespace task
         ExecutionState state_;
         minstd::atomic<uint32_t> wait_status_{static_cast<uint32_t>(WaitStatus::NONE)};
         WaitReason wait_reason_ = WaitReason::NONE;
-        time_point<nanoseconds> block_start_;
+        time_point<nanoseconds> wait_start_;
         microseconds io_wait_time_ = microseconds::zero();
 
-        //  Intrusive links: a task waits on at most one wait queue and one timer list at a time.
+        //  Intrusive links: a waiting task is on at most one wait queue, and on its core's timer list if its wait
+        //      has a deadline.
 
-        TaskImpl *wait_next_ = nullptr;
-        TaskImpl *wait_prev_ = nullptr;
-        TaskImpl *timer_next_ = nullptr;
-        TaskImpl *timer_prev_ = nullptr;
+        TaskImpl *wait_queue_next_ = nullptr;
+        TaskImpl *wait_queue_prev_ = nullptr;
+        TaskImpl *timer_list_next_ = nullptr;
+        TaskImpl *timer_list_prev_ = nullptr;
         uint64_t wake_deadline_ticks_ = 0;
 
         WaitQueue exit_waiters_;

@@ -17,8 +17,8 @@ namespace
 
         uint64_t wake_deadline_ticks_;
         uint32_t id_;
-        TimerNode *timer_next_ = nullptr;
-        TimerNode *timer_prev_ = nullptr;
+        TimerNode *timer_list_next_ = nullptr;
+        TimerNode *timer_list_prev_ = nullptr;
     };
 
     using TimerList = task::TimerList<TimerNode>;
@@ -134,8 +134,8 @@ namespace
 
         CHECK_TRUE(list.Empty());
         CHECK_FALSE(list.Contains(linked));
-        POINTERS_EQUAL(nullptr, linked.timer_next_);
-        POINTERS_EQUAL(nullptr, linked.timer_prev_);
+        POINTERS_EQUAL(nullptr, linked.timer_list_next_);
+        POINTERS_EQUAL(nullptr, linked.timer_list_prev_);
     }
 
     TEST(TimerListOrderTests, ANodeCanBeReinsertedAfterRemoval)

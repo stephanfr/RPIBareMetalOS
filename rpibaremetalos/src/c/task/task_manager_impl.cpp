@@ -132,7 +132,7 @@ namespace task
 
                     const uint64_t saved_irqs = SaveAndDisableIRQs();
 
-                    TaskImpl::GetTask().Block(WaitReason::EVENT, PhysicalTimer::CurrentTicks() + GetCounterFrequency());
+                    TaskImpl::GetTask().Block(WaitReason::EVENT, PhysicalTimer::DeadlineTicksAfter(seconds(1)));
 
                     RestoreIRQs(saved_irqs);
                 }
@@ -660,6 +660,10 @@ namespace task
 
     bool TaskManagerImpl::WakeTask(TaskImpl &task, WaitStatus how)
     {
+        //  Read first: once the wait ends the task may run, exit and be freed.
+
+        const uint32_t core = task.schedule_on_core_.load();
+
         if (!task.TryEndWait(how))
         {
             return false;
@@ -674,18 +678,16 @@ namespace task
             task_wakeups.Increment();
         }
 
-        NudgeCore(task.schedule_on_core_.load());
+        RequestReschedule(core);
 
         return true;
     }
 
-    void TaskManagerImpl::NudgeCore(uint32_t core)
+    void TaskManagerImpl::RequestReschedule(uint32_t core)
     {
         //  Set before the IPI, so the target core sees it when the IPI lands.
 
-        need_resched_[core].store(true, minstd::memory_order_release);
-
-        //  No IPI to ourselves: an ISR switches at IRQ exit, task context at its next preemption point.
+        reschedule_requested_[core].store(true, minstd::memory_order_release);
 
         if (core != GetCoreID())
         {

@@ -81,14 +81,53 @@ namespace task
         }
     }
 
-    void TaskExecutionContext::ExpireTimers()
+    void TaskExecutionContext::ExpireWaitDeadlines()
     {
-        timer_list_.ExpireUpTo(PhysicalTimer::CurrentTicks(), [](TaskImpl &task)
+        wait_deadlines_.ExpireUpTo(PhysicalTimer::CurrentTicks(), [](TaskImpl &task)
         {
             TaskManagerImpl::Instance().WakeTask(task, WaitStatus::TIMED_OUT);
         });
 
-        DeadlineTimer::ArmAt(timer_list_.EarliestDeadline());
+        DeadlineTimer::ArmAt(wait_deadlines_.EarliestDeadline());
+    }
+
+    //  A waker ends a wait by changing wait_status_ only; this core alone moves the task's state.
+
+    void TaskExecutionContext::MakeRunnableIfWaitEnded(TaskImpl &task)
+    {
+        if ((task.state_ != Task::ExecutionState::WAITING) || (task.LoadWaitStatus() == WaitStatus::WAITING))
+        {
+            return;
+        }
+
+        task.state_ = Task::ExecutionState::RUNNABLE_WAITING;
+
+        system_stats::task_waiting.Increment(-1);
+
+        if (task.wait_reason_ == WaitReason::IO)
+        {
+            system_stats::task_waiting_io.Increment(-1);
+        }
+    }
+
+    void TaskExecutionContext::MarkRunning(TaskImpl &task)
+    {
+        if (task.state_ != Task::ExecutionState::RUNNING)
+        {
+            task.state_ = Task::ExecutionState::RUNNING;
+            system_stats::task_running.Increment(1);
+        }
+    }
+
+    //  A WAITING or ZOMBIE task keeps its state.
+
+    void TaskExecutionContext::MarkSwitchedOut(TaskImpl &task)
+    {
+        if (task.state_ == Task::ExecutionState::RUNNING)
+        {
+            task.state_ = Task::ExecutionState::RUNNABLE_WAITING;
+            system_stats::task_running.Increment(-1);
+        }
     }
 
     TaskImpl &TaskExecutionContext::FindNextTask(void)
@@ -100,7 +139,7 @@ namespace task
         long max_counter = -1;
         TaskImpl *next_task = nullptr;
 
-        if (current->State() == Task::ExecutionState::RUNNING)
+        if (current->state_ == Task::ExecutionState::RUNNING)
         {
             max_counter = current->counter_;
             next_task = current;
@@ -131,29 +170,12 @@ namespace task
 
             if (i < task_list_.NumTasks())
             {
-                //  Commit a wake: the waker ended the wait, but only this core moves the task's state.
+                MakeRunnableIfWaitEnded(*task);
 
-                if ((task->State() == Task::ExecutionState::WAITING) &&
-                    (task->LoadWaitStatus() != WaitStatus::WAITING))
+                if (task->IsRunnable() && (task->counter_ > max_counter))
                 {
-                    task->state_ = Task::ExecutionState::RUNNABLE_WAITING;
-
-                    system_stats::task_waiting.Increment(-1);
-
-                    if (task->wait_reason_ == WaitReason::IO)
-                    {
-                        system_stats::task_waiting_io.Increment(-1);
-                    }
-                }
-
-                if (((task->State() == Task::ExecutionState::RUNNING) ||
-                     (task->State() == Task::ExecutionState::RUNNABLE_WAITING)))
-                {
-                    if (task->counter_ > max_counter)
-                    {
-                        max_counter = task->counter_;
-                        next_task = task;
-                    }
+                    max_counter = task->counter_;
+                    next_task = task;
                 }
             }
         }
@@ -172,14 +194,10 @@ namespace task
 
                 task->counter_ = minstd::max((task->counter_ >> 1) + task->priority_, (long)0);
 
-                if (((task->State() == Task::ExecutionState::RUNNING) ||
-                     (task->State() == Task::ExecutionState::RUNNABLE_WAITING)))
+                if (task->IsRunnable() && (task->counter_ > max_counter))
                 {
-                    if (task->counter_ > max_counter)
-                    {
-                        max_counter = task->counter_;
-                        next_task = task;
-                    }
+                    max_counter = task->counter_;
+                    next_task = task;
                 }
             }
         }
@@ -198,7 +216,7 @@ namespace task
 
     void TaskExecutionContext::SwitchTasks(SwitchReason reason)
     {
-        //  Be very care with the order of operations here - we are in a critical section.
+        //  Be very careful with the order of operations here - we are in a critical section.
         //      Do not allow interrupts to occur in this code as we are manipulating the task list
         //      and it is not thread re-entrant.  Do not block or take locks anywhere in this code.
         //
@@ -228,19 +246,19 @@ namespace task
             prev->counter_ = 0;
         }
 
-        const bool blocking = (prev->state_ == Task::ExecutionState::WAITING);
+        const bool prev_is_blocking = (prev->state_ == Task::ExecutionState::WAITING);
 
-        //  First, groom the task list, then wake expired sleepers.  Read the wake flag after both, so a sleeper
-        //      woken here can preempt at once.
+        //  First, groom the task list, then wake the waits whose deadline has passed.  Read the reschedule request
+        //      after both, so a task woken here can preempt at once.
 
         if (inter_context_message_queue_.HasMessages())
         {
             ServiceMessages();
         }
 
-        ExpireTimers();
+        ExpireWaitDeadlines();
 
-        const bool wake_pending = TaskManagerImpl::IsReschedPending(GetCoreID());
+        const bool reschedule_requested = TaskManagerImpl::IsRescheduleRequested(GetCoreID());
 
         //  Only the tick charges the timeslice: a wake IPI must not cost the running task its time.
 
@@ -249,10 +267,10 @@ namespace task
             prev->counter_ = minstd::max(prev->counter_ - 1, (long)0);
         }
 
-        //  Keep running if not preemptible, or if the timeslice remains and no wake is pending.  A wake that
-        //      cannot preempt stays pending for PreemptEnable() to act on.
+        //  Keep running if not preemptible, or if the timeslice remains and no reschedule was requested.  A request
+        //      that cannot preempt stays set for PreemptEnable() to act on.
 
-        if (!blocking && ((prev->preempt_count_ > 0) || (!wake_pending && (prev->counter_ > 0))))
+        if (!prev_is_blocking && ((prev->preempt_count_ > 0) || (!reschedule_requested && (prev->counter_ > 0))))
         {
             prev->timeslices_granted_++; //  Bump the timeslice count
             timeslices_granted.Increment();
@@ -260,9 +278,9 @@ namespace task
             return;
         }
 
-        //  Clear before the scan, so a wake that lands during it sets the flag again rather than being lost.
+        //  Clear before the scan, so a wake that lands during it requests again rather than being lost.
 
-        TaskManagerImpl::ClearReschedPending(GetCoreID());
+        TaskManagerImpl::ClearRescheduleRequest(GetCoreID());
 
         //  Find the next task to run, we could get the same task back though.  A blocking task comes back
         //      only if its wake was committed during the scan.
@@ -274,11 +292,7 @@ namespace task
 
         if (prev == next)
         {
-            if (prev->state_ != Task::ExecutionState::RUNNING)
-            {
-                prev->state_ = Task::ExecutionState::RUNNING;
-                system_stats::task_running.Increment(1);
-            }
+            MarkRunning(*prev);
 
             prev->switched_in_last_ = PhysicalTimer::Now();
             return;
@@ -303,24 +317,8 @@ namespace task
 
         //  Switch the tasks
 
-        if (next->state_ != Task::ExecutionState::RUNNING)
-        {
-            system_stats::task_running.Increment(1);
-        }
-
-        next->state_ = Task::ExecutionState::RUNNING;
-
-        if (prev->state_ == Task::ExecutionState::RUNNING)
-        {
-            system_stats::task_running.Increment(-1);
-        }
-
-        //  A WAITING or ZOMBIE task keeps its state.
-
-        if (prev->state_ == Task::ExecutionState::RUNNING)
-        {
-            prev->state_ = Task::ExecutionState::RUNNABLE_WAITING;
-        }
+        MarkSwitchedOut(*prev);
+        MarkRunning(*next);
 
         next->switched_in_last_ = PhysicalTimer::Now();
 

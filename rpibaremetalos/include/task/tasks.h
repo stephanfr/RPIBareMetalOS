@@ -168,7 +168,7 @@ namespace task
         virtual void Exit() = 0;
         virtual void Join() = 0;
 
-        //  Blocks without being scheduled.  Never returns early; may return late by up to a scheduler tick.
+        //  Blocks without being scheduled.  Never returns early.
         //      SleepFor(0) is a yield.
 
         virtual void SleepFor(microseconds duration) = 0;

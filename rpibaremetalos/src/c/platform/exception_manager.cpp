@@ -181,7 +181,7 @@ void ExceptionManager::ExitInterrupt(InterruptServiceRoutine *core_task_switch_i
         return;
     }
 
-    if (task::TaskManagerImpl::IsReschedPending(GetCoreID()))
+    if (task::TaskManagerImpl::IsRescheduleRequested(GetCoreID()))
     {
         task::TaskManagerImpl::Instance().SwitchToNextTask(task::SwitchReason::PREEMPT);
     }

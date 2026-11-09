@@ -94,21 +94,23 @@ namespace task
 
         //  This core's tasks waiting with a deadline.  Owning core only, IRQs disabled.
 
-        void AddTimer(TaskImpl &task)
+        void AddWaitDeadline(TaskImpl &task)
         {
-            timer_list_.Insert(task);
+            wait_deadlines_.Insert(task);
         }
 
-        void RemoveTimer(TaskImpl &task)
+        //  A task with no deadline listed is left alone.
+
+        void RemoveWaitDeadline(TaskImpl &task)
         {
-            timer_list_.Remove(task);
+            wait_deadlines_.Remove(task);
         }
 
     private:
 
         PerCoreTaskList task_list_;
 
-        TimerList<TaskImpl> timer_list_;
+        TimerList<TaskImpl> wait_deadlines_;
 
         //  Messaging queue for inter-context messages can go into the static heap
 
@@ -120,7 +122,11 @@ namespace task
         
         void ServiceMessages();
 
-        void ExpireTimers();
+        void ExpireWaitDeadlines();
+
+        void MakeRunnableIfWaitEnded(TaskImpl &task);
+        void MarkRunning(TaskImpl &task);
+        void MarkSwitchedOut(TaskImpl &task);
 
         TaskImpl &FindNextTask(void);
     };

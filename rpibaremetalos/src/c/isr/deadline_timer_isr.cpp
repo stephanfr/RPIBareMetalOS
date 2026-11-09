@@ -23,5 +23,5 @@ void DeadlineTimerISR::HandleInterrupt()
 
     deadline_interrupts.Increment();
 
-    task::TaskManagerImpl::SetReschedPending(GetCoreID());
+    task::TaskManagerImpl::RequestReschedule(GetCoreID());
 }

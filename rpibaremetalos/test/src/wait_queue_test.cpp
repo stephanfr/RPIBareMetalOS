@@ -73,8 +73,8 @@ namespace
 
         for (FakeTask *task : tasks)
         {
-            task->wait_next_ = nullptr;
-            task->wait_prev_ = nullptr;
+            task->wait_queue_next_ = nullptr;
+            task->wait_queue_prev_ = nullptr;
             task->status_ = task::WaitStatus::NONE;
             task->blocks_ = 0;
             task->on_block_ = nullptr;
@@ -244,12 +244,38 @@ namespace
         for (uint32_t i = 0; i < 3; i++)
         {
             CHECK_EQUAL(AsInt(Outcome::TIMED_OUT), AsInt(Chain::outcomes_[i]));
-            POINTERS_EQUAL(nullptr, Chain::tasks_[i]->wait_next_);
-            POINTERS_EQUAL(nullptr, Chain::tasks_[i]->wait_prev_);
+            POINTERS_EQUAL(nullptr, Chain::tasks_[i]->wait_queue_next_);
+            POINTERS_EQUAL(nullptr, Chain::tasks_[i]->wait_queue_prev_);
         }
 
         CHECK_EQUAL(0U, queue.WakeAll());
         STRCMP_EQUAL("", FakeWaitPolicy::wake_log_);
+    }
+
+    TEST(WaitQueueLinkTests, AWakeAddressedToTheTaskLeavesTheQueueConsistent)
+    {
+        WaitQueue queue;
+
+        //  Woken directly, as the scheduler can wake any waiting task, rather than through the queue.
+
+        Chain::Start(queue, 2, []()
+        {
+            FakeWaitPolicy::Wake(a, task::WaitStatus::WOKEN);
+        }, FakeWaitPolicy::now_ticks_ + 10);
+
+        CHECK_EQUAL(AsInt(Outcome::WOKEN), AsInt(Chain::outcomes_[0]));
+        POINTERS_EQUAL(nullptr, a.wait_queue_next_);
+        POINTERS_EQUAL(nullptr, a.wait_queue_prev_);
+
+        //  A can wait again without being linked twice, and a wake finds each task once.
+
+        Chain::Start(queue, 1, []()
+        {
+            FakeWaitPolicy::current_ = &waker;
+            CHECK_EQUAL(1U, Chain::queue_->WakeAll());
+        });
+
+        CHECK_EQUAL(0U, queue.WakeAll());
     }
 
     TEST(WaitQueueLinkTests, WakeAllCountsOnlyTheWaitsItEnded)

@@ -1345,6 +1345,60 @@ namespace cli::commands
     }
 
     // -------------------------------------------------------------------------
+    //  Helpers shared by the tests below
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        //  -1 if the statistic is not registered.
+
+        int64_t ReadKernelStatistic(system_stats::KernelStatisticId id)
+        {
+            int64_t value = -1;
+
+            system_stats::GetSystemStatisticsDB().Visit(system_stats::SystemStatistic::KERNEL_PROCESS_ID,
+                                                       system_stats::KernelStatistic(id),
+                                                       [&value](const system_stats::SystemStatistic &statistic)
+                                                       {
+                                                           const auto read = statistic.GetValue<int64_t>();
+
+                                                           if (read.Successful())
+                                                           {
+                                                               value = *read;
+                                                           }
+                                                       });
+
+            return value;
+        }
+
+        //  Forks runnable pinned to core, or reports the failure.  The id is valid only on success.
+
+        bool ForkPinned(CLISessionContext &context, Runnable &runnable, const char *name, uint32_t core, UUID &id)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            auto result = context.task_manager_.ForkKernelTask(&runnable, task::TaskDefinition{name, 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << core)});
+
+            if (result.Failed())
+            {
+                context << minstd::format(buffer, "  FAIL: could not fork {} on core {} -- {}\n", name, core, task::ErrorMessage(result.ResultCode()));
+                return false;
+            }
+
+            id = result.Value();
+            return true;
+        }
+
+        void JoinTask(CLISessionContext &context, const UUID &id)
+        {
+            if (auto forked = context.task_manager_.FindTask(id))
+            {
+                forked->Join();
+            }
+        }
+    } // namespace
+
+    // -------------------------------------------------------------------------
     //  test usertask
     //
     //  The first thing in this OS that actually executes at EL0.  Each case forks
@@ -2224,25 +2278,6 @@ namespace cli::commands
                 SoakUserLauncher launcher;
             };
 
-            int64_t ReadKernelStatistic(system_stats::KernelStatisticId id)
-            {
-                int64_t value = -1;
-
-                system_stats::GetSystemStatisticsDB().Visit(system_stats::SystemStatistic::KERNEL_PROCESS_ID,
-                                                           system_stats::KernelStatistic(id),
-                                                           [&value](const system_stats::SystemStatistic &statistic)
-                                                           {
-                                                               const auto read = statistic.GetValue<int64_t>();
-
-                                                               if (read.Successful())
-                                                               {
-                                                                   value = *read;
-                                                               }
-                                                           });
-
-                return value;
-            }
-
             //  Kernel statistics that count failures.  None may move during a soak.
 
             struct CanaryStatistic
@@ -2577,13 +2612,13 @@ namespace cli::commands
 
         for (uint32_t i = 0; i < soak::NUM_CANARY_STATISTICS; i++)
         {
-            canary_before[i] = soak::ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
+            canary_before[i] = ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
         }
 
-        const int64_t heap_allocations_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
-        const int64_t zombies_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
-        const int64_t preemptions_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES);
-        const int64_t demand_faults_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS);
+        const int64_t heap_allocations_before = ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
+        const int64_t zombies_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
+        const int64_t preemptions_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES);
+        const int64_t demand_faults_before = ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS);
 
         uint32_t failures = 0;
 
@@ -2626,8 +2661,8 @@ namespace cli::commands
         //  The heap cannot be held to an exact count like the pages: finished tasks keep their objects (up to
         //      MAX_RETAINED_ZOMBIES of them, for minutes), and lock-free containers free removed nodes lazily.
 
-        const int64_t heap_allocations_after = soak::ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
-        const int64_t zombies_after = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
+        const int64_t heap_allocations_after = ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
+        const int64_t zombies_after = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
         const int64_t heap_growth = heap_allocations_after - heap_allocations_before;
         const int64_t added_zombies = (zombies_after > zombies_before) ? (zombies_after - zombies_before) : 0;
         const int64_t heap_allowance = soak::HEAP_GROWTH_SLACK + (added_zombies * soak::HEAP_ALLOCATIONS_PER_ZOMBIE);
@@ -2641,7 +2676,7 @@ namespace cli::commands
 
         for (uint32_t i = 0; i < soak::NUM_CANARY_STATISTICS; i++)
         {
-            const int64_t after = soak::ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
+            const int64_t after = ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
 
             if (after != canary_before[i])
             {
@@ -2650,8 +2685,8 @@ namespace cli::commands
             }
         }
 
-        const int64_t preemptions = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES) - preemptions_before;
-        const int64_t demand_faults = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS) - demand_faults_before;
+        const int64_t preemptions = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES) - preemptions_before;
+        const int64_t demand_faults = ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS) - demand_faults_before;
 
         if (preemptions <= 0)
         {
@@ -2776,9 +2811,9 @@ namespace cli::commands
 
         uint32_t failures = 0;
 
-        const int64_t blocks_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS);
-        const int64_t timeouts_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS);
-        const int64_t deadline_interrupts_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::SCHEDULER_DEADLINE_INTERRUPTS);
+        const int64_t blocks_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS);
+        const int64_t timeouts_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS);
+        const int64_t deadline_interrupts_before = ReadKernelStatistic(system_stats::KernelStatisticId::SCHEDULER_DEADLINE_INTERRUPTS);
 
         task::Task &self = task::Task::GetTask();
 
@@ -2830,18 +2865,8 @@ namespace cli::commands
             {
                 sleepers[i].Initialize(10 + (10 * (i % 8)));
 
-                auto result = context.task_manager_.ForkKernelTask(&sleepers[i],
-                                                                   task::TaskDefinition{"Sleeper", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << (i % core_count))});
-
-                if (result.Failed())
-                {
-                    context << minstd::format(buffer, "  FAIL: could not fork sleeper {} -- {}\n", i, task::ErrorMessage(result.ResultCode()));
-                    failures++;
-                    continue;
-                }
-
-                ids[i] = result.Value();
-                forked[i] = true;
+                forked[i] = ForkPinned(context, sleepers[i], "Sleeper", i % core_count, ids[i]);
+                failures += forked[i] ? 0 : 1;
             }
 
             uint32_t concurrent_failures = 0;
@@ -2854,10 +2879,7 @@ namespace cli::commands
                     continue;
                 }
 
-                if (auto sleeper = context.task_manager_.FindTask(ids[i]))
-                {
-                    sleeper->Join();
-                }
+                JoinTask(context, ids[i]);
 
                 const int64_t elapsed_us = sleepers[i].ElapsedUs();
                 const uint64_t requested_ms = sleepers[i].SleepMilliseconds();
@@ -2897,8 +2919,8 @@ namespace cli::commands
         //  Every sleep above blocked at least once and ended by its timeout.
 
         const int64_t sleeps = 3 + 1 + NUM_CONCURRENT_SLEEPERS + 1;
-        const int64_t blocks = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS) - blocks_before;
-        const int64_t timeouts = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS) - timeouts_before;
+        const int64_t blocks = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS) - blocks_before;
+        const int64_t timeouts = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS) - timeouts_before;
 
         if ((blocks < sleeps) || (timeouts < sleeps))
         {
@@ -2913,7 +2935,7 @@ namespace cli::commands
         //  Sleepers sharing a deadline on one core wake on one interrupt, and a tick may expire a deadline first, so
         //      there can be fewer interrupts than sleeps, but never none.
 
-        const int64_t deadline_interrupts = soak::ReadKernelStatistic(system_stats::KernelStatisticId::SCHEDULER_DEADLINE_INTERRUPTS) - deadline_interrupts_before;
+        const int64_t deadline_interrupts = ReadKernelStatistic(system_stats::KernelStatisticId::SCHEDULER_DEADLINE_INTERRUPTS) - deadline_interrupts_before;
 
         if (deadline_interrupts <= 0)
         {
@@ -3044,31 +3066,6 @@ namespace cli::commands
                 volatile uint32_t timeouts_ = 0;
             };
 
-            //  Forks runnable pinned to core, or reports the failure.  The id is valid only on success.
-
-            bool ForkPinned(CLISessionContext &context, Runnable &runnable, const char *name, uint32_t core, UUID &id)
-            {
-                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
-
-                auto result = context.task_manager_.ForkKernelTask(&runnable, task::TaskDefinition{name, 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << core)});
-
-                if (result.Failed())
-                {
-                    context << minstd::format(buffer, "  FAIL: could not fork {} on core {} -- {}\n", name, core, task::ErrorMessage(result.ResultCode()));
-                    return false;
-                }
-
-                id = result.Value();
-                return true;
-            }
-
-            void JoinTask(CLISessionContext &context, const UUID &id)
-            {
-                if (auto forked = context.task_manager_.FindTask(id))
-                {
-                    forked->Join();
-                }
-            }
         } // namespace wait_test
     } // namespace
 
@@ -3081,7 +3078,7 @@ namespace cli::commands
         context << "\ntest wait: producers and consumers on every core share one wait queue\n";
 
         const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
-        const int64_t wakeups_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS);
+        const int64_t wakeups_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS);
 
         Shared shared;
         Consumer consumers[NUM_CONSUMERS];
@@ -3145,7 +3142,7 @@ namespace cli::commands
             timeouts += consumers[i].Timeouts();
         }
 
-        const int64_t wakeups = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS) - wakeups_before;
+        const int64_t wakeups = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS) - wakeups_before;
         const uint32_t producer_wakes = shared.producer_wakes.load();
 
         context << minstd::format(buffer, "  {} tokens posted, {} taken, {} left; {} consumer timeouts\n",
@@ -3314,15 +3311,13 @@ namespace cli::commands
     void CLITestMutexCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
     {
         using namespace mutex_test;
-        using wait_test::ForkPinned;
-        using wait_test::JoinTask;
 
         minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
         context << "\ntest mutex: mutual exclusion and freedom from starvation\n";
 
         const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
-        const int64_t handoffs_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS);
+        const int64_t handoffs_before = ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS);
 
         uint32_t failures = 0;
 
@@ -3435,7 +3430,7 @@ namespace cli::commands
         }
 
         context << minstd::format(buffer, "  mutex.handoffs rose by {}\n",
-                                  soak::ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS) - handoffs_before);
+                                  ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS) - handoffs_before);
 
         if (failures == 0)
         {

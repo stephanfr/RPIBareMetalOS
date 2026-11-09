@@ -6,7 +6,7 @@
 
 #include "isr/isr.h"
 
-//  Runs on the core whose deadline passed.  The switch at IRQ exit expires the due timers and re-arms.
+//  Runs on the core whose deadline passed.  The switch at IRQ exit wakes the waits now due and re-arms.
 
 class DeadlineTimerISR : public InterruptServiceRoutine
 {

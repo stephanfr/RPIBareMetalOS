@@ -113,8 +113,8 @@ namespace task
         void Schedule(void);
         void SwitchToNextTask(SwitchReason reason);
 
-        //  Ends task's wait with how (WOKEN or TIMED_OUT) and nudges its core.  False if the wait had already
-        //      ended, in which case nothing else happens.  Any context, any core, IRQs on or off.
+        //  Ends task's wait with how (WOKEN or TIMED_OUT) and requests a reschedule on its core.  False if the wait
+        //      had already ended, in which case nothing else happens.  Any context, any core, IRQs on or off.
 
         bool WakeTask(TaskImpl &task, WaitStatus how);
 
@@ -125,21 +125,21 @@ namespace task
             return tick_pending_[core].exchange(false, minstd::memory_order_acq_rel);
         }
 
-        //  A wake is pending for core.  Stays set until SwitchTasks() commits to choosing a task.
+        //  Asks core to choose its next task again, at IRQ exit or its next preemption point, whichever comes first.
+        //      Another core is sent an IPI; this core is not.  Any context.
 
-        static bool IsReschedPending(uint32_t core)
+        static void RequestReschedule(uint32_t core);
+
+        //  The request stays until SwitchTasks() commits to choosing a task.
+
+        static bool IsRescheduleRequested(uint32_t core)
         {
-            return need_resched_[core].load(minstd::memory_order_acquire);
+            return reschedule_requested_[core].load(minstd::memory_order_acquire);
         }
 
-        static void SetReschedPending(uint32_t core)
+        static void ClearRescheduleRequest(uint32_t core)
         {
-            need_resched_[core].store(true, minstd::memory_order_release);
-        }
-
-        static void ClearReschedPending(uint32_t core)
-        {
-            need_resched_[core].store(false, minstd::memory_order_release);
+            reschedule_requested_[core].store(false, minstd::memory_order_release);
         }
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
@@ -204,12 +204,10 @@ namespace task
 
         minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
 
-        //  need_resched_ is set by every wake of a task on that core, and acted on at IRQ exit or the next
-        //      preemption point, whichever comes first.  Static so the IRQ exit path can read it before the
-        //      instance exists.
+        //  Static so the IRQ exit path can read them before the instance exists.
 
         static inline minstd::atomic<bool> tick_pending_[MAX_CORES] = {};
-        static inline minstd::atomic<bool> need_resched_[MAX_CORES] = {};
+        static inline minstd::atomic<bool> reschedule_requested_[MAX_CORES] = {};
 
         minstd::fast_lockfree_low_quality_rng random_generator_{GetGeneralRNG()()};
 
@@ -250,8 +248,6 @@ namespace task
         //
 
         static void ReturnFromFork();
-
-        void NudgeCore(uint32_t core);
 
         explicit TaskManagerImpl(minstd::pmr::polymorphic_allocator<uint8_t> alloc);
 

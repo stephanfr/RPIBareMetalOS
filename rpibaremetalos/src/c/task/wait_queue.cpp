@@ -14,7 +14,6 @@
 #include "services/stats_db/kernel_statistic_ids.h"
 #include "services/stats_db/system_stats.h"
 
-#include "utility/tick_conversion.h"
 
 namespace task
 {
@@ -51,9 +50,7 @@ namespace task
 
     uint64_t KernelWaitPolicy::DeadlineAfter(microseconds timeout)
     {
-        const int64_t timeout_us = (timeout.count() > 0) ? timeout.count() : 0;
-
-        return PhysicalTimer::CurrentTicks() + utility::NanosecondsToTicks(static_cast<uint64_t>(timeout_us) * 1000, GetCounterFrequency());
+        return PhysicalTimer::DeadlineTicksAfter(timeout);
     }
 
     void KernelWaitPolicy::PreemptionPoint()

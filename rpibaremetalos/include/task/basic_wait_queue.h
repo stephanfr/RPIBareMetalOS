@@ -10,8 +10,8 @@
 
 namespace task
 {
-    //  Tasks blocked until a condition holds, linked through each task's wait_next_ / wait_prev_.  A task waits on
-    //      at most one queue at a time.  Wakes may come from any core or an ISR; waits only from task context.
+    //  Tasks blocked until a condition holds, linked through each task's wait_queue_next_ / wait_queue_prev_.  A
+    //      task waits on at most one queue at a time.  Wakes may come from any core or an ISR; waits only from task context.
     //
     //      queue.Wait([&]() { return data_ready; }, WaitReason::EVENT);       //  waiter
     //      data_ready = true;  queue.WakeOne();                               //  waker
@@ -32,7 +32,7 @@ namespace task
         typedef enum class Outcome : uint32_t
         {
             CONDITION_MET = 0,
-            WOKEN, //  the condition may or may not hold
+            WOKEN, //  but the condition did not hold when re-checked
             TIMED_OUT,
         } Outcome;
 
@@ -82,7 +82,8 @@ namespace task
         }
 
         //  One step of Wait(), for callers that act between wakes.  Returns without blocking if the condition holds
-        //      or deadline_ticks (0 for none) has passed.  On a timeout the condition is checked once more.
+        //      or deadline_ticks (0 for none) has passed.  After blocking, the condition is checked again, so
+        //      CONDITION_MET wins over WOKEN or TIMED_OUT.
 
         template <typename Condition>
         Outcome WaitOnce(Condition &&condition, WaitReason reason, uint64_t deadline_ticks, Position position)
@@ -112,12 +113,10 @@ namespace task
 
             lock_.Unlock();
 
-            if (Policy::CommitBlock(self) == WaitStatus::WOKEN)
-            {
-                return Outcome::WOKEN; //  the waker unlinked us
-            }
+            const WaitStatus how = Policy::CommitBlock(self);
 
-            //  Timed out: a waker may still find us linked, but its wake fails.
+            //  WakeOne() and WakeAll() unlink before they wake, but a timeout, or a wake addressed to the task
+            //      rather than to this queue, leaves it linked.
 
             lock_.Lock();
 
@@ -126,7 +125,12 @@ namespace task
 
             lock_.Unlock();
 
-            return condition_met ? Outcome::CONDITION_MET : Outcome::TIMED_OUT;
+            if (condition_met)
+            {
+                return Outcome::CONDITION_MET;
+            }
+
+            return (how == WaitStatus::TIMED_OUT) ? Outcome::TIMED_OUT : Outcome::WOKEN;
         }
 
         //  The number of tasks woken, 0 or 1.  Waiters whose wait already ended are skipped.
@@ -210,12 +214,12 @@ namespace task
         {
             if (position == Position::HEAD)
             {
-                task.wait_prev_ = nullptr;
-                task.wait_next_ = head_;
+                task.wait_queue_prev_ = nullptr;
+                task.wait_queue_next_ = head_;
 
                 if (head_ != nullptr)
                 {
-                    head_->wait_prev_ = &task;
+                    head_->wait_queue_prev_ = &task;
                 }
                 else
                 {
@@ -226,12 +230,12 @@ namespace task
                 return;
             }
 
-            task.wait_next_ = nullptr;
-            task.wait_prev_ = tail_;
+            task.wait_queue_next_ = nullptr;
+            task.wait_queue_prev_ = tail_;
 
             if (tail_ != nullptr)
             {
-                tail_->wait_next_ = &task;
+                tail_->wait_queue_next_ = &task;
             }
             else
             {
@@ -245,31 +249,31 @@ namespace task
 
         void Unlink(Task &task)
         {
-            if ((task.wait_prev_ == nullptr) && (head_ != &task))
+            if ((task.wait_queue_prev_ == nullptr) && (head_ != &task))
             {
                 return;
             }
 
-            if (task.wait_prev_ != nullptr)
+            if (task.wait_queue_prev_ != nullptr)
             {
-                task.wait_prev_->wait_next_ = task.wait_next_;
+                task.wait_queue_prev_->wait_queue_next_ = task.wait_queue_next_;
             }
             else
             {
-                head_ = task.wait_next_;
+                head_ = task.wait_queue_next_;
             }
 
-            if (task.wait_next_ != nullptr)
+            if (task.wait_queue_next_ != nullptr)
             {
-                task.wait_next_->wait_prev_ = task.wait_prev_;
+                task.wait_queue_next_->wait_queue_prev_ = task.wait_queue_prev_;
             }
             else
             {
-                tail_ = task.wait_prev_;
+                tail_ = task.wait_queue_prev_;
             }
 
-            task.wait_next_ = nullptr;
-            task.wait_prev_ = nullptr;
+            task.wait_queue_next_ = nullptr;
+            task.wait_queue_prev_ = nullptr;
         }
     };
 } // namespace task

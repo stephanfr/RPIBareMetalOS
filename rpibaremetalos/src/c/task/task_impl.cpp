@@ -41,7 +41,7 @@ namespace task
             return;
         }
 
-        if (TaskManagerImpl::IsReschedPending(GetCoreID()))
+        if (TaskManagerImpl::IsRescheduleRequested(GetCoreID()))
         {
             DisableIRQs();
             TaskManagerImpl::Instance().SwitchToNextTask(SwitchReason::PREEMPT);
@@ -59,7 +59,7 @@ namespace task
         }
 
         wait_reason_ = reason;
-        block_start_ = PhysicalTimer::Now();
+        wait_start_ = PhysicalTimer::Now();
 
         //  Before the task is published anywhere, or a waker's compare-exchange could find it not yet WAITING.
 
@@ -82,7 +82,7 @@ namespace task
         if (deadline_ticks != 0)
         {
             wake_deadline_ticks_ = deadline_ticks;
-            TaskManagerImpl::Instance().ExecutionContextForCurrentCore().AddTimer(*this);
+            TaskManagerImpl::Instance().ExecutionContextForCurrentCore().AddWaitDeadline(*this);
         }
     }
 
@@ -92,13 +92,13 @@ namespace task
 
         //  Running again, on the same core.  A wake that beat the deadline leaves the timer to remove.
 
-        TaskManagerImpl::Instance().ExecutionContextForCurrentCore().RemoveTimer(*this);
+        TaskManagerImpl::Instance().ExecutionContextForCurrentCore().RemoveWaitDeadline(*this);
 
         const WaitStatus how = static_cast<WaitStatus>(wait_status_.exchange(static_cast<uint32_t>(WaitStatus::NONE), minstd::memory_order_acq_rel));
 
         if (wait_reason_ == WaitReason::IO)
         {
-            io_wait_time_ += duration_cast<microseconds>(PhysicalTimer::Now() - block_start_);
+            io_wait_time_ += duration_cast<microseconds>(PhysicalTimer::Now() - wait_start_);
         }
 
         wait_reason_ = WaitReason::NONE;
@@ -114,13 +114,16 @@ namespace task
             return;
         }
 
-        SleepUntil(PhysicalTimer::Now() + duration_cast<nanoseconds>(duration));
+        SleepUntilTicks(PhysicalTimer::DeadlineTicksAfter(duration));
     }
 
     void TaskImpl::SleepUntil(time_point<nanoseconds> deadline)
     {
-        const uint64_t deadline_ticks = utility::NanosecondsToTicks(deadline.time_since_epoch().count(), GetCounterFrequency());
+        SleepUntilTicks(utility::NanosecondsToTicks(deadline.time_since_epoch().count(), GetCounterFrequency()));
+    }
 
+    void TaskImpl::SleepUntilTicks(uint64_t deadline_ticks)
+    {
         //  May be entered with IRQs masked (a system call) or not (a kernel task).
 
         const uint64_t saved_irqs = SaveAndDisableIRQs();

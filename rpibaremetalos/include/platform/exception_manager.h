@@ -122,7 +122,7 @@ protected:
     bool DispatchInterruptType(Interrupts interrupt, InterruptServiceRoutine *&core_task_switch_isr);
 
     //  The last step of every HandleInterrupt(), after EOI: leaves interrupt context, then runs the deferred
-    //      core task switch ISR, or switches if a wake from an ISR on this core asked for it.  May not return.
+    //      core task switch ISR, or switches if a reschedule was requested for this core.  May not return.
 
     void ExitInterrupt(InterruptServiceRoutine *core_task_switch_isr);
 

@@ -39,8 +39,8 @@ namespace
 
             for (FakeTask *task : tasks)
             {
-                task->wait_next_ = nullptr;
-                task->wait_prev_ = nullptr;
+                task->wait_queue_next_ = nullptr;
+                task->wait_queue_prev_ = nullptr;
                 task->status_ = task::WaitStatus::NONE;
                 task->blocks_ = 0;
                 task->on_block_ = nullptr;
@@ -147,7 +147,8 @@ namespace
         mutex->Lock();
 
         //  B is woken, loses to A's barge and sets HANDOFF.  A unlocks before B is back on the queue: with nobody
-        //      to hand to, the lock is released, and B takes it without blocking again.
+        //      to hand to, the lock is released, and B takes it without blocking again.  The unlock has to land on
+        //      B's second lock of the queue: its first is the one that unlinks it after the wake.
 
         b.on_block_ = [](FakeTask &)
         {
@@ -155,6 +156,7 @@ namespace
             mutex->Unlock();
             mutex->Lock();
 
+            FakeLock::before_lock_skip_ = 1;
             FakeLock::before_lock_ = []()
             {
                 ActAs(a);

@@ -30,8 +30,8 @@ namespace fake_wait
 
         char name_;
 
-        FakeTask *wait_next_ = nullptr;
-        FakeTask *wait_prev_ = nullptr;
+        FakeTask *wait_queue_next_ = nullptr;
+        FakeTask *wait_queue_prev_ = nullptr;
 
         task::WaitStatus status_ = task::WaitStatus::NONE;
         task::WaitReason reason_ = task::WaitReason::NONE;
@@ -51,8 +51,9 @@ namespace fake_wait
                 FAIL("wait queue lock taken twice");
             }
 
-            if (LockHook hook = before_lock_)
+            if ((before_lock_ != nullptr) && (before_lock_skip_-- == 0))
             {
+                LockHook hook = before_lock_;
                 before_lock_ = nullptr;
                 hook();
             }
@@ -65,9 +66,10 @@ namespace fake_wait
             held_ = false;
         }
 
-        //  Runs once, the next time any FakeLock is taken, before it is held.
+        //  Runs once, before a FakeLock is held, after before_lock_skip_ acquisitions have gone by without it.
 
         static inline LockHook before_lock_ = nullptr;
+        static inline uint32_t before_lock_skip_ = 0;
 
     private:
         bool held_ = false;
@@ -100,6 +102,7 @@ namespace fake_wait
             wakes_logged_ = 0;
             wake_log_[0] = '\0';
             FakeLock::before_lock_ = nullptr;
+            FakeLock::before_lock_skip_ = 0;
         }
 
         static FakeTask &Current()
