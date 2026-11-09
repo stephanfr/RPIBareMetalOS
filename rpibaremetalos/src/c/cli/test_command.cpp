@@ -16,7 +16,9 @@
 #include "heaps.h"
 
 #include "platform/address_space.h"
+#include "task/mutex.h"
 #include "task/task_impl.h"
+#include "task/wait_queue.h"
 #include "task/user_binary_loader.h"
 #include "platform/memory_manager.h"
 #include "platform/memory_model.h"
@@ -39,6 +41,8 @@ namespace cli::commands
     const CLITestUserTaskCommand        CLITestUserTaskCommand::instance;
     const CLITestSoakCommand            CLITestSoakCommand::instance;
     const CLITestSleepCommand           CLITestSleepCommand::instance;
+    const CLITestWaitCommand            CLITestWaitCommand::instance;
+    const CLITestMutexCommand           CLITestMutexCommand::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -2905,6 +2909,518 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: sleep test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test wait
+    //
+    //  Producers on every core post tokens and WakeOne() a queue that consumers on every core wait on with a
+    //      timeout.  A consumer takes a token inside its wait condition, under the queue lock, so every token is
+    //      taken exactly once, and no wake may be lost: a consumer that times out simply waits again.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        namespace wait_test
+        {
+            constexpr uint32_t NUM_PRODUCERS = 4;
+            constexpr uint32_t NUM_CONSUMERS = 6;
+            constexpr uint32_t TOKENS_PER_PRODUCER = 50;
+            constexpr uint32_t TOTAL_TOKENS = NUM_PRODUCERS * TOKENS_PER_PRODUCER;
+            constexpr uint64_t CONSUMER_TIMEOUT_MS = 20;
+
+            struct Shared
+            {
+                task::WaitQueue queue;
+                minstd::atomic<uint32_t> tokens{0};
+                minstd::atomic<uint32_t> consumed{0};
+                minstd::atomic<uint32_t> producer_wakes{0};
+            };
+
+            class Producer : public Runnable
+            {
+            public:
+                void Initialize(Shared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    for (uint32_t i = 0; i < TOKENS_PER_PRODUCER; i++)
+                    {
+                        shared_->tokens.fetch_add(1);
+                        shared_->producer_wakes.fetch_add(shared_->queue.WakeOne());
+
+                        if ((i % 10) == 9)
+                        {
+                            task::Task::GetTask().SleepFor(milliseconds(1));
+                        }
+                    }
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+            };
+
+            class Consumer : public Runnable
+            {
+            public:
+                void Initialize(Shared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    Shared *const shared = shared_;
+
+                    auto take_token = [shared]()
+                    {
+                        uint32_t available = shared->tokens.load();
+
+                        while (available > 0)
+                        {
+                            if (shared->tokens.compare_exchange_strong(available, available - 1, minstd::memory_order_acq_rel))
+                            {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    };
+
+                    while (shared->consumed.load() < TOTAL_TOKENS)
+                    {
+                        if (shared->queue.Wait(take_token, task::WaitReason::EVENT, milliseconds(CONSUMER_TIMEOUT_MS)))
+                        {
+                            consumed_++;
+                            shared->consumed.fetch_add(1);
+                        }
+                        else
+                        {
+                            timeouts_++;
+                        }
+                    }
+                }
+
+                uint32_t Consumed() const
+                {
+                    return consumed_;
+                }
+
+                uint32_t Timeouts() const
+                {
+                    return timeouts_;
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+                volatile uint32_t consumed_ = 0;
+                volatile uint32_t timeouts_ = 0;
+            };
+
+            //  Forks runnable pinned to core, or reports the failure.  The id is valid only on success.
+
+            bool ForkPinned(CLISessionContext &context, Runnable &runnable, const char *name, uint32_t core, UUID &id)
+            {
+                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+                auto result = context.task_manager_.ForkKernelTask(&runnable, task::TaskDefinition{name, 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << core)});
+
+                if (result.Failed())
+                {
+                    context << minstd::format(buffer, "  FAIL: could not fork {} on core {} -- {}\n", name, core, task::ErrorMessage(result.ResultCode()));
+                    return false;
+                }
+
+                id = result.Value();
+                return true;
+            }
+
+            void JoinTask(CLISessionContext &context, const UUID &id)
+            {
+                if (auto forked = context.task_manager_.FindTask(id))
+                {
+                    forked->Join();
+                }
+            }
+        } // namespace wait_test
+    } // namespace
+
+    void CLITestWaitCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace wait_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest wait: producers and consumers on every core share one wait queue\n";
+
+        const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
+        const int64_t wakeups_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS);
+
+        Shared shared;
+        Consumer consumers[NUM_CONSUMERS];
+        Producer producers[NUM_PRODUCERS];
+        UUID consumer_ids[NUM_CONSUMERS];
+        UUID producer_ids[NUM_PRODUCERS];
+        bool consumer_forked[NUM_CONSUMERS] = {};
+        bool producer_forked[NUM_PRODUCERS] = {};
+
+        uint32_t failures = 0;
+
+        //  Consumers first, so the early tokens find waiters.
+
+        for (uint32_t i = 0; i < NUM_CONSUMERS; i++)
+        {
+            consumers[i].Initialize(&shared);
+            consumer_forked[i] = ForkPinned(context, consumers[i], "Wait Consumer", i % core_count, consumer_ids[i]);
+            failures += consumer_forked[i] ? 0 : 1;
+        }
+
+        for (uint32_t i = 0; i < NUM_PRODUCERS; i++)
+        {
+            producers[i].Initialize(&shared);
+            producer_forked[i] = ForkPinned(context, producers[i], "Wait Producer", i % core_count, producer_ids[i]);
+            failures += producer_forked[i] ? 0 : 1;
+        }
+
+        if (failures != 0)
+        {
+            //  The consumers stop only once every token is taken: make up for the missing producers.
+
+            for (uint32_t i = 0; i < NUM_PRODUCERS; i++)
+            {
+                if (!producer_forked[i])
+                {
+                    shared.tokens.fetch_add(TOKENS_PER_PRODUCER);
+                    shared.queue.WakeAll();
+                }
+            }
+        }
+
+        for (uint32_t i = 0; i < NUM_PRODUCERS; i++)
+        {
+            if (producer_forked[i])
+            {
+                JoinTask(context, producer_ids[i]);
+            }
+        }
+
+        uint32_t consumed = 0;
+        uint32_t timeouts = 0;
+
+        for (uint32_t i = 0; i < NUM_CONSUMERS; i++)
+        {
+            if (consumer_forked[i])
+            {
+                JoinTask(context, consumer_ids[i]);
+            }
+
+            consumed += consumers[i].Consumed();
+            timeouts += consumers[i].Timeouts();
+        }
+
+        const int64_t wakeups = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS) - wakeups_before;
+        const uint32_t producer_wakes = shared.producer_wakes.load();
+
+        context << minstd::format(buffer, "  {} tokens posted, {} taken, {} left; {} consumer timeouts\n",
+                                  TOTAL_TOKENS, consumed, shared.tokens.load(), timeouts);
+        context << minstd::format(buffer, "  {} waiters woken by producers, tasks.wakeups rose by {}\n", producer_wakes, wakeups);
+
+        if ((consumed != TOTAL_TOKENS) || (shared.tokens.load() != 0))
+        {
+            context << "  FAIL: every token must be taken exactly once\n";
+            failures++;
+        }
+
+        if ((producer_wakes == 0) || (producer_wakes > TOTAL_TOKENS) || (wakeups < static_cast<int64_t>(producer_wakes)))
+        {
+            context << "  FAIL: the wakes do not reconcile with tasks.wakeups\n";
+            failures++;
+        }
+
+        if (failures == 0)
+        {
+            context << "PASS: wait test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: wait test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test mutex
+    //
+    //  Mutual exclusion under contention from every core, with holders that yield inside the lock; then a hog that
+    //      re-locks in a tight loop, which waiters on its own core and on another must still get past.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        namespace mutex_test
+        {
+            constexpr uint32_t NUM_CONTENDERS = 8;
+            constexpr uint32_t ITERATIONS = 2000;
+            constexpr uint32_t YIELD_EVERY = 100;
+
+            constexpr int64_t STARVATION_LIMIT_MS = 1000;
+            constexpr int64_t GIVE_UP_MS = 3000;
+
+            struct ExclusionShared
+            {
+                task::Mutex mutex;
+                minstd::atomic<bool> inside{false};
+                minstd::atomic<uint32_t> violations{0};
+                volatile uint64_t counter = 0;
+            };
+
+            class Contender : public Runnable
+            {
+            public:
+                void Initialize(ExclusionShared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    for (uint32_t i = 0; i < ITERATIONS; i++)
+                    {
+                        LockGuard guard(shared_->mutex);
+
+                        if (shared_->inside.exchange(true))
+                        {
+                            shared_->violations.fetch_add(1);
+                        }
+
+                        shared_->counter = shared_->counter + 1;
+
+                        if ((i % YIELD_EVERY) == 0)
+                        {
+                            task::Task::GetTask().Yield();
+                        }
+
+                        shared_->inside.store(false);
+                    }
+                }
+
+            private:
+                ExclusionShared *shared_ = nullptr;
+            };
+
+            struct StarvationShared
+            {
+                task::Mutex mutex;
+                minstd::atomic<bool> stop{false};
+                minstd::atomic<uint32_t> waiters_done{0};
+                minstd::atomic<uint64_t> hog_unlocks{0};
+            };
+
+            class Hog : public Runnable
+            {
+            public:
+                void Initialize(StarvationShared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    while (!shared_->stop.load())
+                    {
+                        shared_->mutex.Lock();
+
+                        for (volatile uint32_t spin = 0; spin < 200; spin = spin + 1)
+                        {
+                        }
+
+                        shared_->mutex.Unlock();
+                        shared_->hog_unlocks.fetch_add(1);
+                    }
+                }
+
+            private:
+                StarvationShared *shared_ = nullptr;
+            };
+
+            class Waiter : public Runnable
+            {
+            public:
+                void Initialize(StarvationShared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    task::Task::GetTask().SleepFor(milliseconds(20)); //  let the hog get going
+
+                    const uint64_t unlocks_before = shared_->hog_unlocks.load();
+                    const auto start = PhysicalTimer::Now();
+
+                    shared_->mutex.Lock();
+
+                    waited_ms_ = duration_cast<milliseconds>(PhysicalTimer::Now() - start).count();
+                    hog_unlocks_waited_ = shared_->hog_unlocks.load() - unlocks_before;
+
+                    shared_->mutex.Unlock();
+                    shared_->waiters_done.fetch_add(1);
+                }
+
+                int64_t WaitedMs() const
+                {
+                    return waited_ms_;
+                }
+
+                uint64_t HogUnlocksWaited() const
+                {
+                    return hog_unlocks_waited_;
+                }
+
+            private:
+                StarvationShared *shared_ = nullptr;
+                volatile int64_t waited_ms_ = -1;
+                volatile uint64_t hog_unlocks_waited_ = 0;
+            };
+        } // namespace mutex_test
+    } // namespace
+
+    void CLITestMutexCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace mutex_test;
+        using wait_test::ForkPinned;
+        using wait_test::JoinTask;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest mutex: mutual exclusion and freedom from starvation\n";
+
+        const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
+        const int64_t handoffs_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS);
+
+        uint32_t failures = 0;
+
+        //  Mutual exclusion.
+
+        {
+            ExclusionShared shared;
+            Contender contenders[NUM_CONTENDERS];
+            UUID ids[NUM_CONTENDERS];
+            bool forked[NUM_CONTENDERS] = {};
+            uint32_t forked_count = 0;
+
+            for (uint32_t i = 0; i < NUM_CONTENDERS; i++)
+            {
+                contenders[i].Initialize(&shared);
+                forked[i] = ForkPinned(context, contenders[i], "Mutex Contender", i % core_count, ids[i]);
+                forked_count += forked[i] ? 1 : 0;
+                failures += forked[i] ? 0 : 1;
+            }
+
+            for (uint32_t i = 0; i < NUM_CONTENDERS; i++)
+            {
+                if (forked[i])
+                {
+                    JoinTask(context, ids[i]);
+                }
+            }
+
+            const uint64_t expected = static_cast<uint64_t>(forked_count) * ITERATIONS;
+
+            const uint64_t counter = shared.counter;
+
+            context << minstd::format(buffer, "  {} contenders on {} cores: counter {} of {}, {} exclusion violations\n",
+                                      forked_count, core_count, counter, expected, shared.violations.load());
+
+            if ((counter != expected) || (shared.violations.load() != 0))
+            {
+                context << "  FAIL: the mutex let two tasks in at once\n";
+                failures++;
+            }
+        }
+
+        //  Starvation: a hog on one core, a waiter on the same core and one on another, all away from this task.
+
+        {
+            const uint32_t self_core = task::Task::GetTask().CurrentCore();
+            const uint32_t hog_core = (self_core + 1) % core_count;
+            const uint32_t cross_core = (self_core + 2) % core_count;
+
+            StarvationShared shared;
+            Hog hog;
+            Waiter waiters[2];
+            const uint32_t waiter_cores[2] = {hog_core, cross_core};
+            const char *const waiter_labels[2] = {"same-core waiter", "cross-core waiter"};
+
+            UUID hog_id;
+            UUID waiter_ids[2];
+            bool waiter_forked[2] = {};
+
+            hog.Initialize(&shared);
+            const bool hog_forked = ForkPinned(context, hog, "Mutex Hog", hog_core, hog_id);
+            failures += hog_forked ? 0 : 1;
+
+            for (uint32_t i = 0; i < 2; i++)
+            {
+                waiters[i].Initialize(&shared);
+                waiter_forked[i] = ForkPinned(context, waiters[i], "Mutex Waiter", waiter_cores[i], waiter_ids[i]);
+                failures += waiter_forked[i] ? 0 : 1;
+            }
+
+            const uint32_t waiters_expected = (waiter_forked[0] ? 1 : 0) + (waiter_forked[1] ? 1 : 0);
+            const auto start = PhysicalTimer::Now();
+
+            while ((shared.waiters_done.load() < waiters_expected) &&
+                   (duration_cast<milliseconds>(PhysicalTimer::Now() - start).count() < GIVE_UP_MS))
+            {
+                task::Task::GetTask().SleepFor(milliseconds(10));
+            }
+
+            shared.stop.store(true);
+
+            if (hog_forked)
+            {
+                JoinTask(context, hog_id);
+            }
+
+            for (uint32_t i = 0; i < 2; i++)
+            {
+                if (!waiter_forked[i])
+                {
+                    continue;
+                }
+
+                JoinTask(context, waiter_ids[i]);
+
+                const int64_t waited_ms = waiters[i].WaitedMs();
+                const uint64_t hog_unlocks_waited = waiters[i].HogUnlocksWaited();
+
+                context << minstd::format(buffer, "  {} on core {}: lock after {} ms, {} hog unlocks\n",
+                                          waiter_labels[i], waiter_cores[i], waited_ms, hog_unlocks_waited);
+
+                if ((waiters[i].WaitedMs() < 0) || (waiters[i].WaitedMs() > STARVATION_LIMIT_MS))
+                {
+                    context << minstd::format(buffer, "  FAIL: the {} was starved\n", waiter_labels[i]);
+                    failures++;
+                }
+            }
+
+            context << minstd::format(buffer, "  hog unlocked {} times\n", shared.hog_unlocks.load());
+        }
+
+        context << minstd::format(buffer, "  mutex.handoffs rose by {}\n",
+                                  soak::ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS) - handoffs_before);
+
+        if (failures == 0)
+        {
+            context << "PASS: mutex test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: mutex test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands

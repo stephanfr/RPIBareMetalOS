@@ -13,8 +13,8 @@
 # one. Board selection in the OS is runtime (MIDR_EL1
 # PARTNUM), so the same kernel8.img and sd.img serve every machine.
 #
-# The armstub is the -kernel image and the kernel is loaded beside it: an ELF keeps QEMU's
-# is_linux flag clear, which is what starts the cores at EL3 (hw/arm/boot.c:1238-1249).
+# The armstub is the -kernel image and the kernel is loaded beside it: QEMU boots an ELF
+# -kernel as a bare-metal image, which is what starts the cores at EL3 (hw/arm/boot.c:1238-1249).
 #
 # Usage:
 #   python3 qemu_regression_test.py --qemu <qemu-binary> \
@@ -238,6 +238,15 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         output = send_command('test sleep', timeout=60)
         check('test sleep', output, 'PASS: sleep test', 'case 15: sleep OK')
 
+        # test wait / test mutex — the wait queue and the blocking mutex across every core: each
+        # posted token taken exactly once, mutual exclusion, and a waiter that a re-locking hog
+        # cannot starve.
+        output = send_command('test wait', timeout=60)
+        check('test wait', output, 'PASS: wait test')
+
+        output = send_command('test mutex', timeout=60)
+        check('test mutex', output, 'PASS: mutex test')
+
         # list statistics — the kernel counts every user task a fault killed, and test usertask
         # is the only thing that kills one: exactly the seven cases above.
         output = send_command('list statistics')
@@ -320,13 +329,15 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
             print('\nPASS [list statistics]: tasks.runlist_depth has one element per core')
         expect_stat(16, 'counter', 'scheduler.missed_interrupts', lambda v: v >= 0, 'present')
 
-        # The wait metrics.  test sleep and the reaper block, and every sleep ends by its timeout.
+        # The wait metrics.  test sleep, test wait, test mutex and the reaper block, and every sleep
+        # ends by its timeout.
         # Nothing waits for storage I/O yet, so waiting_io must stay zero.
         expect_stat(34, 'gauge', 'tasks.waiting', lambda v: v >= 0, '>= 0')
         expect_stat(35, 'gauge', 'tasks.waiting_io', lambda v: v == 0, '== 0')
         expect_stat(36, 'counter', 'tasks.blocks', lambda v: v > 0, '> 0')
         expect_stat(37, 'counter', 'tasks.wakeups', lambda v: v >= 0, 'present')
         expect_stat(38, 'counter', 'tasks.wait_timeouts', lambda v: v > 0, '> 0')
+        expect_stat(39, 'counter', 'mutex.handoffs', lambda v: v >= 0, 'present')
 
         # The address-space metrics.  demand_page_faults must have moved -- test usertask
         # demand-pages heap and stack pages in several cases.  demand_page_failures is a

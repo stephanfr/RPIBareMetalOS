@@ -24,6 +24,7 @@
 #include "task/task_errors.h"
 #include "task/tasks.h"
 #include "task/system_calls.h"
+#include "task/wait_queue.h"
 
 #include "asm_utility.h"
 
@@ -147,6 +148,11 @@ namespace task
             //  We cannot free our own stack here because we are still executing on it.
             //  The stack must be freed by a background cleanup/reaper task or during FindNextTask
             //  when the ZOMBIE task is completely removed.
+            //
+            //  IRQs off first: a tick after state_ becomes ZOMBIE would switch this task out for good before it
+            //      woke its joiners.
+
+            DisableIRQs();
 
             preempt_count_ = 0;
             counter_ = 0;
@@ -164,6 +170,8 @@ namespace task
             system_stats::task_zombies.Increment(1);
 
             state_ = Task::ExecutionState::ZOMBIE;
+
+            exit_waiters_.WakeAll();
 
             GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
@@ -197,15 +205,13 @@ namespace task
             return CommitBlock();
         }
 
+        //  The reference keeps this task, and so exit_waiters_, alive until the joiner is off the queue.
+
         void Join() override
         {
             AddReference();
 
-            while (const_cast<volatile ExecutionState &>(state_) != Task::ExecutionState::ZOMBIE)
-            {
-                Yield();
-                PhysicalTimer::Wait(microseconds(100));
-            }
+            exit_waiters_.Wait([this]() { return state_ == Task::ExecutionState::ZOMBIE; }, WaitReason::JOIN);
 
             ReleaseReference();
         }
@@ -305,6 +311,9 @@ namespace task
         template <typename Node>
         friend class TimerList;
 
+        template <typename Policy>
+        friend class BasicWaitQueue;
+
         WaitStatus LoadWaitStatus() const
         {
             return static_cast<WaitStatus>(wait_status_.load(minstd::memory_order_acquire));
@@ -355,6 +364,8 @@ namespace task
         TaskImpl *timer_next_ = nullptr;
         TaskImpl *timer_prev_ = nullptr;
         uint64_t wake_deadline_ticks_ = 0;
+
+        WaitQueue exit_waiters_;
 
         long counter_;
         long priority_;

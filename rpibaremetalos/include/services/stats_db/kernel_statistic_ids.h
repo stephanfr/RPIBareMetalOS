@@ -58,6 +58,8 @@ namespace system_stats
         TASK_BLOCKS                     = 36,
         TASK_WAKEUPS                    = 37,
         TASK_WAIT_TIMEOUTS              = 38,
+
+        MUTEX_HANDOFFS                  = 39,
     } KernelStatisticId;
 
     constexpr uint32_t KernelStatistic(KernelStatisticId id)

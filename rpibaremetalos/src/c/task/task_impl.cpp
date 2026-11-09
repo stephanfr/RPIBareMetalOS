@@ -51,8 +51,6 @@ namespace task
 
     void TaskImpl::PrepareToBlock(WaitReason reason, uint64_t deadline_ticks)
     {
-        //  Linux reports the same misuse as "scheduling while atomic".
-
         if ((preempt_count_ != 0) || InInterrupt() || AreIRQsEnabled())
         {
             LogFatal("PrepareToBlock: task %s cannot block (preempt count %ld, in interrupt %d, IRQs enabled %d)\n",
