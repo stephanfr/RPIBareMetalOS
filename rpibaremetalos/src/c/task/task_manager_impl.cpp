@@ -702,7 +702,14 @@ namespace task
 
     void TaskManagerImpl::ReturnFromFork()
     {
+        //  A new task's first code, entered from SwitchCPUState with IRQs still disabled.  The preempt count was
+        //      1 since the fork, so the task could not be preempted before this.  Enable IRQs last: a kernel task
+        //      runs its body from here with whatever mask it has, and a user task's KernelExit remasks anyway.
+
         TaskManagerImpl::Instance().CurrentTask().PreemptEnable();
+
+        EnableIRQs();
+
         ReturnFromForkASMStub(); //  Assembly function
     }
 

@@ -220,7 +220,8 @@ namespace task
         //      Do not allow interrupts to occur in this code as we are manipulating the task list
         //      and it is not thread re-entrant.  Do not block or take locks anywhere in this code.
         //
-        //  The KernelExit method will re-enable interrupts at the eret instruction.
+        //  Nothing here re-enables interrupts: a caller that wants them back on does that itself, and the
+        //      KernelExit method restores them at the eret instruction for a switch made from an interrupt.
         //
         //  Even if we had a lock-free task list, there is still some risk of taking an interrupt while
         //      switching contexts.  Best to just have interrupts disabled for the duration of the switch.

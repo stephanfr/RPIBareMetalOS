@@ -90,6 +90,9 @@ namespace task
             inter_context_message_queue_.QueueMessage(message);
         }
 
+        //  Call with IRQs disabled; returns with them disabled, whether or not a switch happened.  May return
+        //      only when this task is next switched in.
+
         void SwitchTasks(SwitchReason reason);
 
         //  This core's tasks waiting with a deadline.  Owning core only, IRQs disabled.

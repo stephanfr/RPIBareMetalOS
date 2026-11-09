@@ -325,6 +325,20 @@ private:
             return true;
         }
 
+        case Interrupts::ARM_VIRTUAL_TIMER:
+        {
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    volatile uint32_t *timer_control = reinterpret_cast<volatile uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::CORE_TIMER_INTERRUPT_CONTROL_OFFSET + (4 * current_core));
+
+                    *timer_control = *timer_control & ~static_cast<uint32_t>(BCM2837ARMLocalInterruptSources::CNTVIRQ);
+                }
+            }
+            return true;
+        }
+
 
 /*
         case Interrupts::CORE_MAILBOX_0:

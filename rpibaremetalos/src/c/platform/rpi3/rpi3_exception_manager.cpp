@@ -81,6 +81,4 @@ void BCM2837ExceptionManager::HandleInterrupt()
     }
 
     ExitInterrupt(core_task_switch_isr);
-
-    EnableIRQs();
 }

@@ -200,7 +200,11 @@ namespace syscall
             return;
         }
 
-        task::Task::GetTask().SleepFor(microseconds(microseconds_to_sleep));
+        //  Clamped so a value past INT64_MAX saturates to a forever sleep instead of turning negative.
+
+        const uint64_t clamped = (microseconds_to_sleep > static_cast<uint64_t>(INT64_MAX)) ? static_cast<uint64_t>(INT64_MAX) : microseconds_to_sleep;
+
+        task::Task::GetTask().SleepFor(microseconds(static_cast<int64_t>(clamped)));
     }
 }
 

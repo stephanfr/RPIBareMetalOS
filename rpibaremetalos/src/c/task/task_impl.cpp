@@ -90,7 +90,8 @@ namespace task
     {
         TaskManagerImpl::Instance().SwitchToNextTask(SwitchReason::BLOCK);
 
-        //  Running again, on the same core.  A wake that beat the deadline leaves the timer to remove.
+        //  Running again, on the same core, IRQs still disabled.  A wake that beat the deadline leaves the
+        //      deadline to remove.
 
         TaskManagerImpl::Instance().ExecutionContextForCurrentCore().RemoveWaitDeadline(*this);
 
@@ -119,7 +120,9 @@ namespace task
 
     void TaskImpl::SleepUntil(time_point<nanoseconds> deadline)
     {
-        SleepUntilTicks(utility::NanosecondsToTicks(deadline.time_since_epoch().count(), GetCounterFrequency()));
+        const int64_t since_epoch = deadline.time_since_epoch().count();
+
+        SleepUntilTicks(utility::NanosecondsToTicks((since_epoch > 0) ? static_cast<uint64_t>(since_epoch) : 0, GetCounterFrequency()));
     }
 
     void TaskImpl::SleepUntilTicks(uint64_t deadline_ticks)

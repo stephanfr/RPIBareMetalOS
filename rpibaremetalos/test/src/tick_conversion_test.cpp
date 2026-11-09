@@ -8,6 +8,8 @@
 
 namespace
 {
+    using utility::DeadlineTicksAfter;
+    using utility::MicrosecondsToTicks;
     using utility::NanosecondsToTicks;
     using utility::TicksToNanoseconds;
 
@@ -137,5 +139,79 @@ namespace
     TEST(NanosecondsToTicksTests, IsUsableInConstantExpressions)
     {
         static_assert(NanosecondsToTicks(NANOSECONDS_PER_SECOND, RPI4_COUNTER_HZ) == RPI4_COUNTER_HZ);
+    }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+    TEST_GROUP(MicrosecondsToTicksTests)
+    {};
+#pragma GCC diagnostic pop
+
+    TEST(MicrosecondsToTicksTests, WholeSecondsScaleByTheFrequency)
+    {
+        CHECK_EQUAL(0ULL, MicrosecondsToTicks(0, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(RPI4_COUNTER_HZ, MicrosecondsToTicks(MICROSECONDS_PER_SECOND, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(3 * RPI3_COUNTER_HZ, MicrosecondsToTicks(3 * MICROSECONDS_PER_SECOND, RPI3_COUNTER_HZ));
+        CHECK_EQUAL(0ULL, MicrosecondsToTicks(5 * MICROSECONDS_PER_SECOND, 0));
+    }
+
+    TEST(MicrosecondsToTicksTests, PartialTicksRoundUp)
+    {
+        //  One microsecond is 19.2 ticks at 19.2 MHz and exactly 54 at 54 MHz.
+        CHECK_EQUAL(20ULL, MicrosecondsToTicks(1, RPI3_COUNTER_HZ));
+        CHECK_EQUAL(54ULL, MicrosecondsToTicks(1, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(96ULL, MicrosecondsToTicks(5, RPI3_COUNTER_HZ));
+        CHECK_EQUAL(RPI3_COUNTER_HZ + 20ULL, MicrosecondsToTicks(MICROSECONDS_PER_SECOND + 1, RPI3_COUNTER_HZ));
+    }
+
+    TEST(MicrosecondsToTicksTests, AgreesWithTheNanosecondConversion)
+    {
+        const uint64_t frequencies[] = {RPI3_COUNTER_HZ, RPI4_COUNTER_HZ, QEMU_COUNTER_HZ};
+        const uint64_t spans[] = {1, 999, 1000000, 49999999, 1234567891ULL, 30ULL * SECONDS_PER_DAY * MICROSECONDS_PER_SECOND + 7};
+
+        for (uint64_t frequency : frequencies)
+        {
+            for (uint64_t microseconds : spans)
+            {
+                CHECK_EQUAL(NanosecondsToTicks(microseconds * NANOSECONDS_PER_MICROSECOND, frequency),
+                            MicrosecondsToTicks(microseconds, frequency));
+            }
+        }
+    }
+
+    TEST(MicrosecondsToTicksTests, SpansTooLongForTheCounterSaturate)
+    {
+        //  2^64 ticks at 54 MHz is ~10,800 years, ~341.6e15 microseconds.
+        CHECK_EQUAL(UINT64_MAX, MicrosecondsToTicks(UINT64_MAX, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(UINT64_MAX, MicrosecondsToTicks(static_cast<uint64_t>(INT64_MAX), RPI3_COUNTER_HZ));
+        CHECK_EQUAL(UINT64_MAX, MicrosecondsToTicks(342000000000000000ULL, RPI4_COUNTER_HZ));
+        CHECK(MicrosecondsToTicks(341000000000000000ULL, RPI4_COUNTER_HZ) < UINT64_MAX);
+    }
+
+    TEST(MicrosecondsToTicksTests, IsUsableInConstantExpressions)
+    {
+        static_assert(MicrosecondsToTicks(MICROSECONDS_PER_SECOND, RPI4_COUNTER_HZ) == RPI4_COUNTER_HZ);
+        static_assert(MicrosecondsToTicks(UINT64_MAX, RPI4_COUNTER_HZ) == UINT64_MAX);
+    }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+    TEST_GROUP(DeadlineTicksAfterTests)
+    {};
+#pragma GCC diagnostic pop
+
+    TEST(DeadlineTicksAfterTests, AddsTheSpanToNow)
+    {
+        CHECK_EQUAL(1000ULL, DeadlineTicksAfter(1000, 0, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(1054ULL, DeadlineTicksAfter(1000, 1, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(1000ULL + RPI3_COUNTER_HZ, DeadlineTicksAfter(1000, MICROSECONDS_PER_SECOND, RPI3_COUNTER_HZ));
+    }
+
+    TEST(DeadlineTicksAfterTests, DeadlinesPastTheEndOfTheCounterSaturate)
+    {
+        CHECK_EQUAL(UINT64_MAX, DeadlineTicksAfter(UINT64_MAX - 53, 1, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(UINT64_MAX - 1, DeadlineTicksAfter(UINT64_MAX - 55, 1, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(UINT64_MAX, DeadlineTicksAfter(1000, UINT64_MAX, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(UINT64_MAX, DeadlineTicksAfter(UINT64_MAX, UINT64_MAX, RPI3_COUNTER_HZ));
     }
 }
