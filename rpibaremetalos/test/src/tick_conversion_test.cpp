@@ -8,6 +8,7 @@
 
 namespace
 {
+    using utility::NanosecondsToTicks;
     using utility::TicksToNanoseconds;
 
     constexpr uint64_t RPI4_COUNTER_HZ = 54000000;
@@ -91,5 +92,50 @@ namespace
     {
         static_assert(TicksToNanoseconds(RPI4_COUNTER_HZ, RPI4_COUNTER_HZ) == NANOSECONDS_PER_SECOND);
         static_assert(TicksToNanoseconds(1, 0) == 0);
+    }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+    TEST_GROUP(NanosecondsToTicksTests)
+    {};
+#pragma GCC diagnostic pop
+
+    TEST(NanosecondsToTicksTests, WholeSecondsScaleByTheFrequency)
+    {
+        CHECK_EQUAL(0ULL, NanosecondsToTicks(0, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(RPI4_COUNTER_HZ, NanosecondsToTicks(NANOSECONDS_PER_SECOND, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(3 * RPI3_COUNTER_HZ, NanosecondsToTicks(3 * NANOSECONDS_PER_SECOND, RPI3_COUNTER_HZ));
+        CHECK_EQUAL(0ULL, NanosecondsToTicks(5 * NANOSECONDS_PER_SECOND, 0));
+    }
+
+    TEST(NanosecondsToTicksTests, PartialTicksRoundUp)
+    {
+        //  At 62.5 MHz one tick is exactly 16 ns.
+        CHECK_EQUAL(1ULL, NanosecondsToTicks(16, QEMU_COUNTER_HZ));
+        CHECK_EQUAL(1ULL, NanosecondsToTicks(1, QEMU_COUNTER_HZ));
+        CHECK_EQUAL(2ULL, NanosecondsToTicks(17, QEMU_COUNTER_HZ));
+
+        //  One 54 MHz tick is 18.518... ns.
+        CHECK_EQUAL(1ULL, NanosecondsToTicks(18, RPI4_COUNTER_HZ));
+        CHECK_EQUAL(2ULL, NanosecondsToTicks(19, RPI4_COUNTER_HZ));
+    }
+
+    TEST(NanosecondsToTicksTests, RoundTripNeverComesBackShort)
+    {
+        const uint64_t frequencies[] = {RPI3_COUNTER_HZ, RPI4_COUNTER_HZ, QEMU_COUNTER_HZ};
+        const uint64_t spans[] = {1, 999, 1000000, 49999999, 1234567891ULL, 30ULL * SECONDS_PER_DAY * NANOSECONDS_PER_SECOND + 7};
+
+        for (uint64_t frequency : frequencies)
+        {
+            for (uint64_t nanoseconds : spans)
+            {
+                CHECK_TRUE(TicksToNanoseconds(NanosecondsToTicks(nanoseconds, frequency), frequency) >= nanoseconds);
+            }
+        }
+    }
+
+    TEST(NanosecondsToTicksTests, IsUsableInConstantExpressions)
+    {
+        static_assert(NanosecondsToTicks(NANOSECONDS_PER_SECOND, RPI4_COUNTER_HZ) == RPI4_COUNTER_HZ);
     }
 }

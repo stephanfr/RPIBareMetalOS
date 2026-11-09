@@ -28,6 +28,12 @@ sc_Yield:
 	svc #0
 	ret
 
+.globl sc_Sleep
+sc_Sleep:
+	mov w8, #SYS_SLEEP_NUMBER
+	svc #0
+	ret
+
 .globl sc_FindStatistic
 sc_FindStatistic:
 	mov w8, #SYS_FIND_STATISTIC_NUMBER

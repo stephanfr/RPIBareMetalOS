@@ -125,7 +125,15 @@ namespace task
                     system_stats::ReclaimRetiredUserStatisticsRegions();
                     system_stats::ReclaimRetiredStatistics();
 
-                    Yield();                                            //  TODO add sleep to scheduler as Sleep(...) like Join
+                    //  Until a zombie is delisted, or a second passes: the resource grace period and the zombie lifetime
+                    //      are lower bounds, so a second late is fine.  A delisting that lands before the task is
+                    //      WAITING is picked up by the timeout.
+
+                    const uint64_t saved_irqs = SaveAndDisableIRQs();
+
+                    TaskImpl::GetTask().Block(WaitReason::EVENT, PhysicalTimer::CurrentTicks() + GetCounterFrequency());
+
+                    RestoreIRQs(saved_irqs);
                 }
             }
         };
@@ -239,13 +247,17 @@ namespace task
 
         //  Create one reaper task to periodically clean up zombie tasks.
 
-        auto reaper_ = static_new<internal::ReaperTask>();
+        auto reaper_runnable = static_new<internal::ReaperTask>();
 
-        if (instance_->get().ForkKernelTask(reaper_, TaskDefinition{"Reaper"}).Failed())
+        auto fork_reaper_result = instance_->get().ForkKernelTask(reaper_runnable, TaskDefinition{"Reaper"});
+
+        if (fork_reaper_result.Failed())
         {
             LogFatal("Failed to create the reaper task\n");
             ParkCore();
         }
+
+        instance_->get().reaper_.store(instance_->get().task_map_.find(fork_reaper_result.Value())->second, minstd::memory_order_release);
 
         return TaskResultCodes::SUCCESS;
     }

@@ -32,6 +32,8 @@ namespace
         void Yield() override {}
         void Exit() override {}
         void Join() override { joins_++; }
+        void SleepFor(microseconds) override {}
+        void SleepUntil(time_point<nanoseconds>) override {}
 
     protected:
         void AddReference() override { references_++; }

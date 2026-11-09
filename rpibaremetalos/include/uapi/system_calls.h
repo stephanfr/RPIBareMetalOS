@@ -18,8 +18,9 @@
 #define SYS_FIND_STATISTIC_NUMBER   5
 #define SYS_READ_STATISTIC_NUMBER   6
 #define SYS_FIND_PROCESS_NUMBER     7
+#define SYS_SLEEP_NUMBER            8
 
-#define NUMBER_OF_SYSTEM_CALLS 8
+#define NUMBER_OF_SYSTEM_CALLS 9
 
 #ifndef __ASSEMBLER__
 
@@ -36,6 +37,10 @@ extern "C"
     unsigned long sc_Malloc(unsigned long block_size);
     void sc_Exit(void);
     void sc_Yield(void);
+
+    //  Blocks for at least the given time; 0 yields.
+
+    void sc_Sleep(uint64_t microseconds);
 
     void sc_Write(const char * buf);
 

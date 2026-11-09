@@ -27,4 +27,14 @@ namespace utility
 
         return (whole_seconds * NANOSECONDS_PER_SECOND) + ((remainder * NANOSECONDS_PER_SECOND) / frequency);
     }
+
+    //  The inverse, rounded UP so a deadline computed from it is never early.  Exact for the same range.
+
+    constexpr uint64_t NanosecondsToTicks(uint64_t nanoseconds, uint64_t frequency) noexcept
+    {
+        const uint64_t whole_seconds = nanoseconds / NANOSECONDS_PER_SECOND;
+        const uint64_t remainder     = nanoseconds % NANOSECONDS_PER_SECOND;
+
+        return (whole_seconds * frequency) + (((remainder * frequency) + NANOSECONDS_PER_SECOND - 1) / NANOSECONDS_PER_SECOND);
+    }
 } // namespace utility

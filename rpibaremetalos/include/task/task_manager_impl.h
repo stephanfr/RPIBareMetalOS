@@ -147,6 +147,11 @@ namespace task
 
         void AddTask(minstd::unique_ptr<TaskImpl> &task);
 
+        TaskExecutionContext &ExecutionContextForCurrentCore()
+        {
+            return task_execution_contexts_[GetCoreID()];
+        }
+
         TaskImpl &IdleTaskForCurrentCore() const
         {
             return *(idle_tasks_[GetCoreID()]);
@@ -162,6 +167,13 @@ namespace task
             if (!delisted_zombies_.push_back(entry))
             {
                 system_stats::task_dropped_zombies.Increment();
+            }
+
+            //  The reaper sleeps between passes, so a burst of exits must wake it before the queue fills.
+
+            if (TaskImpl *reaper = reaper_.load(minstd::memory_order_acquire))
+            {
+                WakeTask(*reaper, WaitStatus::WOKEN);
             }
         }
 
@@ -183,7 +195,7 @@ namespace task
         minstd::array<TaskImpl *, MAX_CORES> kernel_main_tasks_;
         minstd::array<TaskImpl *, MAX_CORES> idle_tasks_;
 
-        TaskImpl* reaper_{nullptr};
+        minstd::atomic<TaskImpl *> reaper_{nullptr};
 
         minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
 

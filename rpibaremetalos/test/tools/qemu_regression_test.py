@@ -28,6 +28,8 @@ import sys
 import re
 import pexpect
 
+from qemu_machines import cpu_flags
+
 
 PROMPT = '> '
 BOOT_READY_MARKER = 'Command Line Interface'
@@ -79,6 +81,7 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         extra_cmdline: str = '') -> int:
     cmd = (
         f'{qemu} -M {machine}'
+        f'{cpu_flags(machine)}'
         f'{f" -m {memory}" if memory else ""}'
         f' -kernel {armstub}'
         f' -device loader,file={kernel},addr=0x80000,force-raw=on'
@@ -230,6 +233,11 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
                 print(f'\nFAIL [test usertask]: unexpected "{bad}" in output')
                 failures += 1
 
+        # test sleep — kernel and user tasks block until a deadline instead of spinning: no sleep
+        # ends early or more than the scheduler-tick bound late, and a sleeping task is not scheduled.
+        output = send_command('test sleep', timeout=60)
+        check('test sleep', output, 'PASS: sleep test', 'case 15: sleep OK')
+
         # list statistics — the kernel counts every user task a fault killed, and test usertask
         # is the only thing that kills one: exactly the seven cases above.
         output = send_command('list statistics')
@@ -311,6 +319,14 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         else:
             print('\nPASS [list statistics]: tasks.runlist_depth has one element per core')
         expect_stat(16, 'counter', 'scheduler.missed_interrupts', lambda v: v >= 0, 'present')
+
+        # The wait metrics.  test sleep and the reaper block, and every sleep ends by its timeout.
+        # Nothing waits for storage I/O yet, so waiting_io must stay zero.
+        expect_stat(34, 'gauge', 'tasks.waiting', lambda v: v >= 0, '>= 0')
+        expect_stat(35, 'gauge', 'tasks.waiting_io', lambda v: v == 0, '== 0')
+        expect_stat(36, 'counter', 'tasks.blocks', lambda v: v > 0, '> 0')
+        expect_stat(37, 'counter', 'tasks.wakeups', lambda v: v >= 0, 'present')
+        expect_stat(38, 'counter', 'tasks.wait_timeouts', lambda v: v > 0, '> 0')
 
         # The address-space metrics.  demand_page_faults must have moved -- test usertask
         # demand-pages heap and stack pages in several cases.  demand_page_failures is a

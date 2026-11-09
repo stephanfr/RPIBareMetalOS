@@ -80,6 +80,14 @@ namespace task
         }
     }
 
+    void TaskExecutionContext::ExpireTimers()
+    {
+        timer_list_.ExpireUpTo(PhysicalTimer::CurrentTicks(), [](TaskImpl &task)
+        {
+            TaskManagerImpl::Instance().WakeTask(task, WaitStatus::TIMED_OUT);
+        });
+    }
+
     TaskImpl &TaskExecutionContext::FindNextTask(void)
     {
         //  Ties go to the current task, so a wake preempts it only with a strictly greater counter.
@@ -218,14 +226,18 @@ namespace task
         }
 
         const bool blocking = (prev->state_ == Task::ExecutionState::WAITING);
-        const bool wake_pending = TaskManagerImpl::IsReschedPending(GetCoreID());
 
-        //  First, groom the task list.
+        //  First, groom the task list, then wake expired sleepers.  Read the wake flag after both, so a sleeper
+        //      woken here can preempt at once.
 
         if (inter_context_message_queue_.HasMessages())
         {
             ServiceMessages();
         }
+
+        ExpireTimers();
+
+        const bool wake_pending = TaskManagerImpl::IsReschedPending(GetCoreID());
 
         //  Only the tick charges the timeslice: a wake IPI must not cost the running task its time.
 

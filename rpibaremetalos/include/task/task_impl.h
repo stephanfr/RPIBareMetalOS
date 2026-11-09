@@ -174,6 +174,29 @@ namespace task
             }
         }
 
+        void SleepFor(microseconds duration) override;
+        void SleepUntil(time_point<nanoseconds> deadline) override;
+
+        //  The blocking protocol every wait primitive is built on.  With IRQs disabled, in task context, preempt
+        //      count zero:
+        //
+        //      PrepareToBlock(reason, deadline);       //  WAITING before the task is visible to any waker
+        //      ...publish the task where a waker will find it...
+        //      WaitStatus how = CommitBlock();         //  switches out; returns once woken or timed out
+        //
+        //  deadline_ticks is in system counter ticks, 0 for none.  A wake may land anywhere after PrepareToBlock(),
+        //      including before CommitBlock(), and is not lost.  Callers re-check their condition: a wait may end
+        //      for a reason unrelated to it.
+
+        void PrepareToBlock(WaitReason reason, uint64_t deadline_ticks);
+        WaitStatus CommitBlock();
+
+        WaitStatus Block(WaitReason reason, uint64_t deadline_ticks)
+        {
+            PrepareToBlock(reason, deadline_ticks);
+            return CommitBlock();
+        }
+
         void Join() override
         {
             AddReference();
@@ -278,6 +301,9 @@ namespace task
         friend class TaskManagerImpl;
         friend class TaskSchedulingQueue;
         friend class TaskExecutionContext;
+
+        template <typename Node>
+        friend class TimerList;
 
         WaitStatus LoadWaitStatus() const
         {

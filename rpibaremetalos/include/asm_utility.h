@@ -52,6 +52,21 @@ inline bool AreIRQsEnabled()
     return (daif & (1UL << 7)) == 0;
 }
 
+//  For code that may be entered with IRQs either masked or unmasked: pass the result to RestoreIRQs().
+
+inline uint64_t SaveAndDisableIRQs()
+{
+    uint64_t daif;
+    asm volatile("mrs %0, daif" : "=r"(daif));
+    asm volatile("msr daifset, #2" ::: "memory");
+    return daif;
+}
+
+inline void RestoreIRQs(uint64_t daif)
+{
+    asm volatile("msr daif, %0" ::"r"(daif) : "memory");
+}
+
 //  Inline ASM functions
 
 inline uint32_t GetCoreID()

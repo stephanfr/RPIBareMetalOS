@@ -5,6 +5,7 @@
 #pragma once
 
 #include "task/inter_context_message_queue.h"
+#include "task/timer_list.h"
 
 namespace task
 {
@@ -91,9 +92,23 @@ namespace task
 
         void SwitchTasks(SwitchReason reason);
 
+        //  This core's tasks waiting with a deadline.  Owning core only, IRQs disabled.
+
+        void AddTimer(TaskImpl &task)
+        {
+            timer_list_.Insert(task);
+        }
+
+        void RemoveTimer(TaskImpl &task)
+        {
+            timer_list_.Remove(task);
+        }
+
     private:
 
         PerCoreTaskList task_list_;
+
+        TimerList<TaskImpl> timer_list_;
 
         //  Messaging queue for inter-context messages can go into the static heap
 
@@ -104,6 +119,8 @@ namespace task
         //
         
         void ServiceMessages();
+
+        void ExpireTimers();
 
         TaskImpl &FindNextTask(void);
     };

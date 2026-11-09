@@ -9,6 +9,13 @@
 
 #include "task/user_binary_loader.h"
 
+#include "devices/log.h"
+#include "devices/physical_timer.h"
+
+#include "services/stats_db/task_statistics.h"
+
+#include "utility/tick_conversion.h"
+
 #include "sysregs.h"
 
 namespace task
@@ -40,6 +47,92 @@ namespace task
             TaskManagerImpl::Instance().SwitchToNextTask(SwitchReason::PREEMPT);
             EnableIRQs();
         }
+    }
+
+    void TaskImpl::PrepareToBlock(WaitReason reason, uint64_t deadline_ticks)
+    {
+        //  Linux reports the same misuse as "scheduling while atomic".
+
+        if ((preempt_count_ != 0) || InInterrupt() || AreIRQsEnabled())
+        {
+            LogFatal("PrepareToBlock: task %s cannot block (preempt count %ld, in interrupt %d, IRQs enabled %d)\n",
+                     name_.c_str(), preempt_count_, InInterrupt(), AreIRQsEnabled());
+            ParkCore();
+        }
+
+        wait_reason_ = reason;
+        block_start_ = PhysicalTimer::Now();
+
+        //  Before the task is published anywhere, or a waker's compare-exchange could find it not yet WAITING.
+
+        wait_status_.store(static_cast<uint32_t>(WaitStatus::WAITING), minstd::memory_order_release);
+
+        if (state_ == ExecutionState::RUNNING)
+        {
+            system_stats::task_running.Increment(-1);
+        }
+
+        state_ = ExecutionState::WAITING;
+
+        system_stats::task_waiting.Increment(1);
+
+        if (reason == WaitReason::IO)
+        {
+            system_stats::task_waiting_io.Increment(1);
+        }
+
+        if (deadline_ticks != 0)
+        {
+            wake_deadline_ticks_ = deadline_ticks;
+            TaskManagerImpl::Instance().ExecutionContextForCurrentCore().AddTimer(*this);
+        }
+    }
+
+    WaitStatus TaskImpl::CommitBlock()
+    {
+        TaskManagerImpl::Instance().SwitchToNextTask(SwitchReason::BLOCK);
+
+        //  Running again, on the same core.  A wake that beat the deadline leaves the timer to remove.
+
+        TaskManagerImpl::Instance().ExecutionContextForCurrentCore().RemoveTimer(*this);
+
+        const WaitStatus how = static_cast<WaitStatus>(wait_status_.exchange(static_cast<uint32_t>(WaitStatus::NONE), minstd::memory_order_acq_rel));
+
+        if (wait_reason_ == WaitReason::IO)
+        {
+            io_wait_time_ += duration_cast<microseconds>(PhysicalTimer::Now() - block_start_);
+        }
+
+        wait_reason_ = WaitReason::NONE;
+
+        return how;
+    }
+
+    void TaskImpl::SleepFor(microseconds duration)
+    {
+        if (duration.count() <= 0)
+        {
+            Yield();
+            return;
+        }
+
+        SleepUntil(PhysicalTimer::Now() + duration_cast<nanoseconds>(duration));
+    }
+
+    void TaskImpl::SleepUntil(time_point<nanoseconds> deadline)
+    {
+        const uint64_t deadline_ticks = utility::NanosecondsToTicks(deadline.time_since_epoch().count(), GetCounterFrequency());
+
+        //  May be entered with IRQs masked (a system call) or not (a kernel task).
+
+        const uint64_t saved_irqs = SaveAndDisableIRQs();
+
+        while (PhysicalTimer::CurrentTicks() < deadline_ticks)
+        {
+            Block(WaitReason::SLEEP, deadline_ticks);
+        }
+
+        RestoreIRQs(saved_irqs);
     }
 
     TaskImpl::FullCPUState &TaskImpl::AllocateTaskInitialFullCPUState( MemoryPagePointer initial_stack )

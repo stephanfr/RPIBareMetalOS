@@ -106,8 +106,13 @@ extern "C" void kernel_main()
         return;
     }
 
+    //  Nothing is left for this task to do.  Block for good rather than idle in WFI: a runnable task at priority 1
+    //      competes with every task on core 0 and wins ties against tasks just woken there.
+
+    DisableIRQs();
+
     while (1)
     {
-        WAIT_FOR_INTERRUPT;
+        task::TaskImpl::GetTask().Block(task::WaitReason::EVENT, 0);
     }
 }

@@ -168,6 +168,12 @@ namespace task
         virtual void Exit() = 0;
         virtual void Join() = 0;
 
+        //  Blocks without being scheduled.  Never returns early; may return late by up to a scheduler tick.
+        //      SleepFor(0) is a yield.
+
+        virtual void SleepFor(microseconds duration) = 0;
+        virtual void SleepUntil(time_point<nanoseconds> deadline) = 0;
+
     protected:
         friend class TaskHandle;
 

@@ -38,6 +38,7 @@ namespace cli::commands
     const CLITestAddressSpaceCommand    CLITestAddressSpaceCommand::instance;
     const CLITestUserTaskCommand        CLITestUserTaskCommand::instance;
     const CLITestSoakCommand            CLITestSoakCommand::instance;
+    const CLITestSleepCommand           CLITestSleepCommand::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -2672,6 +2673,238 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: soak test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test sleep
+    //
+    //  Sleeps must never end early, and while the scheduler tick is the only thing that ends them they may end up
+    //      to a tick late.  A sleeping task is not scheduled at all, which is what separates a sleep from a yield
+    //      loop: its timeslice count barely moves.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        namespace sleep_test
+        {
+            //  Two 50 ms scheduler ticks plus headroom for QEMU.
+            constexpr int64_t LATE_LIMIT_MS = 150;
+
+            //  Granted on the switch back in, plus at most one tick taken before blocking.
+            constexpr uint64_t MAX_TIMESLICES_WHILE_ASLEEP = 3;
+
+            constexpr uint32_t NUM_CONCURRENT_SLEEPERS = 16;
+            constexpr uint64_t USER_SLEEP_MS = 50;
+
+            int64_t ElapsedMilliseconds(time_point<nanoseconds> since)
+            {
+                return duration_cast<milliseconds>(PhysicalTimer::Now() - since).count();
+            }
+
+            class Sleeper : public Runnable
+            {
+            public:
+                void Initialize(uint64_t sleep_ms)
+                {
+                    sleep_ms_ = sleep_ms;
+                }
+
+                void Run() override
+                {
+                    const auto start = PhysicalTimer::Now();
+
+                    task::Task::GetTask().SleepFor(milliseconds(sleep_ms_));
+
+                    elapsed_ms_ = ElapsedMilliseconds(start);
+                }
+
+                uint64_t SleepMilliseconds() const
+                {
+                    return sleep_ms_;
+                }
+
+                int64_t ElapsedMs() const
+                {
+                    return elapsed_ms_;
+                }
+
+            private:
+                uint64_t sleep_ms_ = 0;
+                volatile int64_t elapsed_ms_ = -1;
+            };
+
+            //  Fails if elapsed_ms is short of the request or later than LATE_LIMIT_MS beyond it.
+
+            uint32_t CheckElapsed(CLISessionContext &context, const char *label, uint64_t requested_ms, int64_t elapsed_ms)
+            {
+                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+                const int64_t requested = static_cast<int64_t>(requested_ms);
+
+                if (elapsed_ms < requested)
+                {
+                    context << minstd::format(buffer, "  FAIL: {} slept {} ms, asked for {} ms -- woke early\n", label, elapsed_ms, requested);
+                    return 1;
+                }
+
+                if (elapsed_ms > requested + LATE_LIMIT_MS)
+                {
+                    context << minstd::format(buffer, "  FAIL: {} slept {} ms, asked for {} ms -- more than {} ms late\n", label, elapsed_ms, requested, LATE_LIMIT_MS);
+                    return 1;
+                }
+
+                context << minstd::format(buffer, "  {} slept {} ms, asked for {} ms\n", label, elapsed_ms, requested);
+                return 0;
+            }
+        } // namespace sleep_test
+    } // namespace
+
+    void CLITestSleepCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace sleep_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest sleep: blocking sleeps, timeouts by the scheduler tick\n";
+
+        uint32_t failures = 0;
+
+        const int64_t blocks_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS);
+        const int64_t timeouts_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS);
+
+        task::Task &self = task::Task::GetTask();
+
+        //  Single sleeps by this task.
+
+        const uint64_t single_sleeps_ms[] = {1, 10, 100};
+
+        for (uint64_t sleep_ms : single_sleeps_ms)
+        {
+            const auto start = PhysicalTimer::Now();
+
+            self.SleepFor(milliseconds(sleep_ms));
+
+            failures += CheckElapsed(context, "CLI task", sleep_ms, ElapsedMilliseconds(start));
+        }
+
+        //  A sleeping task is not scheduled.
+
+        {
+            constexpr uint64_t SLEEP_MS = 200;
+
+            const uint64_t timeslices_before = self.TimeslicesGranted();
+
+            self.SleepFor(milliseconds(SLEEP_MS));
+
+            const uint64_t timeslices = self.TimeslicesGranted() - timeslices_before;
+
+            if (timeslices > MAX_TIMESLICES_WHILE_ASLEEP)
+            {
+                context << minstd::format(buffer, "  FAIL: {} timeslices granted across a {} ms sleep -- the task was scheduled while asleep\n", timeslices, SLEEP_MS);
+                failures++;
+            }
+            else
+            {
+                context << minstd::format(buffer, "  {} timeslice(s) granted across a {} ms sleep\n", timeslices, SLEEP_MS);
+            }
+        }
+
+        //  Concurrent sleepers spread over every core, with different deadlines.
+
+        {
+            const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
+
+            Sleeper sleepers[NUM_CONCURRENT_SLEEPERS];
+            UUID ids[NUM_CONCURRENT_SLEEPERS];
+            bool forked[NUM_CONCURRENT_SLEEPERS] = {};
+
+            for (uint32_t i = 0; i < NUM_CONCURRENT_SLEEPERS; i++)
+            {
+                sleepers[i].Initialize(10 + (10 * (i % 8)));
+
+                auto result = context.task_manager_.ForkKernelTask(&sleepers[i],
+                                                                   task::TaskDefinition{"Sleeper", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << (i % core_count))});
+
+                if (result.Failed())
+                {
+                    context << minstd::format(buffer, "  FAIL: could not fork sleeper {} -- {}\n", i, task::ErrorMessage(result.ResultCode()));
+                    failures++;
+                    continue;
+                }
+
+                ids[i] = result.Value();
+                forked[i] = true;
+            }
+
+            uint32_t concurrent_failures = 0;
+
+            for (uint32_t i = 0; i < NUM_CONCURRENT_SLEEPERS; i++)
+            {
+                if (!forked[i])
+                {
+                    continue;
+                }
+
+                if (auto sleeper = context.task_manager_.FindTask(ids[i]))
+                {
+                    sleeper->Join();
+                }
+
+                const int64_t elapsed = sleepers[i].ElapsedMs();
+                const int64_t requested = static_cast<int64_t>(sleepers[i].SleepMilliseconds());
+
+                if ((elapsed < requested) || (elapsed > requested + LATE_LIMIT_MS))
+                {
+                    context << minstd::format(buffer, "  FAIL: sleeper {} on core {} slept {} ms, asked for {} ms\n", i, i % core_count, elapsed, requested);
+                    concurrent_failures++;
+                }
+            }
+
+            failures += concurrent_failures;
+
+            context << minstd::format(buffer, "  {} concurrent sleepers on {} cores: {} out of bounds\n", NUM_CONCURRENT_SLEEPERS, core_count, concurrent_failures);
+        }
+
+        //  A user task sleeping through sc_Sleep times itself and prints "case 15: sleep OK".
+
+        {
+            const auto start = PhysicalTimer::Now();
+
+            if (!ForkAndJoinUserTask(context, "user sleeper", 15 | (USER_SLEEP_MS << 8)))
+            {
+                failures++;
+            }
+            else if (ElapsedMilliseconds(start) < static_cast<int64_t>(USER_SLEEP_MS))
+            {
+                context << minstd::format(buffer, "  FAIL: the user sleeper finished in {} ms, asked for {} ms\n", ElapsedMilliseconds(start), USER_SLEEP_MS);
+                failures++;
+            }
+        }
+
+        //  Every sleep above blocked at least once and ended by its timeout.
+
+        const int64_t sleeps = 3 + 1 + NUM_CONCURRENT_SLEEPERS + 1;
+        const int64_t blocks = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS) - blocks_before;
+        const int64_t timeouts = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS) - timeouts_before;
+
+        if ((blocks < sleeps) || (timeouts < sleeps))
+        {
+            context << minstd::format(buffer, "  FAIL: {} sleeps, but tasks.blocks rose by {} and tasks.wait_timeouts by {}\n", sleeps, blocks, timeouts);
+            failures++;
+        }
+        else
+        {
+            context << minstd::format(buffer, "  tasks.blocks rose by {}, tasks.wait_timeouts by {}\n", blocks, timeouts);
+        }
+
+        if (failures == 0)
+        {
+            context << "PASS: sleep test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: sleep test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands
