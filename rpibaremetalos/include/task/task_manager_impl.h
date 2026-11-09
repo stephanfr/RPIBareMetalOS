@@ -111,7 +111,39 @@ namespace task
         void PreemptiveSchedule(void);
 
         void Schedule(void);
-        void SwitchToNextTask(bool voluntary = false);
+        void SwitchToNextTask(SwitchReason reason);
+
+        //  Ends task's wait with how (WOKEN or TIMED_OUT) and requests a reschedule on its core.  False if the wait
+        //      had already ended, in which case nothing else happens.  Any context, any core, IRQs on or off.
+
+        bool WakeTask(TaskImpl &task, WaitStatus how);
+
+        //  Consumed by the core's interrupt for the scheduler tick; any other CORE_TASK_SWITCH is a PREEMPT.
+
+        static bool ConsumeTickPending(uint32_t core)
+        {
+            return tick_pending_[core].exchange(false, minstd::memory_order_acq_rel);
+        }
+
+        //  Asks core to choose its next task again, at IRQ exit or its next preemption point, whichever comes first.
+        //      Another core is sent an IPI; this core is not.  Any context.
+
+        static void RequestReschedule(uint32_t core);
+
+        //  The request stays until SwitchTasks() commits to choosing a task.
+
+        static bool IsRescheduleRequested(uint32_t core)
+        {
+            return reschedule_requested_[core].load(minstd::memory_order_acquire);
+        }
+
+        //  An exchange, not a store: it reads the request it clears, so that waker's wake is visible to the scan
+        //      that follows.
+
+        static void ClearRescheduleRequest(uint32_t core)
+        {
+            reschedule_requested_[core].exchange(false, minstd::memory_order_acq_rel);
+        }
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
         ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
@@ -122,6 +154,11 @@ namespace task
         void SetCoreMainTaskContext(minstd::unique_ptr<TaskImpl> &task);
 
         void AddTask(minstd::unique_ptr<TaskImpl> &task);
+
+        TaskExecutionContext &ExecutionContextForCurrentCore()
+        {
+            return task_execution_contexts_[GetCoreID()];
+        }
 
         TaskImpl &IdleTaskForCurrentCore() const
         {
@@ -138,6 +175,13 @@ namespace task
             if (!delisted_zombies_.push_back(entry))
             {
                 system_stats::task_dropped_zombies.Increment();
+            }
+
+            //  The reaper sleeps between passes, so a burst of exits must wake it before the queue fills.
+
+            if (TaskImpl *reaper = reaper_.load(minstd::memory_order_acquire))
+            {
+                WakeTask(*reaper, WaitStatus::WOKEN);
             }
         }
 
@@ -159,9 +203,14 @@ namespace task
         minstd::array<TaskImpl *, MAX_CORES> kernel_main_tasks_;
         minstd::array<TaskImpl *, MAX_CORES> idle_tasks_;
 
-        TaskImpl* reaper_{nullptr};
+        minstd::atomic<TaskImpl *> reaper_{nullptr};
 
         minstd::array<TaskExecutionContext, MAX_CORES> task_execution_contexts_;
+
+        //  Static so the IRQ exit path can read them before the instance exists.
+
+        static inline minstd::atomic<bool> tick_pending_[MAX_CORES] = {};
+        static inline minstd::atomic<bool> reschedule_requested_[MAX_CORES] = {};
 
         minstd::fast_lockfree_low_quality_rng random_generator_{GetGeneralRNG()()};
 

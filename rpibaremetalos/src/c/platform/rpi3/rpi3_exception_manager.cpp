@@ -62,6 +62,10 @@ void BCM2837ExceptionManager::HandleInterrupt()
             LogWarning("Unhandled IPI mailbox payload: %u\n", ipi_payload);
         }
     }
+    else if ((interrupt_source & BCM2837ARMLocalInterruptSources::CNTVIRQ) != BCM2837ARMLocalInterruptSources::NONE)
+    {
+        DispatchInterruptType(Interrupts::ARM_VIRTUAL_TIMER, core_task_switch_isr);
+    }
     else if ((interrupt_source & BCM2837ARMLocalInterruptSources::GPU_INTERRUPT) != BCM2837ARMLocalInterruptSources::NONE)
     {
         Interrupts interrupt = AsInterrupt(static_cast<BCM2837Interrupts>(GetRegister(BCM2837ARMCInterruptRequestRegisters::REQUEST_PENDING_1)));
@@ -76,11 +80,5 @@ void BCM2837ExceptionManager::HandleInterrupt()
         }
     }
 
-    if (core_task_switch_isr != nullptr)
-    {
-        LogDebug1("Executing Core Task Switch ISR\n");
-        core_task_switch_isr->HandleInterrupt();
-    }
-
-    EnableIRQs();
+    ExitInterrupt(core_task_switch_isr);
 }

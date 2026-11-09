@@ -24,6 +24,7 @@
 #include "task/task_errors.h"
 #include "task/tasks.h"
 #include "task/system_calls.h"
+#include "task/wait_queue.h"
 
 #include "asm_utility.h"
 
@@ -127,6 +128,16 @@ namespace task
             return timeslices_granted_;
         }
 
+        WaitReason CurrentWaitReason() const override
+        {
+            return wait_reason_;
+        }
+
+        microseconds IOWaitTime() const override
+        {
+            return io_wait_time_;
+        }
+
         void Yield() override
         {
             sc_Yield();
@@ -137,6 +148,11 @@ namespace task
             //  We cannot free our own stack here because we are still executing on it.
             //  The stack must be freed by a background cleanup/reaper task or during FindNextTask
             //  when the ZOMBIE task is completely removed.
+            //
+            //  IRQs off first: a tick after state_ becomes ZOMBIE would switch this task out for good before it
+            //      woke its joiners.
+
+            DisableIRQs();
 
             preempt_count_ = 0;
             counter_ = 0;
@@ -154,6 +170,9 @@ namespace task
             system_stats::task_zombies.Increment(1);
 
             state_ = Task::ExecutionState::ZOMBIE;
+            has_exited_.store(true, minstd::memory_order_release);
+
+            exit_waiters_.WakeAll();
 
             GetExceptionManager().SendInterprocessorInterrupt(GetCoreID(), InterprocessorInterrupts::CORE_TASK_SWITCH);
 
@@ -164,15 +183,37 @@ namespace task
             }
         }
 
+        void SleepFor(microseconds duration) override;
+        void SleepUntil(time_point<nanoseconds> deadline) override;
+        void SleepUntilTicks(uint64_t deadline_ticks);
+
+        //  The blocking protocol every wait primitive is built on.  With IRQs disabled, in task context, preempt
+        //      count zero:
+        //
+        //      PrepareToBlock(reason, deadline);       //  WAITING before the task is visible to any waker
+        //      ...publish the task where a waker will find it...
+        //      WaitStatus how = CommitBlock();         //  switches out; returns once woken or timed out
+        //
+        //  deadline_ticks is in system counter ticks, 0 for none.  A wake may land anywhere after PrepareToBlock(),
+        //      including before CommitBlock(), and is not lost.  Callers re-check their condition: a wait may end
+        //      for a reason unrelated to it.
+
+        void PrepareToBlock(WaitReason reason, uint64_t deadline_ticks);
+        WaitStatus CommitBlock();
+
+        WaitStatus Block(WaitReason reason, uint64_t deadline_ticks)
+        {
+            PrepareToBlock(reason, deadline_ticks);
+            return CommitBlock();
+        }
+
+        //  The reference keeps this task, and so exit_waiters_, alive until the joiner is off the queue.
+
         void Join() override
         {
             AddReference();
 
-            while (const_cast<volatile ExecutionState &>(state_) != Task::ExecutionState::ZOMBIE)
-            {
-                Yield();
-                PhysicalTimer::Wait(microseconds(100));
-            }
+            exit_waiters_.Wait([this]() { return has_exited_.load(minstd::memory_order_acquire); }, WaitReason::JOIN);
 
             ReleaseReference();
         }
@@ -184,8 +225,16 @@ namespace task
 
         void PreemptEnable()
         {
-            preempt_count_--;
+            if (--preempt_count_ == 0)
+            {
+                PreemptionPoint();
+            }
         }
+
+        //  Switches now if a reschedule was requested for this core and the task is preemptible: task context,
+        //      IRQs enabled, preempt count zero.  Otherwise a later preemption point or the IRQ exit acts on it.
+
+        void PreemptionPoint();
 
         void AddReference() override
         {
@@ -261,6 +310,31 @@ namespace task
         friend class TaskSchedulingQueue;
         friend class TaskExecutionContext;
 
+        template <typename Node>
+        friend class TimerList;
+
+        template <typename Policy>
+        friend class BasicWaitQueue;
+
+        WaitStatus LoadWaitStatus() const
+        {
+            return static_cast<WaitStatus>(wait_status_.load(minstd::memory_order_acquire));
+        }
+
+        bool IsRunnable() const
+        {
+            return (state_ == ExecutionState::RUNNING) || (state_ == ExecutionState::RUNNABLE_WAITING);
+        }
+
+        //  The only way a wait ends: WAITING -> how.  False if the wait already ended or never began.
+
+        bool TryEndWait(WaitStatus how)
+        {
+            uint32_t expected = static_cast<uint32_t>(WaitStatus::WAITING);
+
+            return wait_status_.compare_exchange_strong(expected, static_cast<uint32_t>(how), minstd::memory_order_acq_rel);
+        }
+
         const UUID uuid_;
         const minstd::fixed_string<MAX_TASK_NAME_LENGTH> name_;
         TaskType type_;
@@ -280,7 +354,30 @@ namespace task
 
         microseconds runtime_ = microseconds::zero();
 
+        //  state_ is written only by the owning core with IRQs off.  wait_status_ may be written by any core or
+        //      ISR, but leaves WAITING only through TryEndWait(); the owning core then commits the wake to
+        //      state_ in FindNextTask().  minstd::atomic does not take enums, hence the uint32_t.
+
         ExecutionState state_;
+        minstd::atomic<uint32_t> wait_status_{static_cast<uint32_t>(WaitStatus::NONE)};
+        WaitReason wait_reason_ = WaitReason::NONE;
+        time_point<nanoseconds> wait_start_;
+        microseconds io_wait_time_ = microseconds::zero();
+
+        //  Intrusive links: a waiting task is on at most one wait queue, and on its core's timer list if its wait
+        //      has a deadline.
+
+        TaskImpl *wait_queue_next_ = nullptr;
+        TaskImpl *wait_queue_prev_ = nullptr;
+        TaskImpl *timer_list_next_ = nullptr;
+        TaskImpl *timer_list_prev_ = nullptr;
+        uint64_t wake_deadline_ticks_ = 0;
+
+        //  Join() runs on any core, so it reads this rather than state_, which only the owning core may touch.
+
+        minstd::atomic<bool> has_exited_{false};
+        WaitQueue exit_waiters_;
+
         long counter_;
         long priority_;
         long preempt_count_;

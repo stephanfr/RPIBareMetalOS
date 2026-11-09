@@ -15,6 +15,11 @@ QEMU_RPI3_MACHINE      ?= raspi3b
 QEMU_RPI4_MACHINE      ?= raspi4b
 QEMU_RPI4_MEMORY       ?= 2G
 
+#  Count at the real boards' crystal frequency, which the kernel writes to CNTFRQ_EL0; QEMU's default is
+#  62.5 MHz.  Keep in step with test/tools/qemu_machines.py.
+QEMU_RPI3_CPU_FLAGS    := -global cortex-a53-arm-cpu.cntfrq=19200000
+QEMU_RPI4_CPU_FLAGS    := -global cortex-a72-arm-cpu.cntfrq=54000000
+
 SOAK_DURATION_SECONDS          ?= 3600
 SOAK_MIN_INTERVAL_SECONDS      ?= 0.2
 SOAK_MAX_INTERVAL_SECONDS      ?= 1.0
@@ -338,10 +343,10 @@ QEMU_COMMON_FLAGS = \
 	-append "console=ttys0,57600 host=qemu$(QEMU_STRICT_ALIGN)"
 
 qemu-rpi3: all
-	$(QEMU) -M $(QEMU_RPI3_MACHINE) $(QEMU_COMMON_FLAGS)
+	$(QEMU) -M $(QEMU_RPI3_MACHINE) $(QEMU_RPI3_CPU_FLAGS) $(QEMU_COMMON_FLAGS)
 
 qemu-rpi4: all
-	$(QEMU) -M $(QEMU_RPI4_MACHINE) -m $(QEMU_RPI4_MEMORY) $(QEMU_COMMON_FLAGS)
+	$(QEMU) -M $(QEMU_RPI4_MACHINE) $(QEMU_RPI4_CPU_FLAGS) -m $(QEMU_RPI4_MEMORY) $(QEMU_COMMON_FLAGS)
 
 
 SOAK_COMMON_ARGS = \

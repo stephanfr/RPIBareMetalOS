@@ -93,6 +93,31 @@ namespace task
         const CoreMask core_mask_;
     };
 
+    //  Who ended a wait.  Leaves WAITING only by a compare-exchange, so exactly one of a wake or a
+    //      timeout wins.
+
+    typedef enum class WaitStatus : uint32_t
+    {
+        NONE = 0,
+        WAITING,
+        WOKEN,
+        TIMED_OUT,
+    } WaitStatus;
+
+    //  IO is storage I/O the task started and that is certain to finish; only it is
+    //      counted as I/O wait.  DEVICE is a device event that may never come, such as console input.
+
+    typedef enum class WaitReason : uint32_t
+    {
+        NONE = 0,
+        SLEEP,
+        IO,
+        DEVICE,
+        LOCK,
+        JOIN,
+        EVENT,
+    } WaitReason;
+
     class Task
     {
     public:
@@ -134,9 +159,20 @@ namespace task
         virtual microseconds Runtime() const = 0;
         virtual uint64_t TimeslicesGranted() const = 0;
 
+        //  Meaningful only while State() is WAITING.
+
+        virtual WaitReason CurrentWaitReason() const = 0;
+        virtual microseconds IOWaitTime() const = 0;
+
         virtual void Yield() = 0;
         virtual void Exit() = 0;
         virtual void Join() = 0;
+
+        //  Blocks without being scheduled.  Never returns early.
+        //      SleepFor(0) is a yield.
+
+        virtual void SleepFor(microseconds duration) = 0;
+        virtual void SleepUntil(time_point<nanoseconds> deadline) = 0;
 
     protected:
         friend class TaskHandle;
@@ -254,6 +290,46 @@ namespace task
             return "Zombie";
         default:
             return "Unknown State";
+        }
+    }
+
+    inline const char *ToString(WaitStatus status)
+    {
+        switch (status)
+        {
+        case WaitStatus::NONE:
+            return "None";
+        case WaitStatus::WAITING:
+            return "Waiting";
+        case WaitStatus::WOKEN:
+            return "Woken";
+        case WaitStatus::TIMED_OUT:
+            return "Timed Out";
+        default:
+            return "Unknown Wait Status";
+        }
+    }
+
+    inline const char *ToString(WaitReason reason)
+    {
+        switch (reason)
+        {
+        case WaitReason::NONE:
+            return "None";
+        case WaitReason::SLEEP:
+            return "Sleep";
+        case WaitReason::IO:
+            return "IO";
+        case WaitReason::DEVICE:
+            return "Device";
+        case WaitReason::LOCK:
+            return "Lock";
+        case WaitReason::JOIN:
+            return "Join";
+        case WaitReason::EVENT:
+            return "Event";
+        default:
+            return "Unknown Wait Reason";
         }
     }
 

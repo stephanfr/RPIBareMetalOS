@@ -10,6 +10,7 @@
 #include "processor_cores.h"
 #include "task/system_calls.h"
 
+#include "devices/deadline_timer.h"
 #include "devices/log.h"
 #include "devices/physical_timer.h"
 
@@ -48,6 +49,21 @@ namespace system_stats
 
     KernelCounterStatistic<KernelStatisticId::TASK_DROPPED_ZOMBIES>
         task_dropped_zombies("tasks", "dropped_zombies", "Zombies dropped because the reaper queue was full (leak)", 0);
+
+    KernelGaugeStatistic<KernelStatisticId::TASK_WAITING>
+        task_waiting("tasks", "waiting", "Tasks blocked in a wait", 0);
+
+    KernelGaugeStatistic<KernelStatisticId::TASK_WAITING_IO>
+        task_waiting_io("tasks", "waiting_io", "Tasks blocked waiting for storage I/O", 0);
+}
+
+namespace
+{
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_WAKEUPS>
+        task_wakeups("tasks", "wakeups", "Waits ended by a wake", 0);
+
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS>
+        task_wait_timeouts("tasks", "wait_timeouts", "Waits ended by their timeout", 0);
 }
 
 UUID GetCurrentTaskId(void)
@@ -110,7 +126,15 @@ namespace task
                     system_stats::ReclaimRetiredUserStatisticsRegions();
                     system_stats::ReclaimRetiredStatistics();
 
-                    Yield();                                            //  TODO add sleep to scheduler as Sleep(...) like Join
+                    //  Until a zombie is delisted, or a second passes: the resource grace period and the zombie lifetime
+                    //      are lower bounds, so a second late is fine.  A delisting that lands before the task is
+                    //      WAITING is picked up by the timeout.
+
+                    const uint64_t saved_irqs = SaveAndDisableIRQs();
+
+                    TaskImpl::GetTask().Block(WaitReason::EVENT, PhysicalTimer::DeadlineTicksAfter(seconds(1)));
+
+                    RestoreIRQs(saved_irqs);
                 }
             }
         };
@@ -144,6 +168,12 @@ namespace task
             auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
             
             task::TaskManagerImpl::Instance().SetCoreMainTaskContext(core_main_task);
+
+            //  Core 0 enabled the deadline timer's interrupt when it registered the ISR; on the GIC that enable is
+            //      per core.
+
+            DeadlineTimer::Disarm();
+            GetExceptionManager().EnableInterruptOnThisCore(Interrupts::ARM_VIRTUAL_TIMER);
 
             //  Wait for an interrupt - this will be the first task switch message
 
@@ -224,13 +254,17 @@ namespace task
 
         //  Create one reaper task to periodically clean up zombie tasks.
 
-        auto reaper_ = static_new<internal::ReaperTask>();
+        auto reaper_runnable = static_new<internal::ReaperTask>();
 
-        if (instance_->get().ForkKernelTask(reaper_, TaskDefinition{"Reaper"}).Failed())
+        auto fork_reaper_result = instance_->get().ForkKernelTask(reaper_runnable, TaskDefinition{"Reaper"});
+
+        if (fork_reaper_result.Failed())
         {
             LogFatal("Failed to create the reaper task\n");
             ParkCore();
         }
+
+        instance_->get().reaper_.store(instance_->get().task_map_.find(fork_reaper_result.Value())->second, minstd::memory_order_release);
 
         return TaskResultCodes::SUCCESS;
     }
@@ -614,13 +648,51 @@ namespace task
     {
         for (uint32_t core_id = 0; core_id < number_of_cores_; core_id++)
         {
+            tick_pending_[core_id].store(true, minstd::memory_order_release);
             GetExceptionManager().SendInterprocessorInterrupt(core_id, InterprocessorInterrupts::CORE_TASK_SWITCH);
         }
     }
 
-    void TaskManagerImpl::SwitchToNextTask(bool voluntary)
+    void TaskManagerImpl::SwitchToNextTask(SwitchReason reason)
     {
-        task_execution_contexts_[GetCoreID()].SwitchTasks(voluntary);
+        task_execution_contexts_[GetCoreID()].SwitchTasks(reason);
+    }
+
+    bool TaskManagerImpl::WakeTask(TaskImpl &task, WaitStatus how)
+    {
+        //  Read first: once the wait ends the task may run, exit and be freed.
+
+        const uint32_t core = task.schedule_on_core_.load();
+
+        if (!task.TryEndWait(how))
+        {
+            return false;
+        }
+
+        if (how == WaitStatus::TIMED_OUT)
+        {
+            task_wait_timeouts.Increment();
+        }
+        else
+        {
+            task_wakeups.Increment();
+        }
+
+        RequestReschedule(core);
+
+        return true;
+    }
+
+    void TaskManagerImpl::RequestReschedule(uint32_t core)
+    {
+        //  Set before the IPI, so the target core sees it when the IPI lands.
+
+        reschedule_requested_[core].store(true, minstd::memory_order_release);
+
+        if (core != GetCoreID())
+        {
+            GetExceptionManager().SendInterprocessorInterrupt(core, InterprocessorInterrupts::CORE_TASK_SWITCH);
+        }
     }
 
     extern "C" void *GetTaskInitialCPUStateFrame()
@@ -630,7 +702,14 @@ namespace task
 
     void TaskManagerImpl::ReturnFromFork()
     {
+        //  A new task's first code, entered from SwitchCPUState with IRQs still disabled.  The preempt count was
+        //      1 since the fork, so the task could not be preempted before this.  Enable IRQs last: a kernel task
+        //      runs its body from here with whatever mask it has, and a user task's KernelExit remasks anyway.
+
         TaskManagerImpl::Instance().CurrentTask().PreemptEnable();
+
+        EnableIRQs();
+
         ReturnFromForkASMStub(); //  Assembly function
     }
 

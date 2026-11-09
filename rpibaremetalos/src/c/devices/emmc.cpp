@@ -16,6 +16,7 @@
 #include "devices/physical_timer.h"
 
 #include "devices/emmc.h"
+#include "task/mutex.h"
 #include "task/tasks.h"
 
 #include "devices/emmc/emmc_commands.h"
@@ -62,7 +63,7 @@ namespace EmmcImpl
             max_io_time_us("emmc", "max_io_time_us", "Longest single read or write request, in microseconds", 0);
 
         system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_CONTROLLER_WAITS>
-            controller_waits("emmc", "controller_waits", "Requests that yielded because another task held the controller", 0);
+            controller_waits("emmc", "controller_waits", "Requests that blocked because another task held the controller", 0);
 
         system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_CARD_RESETS>
             card_resets("emmc", "card_resets", "Card reset attempts made while initializing the controller", 0);
@@ -250,7 +251,7 @@ namespace EmmcImpl
         uint32_t relative_card_address_register_;
         SDCardConfigurationRegister sd_card_configuration_register_;
 
-        minstd::atomic<bool> controller_in_use_{false};
+        task::Mutex controller_lock_;
 
         EMMCCommand GetCommand(EMMCCommandTypes command_type) const
         {
@@ -1142,26 +1143,17 @@ namespace EmmcImpl
 
     BlockIOResultCodes SDCardController::DataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer)
     {
-        //  Yield until no other task is using the controller; atomic exchange prevents multi-core races.
-
-        bool waited = false;
-
-        while (controller_in_use_.exchange(true, minstd::memory_order_acquire))
-        {
-            waited = true;
-            task::Task::GetTask().Yield();
-        }
-
-        struct ReleaseGuard
-        {
-            minstd::atomic<bool> &flag_;
-            ~ReleaseGuard() { flag_.store(false, minstd::memory_order_release); }
-        } release_guard{controller_in_use_};
-
-        if (waited)
+        if (!controller_lock_.TryLock())
         {
             controller_waits.Increment();
+            controller_lock_.Lock();
         }
+
+        struct UnlockGuard
+        {
+            task::Mutex &mutex_;
+            ~UnlockGuard() { mutex_.Unlock(); }
+        } unlock_guard{controller_lock_};
 
         const auto start = PhysicalTimer::Now();
 

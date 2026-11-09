@@ -176,13 +176,18 @@ namespace cli::commands
                 return task::TaskListVisitorCallbackStatus::NEXT;
             }
 
+            const bool waiting = (task.State() == task::Task::ExecutionState::WAITING);
+            const char *wait_open = waiting ? " (" : "";
+            const char *wait_reason = waiting ? ToString(task.CurrentWaitReason()) : "";
+            const char *wait_close = waiting ? ")" : "";
+
             if (print_uuids)
             {
-                context.output_stream_ << minstd::format(buffer, "{} {:<32} {} {} {} {}\n", task.ID().ToString(uuid_buffer), task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime().count() / 1000UL, ToString(task.State()));
+                context.output_stream_ << minstd::format(buffer, "{} {:<32} {} {} {} {}{}{}{}\n", task.ID().ToString(uuid_buffer), task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime().count() / 1000UL, ToString(task.State()), wait_open, wait_reason, wait_close);
             }
             else
             {
-                context.output_stream_ << minstd::format(buffer, "{:<32} {} {} {} {}\n", task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime().count() / 1000UL, ToString(task.State()));
+                context.output_stream_ << minstd::format(buffer, "{:<32} {} {} {} {}{}{}{}\n", task.Name(), task.CurrentCore(), task.TimeslicesGranted(), task.Runtime().count() / 1000UL, ToString(task.State()), wait_open, wait_reason, wait_close);
             }
 
             return task::TaskListVisitorCallbackStatus::NEXT;

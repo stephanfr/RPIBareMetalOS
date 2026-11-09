@@ -8,6 +8,8 @@
 #include <map>
 #include <memory>
 
+#include "asm_config.h"
+#include "asm_utility.h"
 #include "heaps.h"
 #include "processor_cores.h"
 
@@ -27,6 +29,15 @@ public:
     virtual bool Initialize() = 0;
 
     virtual bool EnableInterrupt(Interrupts interrupt_to_enable, CoreList on_cores) = 0;
+
+    //  For an interrupt with a separate enable on each core, such as a GIC PPI: registering its ISR enables it only
+    //      on the registering core, so every other core calls this for itself.
+
+    bool EnableInterruptOnThisCore(Interrupts interrupt)
+    {
+        return EnableInterrupt(interrupt, CoreList(GetCoreID()));
+    }
+    
     virtual bool DisableInterrupt(Interrupts interrupt_to_disable, CoreList on_cores) = 0;
 
     virtual bool SendInterprocessorInterrupt(uint32_t core_id, InterprocessorInterrupts ipi_id) = 0;
@@ -36,6 +47,19 @@ public:
     virtual void HandleInterrupt() = 0;
 
     void HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far);
+
+    //  Interrupt nesting depth per core, touched only by the owning core.  Static so it can be read before
+    //      the exception manager exists.
+
+    static void EnterInterrupt(uint32_t core)
+    {
+        irq_depth_[core]++;
+    }
+
+    static bool InInterrupt(uint32_t core)
+    {
+        return irq_depth_[core] != 0;
+    }
 
 protected:
     using ISRPointerList = minstd::forward_list<InterruptServiceRoutine *>;
@@ -97,6 +121,11 @@ protected:
 
     bool DispatchInterruptType(Interrupts interrupt, InterruptServiceRoutine *&core_task_switch_isr);
 
+    //  The last step of every HandleInterrupt(), after EOI: leaves interrupt context, then runs the deferred
+    //      core task switch ISR, or switches if a reschedule was requested for this core.  May not return.
+
+    void ExitInterrupt(InterruptServiceRoutine *core_task_switch_isr);
+
     //  A raw IPI mailbox payload may be the bitwise OR of multiple pending
     //      IPI values, since the mailbox register hardware accumulates
     //      every value written to it until it is explicitly cleared (e.g.
@@ -127,6 +156,14 @@ protected:
 
         return dispatched_any;
     }
+
+private:
+    static inline uint32_t irq_depth_[MAX_CORES] = {};
 };
 
 ExceptionManager &GetExceptionManager();
+
+inline bool InInterrupt()
+{
+    return ExceptionManager::InInterrupt(GetCoreID());
+}

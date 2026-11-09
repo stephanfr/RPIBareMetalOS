@@ -6,6 +6,7 @@
 
 #include "asm_globals.h"
 #include "devices/log.h"
+#include "devices/deadline_timer.h"
 #include "devices/physical_timer.h"
 
 #include "services/stats_db/kernel_statistic_ids.h"
@@ -24,13 +25,16 @@ namespace task
     {
         //  Scheduler activity, kept as running statistics rather than summed from the per-task
         //      counters on demand.  Every increment happens in SwitchTasks(), the single choke
-        //      point every switch goes through, voluntary yields and preemption alike.
+        //      point every switch goes through: yields, blocks and preemption alike.
 
         system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_VOLUNTARY_SWITCHES>
             voluntary_switches("tasks", "voluntary_switches", "Context switches caused by a voluntary yield", 0);
 
         system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES>
             preemptive_switches("tasks", "preemptive_switches", "Context switches caused by preemption or timeslice expiry", 0);
+
+        system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_BLOCKS>
+            task_blocks("tasks", "blocks", "Context switches caused by a task blocking", 0);
 
         system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_TIMESLICES_GRANTED>
             timeslices_granted("tasks", "timeslices_granted", "Timeslices granted to tasks by the scheduler", 0);
@@ -77,10 +81,87 @@ namespace task
         }
     }
 
+    void TaskExecutionContext::ExpireWaitDeadlines()
+    {
+        wait_deadlines_.ExpireUpTo(PhysicalTimer::CurrentTicks(), [](TaskImpl &task)
+        {
+            TaskManagerImpl::Instance().WakeTask(task, WaitStatus::TIMED_OUT);
+        });
+
+        DeadlineTimer::ArmAt(wait_deadlines_.EarliestDeadline());
+    }
+
+    void TaskExecutionContext::RemoveWaitDeadline(TaskImpl &task)
+    {
+        if (!wait_deadlines_.Contains(task))
+        {
+            return;
+        }
+
+        wait_deadlines_.Remove(task);
+
+        DeadlineTimer::ArmAt(wait_deadlines_.EarliestDeadline());
+    }
+
+    //  A waker ends a wait by changing wait_status_ only; this core alone moves the task's state.
+
+    void TaskExecutionContext::MakeRunnableIfWaitEnded(TaskImpl &task)
+    {
+        if ((task.state_ != Task::ExecutionState::WAITING) || (task.LoadWaitStatus() == WaitStatus::WAITING))
+        {
+            return;
+        }
+
+        task.state_ = Task::ExecutionState::RUNNABLE_WAITING;
+
+        system_stats::task_waiting.Increment(-1);
+
+        if (task.wait_reason_ == WaitReason::IO)
+        {
+            system_stats::task_waiting_io.Increment(-1);
+        }
+    }
+
+    void TaskExecutionContext::MarkRunning(TaskImpl &task)
+    {
+        if (task.state_ != Task::ExecutionState::RUNNING)
+        {
+            task.state_ = Task::ExecutionState::RUNNING;
+            system_stats::task_running.Increment(1);
+        }
+    }
+
+    //  A WAITING or ZOMBIE task keeps its state.
+
+    void TaskExecutionContext::MarkSwitchedOut(TaskImpl &task)
+    {
+        if (task.state_ == Task::ExecutionState::RUNNING)
+        {
+            task.state_ = Task::ExecutionState::RUNNABLE_WAITING;
+            system_stats::task_running.Increment(-1);
+        }
+    }
+
+    void TaskExecutionContext::GrantTimeslice(TaskImpl &task)
+    {
+        task.timeslices_granted_++;
+        timeslices_granted.Increment();
+    }
+
     TaskImpl &TaskExecutionContext::FindNextTask(void)
     {
+        //  Ties go to the current task, so a wake preempts it only with a strictly greater counter.
+
+        TaskImpl *const current = &TaskImpl::GetTask();
+
         long max_counter = -1;
         TaskImpl *next_task = nullptr;
+
+        if (current->state_ == Task::ExecutionState::RUNNING)
+        {
+            max_counter = current->counter_;
+            next_task = current;
+        }
 
         for (uint32_t i = 0; i < task_list_.NumTasks(); i++)
         {
@@ -107,19 +188,18 @@ namespace task
 
             if (i < task_list_.NumTasks())
             {
-                if (((task->State() == Task::ExecutionState::RUNNING) ||
-                     (task->State() == Task::ExecutionState::RUNNABLE_WAITING)))
+                MakeRunnableIfWaitEnded(*task);
+
+                if (task->IsRunnable() && (task->counter_ > max_counter))
                 {
-                    if (task->counter_ > max_counter)
-                    {
-                        max_counter = task->counter_;
-                        next_task = task;
-                    }
+                    max_counter = task->counter_;
+                    next_task = task;
                 }
             }
         }
 
-        //  If we do not have a task counter with a value > 0, update the counters
+        //  If we do not have a task counter with a value > 0, update the counters.  Blocked tasks are included,
+        //      so a task that waited a while builds up counter and usually wins once woken.
 
         if (max_counter <= 0)
         {
@@ -132,14 +212,10 @@ namespace task
 
                 task->counter_ = minstd::max((task->counter_ >> 1) + task->priority_, (long)0);
 
-                if (((task->State() == Task::ExecutionState::RUNNING) ||
-                     (task->State() == Task::ExecutionState::RUNNABLE_WAITING)))
+                if (task->IsRunnable() && (task->counter_ > max_counter))
                 {
-                    if (task->counter_ > max_counter)
-                    {
-                        max_counter = task->counter_;
-                        next_task = task;
-                    }
+                    max_counter = task->counter_;
+                    next_task = task;
                 }
             }
         }
@@ -156,13 +232,14 @@ namespace task
         return *next_task;
     }
 
-    void TaskExecutionContext::SwitchTasks(bool voluntary)
+    void TaskExecutionContext::SwitchTasks(SwitchReason reason)
     {
-        //  Be very care with the order of operations here - we are in a critical section.
+        //  Be very careful with the order of operations here - we are in a critical section.
         //      Do not allow interrupts to occur in this code as we are manipulating the task list
         //      and it is not thread re-entrant.  Do not block or take locks anywhere in this code.
         //
-        //  The KernelExit method will re-enable interrupts at the eret instruction.
+        //  Nothing here re-enables interrupts: a caller that wants them back on does that itself, and the
+        //      KernelExit method restores them at the eret instruction for a switch made from an interrupt.
         //
         //  Even if we had a lock-free task list, there is still some risk of taking an interrupt while
         //      switching contexts.  Best to just have interrupts disabled for the duration of the switch.
@@ -181,76 +258,98 @@ namespace task
             prev->runtime_ += duration_cast<microseconds>(switch_start - prev->switched_in_last_);
         }
 
-        //  A voluntary yield expires the remaining timeslice immediately.
+        //  A yield expires the remaining timeslice immediately.
 
-        if (voluntary)
+        if (reason == SwitchReason::YIELD)
         {
             prev->counter_ = 0;
         }
 
-        //  First, groom the task list.
+        const bool prev_is_blocking = (prev->state_ == Task::ExecutionState::WAITING);
+
+        //  First, groom the task list, then wake the waits whose deadline has passed.  Read the reschedule request
+        //      after both, so a task woken here can preempt at once.
 
         if (inter_context_message_queue_.HasMessages())
         {
             ServiceMessages();
         }
 
-        //  Decrement the task counter and if it is still > 0 or is not premeptaable
-        //      then return without switching tasks.
+        ExpireWaitDeadlines();
 
-        prev->counter_ = minstd::max(prev->counter_ - 1, (long)0);
+        const bool reschedule_requested = TaskManagerImpl::IsRescheduleRequested(GetCoreID());
 
-        if ((prev->counter_ > 0) || (prev->preempt_count_ > 0))
+        //  Only the tick charges the timeslice: a wake IPI must not cost the running task its time.
+
+        if (reason == SwitchReason::TICK)
         {
-            prev->timeslices_granted_++; //  Bump the timeslice count
-            timeslices_granted.Increment();
+            prev->counter_ = minstd::max(prev->counter_ - 1, (long)0);
+        }
+
+        //  Keep running if not preemptible, or if the timeslice remains and no reschedule was requested.  A request
+        //      that cannot preempt stays set for PreemptEnable() to act on.
+
+        //  A timeslice is granted by a tick, or by switching a task in.  Any other pass that keeps the running task
+        //      running, such as a wake IPI or a deadline interrupt, grants nothing.
+
+        if (!prev_is_blocking && ((prev->preempt_count_ > 0) || (!reschedule_requested && (prev->counter_ > 0))))
+        {
+            if (reason == SwitchReason::TICK)
+            {
+                GrantTimeslice(*prev);
+            }
+
             prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
 
-        //  Find the next task to run, we could get the same task back though.
+        //  Clear before the scan, so a wake that lands during it requests again rather than being lost.
+
+        TaskManagerImpl::ClearRescheduleRequest(GetCoreID());
+
+        //  Find the next task to run, we could get the same task back though.  A blocking task comes back
+        //      only if its wake was committed during the scan.
 
         TaskImpl *next = &FindNextTask();
 
-        next->timeslices_granted_++;
-        timeslices_granted.Increment();
-
         if (prev == next)
         {
+            //  A yield that is chosen again starts a fresh timeslice.
+
+            if ((reason == SwitchReason::TICK) || (reason == SwitchReason::YIELD))
+            {
+                GrantTimeslice(*prev);
+            }
+
+            MarkRunning(*prev);
+
             prev->switched_in_last_ = PhysicalTimer::Now();
             return;
         }
 
-        //  An actual context change happened: count it as voluntary or preemptive by what asked
-        //      for it.
+        GrantTimeslice(*next);
 
-        if (voluntary)
+        //  An actual context change happened: count it by what asked for it.
+
+        switch (reason)
         {
+        case SwitchReason::YIELD:
             voluntary_switches.Increment();
-        }
-        else
-        {
+            break;
+
+        case SwitchReason::BLOCK:
+            task_blocks.Increment();
+            break;
+
+        default:
             preemptive_switches.Increment();
+            break;
         }
 
         //  Switch the tasks
 
-        if (next->state_ != Task::ExecutionState::RUNNING)
-        {
-            system_stats::task_running.Increment(1);
-        }
-
-        next->state_ = Task::ExecutionState::RUNNING;
-
-        if (prev->state_ == Task::ExecutionState::RUNNING)
-        {
-            system_stats::task_running.Increment(-1);
-        }
-
-        if (prev->state_ != Task::ExecutionState::ZOMBIE)
-        {
-            prev->state_ = Task::ExecutionState::RUNNABLE_WAITING;
-        }
+        MarkSwitchedOut(*prev);
+        MarkRunning(*next);
 
         next->switched_in_last_ = PhysicalTimer::Now();
 

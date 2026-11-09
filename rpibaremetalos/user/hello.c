@@ -24,6 +24,7 @@
 //      12 -> user statistics: sets the four below, then waits for the kernel to zero the gauge (a service)
 //      13 -> the statistics system calls, run while a case 12 process (payload: its process id) waits (a service)
 //      14 -> an ordinary process: its statistics are private data, never registered
+//      15 -> sc_Sleep for payload milliseconds, timed with the system counter
 
 
 #include <stdint.h>
@@ -468,6 +469,19 @@ int main(unsigned long arg)
             }
 
             sc_Write("case 14: statistics private to an ordinary process\n");
+            break;
+        }
+
+        case 15:
+        {
+            const uint64_t requested_ticks = (CounterFrequency() * payload) / 1000;
+            const uint64_t start = CounterTicks();
+
+            sc_Sleep(payload * 1000);
+
+            const uint64_t elapsed = CounterTicks() - start;
+
+            sc_Write(elapsed >= requested_ticks ? "case 15: sleep OK\n" : "case 15: sleep returned early\n");
             break;
         }
 

@@ -188,13 +188,28 @@ namespace syscall
     void Yield()
     {
         DisableIRQs();
-        task::TaskManagerImpl::Instance().SwitchToNextTask(true);
+        task::TaskManagerImpl::Instance().SwitchToNextTask(task::SwitchReason::YIELD);
         EnableIRQs();
+    }
+
+    void Sleep(uint64_t microseconds_to_sleep)
+    {
+        if (microseconds_to_sleep == 0)
+        {
+            Yield();
+            return;
+        }
+
+        //  Clamped so a value past INT64_MAX saturates to a forever sleep instead of turning negative.
+
+        const uint64_t clamped = (microseconds_to_sleep > static_cast<uint64_t>(INT64_MAX)) ? static_cast<uint64_t>(INT64_MAX) : microseconds_to_sleep;
+
+        task::Task::GetTask().SleepFor(microseconds(static_cast<int64_t>(clamped)));
     }
 }
 
 extern "C" void *const __system_call_table[] = {(void *)syscall::Write, (void *)syscall::Malloc, (void *)syscall::CloneTask, (void *)syscall::Exit, (void *)syscall::Yield,
                                                (void *)syscall::FindStatistic, (void *)syscall::ReadStatistic,
-                                               (void *)syscall::FindProcess};
+                                               (void *)syscall::FindProcess, (void *)syscall::Sleep};
 
 static_assert(sizeof(__system_call_table) / sizeof(__system_call_table[0]) == NUMBER_OF_SYSTEM_CALLS, "one entry per system call number");

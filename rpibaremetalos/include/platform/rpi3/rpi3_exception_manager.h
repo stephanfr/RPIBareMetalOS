@@ -44,6 +44,7 @@ inline BCM2837ARMLocalInterruptSources operator&(uint32_t lhs, BCM2837ARMLocalIn
 
 typedef enum class BCM2837ARMCoreLocalPeripheralRegisterOffsets : uint32_t
 {
+    CORE_TIMER_INTERRUPT_CONTROL_OFFSET = 0x40,
     MAILBOX_INTERRUPT_CONTROL_OFFSET = 0x50,
     INTERRUPT_SOURCE_OFFSET = 0x60,
     MAILBOX_WRITE_OFFSET = 0x80,
@@ -206,6 +207,24 @@ private:
         case Interrupts::SWITCH_TASK:
             return true;
 
+        case Interrupts::ARM_VIRTUAL_TIMER:
+        {
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    //  Bit 3 routes this core's CNTVIRQ to its IRQ.  Read-modify-write: the register holds every
+                    //      generic timer's routing for the core.
+
+                    volatile uint32_t *timer_control = reinterpret_cast<volatile uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::CORE_TIMER_INTERRUPT_CONTROL_OFFSET + (4 * current_core));
+
+                    *timer_control = *timer_control | static_cast<uint32_t>(BCM2837ARMLocalInterruptSources::CNTVIRQ);
+                }
+            }
+
+            return true;
+        }
+
         case Interrupts::CORE_MAILBOX_0:
         case Interrupts::CORE_MAILBOX_1:
         case Interrupts::CORE_MAILBOX_2:
@@ -301,6 +320,20 @@ private:
                     volatile uint32_t *mailbox_control = reinterpret_cast<volatile uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::MAILBOX_INTERRUPT_CONTROL_OFFSET + (4 * current_core));
 
                     *mailbox_control = *mailbox_control & mailbox_bit_to_clear;
+                }
+            }
+            return true;
+        }
+
+        case Interrupts::ARM_VIRTUAL_TIMER:
+        {
+            for (uint32_t current_core = 0; current_core < platform_info.GetNumberOfCores(); current_core++)
+            {
+                if (on_cores.Cores() & (1 << current_core))
+                {
+                    volatile uint32_t *timer_control = reinterpret_cast<volatile uint32_t *>(platform_info.GetARMLocalBase() + (uint32_t)BCM2837ARMCoreLocalPeripheralRegisterOffsets::CORE_TIMER_INTERRUPT_CONTROL_OFFSET + (4 * current_core));
+
+                    *timer_control = *timer_control & ~static_cast<uint32_t>(BCM2837ARMLocalInterruptSources::CNTVIRQ);
                 }
             }
             return true;

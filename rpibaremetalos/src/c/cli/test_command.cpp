@@ -16,7 +16,9 @@
 #include "heaps.h"
 
 #include "platform/address_space.h"
+#include "task/mutex.h"
 #include "task/task_impl.h"
+#include "task/wait_queue.h"
 #include "task/user_binary_loader.h"
 #include "platform/memory_manager.h"
 #include "platform/memory_model.h"
@@ -38,6 +40,9 @@ namespace cli::commands
     const CLITestAddressSpaceCommand    CLITestAddressSpaceCommand::instance;
     const CLITestUserTaskCommand        CLITestUserTaskCommand::instance;
     const CLITestSoakCommand            CLITestSoakCommand::instance;
+    const CLITestSleepCommand           CLITestSleepCommand::instance;
+    const CLITestWaitCommand            CLITestWaitCommand::instance;
+    const CLITestMutexCommand           CLITestMutexCommand::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -1340,6 +1345,60 @@ namespace cli::commands
     }
 
     // -------------------------------------------------------------------------
+    //  Helpers shared by the tests below
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        //  -1 if the statistic is not registered.
+
+        int64_t ReadKernelStatistic(system_stats::KernelStatisticId id)
+        {
+            int64_t value = -1;
+
+            system_stats::GetSystemStatisticsDB().Visit(system_stats::SystemStatistic::KERNEL_PROCESS_ID,
+                                                       system_stats::KernelStatistic(id),
+                                                       [&value](const system_stats::SystemStatistic &statistic)
+                                                       {
+                                                           const auto read = statistic.GetValue<int64_t>();
+
+                                                           if (read.Successful())
+                                                           {
+                                                               value = *read;
+                                                           }
+                                                       });
+
+            return value;
+        }
+
+        //  Forks runnable pinned to core, or reports the failure.  The id is valid only on success.
+
+        bool ForkPinned(CLISessionContext &context, Runnable &runnable, const char *name, uint32_t core, UUID &id)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            auto result = context.task_manager_.ForkKernelTask(&runnable, task::TaskDefinition{name, 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << core)});
+
+            if (result.Failed())
+            {
+                context << minstd::format(buffer, "  FAIL: could not fork {} on core {} -- {}\n", name, core, task::ErrorMessage(result.ResultCode()));
+                return false;
+            }
+
+            id = result.Value();
+            return true;
+        }
+
+        void JoinTask(CLISessionContext &context, const UUID &id)
+        {
+            if (auto forked = context.task_manager_.FindTask(id))
+            {
+                forked->Join();
+            }
+        }
+    } // namespace
+
+    // -------------------------------------------------------------------------
     //  test usertask
     //
     //  The first thing in this OS that actually executes at EL0.  Each case forks
@@ -2219,25 +2278,6 @@ namespace cli::commands
                 SoakUserLauncher launcher;
             };
 
-            int64_t ReadKernelStatistic(system_stats::KernelStatisticId id)
-            {
-                int64_t value = -1;
-
-                system_stats::GetSystemStatisticsDB().Visit(system_stats::SystemStatistic::KERNEL_PROCESS_ID,
-                                                           system_stats::KernelStatistic(id),
-                                                           [&value](const system_stats::SystemStatistic &statistic)
-                                                           {
-                                                               const auto read = statistic.GetValue<int64_t>();
-
-                                                               if (read.Successful())
-                                                               {
-                                                                   value = *read;
-                                                               }
-                                                           });
-
-                return value;
-            }
-
             //  Kernel statistics that count failures.  None may move during a soak.
 
             struct CanaryStatistic
@@ -2572,13 +2612,13 @@ namespace cli::commands
 
         for (uint32_t i = 0; i < soak::NUM_CANARY_STATISTICS; i++)
         {
-            canary_before[i] = soak::ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
+            canary_before[i] = ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
         }
 
-        const int64_t heap_allocations_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
-        const int64_t zombies_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
-        const int64_t preemptions_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES);
-        const int64_t demand_faults_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS);
+        const int64_t heap_allocations_before = ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
+        const int64_t zombies_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
+        const int64_t preemptions_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES);
+        const int64_t demand_faults_before = ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS);
 
         uint32_t failures = 0;
 
@@ -2621,8 +2661,8 @@ namespace cli::commands
         //  The heap cannot be held to an exact count like the pages: finished tasks keep their objects (up to
         //      MAX_RETAINED_ZOMBIES of them, for minutes), and lock-free containers free removed nodes lazily.
 
-        const int64_t heap_allocations_after = soak::ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
-        const int64_t zombies_after = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
+        const int64_t heap_allocations_after = ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
+        const int64_t zombies_after = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
         const int64_t heap_growth = heap_allocations_after - heap_allocations_before;
         const int64_t added_zombies = (zombies_after > zombies_before) ? (zombies_after - zombies_before) : 0;
         const int64_t heap_allowance = soak::HEAP_GROWTH_SLACK + (added_zombies * soak::HEAP_ALLOCATIONS_PER_ZOMBIE);
@@ -2636,7 +2676,7 @@ namespace cli::commands
 
         for (uint32_t i = 0; i < soak::NUM_CANARY_STATISTICS; i++)
         {
-            const int64_t after = soak::ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
+            const int64_t after = ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
 
             if (after != canary_before[i])
             {
@@ -2645,8 +2685,8 @@ namespace cli::commands
             }
         }
 
-        const int64_t preemptions = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES) - preemptions_before;
-        const int64_t demand_faults = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS) - demand_faults_before;
+        const int64_t preemptions = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES) - preemptions_before;
+        const int64_t demand_faults = ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS) - demand_faults_before;
 
         if (preemptions <= 0)
         {
@@ -2672,6 +2712,733 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: soak test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test sleep
+    //
+    //  Sleeps must never end early, and each core's deadline timer ends them within interrupt latency of their
+    //      deadline.  A sleeping task is not scheduled at all, which is what separates a sleep from a yield loop: its
+    //      timeslice count barely moves.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        namespace sleep_test
+        {
+            //  Interrupt latency is tens of microseconds on hardware; the rest is headroom for QEMU.
+            constexpr int64_t LATE_LIMIT_US = 10000;
+
+            //  Granted on the switch back in, plus at most one tick taken before blocking.
+            constexpr uint64_t MAX_TIMESLICES_WHILE_ASLEEP = 3;
+
+            constexpr uint32_t NUM_CONCURRENT_SLEEPERS = 16;
+            constexpr uint64_t USER_SLEEP_MS = 50;
+
+            int64_t ElapsedMicroseconds(time_point<nanoseconds> since)
+            {
+                return duration_cast<microseconds>(PhysicalTimer::Now() - since).count();
+            }
+
+            class Sleeper : public Runnable
+            {
+            public:
+                void Initialize(uint64_t sleep_ms)
+                {
+                    sleep_ms_ = sleep_ms;
+                }
+
+                void Run() override
+                {
+                    const auto start = PhysicalTimer::Now();
+
+                    task::Task::GetTask().SleepFor(milliseconds(sleep_ms_));
+
+                    elapsed_us_ = ElapsedMicroseconds(start);
+                }
+
+                uint64_t SleepMilliseconds() const
+                {
+                    return sleep_ms_;
+                }
+
+                int64_t ElapsedUs() const
+                {
+                    return elapsed_us_;
+                }
+
+            private:
+                uint64_t sleep_ms_ = 0;
+                volatile int64_t elapsed_us_ = -1;
+            };
+
+            bool InBounds(uint64_t requested_ms, int64_t elapsed_us)
+            {
+                const int64_t requested_us = static_cast<int64_t>(requested_ms) * 1000;
+
+                return (elapsed_us >= requested_us) && (elapsed_us <= requested_us + LATE_LIMIT_US);
+            }
+
+            //  Fails if elapsed_us is short of the request or later than LATE_LIMIT_US beyond it.
+
+            uint32_t CheckElapsed(CLISessionContext &context, const char *label, uint64_t requested_ms, int64_t elapsed_us)
+            {
+                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+                const int64_t late_us = elapsed_us - (static_cast<int64_t>(requested_ms) * 1000);
+
+                if (!InBounds(requested_ms, elapsed_us))
+                {
+                    context << minstd::format(buffer, "  FAIL: {} asked for {} ms and slept {} us -- {} us late, the bound is 0..{} us\n",
+                                              label, requested_ms, elapsed_us, late_us, LATE_LIMIT_US);
+                    return 1;
+                }
+
+                context << minstd::format(buffer, "  {} asked for {} ms: {} us late\n", label, requested_ms, late_us);
+                return 0;
+            }
+        } // namespace sleep_test
+    } // namespace
+
+    void CLITestSleepCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace sleep_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest sleep: blocking sleeps ended by the per-core deadline timers\n";
+
+        uint32_t failures = 0;
+
+        const int64_t blocks_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS);
+        const int64_t timeouts_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS);
+        const int64_t deadline_interrupts_before = ReadKernelStatistic(system_stats::KernelStatisticId::SCHEDULER_DEADLINE_INTERRUPTS);
+
+        task::Task &self = task::Task::GetTask();
+
+        //  Single sleeps by this task.
+
+        const uint64_t single_sleeps_ms[] = {1, 10, 100};
+
+        for (uint64_t sleep_ms : single_sleeps_ms)
+        {
+            const auto start = PhysicalTimer::Now();
+
+            self.SleepFor(milliseconds(sleep_ms));
+
+            failures += CheckElapsed(context, "CLI task", sleep_ms, ElapsedMicroseconds(start));
+        }
+
+        //  A sleeping task is not scheduled.
+
+        {
+            constexpr uint64_t SLEEP_MS = 200;
+
+            const uint64_t timeslices_before = self.TimeslicesGranted();
+
+            self.SleepFor(milliseconds(SLEEP_MS));
+
+            const uint64_t timeslices = self.TimeslicesGranted() - timeslices_before;
+
+            if (timeslices > MAX_TIMESLICES_WHILE_ASLEEP)
+            {
+                context << minstd::format(buffer, "  FAIL: {} timeslices granted across a {} ms sleep -- the task was scheduled while asleep\n", timeslices, SLEEP_MS);
+                failures++;
+            }
+            else
+            {
+                context << minstd::format(buffer, "  {} timeslice(s) granted across a {} ms sleep\n", timeslices, SLEEP_MS);
+            }
+        }
+
+        //  Concurrent sleepers spread over every core, with different deadlines.
+
+        {
+            const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
+
+            Sleeper sleepers[NUM_CONCURRENT_SLEEPERS];
+            UUID ids[NUM_CONCURRENT_SLEEPERS];
+            bool forked[NUM_CONCURRENT_SLEEPERS] = {};
+
+            for (uint32_t i = 0; i < NUM_CONCURRENT_SLEEPERS; i++)
+            {
+                sleepers[i].Initialize(10 + (10 * (i % 8)));
+
+                forked[i] = ForkPinned(context, sleepers[i], "Sleeper", i % core_count, ids[i]);
+                failures += forked[i] ? 0 : 1;
+            }
+
+            uint32_t concurrent_failures = 0;
+            int64_t latest_us = 0;
+
+            for (uint32_t i = 0; i < NUM_CONCURRENT_SLEEPERS; i++)
+            {
+                if (!forked[i])
+                {
+                    continue;
+                }
+
+                JoinTask(context, ids[i]);
+
+                const int64_t elapsed_us = sleepers[i].ElapsedUs();
+                const uint64_t requested_ms = sleepers[i].SleepMilliseconds();
+                const int64_t late_us = elapsed_us - (static_cast<int64_t>(requested_ms) * 1000);
+
+                latest_us = (late_us > latest_us) ? late_us : latest_us;
+
+                if (!InBounds(requested_ms, elapsed_us))
+                {
+                    context << minstd::format(buffer, "  FAIL: sleeper {} on core {} asked for {} ms and slept {} us\n", i, i % core_count, requested_ms, elapsed_us);
+                    concurrent_failures++;
+                }
+            }
+
+            failures += concurrent_failures;
+
+            context << minstd::format(buffer, "  {} concurrent sleepers on {} cores: {} out of bounds, latest {} us late\n",
+                                      NUM_CONCURRENT_SLEEPERS, core_count, concurrent_failures, latest_us);
+        }
+
+        //  A user task sleeping through sc_Sleep times itself and prints "case 15: sleep OK".
+
+        {
+            const auto start = PhysicalTimer::Now();
+
+            if (!ForkAndJoinUserTask(context, "user sleeper", 15 | (USER_SLEEP_MS << 8)))
+            {
+                failures++;
+            }
+            else if (ElapsedMicroseconds(start) < static_cast<int64_t>(USER_SLEEP_MS * 1000))
+            {
+                context << minstd::format(buffer, "  FAIL: the user sleeper finished in {} us, asked for {} ms\n", ElapsedMicroseconds(start), USER_SLEEP_MS);
+                failures++;
+            }
+        }
+
+        //  Every sleep above blocked at least once and ended by its timeout.
+
+        const int64_t sleeps = 3 + 1 + NUM_CONCURRENT_SLEEPERS + 1;
+        const int64_t blocks = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_BLOCKS) - blocks_before;
+        const int64_t timeouts = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS) - timeouts_before;
+
+        if ((blocks < sleeps) || (timeouts < sleeps))
+        {
+            context << minstd::format(buffer, "  FAIL: {} sleeps, but tasks.blocks rose by {} and tasks.wait_timeouts by {}\n", sleeps, blocks, timeouts);
+            failures++;
+        }
+        else
+        {
+            context << minstd::format(buffer, "  tasks.blocks rose by {}, tasks.wait_timeouts by {}\n", blocks, timeouts);
+        }
+
+        //  Sleepers sharing a deadline on one core wake on one interrupt, and a tick may expire a deadline first, so
+        //      there can be fewer interrupts than sleeps, but never none.
+
+        const int64_t deadline_interrupts = ReadKernelStatistic(system_stats::KernelStatisticId::SCHEDULER_DEADLINE_INTERRUPTS) - deadline_interrupts_before;
+
+        if (deadline_interrupts <= 0)
+        {
+            context << "  FAIL: no deadline timer interrupts -- the sleeps were ended by something else\n";
+            failures++;
+        }
+        else
+        {
+            context << minstd::format(buffer, "  scheduler.deadline_interrupts rose by {}\n", deadline_interrupts);
+        }
+
+        if (failures == 0)
+        {
+            context << "PASS: sleep test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: sleep test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test wait
+    //
+    //  Producers on every core post tokens and WakeOne() a queue that consumers on every core wait on with a
+    //      timeout.  A consumer takes a token inside its wait condition, under the queue lock, so every token is
+    //      taken exactly once, and no wake may be lost: a consumer that times out simply waits again.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        namespace wait_test
+        {
+            constexpr uint32_t NUM_PRODUCERS = 4;
+            constexpr uint32_t NUM_CONSUMERS = 6;
+            constexpr uint32_t TOKENS_PER_PRODUCER = 50;
+            constexpr uint32_t TOTAL_TOKENS = NUM_PRODUCERS * TOKENS_PER_PRODUCER;
+            constexpr uint64_t CONSUMER_TIMEOUT_MS = 20;
+
+            struct Shared
+            {
+                task::WaitQueue queue;
+                minstd::atomic<uint32_t> tokens{0};
+                minstd::atomic<uint32_t> consumed{0};
+                minstd::atomic<uint32_t> producer_wakes{0};
+            };
+
+            class Producer : public Runnable
+            {
+            public:
+                void Initialize(Shared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    for (uint32_t i = 0; i < TOKENS_PER_PRODUCER; i++)
+                    {
+                        shared_->tokens.fetch_add(1);
+                        shared_->producer_wakes.fetch_add(shared_->queue.WakeOne());
+
+                        if ((i % 10) == 9)
+                        {
+                            task::Task::GetTask().SleepFor(milliseconds(1));
+                        }
+                    }
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+            };
+
+            class Consumer : public Runnable
+            {
+            public:
+                void Initialize(Shared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    Shared *const shared = shared_;
+
+                    auto take_token = [shared]()
+                    {
+                        uint32_t available = shared->tokens.load();
+
+                        while (available > 0)
+                        {
+                            if (shared->tokens.compare_exchange_strong(available, available - 1, minstd::memory_order_acq_rel))
+                            {
+                                return true;
+                            }
+                        }
+
+                        return false;
+                    };
+
+                    while (shared->consumed.load() < TOTAL_TOKENS)
+                    {
+                        if (shared->queue.Wait(take_token, task::WaitReason::EVENT, milliseconds(CONSUMER_TIMEOUT_MS)))
+                        {
+                            consumed_++;
+                            shared->consumed.fetch_add(1);
+                        }
+                        else
+                        {
+                            timeouts_++;
+                        }
+                    }
+                }
+
+                uint32_t Consumed() const
+                {
+                    return consumed_;
+                }
+
+                uint32_t Timeouts() const
+                {
+                    return timeouts_;
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+                volatile uint32_t consumed_ = 0;
+                volatile uint32_t timeouts_ = 0;
+            };
+
+        } // namespace wait_test
+    } // namespace
+
+    void CLITestWaitCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace wait_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest wait: producers and consumers on every core share one wait queue\n";
+
+        const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
+        const int64_t wakeups_before = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS);
+
+        Shared shared;
+        Consumer consumers[NUM_CONSUMERS];
+        Producer producers[NUM_PRODUCERS];
+        UUID consumer_ids[NUM_CONSUMERS];
+        UUID producer_ids[NUM_PRODUCERS];
+        bool consumer_forked[NUM_CONSUMERS] = {};
+        bool producer_forked[NUM_PRODUCERS] = {};
+
+        uint32_t failures = 0;
+
+        //  Consumers first, so the early tokens find waiters.
+
+        for (uint32_t i = 0; i < NUM_CONSUMERS; i++)
+        {
+            consumers[i].Initialize(&shared);
+            consumer_forked[i] = ForkPinned(context, consumers[i], "Wait Consumer", i % core_count, consumer_ids[i]);
+            failures += consumer_forked[i] ? 0 : 1;
+        }
+
+        for (uint32_t i = 0; i < NUM_PRODUCERS; i++)
+        {
+            producers[i].Initialize(&shared);
+            producer_forked[i] = ForkPinned(context, producers[i], "Wait Producer", i % core_count, producer_ids[i]);
+            failures += producer_forked[i] ? 0 : 1;
+        }
+
+        if (failures != 0)
+        {
+            //  The consumers stop only once every token is taken: make up for the missing producers.
+
+            for (uint32_t i = 0; i < NUM_PRODUCERS; i++)
+            {
+                if (!producer_forked[i])
+                {
+                    shared.tokens.fetch_add(TOKENS_PER_PRODUCER);
+                    shared.queue.WakeAll();
+                }
+            }
+        }
+
+        for (uint32_t i = 0; i < NUM_PRODUCERS; i++)
+        {
+            if (producer_forked[i])
+            {
+                JoinTask(context, producer_ids[i]);
+            }
+        }
+
+        uint32_t consumed = 0;
+        uint32_t timeouts = 0;
+
+        for (uint32_t i = 0; i < NUM_CONSUMERS; i++)
+        {
+            if (consumer_forked[i])
+            {
+                JoinTask(context, consumer_ids[i]);
+            }
+
+            consumed += consumers[i].Consumed();
+            timeouts += consumers[i].Timeouts();
+        }
+
+        const int64_t wakeups = ReadKernelStatistic(system_stats::KernelStatisticId::TASK_WAKEUPS) - wakeups_before;
+        const uint32_t producer_wakes = shared.producer_wakes.load();
+
+        context << minstd::format(buffer, "  {} tokens posted, {} taken, {} left; {} consumer timeouts\n",
+                                  TOTAL_TOKENS, consumed, shared.tokens.load(), timeouts);
+        context << minstd::format(buffer, "  {} waiters woken by producers, tasks.wakeups rose by {}\n", producer_wakes, wakeups);
+
+        if ((consumed != TOTAL_TOKENS) || (shared.tokens.load() != 0))
+        {
+            context << "  FAIL: every token must be taken exactly once\n";
+            failures++;
+        }
+
+        if ((producer_wakes == 0) || (producer_wakes > TOTAL_TOKENS) || (wakeups < static_cast<int64_t>(producer_wakes)))
+        {
+            context << "  FAIL: the wakes do not reconcile with tasks.wakeups\n";
+            failures++;
+        }
+
+        if (failures == 0)
+        {
+            context << "PASS: wait test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: wait test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test mutex
+    //
+    //  Mutual exclusion under contention from every core, with holders that yield inside the lock; then a hog that
+    //      re-locks in a tight loop, which waiters on its own core and on another must still get past.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        namespace mutex_test
+        {
+            constexpr uint32_t NUM_CONTENDERS = 8;
+            constexpr uint32_t ITERATIONS = 2000;
+            constexpr uint32_t YIELD_EVERY = 100;
+
+            constexpr int64_t STARVATION_LIMIT_MS = 1000;
+            constexpr int64_t GIVE_UP_MS = 3000;
+
+            struct ExclusionShared
+            {
+                task::Mutex mutex;
+                minstd::atomic<bool> inside{false};
+                minstd::atomic<uint32_t> violations{0};
+                volatile uint64_t counter = 0;
+            };
+
+            class Contender : public Runnable
+            {
+            public:
+                void Initialize(ExclusionShared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    for (uint32_t i = 0; i < ITERATIONS; i++)
+                    {
+                        LockGuard guard(shared_->mutex);
+
+                        if (shared_->inside.exchange(true))
+                        {
+                            shared_->violations.fetch_add(1);
+                        }
+
+                        shared_->counter = shared_->counter + 1;
+
+                        if ((i % YIELD_EVERY) == 0)
+                        {
+                            task::Task::GetTask().Yield();
+                        }
+
+                        shared_->inside.store(false);
+                    }
+                }
+
+            private:
+                ExclusionShared *shared_ = nullptr;
+            };
+
+            struct StarvationShared
+            {
+                task::Mutex mutex;
+                minstd::atomic<bool> stop{false};
+                minstd::atomic<uint32_t> waiters_done{0};
+                minstd::atomic<uint64_t> hog_unlocks{0};
+            };
+
+            class Hog : public Runnable
+            {
+            public:
+                void Initialize(StarvationShared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    while (!shared_->stop.load())
+                    {
+                        shared_->mutex.Lock();
+
+                        for (volatile uint32_t spin = 0; spin < 200; spin = spin + 1)
+                        {
+                        }
+
+                        shared_->mutex.Unlock();
+                        shared_->hog_unlocks.fetch_add(1);
+                    }
+                }
+
+            private:
+                StarvationShared *shared_ = nullptr;
+            };
+
+            class Waiter : public Runnable
+            {
+            public:
+                void Initialize(StarvationShared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    task::Task::GetTask().SleepFor(milliseconds(20)); //  let the hog get going
+
+                    const uint64_t unlocks_before = shared_->hog_unlocks.load();
+                    const auto start = PhysicalTimer::Now();
+
+                    shared_->mutex.Lock();
+
+                    waited_ms_ = duration_cast<milliseconds>(PhysicalTimer::Now() - start).count();
+                    hog_unlocks_waited_ = shared_->hog_unlocks.load() - unlocks_before;
+
+                    shared_->mutex.Unlock();
+                    shared_->waiters_done.fetch_add(1);
+                }
+
+                int64_t WaitedMs() const
+                {
+                    return waited_ms_;
+                }
+
+                uint64_t HogUnlocksWaited() const
+                {
+                    return hog_unlocks_waited_;
+                }
+
+            private:
+                StarvationShared *shared_ = nullptr;
+                volatile int64_t waited_ms_ = -1;
+                volatile uint64_t hog_unlocks_waited_ = 0;
+            };
+        } // namespace mutex_test
+    } // namespace
+
+    void CLITestMutexCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace mutex_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest mutex: mutual exclusion and freedom from starvation\n";
+
+        const uint32_t core_count = GetPlatformInfo().GetNumberOfCores();
+        const int64_t handoffs_before = ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS);
+
+        uint32_t failures = 0;
+
+        //  Mutual exclusion.
+
+        {
+            ExclusionShared shared;
+            Contender contenders[NUM_CONTENDERS];
+            UUID ids[NUM_CONTENDERS];
+            bool forked[NUM_CONTENDERS] = {};
+            uint32_t forked_count = 0;
+
+            for (uint32_t i = 0; i < NUM_CONTENDERS; i++)
+            {
+                contenders[i].Initialize(&shared);
+                forked[i] = ForkPinned(context, contenders[i], "Mutex Contender", i % core_count, ids[i]);
+                forked_count += forked[i] ? 1 : 0;
+                failures += forked[i] ? 0 : 1;
+            }
+
+            for (uint32_t i = 0; i < NUM_CONTENDERS; i++)
+            {
+                if (forked[i])
+                {
+                    JoinTask(context, ids[i]);
+                }
+            }
+
+            const uint64_t expected = static_cast<uint64_t>(forked_count) * ITERATIONS;
+
+            const uint64_t counter = shared.counter;
+
+            context << minstd::format(buffer, "  {} contenders on {} cores: counter {} of {}, {} exclusion violations\n",
+                                      forked_count, core_count, counter, expected, shared.violations.load());
+
+            if ((counter != expected) || (shared.violations.load() != 0))
+            {
+                context << "  FAIL: the mutex let two tasks in at once\n";
+                failures++;
+            }
+        }
+
+        //  Starvation: a hog on one core, a waiter on the same core and one on another, all away from this task.
+
+        {
+            const uint32_t self_core = task::Task::GetTask().CurrentCore();
+            const uint32_t hog_core = (self_core + 1) % core_count;
+            const uint32_t cross_core = (self_core + 2) % core_count;
+
+            StarvationShared shared;
+            Hog hog;
+            Waiter waiters[2];
+            const uint32_t waiter_cores[2] = {hog_core, cross_core};
+            const char *const waiter_labels[2] = {"same-core waiter", "cross-core waiter"};
+
+            UUID hog_id;
+            UUID waiter_ids[2];
+            bool waiter_forked[2] = {};
+
+            hog.Initialize(&shared);
+            const bool hog_forked = ForkPinned(context, hog, "Mutex Hog", hog_core, hog_id);
+            failures += hog_forked ? 0 : 1;
+
+            for (uint32_t i = 0; i < 2; i++)
+            {
+                waiters[i].Initialize(&shared);
+                waiter_forked[i] = ForkPinned(context, waiters[i], "Mutex Waiter", waiter_cores[i], waiter_ids[i]);
+                failures += waiter_forked[i] ? 0 : 1;
+            }
+
+            const uint32_t waiters_expected = (waiter_forked[0] ? 1 : 0) + (waiter_forked[1] ? 1 : 0);
+            const auto start = PhysicalTimer::Now();
+
+            while ((shared.waiters_done.load() < waiters_expected) &&
+                   (duration_cast<milliseconds>(PhysicalTimer::Now() - start).count() < GIVE_UP_MS))
+            {
+                task::Task::GetTask().SleepFor(milliseconds(10));
+            }
+
+            shared.stop.store(true);
+
+            if (hog_forked)
+            {
+                JoinTask(context, hog_id);
+            }
+
+            for (uint32_t i = 0; i < 2; i++)
+            {
+                if (!waiter_forked[i])
+                {
+                    continue;
+                }
+
+                JoinTask(context, waiter_ids[i]);
+
+                const int64_t waited_ms = waiters[i].WaitedMs();
+                const uint64_t hog_unlocks_waited = waiters[i].HogUnlocksWaited();
+
+                context << minstd::format(buffer, "  {} on core {}: lock after {} ms, {} hog unlocks\n",
+                                          waiter_labels[i], waiter_cores[i], waited_ms, hog_unlocks_waited);
+
+                if ((waiters[i].WaitedMs() < 0) || (waiters[i].WaitedMs() > STARVATION_LIMIT_MS))
+                {
+                    context << minstd::format(buffer, "  FAIL: the {} was starved\n", waiter_labels[i]);
+                    failures++;
+                }
+            }
+
+            context << minstd::format(buffer, "  hog unlocked {} times\n", shared.hog_unlocks.load());
+        }
+
+        context << minstd::format(buffer, "  mutex.handoffs rose by {}\n",
+                                  ReadKernelStatistic(system_stats::KernelStatisticId::MUTEX_HANDOFFS) - handoffs_before);
+
+        if (failures == 0)
+        {
+            context << "PASS: mutex test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: mutex test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands

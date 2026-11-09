@@ -5,9 +5,21 @@
 #pragma once
 
 #include "task/inter_context_message_queue.h"
+#include "task/timer_list.h"
 
 namespace task
 {
+    //  Why SwitchTasks() was called.  Only TICK charges the running task's timeslice; YIELD gives up the rest
+    //      of it; BLOCK keeps it.
+
+    typedef enum class SwitchReason : uint32_t
+    {
+        TICK = 0,
+        PREEMPT,
+        YIELD,
+        BLOCK,
+    } SwitchReason;
+
     class PerCoreTaskList
     {
         public :
@@ -78,11 +90,28 @@ namespace task
             inter_context_message_queue_.QueueMessage(message);
         }
 
-        void SwitchTasks(bool voluntary = false);
+        //  Call with IRQs disabled; returns with them disabled, whether or not a switch happened.  May return
+        //      only when this task is next switched in.
+
+        void SwitchTasks(SwitchReason reason);
+
+        //  This core's tasks waiting with a deadline.  Owning core only, IRQs disabled.
+
+        void AddWaitDeadline(TaskImpl &task)
+        {
+            wait_deadlines_.Insert(task);
+        }
+
+        //  A task with no deadline listed is left alone.  Re-arms the deadline timer, so a wait that ended early
+        //      leaves no interrupt behind.
+
+        void RemoveWaitDeadline(TaskImpl &task);
 
     private:
 
         PerCoreTaskList task_list_;
+
+        TimerList<TaskImpl> wait_deadlines_;
 
         //  Messaging queue for inter-context messages can go into the static heap
 
@@ -93,6 +122,13 @@ namespace task
         //
         
         void ServiceMessages();
+
+        void ExpireWaitDeadlines();
+
+        void MakeRunnableIfWaitEnded(TaskImpl &task);
+        void MarkRunning(TaskImpl &task);
+        void MarkSwitchedOut(TaskImpl &task);
+        void GrantTimeslice(TaskImpl &task);
 
         TaskImpl &FindNextTask(void);
     };

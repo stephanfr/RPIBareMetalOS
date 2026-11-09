@@ -31,6 +31,16 @@ public:
         return current_count;
     }
 
+    //  The system counter value duration from now, rounded up so a wait for it never ends early, and UINT64_MAX
+    //      (never) if it lies past the end of the counter.  A negative duration is now.
+
+    static uint64_t DeadlineTicksAfter(minstd::chrono::microseconds duration)
+    {
+        const uint64_t span = (duration.count() > 0) ? static_cast<uint64_t>(duration.count()) : 0;
+
+        return utility::DeadlineTicksAfter(CurrentTicks(), span, GetCounterFrequency());
+    }
+
     static minstd::chrono::time_point<minstd::chrono::nanoseconds> Now(void)
     {
         return minstd::chrono::time_point<minstd::chrono::nanoseconds>(

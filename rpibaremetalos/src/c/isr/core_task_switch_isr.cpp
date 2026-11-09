@@ -12,5 +12,7 @@ void CoreTaskSwitchISR::HandleInterrupt()
 {
     LogEntryAndExit("CoreTaskSwitchISR::HandleInterrupt\n");
 
-    task::TaskManagerImpl::Instance().SwitchToNextTask();
+    const bool tick = task::TaskManagerImpl::ConsumeTickPending(GetCoreID());
+
+    task::TaskManagerImpl::Instance().SwitchToNextTask(tick ? task::SwitchReason::TICK : task::SwitchReason::PREEMPT);
 }

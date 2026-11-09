@@ -13,6 +13,7 @@
 
 #include "devices/log.h"
 #include "task/task_impl.h"
+#include "task/task_manager_impl.h"
 #include "sysregs.h"
 #include "platform/address_space_layout.h"
 #include "services/stats_db/kernel_statistic_ids.h"
@@ -49,6 +50,7 @@ extern "C" void ShowInvalidExceptionTableEntryMessage(unsigned int type, unsigne
 
 extern "C" void HandleIRQ()
 {
+    ExceptionManager::EnterInterrupt(GetCoreID());
     GetExceptionManager().HandleInterrupt();
 }
 
@@ -165,4 +167,22 @@ bool ExceptionManager::DispatchInterruptType(Interrupts interrupt, InterruptServ
     }
 
     return true;
+}
+
+void ExceptionManager::ExitInterrupt(InterruptServiceRoutine *core_task_switch_isr)
+{
+    //  Before any switch: the next task resumes outside interrupt context.
+
+    irq_depth_[GetCoreID()]--;
+
+    if (core_task_switch_isr != nullptr)
+    {
+        core_task_switch_isr->HandleInterrupt();
+        return;
+    }
+
+    if (task::TaskManagerImpl::IsRescheduleRequested(GetCoreID()))
+    {
+        task::TaskManagerImpl::Instance().SwitchToNextTask(task::SwitchReason::PREEMPT);
+    }
 }

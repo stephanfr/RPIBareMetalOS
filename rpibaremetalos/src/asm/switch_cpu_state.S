@@ -12,9 +12,9 @@
 //		as a result of a call to 'schedule', the other registers are assumed by the compiler to
 //		be volatile.
 //
-//	Insure that IRQs are disabled when calling this method, it will re-enable them before returning.
-
-#include "enable_disable_irqs.h"
+//	Call with IRQs disabled.  They stay disabled: the switched-in task resumes with the mask its switch out
+//		left it, so code after a switch runs under the same mask as the code before it.  A new task's first
+//		code, ReturnFromFork, enables them itself.
 
 .globl SwitchCPUState
 SwitchCPUState:
@@ -43,5 +43,4 @@ SwitchCPUState:
 	msr tpidrro_el0, x2
 	msr tpidr_el1, x3
 	mov	sp, x9
-	EnableIRQs							// Enable IRQs
 	ret

@@ -52,6 +52,16 @@ namespace system_stats
         EMMC_TRANSFER_ABORTS            = 32,
 
         HEAP_DYNAMIC_ALLOCATIONS        = 33,
+
+        TASK_WAITING                    = 34,
+        TASK_WAITING_IO                 = 35,
+        TASK_BLOCKS                     = 36,
+        TASK_WAKEUPS                    = 37,
+        TASK_WAIT_TIMEOUTS              = 38,
+
+        MUTEX_HANDOFFS                  = 39,
+
+        SCHEDULER_DEADLINE_INTERRUPTS   = 40,
     } KernelStatisticId;
 
     constexpr uint32_t KernelStatistic(KernelStatisticId id)

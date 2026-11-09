@@ -30,6 +30,8 @@ const char *ToString(Interrupts interrupt)
         return "SYSTEM_TIMER_3";
     case Interrupts::ARM_GENERIC_TIMER:
         return "ARM_GENERIC_TIMER";
+    case Interrupts::ARM_VIRTUAL_TIMER:
+        return "ARM_VIRTUAL_TIMER";
     default:
         return "NO_SUCH_INTERRUPT";
     }

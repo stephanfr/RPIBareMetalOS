@@ -22,6 +22,8 @@ from dataclasses import dataclass
 import pexpect
 import pexpect.fdpexpect
 
+from qemu_machines import cpu_flags
+
 
 PROMPT = '> '
 BOOT_READY_MARKER = 'Command Line Interface'
@@ -65,6 +67,7 @@ class tee_writer:
 def open_qemu(args: argparse.Namespace) -> pexpect.spawn:
     cmd = (
         f'{args.qemu} -M {args.machine}'
+        f'{cpu_flags(args.machine)}'
         f' -kernel {args.armstub}'
         f' -device loader,file={args.kernel},addr=0x80000,force-raw=on'
         f' -drive file={args.sdimage},if=sd,format=raw'

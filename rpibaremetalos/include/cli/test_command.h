@@ -131,7 +131,46 @@ namespace cli::commands
         void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
     };
 
-    class CLITestCommand : public CLIParentCommand<9>
+    class CLITestSleepCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestSleepCommand instance;
+
+        CLITestSleepCommand()
+            : CLICommandExecutor("sleep")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
+    };
+
+    class CLITestWaitCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestWaitCommand instance;
+
+        CLITestWaitCommand()
+            : CLICommandExecutor("wait")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
+    };
+
+    class CLITestMutexCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestMutexCommand instance;
+
+        CLITestMutexCommand()
+            : CLICommandExecutor("mutex")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
+    };
+
+    class CLITestCommand : public CLIParentCommand<12>
     {
     public:
         static const CLITestCommand instance;
@@ -145,7 +184,10 @@ namespace cli::commands
                                         CLITestMemorySoakCommand::instance,
                                         CLITestAddressSpaceCommand::instance,
                                         CLITestUserTaskCommand::instance,
-                                        CLITestSoakCommand::instance})
+                                        CLITestSoakCommand::instance,
+                                        CLITestSleepCommand::instance,
+                                        CLITestWaitCommand::instance,
+                                        CLITestMutexCommand::instance})
         {
         }
     };
