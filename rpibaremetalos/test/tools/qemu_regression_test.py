@@ -302,8 +302,14 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         expect_stat(9, 'gauge', 'tasks.running', lambda v: 1 <= v <= 4, 'in 1..4')
         expect_stat(10, 'gauge', 'tasks.zombies', lambda v: v > 0, '> 0')
         expect_stat(11, 'counter', 'tasks.dropped_zombies', lambda v: v == 0, '== 0')
+        # One line per core: each run list always holds its idle task, and the emulated boards have four cores.
         for core in range(4):
-            expect_stat(12 + core, 'gauge', f'tasks.runlist_depth_{core}', lambda v: v >= 1, '>= 1')
+            expect_stat(12, 'array', f'tasks.runlist_depth[{core}]', lambda v: v >= 1, '>= 1')
+        if stat_value(12, 'array', 'tasks.runlist_depth[4]') is not None:
+            print('\nFAIL [list statistics]: tasks.runlist_depth has an element past the last core')
+            failures += 1
+        else:
+            print('\nPASS [list statistics]: tasks.runlist_depth has one element per core')
         expect_stat(16, 'counter', 'scheduler.missed_interrupts', lambda v: v >= 0, 'present')
 
         # The address-space metrics.  demand_page_faults must have moved -- test usertask
@@ -317,10 +323,35 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         expect_stat(18, 'counter', 'mmu.demand_page_faults', lambda v: v > 0, '> 0')
         expect_stat(19, 'counter', 'mmu.demand_page_failures', lambda v: v == 0, '== 0')
 
+        # The SD card metrics.  Mounting the filesystem and loading every user binary read the
+        # card, so reads and blocks_read must have moved, and the time spent must be nonzero.
+        # The run never writes, so the write statistics need only be present.  io_failures and
+        # last_io_failure are correctness canaries: a nonzero value means a read gave up after
+        # all its retries; transfer_aborts means a data command hit an error at all.  The card
+        # must have come up, so there was at least one reset.
+        expect_stat(21, 'counter', 'emmc.reads', lambda v: v > 0, '> 0')
+        expect_stat(22, 'counter', 'emmc.writes', lambda v: v >= 0, 'present')
+        expect_stat(23, 'counter', 'emmc.blocks_read', lambda v: v >= stat_value(21, 'counter', 'emmc.reads'), '>= reads')
+        expect_stat(24, 'counter', 'emmc.blocks_written', lambda v: v >= 0, 'present')
+        expect_stat(25, 'counter', 'emmc.io_failures', lambda v: v == 0, '== 0')
+        expect_stat(26, 'timestamp', 'emmc.last_io_failure', lambda v: v == 0, '== 0 (never)')
+        expect_stat(27, 'counter', 'emmc.command_retries', lambda v: v >= 0, 'present')
+        expect_stat(28, 'counter', 'emmc.io_time_us', lambda v: v > 0, '> 0')
+        expect_stat(29, 'gauge', 'emmc.max_io_time_us', lambda v: 0 < v <= stat_value(28, 'counter', 'emmc.io_time_us'), 'in 1..io_time_us')
+        expect_stat(30, 'counter', 'emmc.controller_waits', lambda v: v >= 0, 'present')
+        expect_stat(31, 'counter', 'emmc.card_resets', lambda v: v >= 1, '>= 1')
+        expect_stat(32, 'counter', 'emmc.transfer_aborts', lambda v: v == 0, '== 0')
+
         # test addrspace — checks the address space / page table layer, including
         # that the syscall boundary range-checks before it walks.
         output = send_command('test addrspace')
         check('test addrspace', output, 'PASS: address space test', 'loaded statistics: 4 registered')
+
+        # test soak — two rounds of the scheduling, memory and concurrency soak that
+        # make qemu-cli-soak and make hw-cli-soak run for an hour.  Last, so its tasks and statistics cannot
+        # disturb the exact checks above.
+        output = send_command('test soak --seconds=10', timeout=180)
+        check('test soak', output, 'PASS: soak test')
 
     except pexpect.TIMEOUT:
         print('\nFAIL: timed out waiting for expected output')

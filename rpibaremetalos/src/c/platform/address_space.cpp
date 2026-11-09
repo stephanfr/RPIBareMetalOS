@@ -71,13 +71,13 @@ namespace
 
     //  Address-space activity, kept as running statistics rather than recomputed on demand.
 
-    system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MMU_ADDRESS_SPACES)>
+    system_stats::KernelGaugeStatistic<system_stats::KernelStatisticId::MMU_ADDRESS_SPACES>
         address_spaces("mmu", "address_spaces", "Live non-kernel address spaces (one ASID each)", 0);
 
-    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS)>
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS>
         demand_page_faults("mmu", "demand_page_faults", "Demand-paged user pages faulted in", 0);
 
-    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAILURES)>
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAILURES>
         demand_page_failures("mmu", "demand_page_failures", "Demand page-ins that failed to allocate a frame or table", 0);
 }
 

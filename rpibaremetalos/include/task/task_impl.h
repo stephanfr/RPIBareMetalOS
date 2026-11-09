@@ -187,12 +187,12 @@ namespace task
             preempt_count_--;
         }
 
-        void AddReference()
+        void AddReference() override
         {
             references_.fetch_add(1);
         }
 
-        void ReleaseReference()
+        void ReleaseReference() override
         {
             references_.fetch_sub(1);
         }
@@ -276,6 +276,7 @@ namespace task
         time_point<nanoseconds> switched_out_last_;
         time_point<nanoseconds> zombie_timestamp_;
         minstd::atomic<uint32_t> references_{0};
+        bool removed_from_task_map_ = false;                    //  reaper-owned
 
         microseconds runtime_ = microseconds::zero();
 

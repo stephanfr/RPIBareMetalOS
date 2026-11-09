@@ -57,7 +57,7 @@ namespace
     //  The kill itself is only a warning-level log line, which a normal run does not print, so this is the way to
     //      see that it happened: 'list statistics'.
 
-    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS)>
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::USER_TASK_FAULTS>
         user_task_faults("tasks", "user_faults", "User tasks killed by a fault taken at EL0", 0);
 }
 

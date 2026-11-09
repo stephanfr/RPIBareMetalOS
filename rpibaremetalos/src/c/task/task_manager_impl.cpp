@@ -21,6 +21,7 @@
 #include "platform/platform_sw_rngs.h"
 
 #include "services/stats_db/kernel_statistic_ids.h"
+#include "services/stats_db/registered_statistic.h"
 #include "services/stats_db/system_stats.h"
 #include "services/stats_db/task_statistics.h"
 #include "services/stats_db/user_statistics.h"
@@ -39,13 +40,13 @@ namespace system_stats
     //      task_statistics.h for the other files that move a task's state.  Like every other
     //      kernel statistic they are recorded during static initialisation and registered at boot.
 
-    GaugeStatistic<KernelStatistic(KernelStatisticId::TASK_RUNNING)>
+    KernelGaugeStatistic<KernelStatisticId::TASK_RUNNING>
         task_running("tasks", "running", "Tasks currently running on a core", 0);
 
-    GaugeStatistic<KernelStatistic(KernelStatisticId::TASK_ZOMBIES)>
+    KernelGaugeStatistic<KernelStatisticId::TASK_ZOMBIES>
         task_zombies("tasks", "zombies", "Zombie tasks awaiting the reaper", 0);
 
-    CounterStatistic<KernelStatistic(KernelStatisticId::TASK_DROPPED_ZOMBIES)>
+    KernelCounterStatistic<KernelStatisticId::TASK_DROPPED_ZOMBIES>
         task_dropped_zombies("tasks", "dropped_zombies", "Zombies dropped because the reaper queue was full (leak)", 0);
 }
 
@@ -103,9 +104,11 @@ namespace task
                 {
                     TaskManagerImpl::Instance().ReapZombies();
 
-                    //  Statistics of reaped user tasks wait here until no reader can reach them.
+                    //  Statistics of reaped user tasks, and kernel statistics retired while a reader was running,
+                    //      wait here until no reader can reach them.
 
                     system_stats::ReclaimRetiredUserStatisticsRegions();
+                    system_stats::ReclaimRetiredStatistics();
 
                     Yield();                                            //  TODO add sleep to scheduler as Sleep(...) like Join
                 }
@@ -349,8 +352,7 @@ namespace task
 
     void TaskManagerImpl::VisitTaskList(TaskListVisitorCallback callback) const
     {
-        //  We need to single-thread this method
-
+        LookupSection lookup(active_lookups_);
 
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
@@ -373,6 +375,8 @@ namespace task
         }
 
         //  The map is keyed by UUID, not process id, so every task is looked at.
+
+        LookupSection lookup(active_lookups_);
 
         for (auto task_itr = task_map_.begin(); task_itr != task_map_.end(); ++task_itr)
         {
@@ -585,17 +589,20 @@ namespace task
         task_execution_contexts_[schedule_on_core].QueueMessage(add_task_message);
     }
 
-    minstd::optional<minstd::reference_wrapper<Task>> TaskManagerImpl::FindTask(const UUID &task_id)
+    TaskHandle TaskManagerImpl::FindTask(const UUID &task_id)
     {
+        //  The handle takes its reference inside the lookup section, before the reaper can free the task.
+
+        LookupSection lookup(active_lookups_);
 
         auto task_itr = task_map_.find(task_id);
 
-        if (task_itr != task_map_.end())
+        if (task_itr == task_map_.end())
         {
-            return minstd::optional<minstd::reference_wrapper<Task>>(*(task_itr->second));
+            return TaskHandle();
         }
 
-        return minstd::optional<minstd::reference_wrapper<Task>>();
+        return TaskHandle(*task_itr->second);
     }
 
     /**
@@ -645,15 +652,11 @@ namespace task
             }
         }
 
-        //  PASS 2 -- destroy the OBJECTS, and compact.  Safe now: the task is in no run
-        //      list (it only reaches this array via FindNextTask delisting it) and nothing
-        //      holds a reference.  Removing from task_map_ last is what keeps FindTask()
-        //      working for the whole retention window.
+        //  PASS 2 -- remove the OBJECTS from task_map_.  The task is in no run list (it only reaches this array via
+        //      FindNextTask delisting it).  Staying in the map until now is what keeps FindTask() working for the
+        //      whole retention window.
 
         const bool over_cap = (retained_zombie_count_ >= MAX_RETAINED_ZOMBIES);
-
-        uint32_t reaped = 0;
-        uint32_t surviving = 0;
 
         for (uint32_t i = 0; i < retained_zombie_count_; i++)
         {
@@ -662,13 +665,35 @@ namespace task
             const bool old_enough =
                 duration_cast<seconds>(now - task->zombie_timestamp_) >= zombie_lifetime_;
 
-            if ((task->References() != 0) || (!old_enough && !over_cap))
+            if (!task->removed_from_task_map_ && (task->References() == 0) && (old_enough || over_cap))
+            {
+                task_map_.remove(task->ID());
+                task->removed_from_task_map_ = true;
+            }
+        }
+
+        //  PASS 3 -- destroy them, and compact.  A lookup that began before the removal may hold a pointer and be
+        //      about to take a reference, so wait until none is in progress; any that begins later cannot find
+        //      the task.  Then References() is final unless it is nonzero, and a referenced task waits for its last
+        //      TaskHandle.  The fence pairs with the one in LookupSection.
+
+        __atomic_thread_fence(__ATOMIC_SEQ_CST);
+
+        const bool no_lookups = (active_lookups_.load(minstd::memory_order_seq_cst) == 0);
+
+        uint32_t reaped = 0;
+        uint32_t surviving = 0;
+
+        for (uint32_t i = 0; i < retained_zombie_count_; i++)
+        {
+            TaskImpl *task = retained_zombies_[i];
+
+            if (!task->removed_from_task_map_ || !no_lookups || (task->References() != 0))
             {
                 retained_zombies_[surviving++] = task;
                 continue;
             }
 
-            task_map_.remove(task->ID());
             task->ReleaseResources();          //  no-op if pass 1 already ran
             task->Destroy();                   //  frees it as its own type: it may be a ServiceTaskImpl
 
@@ -679,7 +704,7 @@ namespace task
 
         retained_zombie_count_ = surviving;
 
-        //  DRAIN last, into the space pass 2 just freed.  Anything that will not fit stays
+        //  DRAIN last, into the space pass 3 just freed.  Anything that will not fit stays
         //      queued for the next sweep rather than being dropped.
 
         TaskImpl *delisted = nullptr;

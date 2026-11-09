@@ -137,6 +137,86 @@ namespace task
         virtual void Yield() = 0;
         virtual void Exit() = 0;
         virtual void Join() = 0;
+
+    protected:
+        friend class TaskHandle;
+
+        //  The reaper does not destroy a task while it holds references.
+
+        virtual void AddReference() = 0;
+        virtual void ReleaseReference() = 0;
+    };
+
+    //  A counted reference to a task.  The task may exit while a handle exists, but it is not destroyed.  An empty
+    //      handle is what FindTask() returns for an id it does not know.
+    //
+    //      if (auto task = GetTaskManager().FindTask(id)) { task->Join(); }
+
+    class TaskHandle
+    {
+    public:
+        TaskHandle() = default;
+
+        explicit TaskHandle(Task &task)
+            : task_(&task)
+        {
+            task_->AddReference();
+        }
+
+        TaskHandle(const TaskHandle &other)
+            : task_(other.task_)
+        {
+            if (task_ != nullptr)
+            {
+                task_->AddReference();
+            }
+        }
+
+        TaskHandle(TaskHandle &&other) noexcept
+            : task_(other.task_)
+        {
+            other.task_ = nullptr;
+        }
+
+        TaskHandle &operator=(TaskHandle other) noexcept
+        {
+            Task *previous = task_;
+            task_ = other.task_;
+            other.task_ = previous;
+
+            return *this;
+        }
+
+        ~TaskHandle()
+        {
+            if (task_ != nullptr)
+            {
+                task_->ReleaseReference();
+            }
+        }
+
+        bool has_value() const noexcept
+        {
+            return task_ != nullptr;
+        }
+
+        explicit operator bool() const noexcept
+        {
+            return task_ != nullptr;
+        }
+
+        Task &operator*() const noexcept
+        {
+            return *task_;
+        }
+
+        Task *operator->() const noexcept
+        {
+            return task_;
+        }
+
+    private:
+        Task *task_ = nullptr;
     };
 
     inline const char *ToString(Task::TaskType type)
@@ -188,8 +268,10 @@ namespace task
     class TaskManager : public OSEntity
     {
     public:
+        //  The task passed to callback is valid only during the call; take a TaskHandle to keep it.
+
         virtual void VisitTaskList(TaskListVisitorCallback callback) const = 0;
-        virtual minstd::optional<minstd::reference_wrapper<Task>> FindTask(const UUID &task_id) = 0;
+        virtual TaskHandle FindTask(const UUID &task_id) = 0;
 
         virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
         virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;

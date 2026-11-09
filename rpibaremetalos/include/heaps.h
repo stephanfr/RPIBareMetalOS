@@ -26,10 +26,18 @@ public:
     }
 };
 
+//  Every helper here returns null (or an empty unique_ptr) when the heap is exhausted, without running a constructor.
+
 template <typename T, typename... Args>
 T *static_new(Args &&...args)
 {
     void *buffer = __os_static_heap_resource.allocate(sizeof(T), alignof(T));
+
+    if (buffer == nullptr)
+    {
+        return nullptr;
+    }
+
     return new (buffer) T(minstd::forward<Args>(args)...);
 }
 
@@ -37,16 +45,21 @@ template <typename T, typename... Args>
 inline minstd::unique_ptr<T> make_static_unique(Args &&...args)
 {
     void *buffer = __os_static_heap_resource.allocate(sizeof(T), alignof(T));
-    T *temp = new (buffer) T(minstd::forward<Args>(args)...);
-    return minstd::unique_ptr<T>(temp, __os_static_heap_resource);
+
+    if (buffer == nullptr)
+    {
+        return minstd::unique_ptr<T>();
+    }
+
+    return minstd::unique_ptr<T>(new (buffer) T(minstd::forward<Args>(args)...), __os_static_heap_resource);
 }
+
+//  Allocates a T and returns it as a T2 (a base of T); the unique_ptr still frees it as a T.
 
 template <typename T, typename T2, typename... Args>
 inline minstd::unique_ptr<T2> make_static_unique(Args &&...args)
 {
-    void *buffer = __os_static_heap_resource.allocate(sizeof(T), alignof(T));
-    T2 *temp = dynamic_cast<T2 *>(new (buffer) T(minstd::forward<Args>(args)...));
-    return minstd::unique_ptr<T2>(temp, __os_static_heap_resource);
+    return make_static_unique<T>(minstd::forward<Args>(args)...);
 }
 
 
@@ -65,14 +78,21 @@ template <typename T, typename... Args>
 inline minstd::unique_ptr<T> dynamic_new(Args &&...args)
 {
     void *buffer = __os_dynamic_heap_resource.allocate(sizeof(T), alignof(T));
+
+    if (buffer == nullptr)
+    {
+        return minstd::unique_ptr<T>();
+    }
+
     return minstd::unique_ptr<T>(new (buffer) T(minstd::forward<Args>(args)...), __os_dynamic_heap_resource);
 }
+
+//  Allocates a U and returns it as a T (a base of U); the unique_ptr still frees it as a U.
 
 template <typename T, typename U, typename... Args>
 inline minstd::unique_ptr<T> dynamic_new(Args &&...args)
 {
-    void *buffer = __os_dynamic_heap_resource.allocate(sizeof(U), alignof(U));
-    return minstd::unique_ptr<T>(dynamic_cast<T *>(new (buffer) U(minstd::forward<Args>(args)...)), __os_dynamic_heap_resource);
+    return dynamic_new<U>(minstd::forward<Args>(args)...);
 }
 
 template <typename T>
@@ -91,17 +111,15 @@ inline void dynamic_delete(T *pointer)
 template <typename T, typename... Args>
 inline minstd::unique_ptr<T> make_dynamic_unique(Args &&...args)
 {
-    void *buffer = __os_dynamic_heap_resource.allocate(sizeof(T), alignof(T));
-    T *temp = new (buffer) T(minstd::forward<Args>(args)...);
-    return minstd::unique_ptr<T>(temp, __os_dynamic_heap_resource);
+    return dynamic_new<T>(minstd::forward<Args>(args)...);
 }
+
+//  Allocates a T and returns it as a T2 (a base of T); the unique_ptr still frees it as a T.
 
 template <typename T, typename T2, typename... Args>
 inline minstd::unique_ptr<T2> make_dynamic_unique(Args &&...args)
 {
-    void *buffer = __os_dynamic_heap_resource.allocate(sizeof(T), alignof(T));
-    T2 *temp = dynamic_cast<T2 *>(new (buffer) T(minstd::forward<Args>(args)...));
-    return minstd::unique_ptr<T2>(temp, __os_dynamic_heap_resource);
+    return dynamic_new<T>(minstd::forward<Args>(args)...);
 }
 
 

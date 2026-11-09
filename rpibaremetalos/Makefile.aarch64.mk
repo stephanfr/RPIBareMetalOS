@@ -10,7 +10,7 @@ IMAGE_DIR   := image
 
 QEMU                   ?= qemu-system-aarch64
 QEMU_REGRESSION_SCRIPT := test/tools/qemu_regression_test.py
-QEMU_CLI_SOAK_SCRIPT   := test/tools/qemu_cli_soak_test.py
+CLI_SOAK_SCRIPT        := test/tools/cli_soak_test.py
 QEMU_RPI3_MACHINE      ?= raspi3b
 QEMU_RPI4_MACHINE      ?= raspi4b
 QEMU_RPI4_MEMORY       ?= 2G
@@ -21,6 +21,10 @@ SOAK_MAX_INTERVAL_SECONDS      ?= 1.0
 SOAK_PROGRESS_INTERVAL_SECONDS ?= 30
 SOAK_SEED                      ?=
 SOAK_EXTRA_ARGS                ?=
+SOAK_LOG                       ?= soak-$(shell date +%Y%m%d-%H%M%S).log
+
+SERIAL_PORT                    ?= /dev/ttyUSB0
+SERIAL_BAUD                    ?= 57600
 
 BUILD_DIRS := $(IMAGE_DIR) $(BUILD_ROOT) $(BUILD_ROOT)/user\
 $(BUILD_ROOT)/asm \
@@ -340,16 +344,29 @@ qemu-rpi4: all
 	$(QEMU) -M $(QEMU_RPI4_MACHINE) -m $(QEMU_RPI4_MEMORY) $(QEMU_COMMON_FLAGS)
 
 
-qemu-cli-soak: all
-	python3 $(QEMU_CLI_SOAK_SCRIPT) \
-		--qemu $(QEMU) \
-		--armstub $(IMAGE_DIR)/supervisor.elf \
-		--kernel $(IMAGE_DIR)/kernel8.img \
-		--sdimage $(IMAGE_DIR)/sd.img \
-		--machine $(QEMU_RPI3_MACHINE) \
+SOAK_COMMON_ARGS = \
 		--duration-seconds $(SOAK_DURATION_SECONDS) \
 		--min-interval-seconds $(SOAK_MIN_INTERVAL_SECONDS) \
 		--max-interval-seconds $(SOAK_MAX_INTERVAL_SECONDS) \
 		--progress-interval-seconds $(SOAK_PROGRESS_INTERVAL_SECONDS) \
 		$(if $(SOAK_SEED),--seed $(SOAK_SEED),) \
 		$(SOAK_EXTRA_ARGS)
+
+qemu-cli-soak: all
+	python3 $(CLI_SOAK_SCRIPT) \
+		--qemu $(QEMU) \
+		--armstub $(IMAGE_DIR)/supervisor.elf \
+		--kernel $(IMAGE_DIR)/kernel8.img \
+		--sdimage $(IMAGE_DIR)/sd.img \
+		--machine $(QEMU_RPI3_MACHINE) \
+		$(SOAK_COMMON_ARGS)
+
+#  Soaks a board already booted to the CLI, writing its whole console output to SOAK_LOG.  Does not build or
+#      deploy: copy image/ to the SD card first.  SOAK_EXTRA_ARGS=--wait-for-boot waits for a power-on instead.
+
+hw-cli-soak:
+	python3 $(CLI_SOAK_SCRIPT) \
+		--serial $(SERIAL_PORT) \
+		--baud $(SERIAL_BAUD) \
+		--log $(SOAK_LOG) \
+		$(SOAK_COMMON_ARGS)

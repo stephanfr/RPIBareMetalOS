@@ -8,6 +8,7 @@
 #include <atomic>
 #include <charconv>
 #include <format>
+#include <mutex>
 
 #include "devices/physical_timer.h"
 #include "task/tasks.h"
@@ -23,6 +24,8 @@
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
 #include "services/stats_db/user_statistics.h"
+#include "services/stats_db/kernel_statistic_ids.h"
+#include "asm_globals.h"
 
 namespace cli::commands
 {
@@ -34,6 +37,7 @@ namespace cli::commands
     const CLITestMemorySoakCommand      CLITestMemorySoakCommand::instance;
     const CLITestAddressSpaceCommand    CLITestAddressSpaceCommand::instance;
     const CLITestUserTaskCommand        CLITestUserTaskCommand::instance;
+    const CLITestSoakCommand            CLITestSoakCommand::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -218,7 +222,7 @@ namespace cli::commands
 
             if (task.has_value())
             {
-                task.value().get().Join();
+                task->Join();
             }
         }
 
@@ -393,7 +397,7 @@ namespace cli::commands
             if (task.has_value())
             {
                 valid_tasks++;
-                task.value().get().Join();
+                task->Join();
             }
             else
             {
@@ -511,7 +515,7 @@ namespace cli::commands
         auto found = context.task_manager_.FindTask(task_id);
         if (found.has_value())
         {
-            const char *state_str = task::ToString(found.value().get().State());
+            const char *state_str = task::ToString(found->State());
             context << minstd::format(buffer, "  FindTask (immediate): FOUND, state={}\n", state_str);
         }
         else
@@ -522,7 +526,7 @@ namespace cli::commands
         //  Step 3 – Join (or poll fallback)
         if (found.has_value())
         {
-            found.value().get().Join();
+            found->Join();
             context << "  Join() returned\n";
         }
         else
@@ -546,7 +550,7 @@ namespace cli::commands
         auto found_after = context.task_manager_.FindTask(task_id);
         if (found_after.has_value())
         {
-            const char *state_str = task::ToString(found_after.value().get().State());
+            const char *state_str = task::ToString(found_after->State());
             context << minstd::format(buffer, "  FindTask (post-join): FOUND, state={}\n", state_str);
         }
         else
@@ -596,6 +600,41 @@ namespace cli::commands
             }
 
             return true;
+        }
+
+        //  Waits for FreePages() to hold still for two seconds and returns it.  The Reaper releases a dead task's
+        //      stack and address space after a one second grace, in steps a few hundred ms apart, so a shorter quiet
+        //      window can fall between two steps.  Gives up after 30 s and returns the latest count.
+
+        uint64_t WaitForFreePagesToSettle()
+        {
+            constexpr uint32_t SETTLE_POLL_MS = 100;
+            constexpr uint32_t SETTLE_MAX_POLLS = 300;
+            constexpr int64_t SETTLE_QUIET_MS = 2000;
+
+            uint64_t settled = GetMemoryManager().FreePages();
+            auto quiet_since = PhysicalTimer::Now();
+
+            for (uint32_t poll = 0; poll < SETTLE_MAX_POLLS; poll++)
+            {
+                task::Task::GetTask().Yield();
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(SETTLE_POLL_MS));
+
+                const uint64_t now = GetMemoryManager().FreePages();
+
+                if (now != settled)
+                {
+                    settled = now;
+                    quiet_since = PhysicalTimer::Now();
+                }
+                else if (minstd::chrono::duration_cast<minstd::chrono::milliseconds>(
+                             PhysicalTimer::Now() - quiet_since).count() >= SETTLE_QUIET_MS)
+                {
+                    break;
+                }
+            }
+
+            return settled;
         }
     }
 
@@ -1149,9 +1188,6 @@ namespace cli::commands
 
         {
             constexpr uint32_t ACCOUNTING_ATTEMPTS = 5;
-            constexpr uint32_t SETTLE_POLL_MS = 100;
-            constexpr uint32_t SETTLE_MAX_POLLS = 300;
-            constexpr int64_t SETTLE_QUIET_MS = 2000;
 
             const uint64_t expected_pages = (7 * BYTES_4K) / GetMemoryManager().PageSize();
 
@@ -1163,32 +1199,7 @@ namespace cli::commands
 
             for (uint32_t attempt = 0; (attempt < ACCOUNTING_ATTEMPTS) && !accounted; attempt++)
             {
-                //  Wait for the free-page count to be QUIET for SETTLE_QUIET_MS.  The Reaper
-                //      releases a dead task's stack and address space in steps a few hundred ms
-                //      apart, after a 1s grace period, so a short "unchanged" window can fall
-                //      between two steps.  The quiet period has to outlast both.
-
-                uint64_t settled = GetMemoryManager().FreePages();
-                auto quiet_since = PhysicalTimer::Now();
-
-                for (uint32_t poll = 0; poll < SETTLE_MAX_POLLS; poll++)
-                {
-                    task::Task::GetTask().Yield();
-                    PhysicalTimer::Wait(minstd::chrono::milliseconds(SETTLE_POLL_MS));
-
-                    const uint64_t now = GetMemoryManager().FreePages();
-
-                    if (now != settled)
-                    {
-                        settled = now;
-                        quiet_since = PhysicalTimer::Now();
-                    }
-                    else if (minstd::chrono::duration_cast<minstd::chrono::milliseconds>(
-                                 PhysicalTimer::Now() - quiet_since).count() >= SETTLE_QUIET_MS)
-                    {
-                        break;
-                    }
-                }
+                WaitForFreePagesToSettle();
 
                 AddressSpace *accounting_space = dynamic_new<AddressSpace>().release();
 
@@ -1367,7 +1378,7 @@ namespace cli::commands
 
             if (task.has_value())
             {
-                task.value().get().Join();
+                task->Join();
             }
 
             return true;
@@ -1398,7 +1409,7 @@ namespace cli::commands
 
             if (task.has_value())
             {
-                task.value().get().Join();
+                task->Join();
             }
 
             return true;
@@ -1442,7 +1453,7 @@ namespace cli::commands
                     return false;
                 }
 
-                process_id = static_cast<task::TaskImpl &>(task.value().get()).ProcessId();
+                process_id = static_cast<task::TaskImpl &>(*task).ProcessId();
             }
 
             //  The task loads its binary -- and so registers its statistics -- when it first runs, before
@@ -1523,7 +1534,7 @@ namespace cli::commands
 
             if (task.has_value())
             {
-                task.value().get().Join();
+                task->Join();
             }
 
             if (!passed)
@@ -1625,7 +1636,7 @@ namespace cli::commands
 
                 if (task.has_value())
                 {
-                    task.value().get().Join();
+                    task->Join();
                 }
             }
         }
@@ -1644,6 +1655,1023 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: user task test -- {} failure(s)\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test soak  -- long-running scheduling, memory and concurrency soak.
+    //
+    //  Runs in rounds of ROUND_SECONDS until --seconds have passed.  Each round forks a fresh cohort and stops it
+    //      at the deadline, then checks exact invariants, so a failure is pinned to the round that produced it:
+    //
+    //      workers   pinned round-robin to the cores.  Each loops over: shared atomic increments; a mutex-guarded
+    //                non-atomic pair whose halves must always match and whose owner must not change while held;
+    //                a live set of page-allocator blocks and kernel-heap objects, each filled with a pattern that
+    //                encodes the worker, verified on release; and a short-lived child task forked on a random core.
+    //      hogs      one per core, spins without yielding for the first HOG_MILLISECONDS.  Workers sharing that core
+    //                only progress meanwhile if preemption works.
+    //      launcher  runs hello.bin's demand-paging and deep-stack cases back to back (--no-user disables it).
+    //
+    //  Completion is signalled by each task through a flag rather than observed with FindTask() and Join(), so a
+    //      hung task is reported after a timeout instead of hanging the CLI.  After the last round the free-page
+    //      count must settle back to where it started, and the kernel's failure statistics must not have moved.
+    // -------------------------------------------------------------------------
+
+    namespace
+    {
+        namespace soak
+        {
+            constexpr uint32_t ROUND_SECONDS = 5;
+            constexpr int64_t HOG_MILLISECONDS = 1000;
+            constexpr uint32_t STOP_TIMEOUT_MS = 15000;
+            constexpr uint32_t DEFAULT_WORKERS = 8;
+            constexpr uint32_t MAX_WORKERS = 32;
+
+            constexpr uint32_t ATOMIC_INCREMENTS_PER_ITERATION = 16;
+            constexpr uint32_t CRITICAL_SECTION_SPIN = 32;
+            constexpr uint32_t LIVE_BLOCKS = 8;
+            constexpr uint32_t MAX_BLOCK_PAGES = 8;
+            constexpr uint32_t LIVE_HEAP_OBJECTS = 16;
+            constexpr uint32_t MAX_HEAP_OBJECT_WORDS = 64;
+            constexpr uint32_t CHILD_INTERVAL = 32;
+            constexpr uint32_t YIELD_INTERVAL = 8;
+
+            //  A retained zombie holds ~3 allocations.  A leak of ~200 allocations a round still fails a 30s soak.
+            constexpr int64_t HEAP_GROWTH_SLACK = 256;
+            constexpr int64_t HEAP_ALLOCATIONS_PER_ZOMBIE = 8;
+
+            //  hello.bin cases that must run to completion: 64 demand-paged heap pages, and 256 demand-paged stack
+            //      pages.  A failed page-in kills the task, which tasks.user_faults counts.
+
+            constexpr unsigned long USER_CASES[] = {7, 10};
+
+            //  Every word encodes the owner's seed and its own offset, so a block handed to two owners, or a stray
+            //      write from anywhere, fails verification.
+
+            void FillWords(uint64_t *words, uint64_t count, uint64_t seed)
+            {
+                for (uint64_t i = 0; i < count; i++)
+                {
+                    words[i] = seed ^ (i * 0x9E3779B97F4A7C15ULL);
+                }
+            }
+
+            bool VerifyWords(const uint64_t *words, uint64_t count, uint64_t seed)
+            {
+                for (uint64_t i = 0; i < count; i++)
+                {
+                    if (words[i] != (seed ^ (i * 0x9E3779B97F4A7C15ULL)))
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            int64_t ElapsedMilliseconds(minstd::chrono::time_point<minstd::chrono::nanoseconds> since)
+            {
+                return minstd::chrono::duration_cast<minstd::chrono::milliseconds>(PhysicalTimer::Now() - since).count();
+            }
+
+            class XorShift64
+            {
+            public:
+                explicit XorShift64(uint64_t seed)
+                    : state_((seed != 0) ? seed : 0x2545F4914F6CDD1DULL)
+                {
+                }
+
+                uint64_t operator()()
+                {
+                    state_ ^= state_ << 13;
+                    state_ ^= state_ >> 7;
+                    state_ ^= state_ << 17;
+                    return state_;
+                }
+
+            private:
+                uint64_t state_;
+            };
+
+            //  GCC 13 zero-fills runs of members with 16-byte stp q stores even under -mstrict-align, and those fault
+            //      under strict_align=1 (SCTLR_EL1.A set) unless 16-byte aligned.  Hence the alignas(16) on the arrays.
+
+            struct alignas(16) Shared
+            {
+                Shared()
+                {
+                    for (uint32_t core = 0; core < MAX_CORES; core++)
+                    {
+                        core_iterations[core].store(0, minstd::memory_order_relaxed);
+                        hogging[core].store(false, minstd::memory_order_relaxed);
+                        hogged_iterations[core].store(0, minstd::memory_order_relaxed);
+                    }
+                }
+
+                minstd::atomic<bool> stop{false};
+
+                minstd::atomic<uint64_t> atomic_counter{0};
+
+                //  Touched only with mutex held.  volatile so every access really reaches memory: the checks below
+                //      only work if a write by another core in the critical section can be seen.
+
+                minstd::spin_mutex mutex;
+                volatile uint64_t guarded_a = 0;
+                volatile uint64_t guarded_b = 0;
+                volatile uint32_t guarded_owner = 0;
+
+                minstd::atomic<uint32_t> torn_reads{0};
+                minstd::atomic<uint32_t> exclusion_violations{0};
+
+                alignas(16) minstd::atomic<uint64_t> core_iterations[MAX_CORES];
+
+                //  Iterations completed on a core while its hog was spinning: only possible if the hog was preempted.
+
+                alignas(16) minstd::atomic<bool> hogging[MAX_CORES];
+                alignas(16) minstd::atomic<uint64_t> hogged_iterations[MAX_CORES];
+
+                minstd::atomic<uint64_t> children_completed{0};
+            };
+
+            //  Written by the worker before it sets done_, read by the parent after it sees done_.  Aligned for the
+            //      same GCC 13 zero-fill as Shared.
+
+            struct alignas(16) WorkerResults
+            {
+                uint64_t iterations = 0;
+                uint64_t atomic_increments = 0;
+                uint64_t mutex_increments = 0;
+                uint64_t page_allocs = 0;
+                uint64_t page_alloc_failures = 0;
+                uint64_t page_corruptions = 0;
+                uint64_t heap_allocs = 0;
+                uint64_t heap_alloc_failures = 0;
+                uint64_t heap_corruptions = 0;
+                uint64_t children_forked = 0;
+                uint64_t child_fork_failures = 0;
+            };
+
+            //  Base for every task in a round: done_ is the last thing Run() touches, and Runnable::Exit() does not
+            //      touch the object, so the parent may destroy it once done_ is set.
+
+            class SoakTask : public Runnable
+            {
+            public:
+                bool Done() const
+                {
+                    return done_.load(minstd::memory_order_acquire);
+                }
+
+                void Reset()
+                {
+                    done_.store(false, minstd::memory_order_relaxed);
+                }
+
+                void SignalDone()
+                {
+                    done_.store(true, minstd::memory_order_release);
+                }
+
+            private:
+                minstd::atomic<bool> done_{false};
+            };
+
+            class SoakChild : public SoakTask
+            {
+            public:
+                void Initialize(Shared *shared)
+                {
+                    shared_ = shared;
+                }
+
+                void Run() override
+                {
+                    shared_->children_completed.fetch_add(1);
+
+                    SignalDone();
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+            };
+
+            class SoakWorker : public SoakTask
+            {
+            public:
+                void Initialize(Shared *shared, uint32_t id)
+                {
+                    shared_ = shared;
+                    id_ = id;
+                    rng_ = XorShift64(0x9E3779B97F4A7C15ULL * id);
+                    results_ = WorkerResults();
+                    live_blocks_ = 0;
+                    live_heap_objects_ = 0;
+                    next_seed_ = 0;
+                    child_.Initialize(shared);
+                    child_.SignalDone();
+                    Reset();
+                }
+
+                const WorkerResults &Results() const
+                {
+                    return results_;
+                }
+
+                void Run() override
+                {
+                    while (!shared_->stop.load(minstd::memory_order_relaxed))
+                    {
+                        results_.iterations++;
+                        const uint32_t core = GetCoreID();
+
+                        shared_->core_iterations[core].fetch_add(1, minstd::memory_order_relaxed);
+
+                        if (shared_->hogging[core].load(minstd::memory_order_relaxed))
+                        {
+                            shared_->hogged_iterations[core].fetch_add(1, minstd::memory_order_relaxed);
+                        }
+
+                        for (uint32_t i = 0; i < ATOMIC_INCREMENTS_PER_ITERATION; i++)
+                        {
+                            shared_->atomic_counter.fetch_add(1, minstd::memory_order_relaxed);
+                        }
+
+                        results_.atomic_increments += ATOMIC_INCREMENTS_PER_ITERATION;
+
+                        GuardedIncrement();
+                        PageAllocatorStep();
+                        HeapStep();
+
+                        if (((results_.iterations % CHILD_INTERVAL) == 0) && child_.Done())
+                        {
+                            ForkChild();
+                        }
+
+                        if ((results_.iterations % YIELD_INTERVAL) == 0)
+                        {
+                            Yield();
+                        }
+                    }
+
+                    while (live_blocks_ > 0)
+                    {
+                        ReleaseBlock(0);
+                    }
+
+                    while (live_heap_objects_ > 0)
+                    {
+                        ReleaseHeapObject(0);
+                    }
+
+                    //  The child is part of this object, so it must finish before we report done.
+
+                    while (!child_.Done())
+                    {
+                        Yield();
+                    }
+
+                    SignalDone();
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+                uint32_t id_ = 0;
+                XorShift64 rng_{1};
+                WorkerResults results_;
+
+                //  Only the first live_blocks_ and live_heap_objects_ entries are ever read.
+
+                uint64_t block_address_[LIVE_BLOCKS];
+                uint64_t block_size_[LIVE_BLOCKS];
+                uint64_t block_seed_[LIVE_BLOCKS];
+                uint32_t live_blocks_ = 0;
+
+                uint64_t *heap_object_[LIVE_HEAP_OBJECTS];
+                uint64_t heap_words_[LIVE_HEAP_OBJECTS];
+                uint64_t heap_seed_[LIVE_HEAP_OBJECTS];
+                uint32_t live_heap_objects_ = 0;
+
+                uint64_t next_seed_ = 0;
+
+                SoakChild child_;
+
+                uint64_t NextSeed()
+                {
+                    return ((uint64_t)id_ << 48) | (++next_seed_ & 0xFFFFFFFFFFFFULL);
+                }
+
+                void GuardedIncrement()
+                {
+                    shared_->mutex.lock();
+
+                    shared_->guarded_owner = id_;
+
+                    const uint64_t a = shared_->guarded_a;
+                    const uint64_t b = shared_->guarded_b;
+
+                    if (a != b)
+                    {
+                        shared_->torn_reads.fetch_add(1);
+                    }
+
+                    //  Widen the window between read and write so a mutex that fails to exclude loses updates
+                    //      reliably rather than by luck.
+
+                    for (uint32_t spin = 0; spin < CRITICAL_SECTION_SPIN; spin++)
+                    {
+                        asm volatile("nop");
+                    }
+
+                    shared_->guarded_a = a + 1;
+                    shared_->guarded_b = b + 1;
+
+                    if (shared_->guarded_owner != id_)
+                    {
+                        shared_->exclusion_violations.fetch_add(1);
+                    }
+
+                    shared_->mutex.unlock();
+
+                    results_.mutex_increments++;
+                }
+
+                void PageAllocatorStep()
+                {
+                    MemoryManager &memory_manager = GetMemoryManager();
+
+                    const bool allocate = (live_blocks_ == 0) || ((live_blocks_ < LIVE_BLOCKS) && ((rng_() & 1) == 0));
+
+                    if (!allocate)
+                    {
+                        ReleaseBlock((uint32_t)(rng_() % live_blocks_));
+                        return;
+                    }
+
+                    const uint64_t size = memory_manager.PageSize() * (1 + (rng_() % MAX_BLOCK_PAGES));
+
+                    MemoryPagePointer block = memory_manager.GetFreeBlock(size);
+
+                    if (block == 0)
+                    {
+                        results_.page_alloc_failures++;
+                        return;
+                    }
+
+                    const uint64_t seed = NextSeed();
+
+                    FillWords((uint64_t *)(uint8_t *)block, size / sizeof(uint64_t), seed);
+
+                    block_address_[live_blocks_] = static_cast<uint64_t>(block);
+                    block_size_[live_blocks_] = size;
+                    block_seed_[live_blocks_] = seed;
+                    live_blocks_++;
+
+                    results_.page_allocs++;
+                }
+
+                void ReleaseBlock(uint32_t index)
+                {
+                    MemoryPagePointer block{block_address_[index]};
+
+                    if (!VerifyWords((const uint64_t *)(uint8_t *)block, block_size_[index] / sizeof(uint64_t), block_seed_[index]))
+                    {
+                        results_.page_corruptions++;
+                    }
+
+                    GetMemoryManager().ReleaseBlock(block, block_size_[index]);
+
+                    live_blocks_--;
+                    block_address_[index] = block_address_[live_blocks_];
+                    block_size_[index] = block_size_[live_blocks_];
+                    block_seed_[index] = block_seed_[live_blocks_];
+                }
+
+                void HeapStep()
+                {
+                    const bool allocate = (live_heap_objects_ == 0) ||
+                                          ((live_heap_objects_ < LIVE_HEAP_OBJECTS) && ((rng_() & 1) == 0));
+
+                    if (!allocate)
+                    {
+                        ReleaseHeapObject((uint32_t)(rng_() % live_heap_objects_));
+                        return;
+                    }
+
+                    const uint64_t words = 1 + (rng_() % MAX_HEAP_OBJECT_WORDS);
+
+                    uint64_t *object = static_cast<uint64_t *>(__os_dynamic_heap_resource.allocate(words * sizeof(uint64_t), alignof(uint64_t)));
+
+                    if (object == nullptr)
+                    {
+                        results_.heap_alloc_failures++;
+                        return;
+                    }
+
+                    const uint64_t seed = NextSeed();
+
+                    FillWords(object, words, seed);
+
+                    heap_object_[live_heap_objects_] = object;
+                    heap_words_[live_heap_objects_] = words;
+                    heap_seed_[live_heap_objects_] = seed;
+                    live_heap_objects_++;
+
+                    results_.heap_allocs++;
+                }
+
+                void ReleaseHeapObject(uint32_t index)
+                {
+                    if (!VerifyWords(heap_object_[index], heap_words_[index], heap_seed_[index]))
+                    {
+                        results_.heap_corruptions++;
+                    }
+
+                    __os_dynamic_heap_resource.deallocate(heap_object_[index], heap_words_[index] * sizeof(uint64_t), alignof(uint64_t));
+
+                    live_heap_objects_--;
+                    heap_object_[index] = heap_object_[live_heap_objects_];
+                    heap_words_[index] = heap_words_[live_heap_objects_];
+                    heap_seed_[index] = heap_seed_[live_heap_objects_];
+                }
+
+                void ForkChild()
+                {
+                    child_.Reset();
+
+                    if (task::GetTaskManager().ForkKernelTask(&child_, task::TaskDefinition{"Soak Child"}).Failed())
+                    {
+                        results_.child_fork_failures++;
+                        child_.SignalDone();            //  no task will ever run it
+                        return;
+                    }
+
+                    results_.children_forked++;
+                }
+            };
+
+            class SoakHog : public SoakTask
+            {
+            public:
+                void Initialize(Shared *shared)
+                {
+                    shared_ = shared;
+                    spins_ = 0;
+                    Reset();
+                }
+
+                uint64_t Spins() const
+                {
+                    return spins_;
+                }
+
+                //  Spins without yielding for the first HOG_MILLISECONDS of the round, then exits so the rest of the
+                //      round runs at full speed.
+
+                void Run() override
+                {
+                    const uint32_t core = GetCoreID();
+                    const auto start = PhysicalTimer::Now();
+
+                    shared_->hogging[core].store(true);
+
+                    while (!shared_->stop.load(minstd::memory_order_relaxed) && (ElapsedMilliseconds(start) < HOG_MILLISECONDS))
+                    {
+                        spins_ = spins_ + 1;
+                    }
+
+                    shared_->hogging[core].store(false);
+
+                    SignalDone();
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+                volatile uint64_t spins_ = 0;
+            };
+
+            class SoakUserLauncher : public SoakTask
+            {
+            public:
+                void Initialize(Shared *shared)
+                {
+                    shared_ = shared;
+                    launched_ = 0;
+                    fork_failures_ = 0;
+                    Reset();
+                }
+
+                uint64_t Launched() const
+                {
+                    return launched_;
+                }
+
+                uint64_t ForkFailures() const
+                {
+                    return fork_failures_;
+                }
+
+                void Run() override
+                {
+                    minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+
+                    uint32_t next_case = 0;
+
+                    while (!shared_->stop.load(minstd::memory_order_relaxed))
+                    {
+                        const unsigned long user_case = USER_CASES[next_case++ % (sizeof(USER_CASES) / sizeof(USER_CASES[0]))];
+
+                        auto forked = task::GetTaskManager().ForkUserTask(binary, user_case, task::TaskDefinition{"Soak User"});
+
+                        if (forked.Failed())
+                        {
+                            fork_failures_++;
+                            Yield();
+                            continue;
+                        }
+
+                        launched_++;
+
+                        //  A task that has already exited and been reaped is not found, which is a success too.
+
+                        auto user_task = task::GetTaskManager().FindTask(forked.Value());
+
+                        if (user_task.has_value())
+                        {
+                            user_task->Join();
+                        }
+                    }
+
+                    SignalDone();
+                }
+
+            private:
+                Shared *shared_ = nullptr;
+                uint64_t launched_ = 0;
+                uint64_t fork_failures_ = 0;
+            };
+
+            struct Round
+            {
+                Shared shared;
+                SoakWorker workers[MAX_WORKERS];
+                SoakHog hogs[MAX_CORES];
+                SoakUserLauncher launcher;
+            };
+
+            int64_t ReadKernelStatistic(system_stats::KernelStatisticId id)
+            {
+                int64_t value = -1;
+
+                system_stats::GetSystemStatisticsDB().Visit(system_stats::SystemStatistic::KERNEL_PROCESS_ID,
+                                                           system_stats::KernelStatistic(id),
+                                                           [&value](const system_stats::SystemStatistic &statistic)
+                                                           {
+                                                               const auto read = statistic.GetValue<int64_t>();
+
+                                                               if (read.Successful())
+                                                               {
+                                                                   value = *read;
+                                                               }
+                                                           });
+
+                return value;
+            }
+
+            //  Kernel statistics that count failures.  None may move during a soak.
+
+            struct CanaryStatistic
+            {
+                system_stats::KernelStatisticId id_;
+                const char *name_;
+            };
+
+            constexpr CanaryStatistic CANARY_STATISTICS[] = {
+                {system_stats::KernelStatisticId::USER_TASK_FAULTS, "tasks.user_faults"},
+                {system_stats::KernelStatisticId::TASK_DROPPED_ZOMBIES, "tasks.dropped_zombies"},
+                {system_stats::KernelStatisticId::MEMORY_ALLOC_FAILURES, "memory.alloc_failures"},
+                {system_stats::KernelStatisticId::MEMORY_INVALID_RELEASES, "memory.invalid_releases"},
+                {system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAILURES, "mmu.demand_page_failures"},
+                {system_stats::KernelStatisticId::EMMC_IO_FAILURES, "emmc.io_failures"},
+            };
+
+            constexpr uint32_t NUM_CANARY_STATISTICS = sizeof(CANARY_STATISTICS) / sizeof(CANARY_STATISTICS[0]);
+
+            //  Starts every task of a round, runs it to the deadline, and stops it.  Returns false if any task failed
+            //      to finish, in which case the round must not be freed: a task may still be using it.
+
+            bool RunRound(CLISessionContext &context, Round &round, uint32_t worker_count, uint32_t core_count,
+                          bool run_user_tasks, uint32_t round_seconds, uint32_t &failures)
+            {
+                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+                bool forked_all = true;
+
+                uint32_t hogs_forked = 0;
+                uint32_t workers_forked = 0;
+                bool launcher_forked = false;
+
+                for (uint32_t core = 0; (core < core_count) && forked_all; core++)
+                {
+                    round.hogs[core].Initialize(&round.shared);
+
+                    forked_all = context.task_manager_.ForkKernelTask(&round.hogs[core],
+                                                                      task::TaskDefinition{"Soak Hog", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << core)})
+                                     .Successful();
+
+                    hogs_forked += forked_all ? 1 : 0;
+                }
+
+                for (uint32_t i = 0; (i < worker_count) && forked_all; i++)
+                {
+                    round.workers[i].Initialize(&round.shared, i + 1);
+
+                    forked_all = context.task_manager_.ForkKernelTask(&round.workers[i],
+                                                                      task::TaskDefinition{"Soak Worker", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, task::CoreMask(1ULL << (i % core_count))})
+                                     .Successful();
+
+                    workers_forked += forked_all ? 1 : 0;
+                }
+
+                if (forked_all && run_user_tasks)
+                {
+                    round.launcher.Initialize(&round.shared);
+
+                    launcher_forked = context.task_manager_.ForkKernelTask(&round.launcher, task::TaskDefinition{"Soak Launcher"}).Successful();
+                    forked_all = launcher_forked;
+                }
+
+                if (!forked_all)
+                {
+                    context << "  FAIL: could not fork every soak task\n";
+                    failures++;
+                }
+                else
+                {
+                    const auto round_start = PhysicalTimer::Now();
+
+                    while (ElapsedMilliseconds(round_start) < (int64_t)round_seconds * 1000)
+                    {
+                        task::Task::GetTask().Yield();
+                        PhysicalTimer::Wait(minstd::chrono::milliseconds(10));
+                    }
+                }
+
+                round.shared.stop.store(true);
+
+                //  Wait for exactly the tasks that were forked; anything else was never started.
+
+                const auto stop_start = PhysicalTimer::Now();
+
+                auto all_done = [&]()
+                {
+                    for (uint32_t i = 0; i < hogs_forked; i++)
+                    {
+                        if (!round.hogs[i].Done())
+                        {
+                            return false;
+                        }
+                    }
+
+                    for (uint32_t i = 0; i < workers_forked; i++)
+                    {
+                        if (!round.workers[i].Done())
+                        {
+                            return false;
+                        }
+                    }
+
+                    return !launcher_forked || round.launcher.Done();
+                };
+
+                while (!all_done() && (ElapsedMilliseconds(stop_start) < STOP_TIMEOUT_MS))
+                {
+                    task::Task::GetTask().Yield();
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(10));
+                }
+
+                if (all_done())
+                {
+                    return true;
+                }
+
+                for (uint32_t i = 0; i < hogs_forked; i++)
+                {
+                    if (!round.hogs[i].Done())
+                    {
+                        context << minstd::format(buffer, "  FAIL: hog on core {} did not stop\n", i);
+                    }
+                }
+
+                for (uint32_t i = 0; i < workers_forked; i++)
+                {
+                    if (!round.workers[i].Done())
+                    {
+                        context << minstd::format(buffer, "  FAIL: worker {} (core {}) did not stop -- hung or starved\n", i + 1, i % core_count);
+                    }
+                }
+
+                if (launcher_forked && !round.launcher.Done())
+                {
+                    context << "  FAIL: user task launcher did not stop -- a user task never exited\n";
+                }
+
+                failures++;
+                return false;
+            }
+
+            //  Checks a finished round's invariants and prints one summary line.  Returns the number of failures.
+
+            uint32_t CheckRound(CLISessionContext &context, const Round &round, uint32_t round_number,
+                                uint32_t worker_count, uint32_t core_count, bool run_user_tasks)
+            {
+                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+                uint32_t failures = 0;
+
+                WorkerResults totals;
+
+                for (uint32_t i = 0; i < worker_count; i++)
+                {
+                    const WorkerResults &results = round.workers[i].Results();
+
+                    if (results.iterations == 0)
+                    {
+                        context << minstd::format(buffer, "  FAIL: worker {} (core {}) never ran -- starved\n", i + 1, i % core_count);
+                        failures++;
+                    }
+
+                    totals.iterations += results.iterations;
+                    totals.atomic_increments += results.atomic_increments;
+                    totals.mutex_increments += results.mutex_increments;
+                    totals.page_allocs += results.page_allocs;
+                    totals.page_alloc_failures += results.page_alloc_failures;
+                    totals.page_corruptions += results.page_corruptions;
+                    totals.heap_allocs += results.heap_allocs;
+                    totals.heap_alloc_failures += results.heap_alloc_failures;
+                    totals.heap_corruptions += results.heap_corruptions;
+                    totals.children_forked += results.children_forked;
+                    totals.child_fork_failures += results.child_fork_failures;
+                }
+
+                const Shared &shared = round.shared;
+
+                const uint64_t atomic_counter = shared.atomic_counter.load();
+
+                if (atomic_counter != totals.atomic_increments)
+                {
+                    context << minstd::format(buffer, "  FAIL: atomic counter {} != {} increments made\n", atomic_counter, totals.atomic_increments);
+                    failures++;
+                }
+
+                if ((shared.guarded_a != totals.mutex_increments) || (shared.guarded_b != totals.mutex_increments))
+                {
+                    context << minstd::format(buffer, "  FAIL: mutex-guarded values {}/{} != {} increments made -- lost updates\n",
+                                              (uint64_t)shared.guarded_a, (uint64_t)shared.guarded_b, totals.mutex_increments);
+                    failures++;
+                }
+
+                if ((shared.torn_reads.load() != 0) || (shared.exclusion_violations.load() != 0))
+                {
+                    context << minstd::format(buffer, "  FAIL: mutex did not exclude -- {} torn reads, {} owner changes while held\n",
+                                              shared.torn_reads.load(), shared.exclusion_violations.load());
+                    failures++;
+                }
+
+                if ((totals.page_corruptions != 0) || (totals.heap_corruptions != 0))
+                {
+                    context << minstd::format(buffer, "  FAIL: corruption -- {} page blocks, {} heap objects\n",
+                                              totals.page_corruptions, totals.heap_corruptions);
+                    failures++;
+                }
+
+                if ((totals.page_alloc_failures != 0) || (totals.heap_alloc_failures != 0))
+                {
+                    context << minstd::format(buffer, "  FAIL: allocation failed -- {} page blocks, {} heap objects\n",
+                                              totals.page_alloc_failures, totals.heap_alloc_failures);
+                    failures++;
+                }
+
+                const uint64_t children_completed = shared.children_completed.load();
+
+                if ((totals.child_fork_failures != 0) || (children_completed != totals.children_forked))
+                {
+                    context << minstd::format(buffer, "  FAIL: child tasks -- {} forked, {} completed, {} fork failures\n",
+                                              totals.children_forked, children_completed, totals.child_fork_failures);
+                    failures++;
+                }
+
+                for (uint32_t core = 0; core < core_count; core++)
+                {
+                    if (shared.core_iterations[core].load() == 0)
+                    {
+                        context << minstd::format(buffer, "  FAIL: no worker ran on core {} -- scheduling broken there\n", core);
+                        failures++;
+                    }
+                    else if (shared.hogged_iterations[core].load() == 0)
+                    {
+                        context << minstd::format(buffer, "  FAIL: no worker ran on core {} while its hog spun -- preemption broken there\n", core);
+                        failures++;
+                    }
+
+                    if (round.hogs[core].Spins() == 0)
+                    {
+                        context << minstd::format(buffer, "  FAIL: hog on core {} never ran\n", core);
+                        failures++;
+                    }
+                }
+
+                if (run_user_tasks && ((round.launcher.Launched() == 0) || (round.launcher.ForkFailures() != 0)))
+                {
+                    context << minstd::format(buffer, "  FAIL: user tasks -- {} run, {} fork failures\n",
+                                              round.launcher.Launched(), round.launcher.ForkFailures());
+                    failures++;
+                }
+
+                context << minstd::format(buffer, "  round {}: {} iterations, {} pages + {} heap allocs, {} children, {} user tasks, {} live heap allocs -- {}\n",
+                                          round_number, totals.iterations, totals.page_allocs, totals.heap_allocs,
+                                          totals.children_forked, run_user_tasks ? round.launcher.Launched() : 0,
+                                          ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS),
+                                          (failures == 0) ? "PASS" : "FAIL");
+
+                return failures;
+            }
+        } // namespace soak
+    } // namespace
+
+    void CLITestSoakCommand::ProcessToken(CommandParser &parser,
+                                          CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        uint32_t duration_seconds = 60;
+        uint32_t worker_count = soak::DEFAULT_WORKERS;
+        bool run_user_tasks = true;
+
+        while (true)
+        {
+            const char *token = parser.NextToken();
+            if (token == nullptr)
+            {
+                break;
+            }
+
+            if (strncmp(token, "--seconds=", 10) == 0)
+            {
+                const char *p = token + 10;
+                if (!minstd::from_chars(p, p + strnlen(p, 32), duration_seconds))
+                {
+                    context << minstd::format(buffer, "Invalid value for --seconds: '{}'\n", p);
+                    return;
+                }
+            }
+            else if (strncmp(token, "--workers=", 10) == 0)
+            {
+                const char *p = token + 10;
+                if (!minstd::from_chars(p, p + strnlen(p, 32), worker_count))
+                {
+                    context << minstd::format(buffer, "Invalid value for --workers: '{}'\n", p);
+                    return;
+                }
+            }
+            else if (strncmp(token, "--no-user", 10) == 0)
+            {
+                run_user_tasks = false;
+            }
+            else
+            {
+                context << minstd::format(buffer, "Unrecognized argument: {}\n", token);
+                return;
+            }
+        }
+
+        const uint32_t core_count = __number_of_cores_available;
+
+        if ((worker_count < core_count) || (worker_count > soak::MAX_WORKERS))
+        {
+            context << minstd::format(buffer, "Invalid worker count. Must be between {} (one per core) and {}.\n", core_count, soak::MAX_WORKERS);
+            return;
+        }
+
+        if (duration_seconds == 0)
+        {
+            context << "Invalid duration. Must be at least 1 second.\n";
+            return;
+        }
+
+        const uint32_t rounds = (duration_seconds + soak::ROUND_SECONDS - 1) / soak::ROUND_SECONDS;
+
+        context << minstd::format(buffer, "\nSoak test: {}s in {} round(s), {} workers + {} hogs on {} cores, user tasks {}\n",
+                                  duration_seconds, rounds, worker_count, core_count, core_count, run_user_tasks ? "on" : "off");
+
+        //  Earlier commands may still have zombies being torn down; start from a quiet allocator.
+
+        const uint64_t free_pages_before = WaitForFreePagesToSettle();
+
+        int64_t canary_before[soak::NUM_CANARY_STATISTICS];
+
+        for (uint32_t i = 0; i < soak::NUM_CANARY_STATISTICS; i++)
+        {
+            canary_before[i] = soak::ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
+        }
+
+        const int64_t heap_allocations_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
+        const int64_t zombies_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
+        const int64_t preemptions_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES);
+        const int64_t demand_faults_before = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS);
+
+        uint32_t failures = 0;
+
+        const auto start = PhysicalTimer::Now();
+
+        for (uint32_t round_number = 1; round_number <= rounds; round_number++)
+        {
+            const uint32_t round_seconds = (round_number < rounds) ? soak::ROUND_SECONDS
+                                                                    : (duration_seconds - ((rounds - 1) * soak::ROUND_SECONDS));
+
+            auto round = dynamic_new<soak::Round>();
+
+            if (!soak::RunRound(context, *round, worker_count, core_count, run_user_tasks, round_seconds, failures))
+            {
+                //  Something still references the round, so it is leaked on purpose.  The system is no longer in a
+                //      state worth soaking.
+
+                (void)round.release();
+                context << minstd::format(buffer, "\nFAIL: soak test -- stopped in round {}\n", round_number);
+                return;
+            }
+
+            failures += soak::CheckRound(context, *round, round_number, worker_count, core_count, run_user_tasks);
+        }
+
+        const int64_t elapsed_ms = soak::ElapsedMilliseconds(start);
+
+        //  Whole-run checks.  The round objects are gone and every task has exited, so once the Reaper has released
+        //      their stacks and address spaces the free-page count must be exactly where it started.
+
+        const uint64_t free_pages_after = WaitForFreePagesToSettle();
+
+        if (free_pages_after != free_pages_before)
+        {
+            context << minstd::format(buffer, "  FAIL: {} pages before, {} after -- {} pages leaked\n",
+                                      free_pages_before, free_pages_after, (int64_t)free_pages_before - (int64_t)free_pages_after);
+            failures++;
+        }
+
+        //  The heap cannot be held to an exact count like the pages: finished tasks keep their objects (up to
+        //      MAX_RETAINED_ZOMBIES of them, for minutes), and lock-free containers free removed nodes lazily.
+
+        const int64_t heap_allocations_after = soak::ReadKernelStatistic(system_stats::KernelStatisticId::HEAP_DYNAMIC_ALLOCATIONS);
+        const int64_t zombies_after = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_ZOMBIES);
+        const int64_t heap_growth = heap_allocations_after - heap_allocations_before;
+        const int64_t added_zombies = (zombies_after > zombies_before) ? (zombies_after - zombies_before) : 0;
+        const int64_t heap_allowance = soak::HEAP_GROWTH_SLACK + (added_zombies * soak::HEAP_ALLOCATIONS_PER_ZOMBIE);
+
+        if (heap_growth > heap_allowance)
+        {
+            context << minstd::format(buffer, "  FAIL: {} live heap allocations before, {} after -- grew by {}, more than the {} allowed\n",
+                                      heap_allocations_before, heap_allocations_after, heap_growth, heap_allowance);
+            failures++;
+        }
+
+        for (uint32_t i = 0; i < soak::NUM_CANARY_STATISTICS; i++)
+        {
+            const int64_t after = soak::ReadKernelStatistic(soak::CANARY_STATISTICS[i].id_);
+
+            if (after != canary_before[i])
+            {
+                context << minstd::format(buffer, "  FAIL: {} moved from {} to {}\n", soak::CANARY_STATISTICS[i].name_, canary_before[i], after);
+                failures++;
+            }
+        }
+
+        const int64_t preemptions = soak::ReadKernelStatistic(system_stats::KernelStatisticId::TASK_PREEMPTIVE_SWITCHES) - preemptions_before;
+        const int64_t demand_faults = soak::ReadKernelStatistic(system_stats::KernelStatisticId::MMU_DEMAND_PAGE_FAULTS) - demand_faults_before;
+
+        if (preemptions <= 0)
+        {
+            context << "  FAIL: no preemptive switches -- the hogs were never preempted\n";
+            failures++;
+        }
+
+        if (run_user_tasks && (demand_faults <= 0))
+        {
+            context << "  FAIL: user tasks ran but no pages were demand-faulted\n";
+            failures++;
+        }
+
+        context << minstd::format(buffer, "\n  {} rounds in {} ms, {} preemptive switches, {} demand page faults, free pages {} before, {} after\n",
+                                  rounds, elapsed_ms, preemptions, demand_faults, free_pages_before, free_pages_after);
+        context << minstd::format(buffer, "  live heap allocations {} before, {} after; zombies {} before, {} after\n",
+                                  heap_allocations_before, heap_allocations_after, zombies_before, zombies_after);
+
+        if (failures == 0)
+        {
+            context << "PASS: soak test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: soak test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands

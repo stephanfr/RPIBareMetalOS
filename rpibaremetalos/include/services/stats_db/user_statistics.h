@@ -20,8 +20,9 @@ namespace system_stats
     //      and strings are copied when the image is loaded; the value is read through the kernel's own mapping of the
     //      process's page, so a read never depends on the installed address space and never faults.  Processes
     //      loaded from one binary share ids, group and names, and are told apart by process id.
+    //  Validate() admits only the scalar kinds.
 
-    class UserStatistic : public DynamicStatistic
+    class UserStatistic final : public ScalarStatisticView, public DynamicStatistic
     {
     public:
         UserStatistic(const UserStatisticDescriptor &descriptor, int64_t *value, uint32_t process_id);
@@ -59,12 +60,6 @@ namespace system_stats
             return this;
         }
 
-        bool NumericValue(int64_t &value) const noexcept override
-        {
-            value = Get();
-            return true;
-        }
-
         //  USER_STATISTIC_PRIVATE or USER_STATISTIC_PUBLIC, from the descriptor at load time.
 
         uint32_t Flags() const noexcept
@@ -84,7 +79,7 @@ namespace system_stats
             return process_id_;
         }
 
-        int64_t Get() const noexcept
+        int64_t Get() const noexcept override
         {
             return __atomic_load_n(value_, __ATOMIC_RELAXED);
         }

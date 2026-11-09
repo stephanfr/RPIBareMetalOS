@@ -14,6 +14,9 @@
 #include "platform/kernel_command_line.h"
 
 #include "devices/character_io.h"
+#include "devices/physical_timer.h"
+
+#include "utility/timespan_format.h"
 
 #include "heaps.h"
 
@@ -78,6 +81,10 @@ namespace cli::commands
 
         context.output_stream_ << "\nTimer Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Counter Frequency (cntfrq_el0): {} Hz ({} ticks/ms)\n", GetCounterFrequency(), GetCounterFrequency() / 1000);
+
+        char uptime_buffer[32]{};
+        utility::FormatTimespan(PhysicalTimer::UptimeSinceBoot(), uptime_buffer, sizeof(uptime_buffer));
+        context.output_stream_ << minstd::format(format_buffer, "Uptime: {}\n", uptime_buffer);
 
         context.output_stream_ << "\nMemory Info:\n";
         context.output_stream_ << minstd::format(format_buffer, "Memory Base Address {:#010x}\n", platformInfo.GetMemoryBaseAddress());

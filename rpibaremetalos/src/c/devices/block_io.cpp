@@ -35,7 +35,8 @@ static const char *const BlockIOErrorMessages[] = {
     "EMMC_TIMEOUT_WAITING_FOR_INHIBITS_TO_CLEAR - Timeout while waiting for SD Command or Data Inhibits to clear",
     "EMMC_TIMEOUT_FOR_CARD_RESET - Timeout waiting for SD Card reset",
     "EMMC_TIMEOUT_WHILE_PROBING_FOR_SDHC_CARD - Timeout while probing for SDHC Card",
-    "EMMC_TIMEOUT_FOR_ISSUE_COMMAND - Issue Command, Timeout"};
+    "EMMC_TIMEOUT_FOR_ISSUE_COMMAND - Issue Command, Timeout",
+    "EMMC_TIMEOUT_WAITING_FOR_DATA_DONE - Timeout waiting for a data transfer or busy signal to complete"};
 
 //
 //  Insure the number of messages equals the number of error codes.
