@@ -22,8 +22,84 @@
 #include "devices/emmc/emmc_registers.h"
 #include "devices/emmc/sd_card_registers.h"
 
+#include "services/stats_db/kernel_statistic_ids.h"
+
 namespace EmmcImpl
 {
+    namespace
+    {
+        using system_stats::KernelStatisticId;
+
+        //  Read and write requests are counted once each, however many attempts they took.  The time statistics
+        //      measure a request from when it holds the controller to when it completes, so they exclude time spent
+        //      waiting for another task's transfer; controller_waits counts the requests that had to wait.
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_READS>
+            reads("emmc", "reads", "Read requests completed", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_WRITES>
+            writes("emmc", "writes", "Write requests completed", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_BLOCKS_READ>
+            blocks_read("emmc", "blocks_read", "Blocks read by completed requests", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_BLOCKS_WRITTEN>
+            blocks_written("emmc", "blocks_written", "Blocks written by completed requests", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_IO_FAILURES>
+            io_failures("emmc", "io_failures", "Read or write requests that failed after all retries", 0);
+
+        system_stats::KernelTimestampStatistic<KernelStatisticId::EMMC_LAST_IO_FAILURE>
+            last_io_failure("emmc", "last_io_failure", "Tick of the most recent failed read or write request");
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_COMMAND_RETRIES>
+            command_retries("emmc", "command_retries", "Data commands reissued after a controller error", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_IO_TIME_US>
+            io_time_us("emmc", "io_time_us", "Microseconds spent servicing read and write requests", 0);
+
+        system_stats::KernelGaugeStatistic<KernelStatisticId::EMMC_MAX_IO_TIME_US>
+            max_io_time_us("emmc", "max_io_time_us", "Longest single read or write request, in microseconds", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_CONTROLLER_WAITS>
+            controller_waits("emmc", "controller_waits", "Requests that yielded because another task held the controller", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_CARD_RESETS>
+            card_resets("emmc", "card_resets", "Card reset attempts made while initializing the controller", 0);
+
+        system_stats::KernelCounterStatistic<KernelStatisticId::EMMC_TRANSFER_ABORTS>
+            transfer_aborts("emmc", "transfer_aborts", "Data commands abandoned and the controller reset after an error", 0);
+
+        //  Must be called with the controller held: that serializes the read-compare-set of the max gauge.
+
+        void RecordDataRequest(bool write, uint32_t blocks, BlockIOResultCodes result, int64_t elapsed_us)
+        {
+            io_time_us.Increment(elapsed_us);
+
+            if (elapsed_us > max_io_time_us.Get())
+            {
+                max_io_time_us.Set(elapsed_us);
+            }
+
+            if (result != BlockIOResultCodes::SUCCESS)
+            {
+                io_failures.Increment();
+                last_io_failure.Stamp();
+                return;
+            }
+
+            if (write)
+            {
+                writes.Increment();
+                blocks_written.Increment(blocks);
+            }
+            else
+            {
+                reads.Increment();
+                blocks_read.Increment(blocks);
+            }
+        }
+    }
 
 #define BSWAP32(x) (((x << 24) & 0xFF000000) | \
                     ((x << 8) & 0x00FF0000) |  \
@@ -217,8 +293,16 @@ namespace EmmcImpl
         ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t> Command(EMMCCommandTypes command, uint32_t arg, uint32_t timeout);
         ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t> AppCommand(EMMCCommandTypes command, uint32_t arg, uint32_t timeout);
         BlockIOResultCodes ResetCommand();
+        bool ResetLines(uint32_t lines);
+        void ResetCommandAndDataLines();
+
+        //  Returns the controller and card to a state where the next command can succeed.  Not called for
+        //      StopTransmission itself, which carries no data, so it cannot recurse.
+
+        void AbortDataTransfer(const EMMCCommand &command);
         ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t> IssueCommand(EMMCCommand cmd, uint32_t arg, uint32_t timeout);
         BlockIOResultCodes DataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer);
+        BlockIOResultCodes IssueDataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer);
 
         BlockIOResultCodes TransferData(EMMCCommand cmd);
 
@@ -266,12 +350,8 @@ namespace EmmcImpl
         {
             //  Wait for the card to be ready for the read or write operation
 
-            const auto wait_start = PhysicalTimer::Now();
-
             WaitForInterrupt(registers_->int_flags, read_or_write_ready_interrupt | InterruptRegError, true, 2000);
 
-            LogWarning("EMMC: block %u ReadReady after %lu us\n", block, duration_cast<microseconds>(PhysicalTimer::Now() - wait_start).count());
-            
             uint32_t intr_val = registers_->int_flags;
 
             registers_->int_flags = read_or_write_ready_interrupt | InterruptRegError;
@@ -394,12 +474,28 @@ namespace EmmcImpl
 
         if (command.is_data)
         {
-            TransferData(command);
+            const BlockIOResultCodes transfer_result = TransferData(command);
+
+            if (Failure(transfer_result))
+            {
+                AbortDataTransfer(command);
+                return Result::Failure(transfer_result);
+            }
         }
 
         if ((command.response_type == RT_48_BITS_BUSY) || command.is_data)
         {
-            WaitForInterrupt(registers_->int_flags, InterruptRegError | InterruptRegDataDone, true, 2000);
+            if (!WaitForInterrupt(registers_->int_flags, InterruptRegError | InterruptRegDataDone, true, 2000))
+            {
+                registers_->int_flags = InterruptRegErrorMask | InterruptRegDataDone;
+
+                if (command.is_data)
+                {
+                    AbortDataTransfer(command);
+                }
+
+                return Result::Failure(BlockIOResultCodes::EMMC_TIMEOUT_WAITING_FOR_DATA_DONE);
+            }
 
             interrupt_flags = registers_->int_flags;
 
@@ -412,6 +508,12 @@ namespace EmmcImpl
                 ((interrupt_flags & (InterruptRegErrorMask | InterruptRegDataDone)) != (InterruptRegCommandTimeoutError | InterruptRegDataDone)))
             {
                 LogDebug1("Failing with interrupt flags: %X\n", interrupt_flags);
+
+                if (command.is_data)
+                {
+                    AbortDataTransfer(command);
+                }
+
                 return Result::Failure(BlockIOResultCodes::EMMC_ISSUE_COMMAND_ERROR_WAITING_FOR_COMMAND_INTERRUPT_TO_COMPLETE, interrupt_flags & InterruptRegErrorMask);
             }
         }
@@ -431,28 +533,64 @@ namespace EmmcImpl
         return IssueCommand(GetCommand(command), arg, timeout);
     }
 
-    BlockIOResultCodes SDCardController::ResetCommand()
+    bool SDCardController::ResetLines(uint32_t lines)
     {
-        registers_->control[1] |= ControlReg1ResetCommand;
+        registers_->control[1] |= lines;
 
         for (int i = 0; i < 10000; i++)
         {
-            if (!(registers_->control[1] & ControlReg1ResetCommand))
+            if (!(registers_->control[1] & lines))
             {
-                return BlockIOResultCodes::SUCCESS;
+                return true;
             }
 
             PhysicalTimer::Wait(milliseconds(1));
         }
 
-        return BlockIOResultCodes::EMMC_COMMAND_LINE_FAILED_TO_RESET_CORRECTLY;
+        return false;
+    }
+
+    BlockIOResultCodes SDCardController::ResetCommand()
+    {
+        return ResetLines(ControlReg1ResetCommand) ? BlockIOResultCodes::SUCCESS
+                                                   : BlockIOResultCodes::EMMC_COMMAND_LINE_FAILED_TO_RESET_CORRECTLY;
+    }
+
+    void SDCardController::ResetCommandAndDataLines()
+    {
+        if (!ResetLines(ControlReg1ResetCommand | ControlReg1ResetData))
+        {
+            LogError("EMMC: command and data lines failed to reset\n");
+        }
+
+        registers_->int_flags = InterruptRegEnableAll;
+    }
+
+    void SDCardController::AbortDataTransfer(const EMMCCommand &command)
+    {
+        transfer_aborts.Increment();
+
+        ResetCommandAndDataLines();
+
+        //  Auto CMD12 is only sent after the last block, so a multi-block transfer cut short leaves the card in its
+        //      data state, where it rejects the next read or write.  Stop it explicitly.
+
+        if (command.multiblock)
+        {
+            if (IssueCommand(GetCommand(EMMCCommandTypes::StopTransmission), 0, 500).Failed())
+            {
+                LogWarning("EMMC: CMD12 failed while aborting a multi-block transfer\n");
+            }
+
+            ResetCommandAndDataLines();
+        }
     }
 
     ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t> SDCardController::AppCommand(EMMCCommandTypes command, uint32_t arg, uint32_t timeout)
     {
         using Result = ValueResultWithErrorInfo<BlockIOResultCodes, int32_t, uint32_t>;
 
-        if (GetCommand(command).index >= 60)
+        if (GetCommand(command) == INVALID_CMD)
         {
             return Result::Failure(BlockIOResultCodes::EMMC_INVALID_APP_COMMAND);
         }
@@ -828,6 +966,8 @@ namespace EmmcImpl
 
         for (int i = 0; i < 10; i++)
         {
+            card_resets.Increment();
+
             last_reset_result = ResetCard();
 
             if (last_reset_result == BlockIOResultCodes::SUCCESS)
@@ -1003,9 +1143,12 @@ namespace EmmcImpl
     BlockIOResultCodes SDCardController::DataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer)
     {
         //  Yield until no other task is using the controller; atomic exchange prevents multi-core races.
-        
+
+        bool waited = false;
+
         while (controller_in_use_.exchange(true, minstd::memory_order_acquire))
         {
+            waited = true;
             task::Task::GetTask().Yield();
         }
 
@@ -1015,6 +1158,24 @@ namespace EmmcImpl
             ~ReleaseGuard() { flag_.store(false, minstd::memory_order_release); }
         } release_guard{controller_in_use_};
 
+        if (waited)
+        {
+            controller_waits.Increment();
+        }
+
+        const auto start = PhysicalTimer::Now();
+
+        const BlockIOResultCodes result = IssueDataCommand(write, buffer, block_number, blocks_to_transfer);
+
+        RecordDataRequest(write, blocks_to_transfer, result, duration_cast<microseconds>(PhysicalTimer::Now() - start).count());
+
+        return result;
+    }
+
+    //  Caller must hold the controller.
+
+    BlockIOResultCodes SDCardController::IssueDataCommand(bool write, uint8_t *buffer, uint32_t block_number, uint32_t blocks_to_transfer)
+    {
         if (!is_sdhc_card_)
         {
             block_number *= 512;
@@ -1057,6 +1218,8 @@ namespace EmmcImpl
             {
                 return BlockIOResultCodes::EMMC_DATA_COMMAND_MAX_RETRIES;
             }
+
+            command_retries.Increment();
         }
 
         return BlockIOResultCodes::SUCCESS;

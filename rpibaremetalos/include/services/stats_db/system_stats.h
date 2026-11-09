@@ -8,7 +8,12 @@
 #include <string.h>
 
 #include <atomic>
+#include <chrono>
+#include <concepts>
 #include <lockfree/latest_value_slot_array>
+
+#include "result.h"
+#include "utility/tick_conversion.h"
 
 #if defined(__aarch64__)
 #include "devices/physical_timer.h"
@@ -19,15 +24,43 @@ namespace system_stats {
 
     class UserStatistic;
 
+    namespace internal
+    {
+        template<typename T>
+        class DynamicStatisticHolder;
+    }
+
+    class ScalarStatisticView;
+    class TextStatisticView;
+    class BlobStatisticView;
+    class ArrayStatisticView;
+
     class TimestampTickSource
     {
     public:
 
         typedef int64_t (*TickFunction)();
 
-        //  Overridable: pass nullptr to restore the default.  Safe to call while other cores are stamping.
+        //  nullptr restores the default.
         static void    SetTickFunction( TickFunction fn )  { tick_function_.store((fn != nullptr) ? fn : DefaultTicks, minstd::memory_order_relaxed); }
         static int64_t CurrentTicks()                      { return tick_function_.load(minstd::memory_order_relaxed)(); }
+
+        //  Counter frequency in Hz, for turning ticks into nanoseconds.  A stored 0 means "not overridden": on target
+        //      that reads the live counter, on host it stays 0 so a conversion reads as epoch-zero until a test sets it.
+        static void     SetTickFrequency( uint64_t hz )
+        {
+            tick_frequency_.store(hz, minstd::memory_order_relaxed);
+        }
+
+        static uint64_t CurrentTickFrequency()
+        {
+            const uint64_t hz = tick_frequency_.load(minstd::memory_order_relaxed);
+#if defined(__aarch64__)
+            return (hz != 0) ? hz : GetCounterFrequency();
+#else
+            return hz;
+#endif
+        }
 
     private:
         static int64_t DefaultTicks()
@@ -35,21 +68,39 @@ namespace system_stats {
 #if defined(__aarch64__)
             return static_cast<int64_t>(PhysicalTimer::CurrentTicks());
 #else
-            return 0;           //  host builds (the unit tests): a test that needs time sets SetTickFunction()
+            return 0;           //  host builds: a test that needs time sets SetTickFunction()
 #endif
         }
 
         static inline constinit minstd::atomic<TickFunction> tick_function_{DefaultTicks};
+        static inline constinit minstd::atomic<uint64_t>     tick_frequency_{0};
     };
+
+    //  Raw counter ticks as an absolute time point, the same conversion PhysicalTimer::Now() uses; zero ticks or an
+    //      unknown frequency read as epoch-zero.
+
+    inline minstd::chrono::time_point<minstd::chrono::nanoseconds> TicksToTimePoint( int64_t ticks ) noexcept
+    {
+        const uint64_t frequency = TimestampTickSource::CurrentTickFrequency();
+
+        if ((frequency == 0) || (ticks <= 0))
+        {
+            return minstd::chrono::time_point<minstd::chrono::nanoseconds>();
+        }
+
+        return minstd::chrono::time_point<minstd::chrono::nanoseconds>(
+            minstd::chrono::nanoseconds(utility::TicksToNanoseconds(static_cast<uint64_t>(ticks), frequency)));
+    }
 
     enum class StatKind : uint32_t
     {
-        GAUGE = 1,      //  int64, Set()
-        COUNTER,        //  int64, starts at its initial value, Increment() only
-        TIMESTAMP,      //  int64 raw timer ticks of when something last happened; 0 = never; Stamp() only    
-        TEXT,           //  string, always NULL-terminated
-        BLOB,           //  bytes
-        PROBE           //  int64 read through a function given at construction
+        GAUGE = 1,
+        COUNTER,
+        TIMESTAMP,      //  raw timer ticks; 0 = never
+        TEXT,
+        BLOB,
+        PROBE,          //  read through a function given at construction
+        ARRAY
     };
 
     inline const char *ToString(StatKind kind)
@@ -68,14 +119,97 @@ namespace system_stats {
             return "blob";
         case StatKind::PROBE:
             return "probe";
+        case StatKind::ARRAY:
+            return "array";
         default:
             return "unknown";
         }
     }
 
-    //  A statistic is identified by its process id and its id, both fixed by whoever defines it.  Kernel statistics
-    //      are process KERNEL_PROCESS_ID; a user process's statistics carry its process id, which starts at 1 and is
-    //      never reused.
+    //  How a value is held, and so which view reads it: a gauge and a counter are different kinds, both SCALAR.
+
+    typedef enum class ValueRepresentation : uint32_t
+    {
+        UNKNOWN = 0,
+        SCALAR,
+        TEXT,
+        BLOB,
+        ARRAY
+    } ValueRepresentation;
+
+    constexpr ValueRepresentation RepresentationOf(StatKind kind)
+    {
+        switch (kind)
+        {
+        case StatKind::GAUGE:
+        case StatKind::COUNTER:
+        case StatKind::TIMESTAMP:
+        case StatKind::PROBE:
+            return ValueRepresentation::SCALAR;
+        case StatKind::TEXT:
+            return ValueRepresentation::TEXT;
+        case StatKind::BLOB:
+            return ValueRepresentation::BLOB;
+        case StatKind::ARRAY:
+            return ValueRepresentation::ARRAY;
+        default:
+            return ValueRepresentation::UNKNOWN;
+        }
+    }
+
+    inline const char *ToString(ValueRepresentation representation)
+    {
+        switch (representation)
+        {
+        case ValueRepresentation::SCALAR:
+            return "scalar";
+        case ValueRepresentation::TEXT:
+            return "text";
+        case ValueRepresentation::BLOB:
+            return "blob";
+        case ValueRepresentation::ARRAY:
+            return "array";
+        default:
+            return "unknown";
+        }
+    }
+
+    typedef enum class StatisticValueResultCodes : uint32_t
+    {
+        SUCCESS = 0,
+
+        INVALID_VALUE_TYPE,
+        INDEX_OUT_OF_RANGE,
+        NOT_REGISTERED
+    } StatisticValueResultCodes;
+
+    template<typename T>
+    using StatisticValueResult = ValueResult<StatisticValueResultCodes, T>;
+
+    template<typename T>
+    concept StatisticView = minstd::same_as<T, ScalarStatisticView> ||
+                            minstd::same_as<T, TextStatisticView> ||
+                            minstd::same_as<T, BlobStatisticView> ||
+                            minstd::same_as<T, ArrayStatisticView>;
+
+    //  A scalar statistic's value, and each element of an array statistic.
+
+    template<typename T>
+    concept ScalarStatisticValue = minstd::same_as<T, int64_t>;
+
+    //  Every type SystemStatistic::GetValue<T>() can return.
+
+    template<typename T>
+    concept StatisticValue = ScalarStatisticValue<T>;
+
+    //  A statistic is identified by (process id, id); kernel statistics are process KERNEL_PROCESS_ID.  The value is
+    //      read through the view for its representation.  The hierarchy is closed -- only the four views may derive
+    //      from SystemStatistic, and each makes Representation() final -- which is what makes As<View>() safe
+    //      without RTTI.
+    //
+    //  Holding a concrete statistic or a view, a wrong GetValue<T>() does not compile.  Holding only a
+    //      SystemStatistic, a statistic of another representation is reported at run time: INVALID_VALUE_TYPE from
+    //      GetValue<T>(), nullptr from As<View>().
 
     class SystemStatistic
     {
@@ -86,7 +220,10 @@ namespace system_stats {
 
         static constexpr uint32_t KERNEL_PROCESS_ID = 0;
 
-        virtual ~SystemStatistic() = default;                       //  class is pure virtual
+        virtual ~SystemStatistic() = default;
+
+        SystemStatistic(const SystemStatistic &) = delete;
+        SystemStatistic &operator=(const SystemStatistic &) = delete;
 
         virtual uint32_t    id()          const noexcept = 0;
 
@@ -100,25 +237,192 @@ namespace system_stats {
         virtual const char* Name()        const noexcept = 0;
         virtual const char* Description() const noexcept = 0;
 
-        //  This statistic as a UserStatistic, or nullptr if it is not one.  The build has no RTTI, and nothing may
-        //      be cast to UserStatistic on the strength of its id alone.
+        virtual ValueRepresentation Representation() const noexcept = 0;
+
+        //  nullptr unless this is a UserStatistic.
 
         virtual const UserStatistic *AsUserStatistic() const noexcept
         {
             return nullptr;
         }
 
-        //  The current value of a GAUGE, COUNTER, TIMESTAMP or PROBE statistic, for a reader that has only a
-        //      SystemStatistic -- a listing of the database, say.  False, and value unchanged, for TEXT and BLOB.
+        //  nullptr if the statistic has another representation.
 
-        virtual bool NumericValue(int64_t &value) const noexcept
+        template<StatisticView View>
+        const View *As() const noexcept
         {
-            (void)value;
-            return false;
+            return (Representation() == View::REPRESENTATION) ? static_cast<const View *>(this) : nullptr;
         }
+
+        //  A scalar statistic's value; INVALID_VALUE_TYPE for any other representation.
+
+        template<StatisticValue T>
+        StatisticValueResult<T> GetValue() const noexcept;
+
+        //  An array statistic's element; INVALID_VALUE_TYPE for any other representation.
+
+        template<StatisticValue T>
+        StatisticValueResult<T> GetValue(uint32_t index) const noexcept;
+
+    private:
+
+        SystemStatistic() = default;
+
+        friend class ScalarStatisticView;
+        friend class TextStatisticView;
+        friend class BlobStatisticView;
+        friend class ArrayStatisticView;
     };
 
-    class SystemStatisticType : public SystemStatistic
+    //  The views.  Each has only the accessors its representation really has; the GetValue() overloads that cannot
+    //      apply are deleted, so they fail to compile rather than at run time.
+
+    class ScalarStatisticView : public SystemStatistic
+    {
+    public:
+        static constexpr ValueRepresentation REPRESENTATION = ValueRepresentation::SCALAR;
+
+        ValueRepresentation Representation() const noexcept final
+        {
+            return REPRESENTATION;
+        }
+
+        virtual int64_t Get() const noexcept = 0;
+
+        template<ScalarStatisticValue T>
+        StatisticValueResult<T> GetValue() const noexcept
+        {
+            return StatisticValueResult<T>::Success(Get());
+        }
+
+        //  A scalar statistic has no elements.
+
+        template<typename T>
+        StatisticValueResult<T> GetValue(uint32_t index) const noexcept = delete;
+
+    protected:
+        ScalarStatisticView() = default;
+    };
+
+    class TextStatisticView : public SystemStatistic
+    {
+    public:
+        static constexpr ValueRepresentation REPRESENTATION = ValueRepresentation::TEXT;
+
+        ValueRepresentation Representation() const noexcept final
+        {
+            return REPRESENTATION;
+        }
+
+        virtual uint32_t MaxLength() const noexcept = 0;
+
+        //  Always null-terminates when dest_len > 0; TRUNCATED if dest was too small, EMPTY before the first Set().
+
+        virtual minstd::lockfree::latest_value_result Get(char *dest, uint32_t dest_len) const noexcept = 0;
+
+        virtual uint32_t Length() const noexcept = 0;
+        virtual bool     HasValue() const noexcept = 0;
+
+        //  Text has no scalar value: read it with Get(dest, dest_len).
+
+        template<typename T>
+        StatisticValueResult<T> GetValue() const noexcept = delete;
+
+        template<typename T>
+        StatisticValueResult<T> GetValue(uint32_t index) const noexcept = delete;
+
+    protected:
+        TextStatisticView() = default;
+    };
+
+    class BlobStatisticView : public SystemStatistic
+    {
+    public:
+        static constexpr ValueRepresentation REPRESENTATION = ValueRepresentation::BLOB;
+
+        ValueRepresentation Representation() const noexcept final
+        {
+            return REPRESENTATION;
+        }
+
+        virtual uint32_t MaxSize() const noexcept = 0;
+
+        //  Copies min(Size(), dest_len) bytes; TRUNCATED if dest was too small, EMPTY before the first Set().
+
+        virtual minstd::lockfree::latest_value_result Get(void *dest, uint32_t dest_len) const noexcept = 0;
+
+        virtual uint32_t Size() const noexcept = 0;
+        virtual bool     HasValue() const noexcept = 0;
+
+        //  A blob has no scalar value: read it with Get(dest, dest_len).
+
+        template<typename T>
+        StatisticValueResult<T> GetValue() const noexcept = delete;
+
+        template<typename T>
+        StatisticValueResult<T> GetValue(uint32_t index) const noexcept = delete;
+
+    protected:
+        BlobStatisticView() = default;
+    };
+
+    class ArrayStatisticView : public SystemStatistic
+    {
+    public:
+        static constexpr ValueRepresentation REPRESENTATION = ValueRepresentation::ARRAY;
+
+        ValueRepresentation Representation() const noexcept final
+        {
+            return REPRESENTATION;
+        }
+
+        //  Fixed for the life of the statistic.
+
+        virtual uint32_t Count() const noexcept = 0;
+
+        //  INDEX_OUT_OF_RANGE at or past Count().
+
+        template<ScalarStatisticValue T>
+        StatisticValueResult<T> GetValue(uint32_t index) const noexcept
+        {
+            return (index < Count()) ? StatisticValueResult<T>::Success(Element(index))
+                                     : StatisticValueResult<T>::Failure(StatisticValueResultCodes::INDEX_OUT_OF_RANGE);
+        }
+
+        //  An array has no single value: read an element with GetValue<T>(index).
+
+        template<typename T>
+        StatisticValueResult<T> GetValue() const noexcept = delete;
+
+    protected:
+        ArrayStatisticView() = default;
+
+        //  Called only with index < Count().
+
+        virtual int64_t Element(uint32_t index) const noexcept = 0;
+    };
+
+    template<StatisticValue T>
+    StatisticValueResult<T> SystemStatistic::GetValue() const noexcept
+    {
+        const ScalarStatisticView *scalar = As<ScalarStatisticView>();
+
+        return (scalar != nullptr) ? scalar->GetValue<T>()
+                                   : StatisticValueResult<T>::Failure(StatisticValueResultCodes::INVALID_VALUE_TYPE);
+    }
+
+    template<StatisticValue T>
+    StatisticValueResult<T> SystemStatistic::GetValue(uint32_t index) const noexcept
+    {
+        const ArrayStatisticView *array = As<ArrayStatisticView>();
+
+        return (array != nullptr) ? array->GetValue<T>(index)
+                                  : StatisticValueResult<T>::Failure(StatisticValueResultCodes::INVALID_VALUE_TYPE);
+    }
+
+    //  A copy of one statistic's metadata, without its value.  Strings are truncated to fit; nullptr is stored as "".
+
+    class SystemStatisticType
     {
     public:
 
@@ -132,70 +436,73 @@ namespace system_stats {
               id_(id),
               kind_(kind)
         {
-            strlcpy(this->group_, (group != nullptr) ? group : "", GROUP_MAX + 1);
-            strlcpy(this->name_, (name != nullptr) ? name : "", NAME_MAX + 1);
-            strlcpy(this->description_, (description != nullptr) ? description : "", DESCRIPTION_MAX + 1);
+            strlcpy(this->group_, (group != nullptr) ? group : "", SystemStatistic::GROUP_MAX + 1);
+            strlcpy(this->name_, (name != nullptr) ? name : "", SystemStatistic::NAME_MAX + 1);
+            strlcpy(this->description_, (description != nullptr) ? description : "", SystemStatistic::DESCRIPTION_MAX + 1);
         }
-        
-        uint32_t id() const noexcept override
+
+        uint32_t id() const noexcept
         {
             return id_;
         }
 
-        uint32_t ProcessId() const noexcept override
+        uint32_t ProcessId() const noexcept
         {
             return process_id_;
         }
 
-        StatKind Kind() const noexcept override
+        StatKind Kind() const noexcept
         {
             return kind_;
         }
 
-        const char* Group() const noexcept override
+        ValueRepresentation Representation() const noexcept
+        {
+            return RepresentationOf(kind_);
+        }
+
+        const char* Group() const noexcept
         {
             return group_;
         }
 
-        const char* Name() const noexcept override
+        const char* Name() const noexcept
         {
             return name_;
         }
 
-        const char* Description() const noexcept override
+        const char* Description() const noexcept
         {
             return description_;
         }
-
 
     private:
 
         const uint32_t      process_id_;
         const uint32_t      id_;
         const StatKind      kind_;
-        char                group_[GROUP_MAX + 1]{};
-        char                name_[NAME_MAX + 1]{};
-        char                description_[DESCRIPTION_MAX + 1]{};
+        char                group_[SystemStatistic::GROUP_MAX + 1]{};
+        char                name_[SystemStatistic::NAME_MAX + 1]{};
+        char                description_[SystemStatistic::DESCRIPTION_MAX + 1]{};
     };
 
-    //  Every statistic constructed while static recording is open -- i.e. during static initialisation --
-    //      adds itself to a list, so RegisterStaticStatistics() (stats_db.h) can register them all once the heap
-    //      exists, without each statistic needing a registration call of its own.
-    //
-    //  RegisterStaticStatistics() closes recording before walking the list.  A statistic constructed after that
-    //      (on the stack, on the heap, or late) is not recorded and must be registered explicitly.  Statistics
-    //      recorded this way must have static storage duration: the list holds pointers to them forever.
-    //
-    //  Recording makes statistic constructors non-constexpr, so statistics are dynamically initialised: no
-    //      static constructor may use a statistic, as it may not have been constructed yet.
+    template<StatisticView View, StatKind StatisticKind, uint32_t Id>
+    class StaticStatistic;
 
-    class StaticStatisticLink : public SystemStatistic
+    //  Every StaticStatistic constructed during static initialisation records itself here, so
+    //      RegisterStaticStatistics() (stats_db.h) can register them all at boot without a call per statistic.  That
+    //      closes recording: a statistic constructed later is not recorded and must be registered explicitly.
+    //
+    //  The list holds pointers forever, so recorded statistics must have static storage duration.  Statistics are
+    //      dynamically initialised, so no static constructor may use one: it may not have been constructed yet.
+
+    class StaticStatisticLink
     {
     public:
         StaticStatisticLink(const StaticStatisticLink &) = delete;
         StaticStatisticLink &operator=(const StaticStatisticLink &) = delete;
 
-        //  Head of the recorded list, newest first, then each statistic's successor; nullptr ends the list.
+        //  Newest first; nullptr ends the list.
 
         static const StaticStatisticLink *FirstStaticStatistic() noexcept
         {
@@ -205,6 +512,11 @@ namespace system_stats {
         const StaticStatisticLink *NextStaticStatistic() const noexcept
         {
             return next_static_;
+        }
+
+        const SystemStatistic &Statistic() const noexcept
+        {
+            return statistic_;
         }
 
         static void CloseStaticRecording() noexcept
@@ -217,8 +529,18 @@ namespace system_stats {
             return recording_open_.load(minstd::memory_order_relaxed);
         }
 
-    protected:
-        StaticStatisticLink() noexcept
+    private:
+        template<StatisticView View, StatKind StatisticKind, uint32_t Id>
+        friend class StaticStatistic;
+
+        static inline constinit minstd::atomic<const StaticStatisticLink *> static_head_{nullptr};
+        static inline constinit minstd::atomic<bool>                        recording_open_{true};
+
+        const SystemStatistic      &statistic_;
+        const StaticStatisticLink  *next_static_ = nullptr;
+
+        explicit StaticStatisticLink(const SystemStatistic &statistic) noexcept
+            : statistic_(statistic)
         {
             if (!StaticRecordingOpen())
             {
@@ -234,88 +556,89 @@ namespace system_stats {
                 next_static_ = head;
             } while (!static_head_.compare_exchange_weak(head, this, minstd::memory_order_release, minstd::memory_order_relaxed));
         }
-
-    private:
-        static inline constinit minstd::atomic<const StaticStatisticLink *> static_head_{nullptr};
-        static inline constinit minstd::atomic<bool>                        recording_open_{true};
-
-        const StaticStatisticLink *next_static_ = nullptr;
     };
 
-    //  A nullptr group, name or description is stored as the empty string, so readers never see nullptr.
+    //  Marks a statistic that can be registered with RegisterDynamic() and removed with RemoveDynamic().  It derives
+    //      from one view and from DynamicStatistic.  Kernel services use the ready-made ones below through
+    //      RegisteredStatistic (registered_statistic.h) rather than writing their own.
 
-    //  A statistic created at run time and registered with SystemStatisticsDB::RegisterDynamic().  Unlike the
-    //      compile-time statistics it can be removed (RemoveDynamic()); see SystemStatisticsDB for when its memory
-    //      may then be freed.
-
-    class DynamicStatistic : public SystemStatistic
+    class DynamicStatistic
     {
+    protected:
+        DynamicStatistic() = default;
+        ~DynamicStatistic() = default;
+
+        DynamicStatistic(const DynamicStatistic &) = delete;
+        DynamicStatistic &operator=(const DynamicStatistic &) = delete;
     };
 
-    template<uint32_t Id>
-    class SystemStatisticBase : public StaticStatisticLink
+    template<typename T>
+    concept DynamicStatisticType = minstd::derived_from<T, SystemStatistic> && minstd::derived_from<T, DynamicStatistic>;
+
+    //  Base of the compile-time kernel statistics: the id and kind are template arguments.
+
+    template<StatisticView View, StatKind StatisticKind, uint32_t Id>
+    class StaticStatistic : public View
     {
     public:
-        SystemStatisticBase( const char*      group,
-                             const char*      name,
-                             const char*      description )
-            : group_((group != nullptr) ? group : ""),
-              name_((name != nullptr) ? name : ""),
-              description_((description != nullptr) ? description : "")
-        {}
+        static constexpr StatKind KIND = StatisticKind;
 
-        virtual StatKind Kind() const noexcept = 0;
+        static_assert(RepresentationOf(StatisticKind) == View::REPRESENTATION, "the statistic's kind is not one its view represents");
 
-        uint32_t id() const noexcept override
+        uint32_t id() const noexcept final
         {
             return Id;
         }
 
-        const char* Group() const noexcept override
+        uint32_t ProcessId() const noexcept final
+        {
+            return SystemStatistic::KERNEL_PROCESS_ID;
+        }
+
+        StatKind Kind() const noexcept final
+        {
+            return StatisticKind;
+        }
+
+        const char* Group() const noexcept final
         {
             return group_;
         }
 
-        const char* Name() const noexcept override
+        const char* Name() const noexcept final
         {
             return name_;
         }
 
-        const char* Description() const noexcept override
+        const char* Description() const noexcept final
         {
             return description_;
         }
 
-        bool IsNumeric() const
-        {
-            return (Kind() == StatKind::GAUGE) || (Kind() == StatKind::COUNTER) || (Kind() == StatKind::TIMESTAMP);
-        }
-        
-        bool IsVariable() const
-        {
-            return (Kind() == StatKind::TEXT) || (Kind() == StatKind::BLOB);
-        }
-
-        bool IsProbe() const
-        {
-            return Kind() == StatKind::PROBE;
-        }
-
-        bool IsTimestamp() const
-        {
-            return Kind() == StatKind::TIMESTAMP;
-        }
-
     protected:
+
+        //  The strings are not copied.  nullptr is stored as "".
+
+        StaticStatistic( const char*      group,
+                         const char*      name,
+                         const char*      description )
+            : group_((group != nullptr) ? group : ""),
+              name_((name != nullptr) ? name : ""),
+              description_((description != nullptr) ? description : ""),
+              link_(*this)
+        {}
+
+    private:
 
         const char*                 group_;
         const char*                 name_;
         const char*                 description_;
+        StaticStatisticLink         link_;
     };
 
 
     template<uint32_t Id>
-    class GaugeStatistic : public SystemStatisticBase<Id>
+    class GaugeStatistic final : public StaticStatistic<ScalarStatisticView, StatKind::GAUGE, Id>
     {
     public:
 
@@ -323,36 +646,23 @@ namespace system_stats {
                         const char*      name,
                         const char*      description,
                         int64_t          initial_value )
-            : SystemStatisticBase<Id>(group, name, description),
+            : StaticStatistic<ScalarStatisticView, StatKind::GAUGE, Id>(group, name, description),
               value_(initial_value)
         {}
-
-        StatKind Kind() const noexcept override
-        {
-            return StatKind::GAUGE;
-        }
-
-        bool NumericValue(int64_t &value) const noexcept override
-        {
-            value = Get();
-            return true;
-        }
 
         void Set( int64_t new_value )
         {
             value_.store(new_value, minstd::memory_order_relaxed);
         }
 
-        //  Adds amount atomically; returns the previous value.  For a gauge that moves in both
-        //      directions (a free-page count, say) where a read-modify-write through Set() would
-        //      race between cores.
+        //  Atomic; returns the previous value.  Use it rather than Get() then Set(), which races between cores.
 
         int64_t Increment( int64_t amount = 1 )
         {
             return value_.fetch_add(amount, minstd::memory_order_relaxed);
         }
 
-        int64_t Get() const
+        int64_t Get() const noexcept override
         {
             return value_.load(minstd::memory_order_relaxed);
         }
@@ -364,7 +674,7 @@ namespace system_stats {
 
 
     template<uint32_t Id>
-    class CounterStatistic : public SystemStatisticBase<Id>
+    class CounterStatistic final : public StaticStatistic<ScalarStatisticView, StatKind::COUNTER, Id>
     {
     public:
 
@@ -372,22 +682,11 @@ namespace system_stats {
                           const char*      name,
                           const char*      description,
                           int64_t          initial_value )
-            : SystemStatisticBase<Id>(group, name, description),
+            : StaticStatistic<ScalarStatisticView, StatKind::COUNTER, Id>(group, name, description),
               value_(initial_value)
         {}
 
-        StatKind Kind() const noexcept override
-        {
-            return StatKind::COUNTER;
-        }
-
-        bool NumericValue(int64_t &value) const noexcept override
-        {
-            value = Get();
-            return true;
-        }
-
-        int64_t Get() const
+        int64_t Get() const noexcept override
         {
             return value_.load(minstd::memory_order_relaxed);
         }
@@ -403,27 +702,16 @@ namespace system_stats {
     };
 
     template<uint32_t Id>
-    class TimestampStatistic : public SystemStatisticBase<Id>
+    class TimestampStatistic final : public StaticStatistic<ScalarStatisticView, StatKind::TIMESTAMP, Id>
     {
     public:
 
         TimestampStatistic( const char*   group,
                             const char*   name,
                             const char*   description )
-            : SystemStatisticBase<Id>(group, name, description),
+            : StaticStatistic<ScalarStatisticView, StatKind::TIMESTAMP, Id>(group, name, description),
               value_(0)
         {}
-
-        StatKind Kind() const noexcept override
-        {
-            return StatKind::TIMESTAMP;
-        }
-
-        bool NumericValue(int64_t &value) const noexcept override
-        {
-            value = Get();
-            return true;
-        }
 
         void    Stamp()
         {
@@ -434,12 +722,18 @@ namespace system_stats {
         {
             value_.store(ticks, minstd::memory_order_relaxed);
         }
-        
-        int64_t Get() const
+
+        int64_t Get() const noexcept override
         {
             return value_.load(minstd::memory_order_relaxed);
         }
-        
+
+        //  The stored ticks as an absolute time point; epoch-zero before the first Stamp().
+        minstd::chrono::time_point<minstd::chrono::nanoseconds> AsTimePoint() const noexcept
+        {
+            return TicksToTimePoint(Get());
+        }
+
         bool    HasOccurred() const
         {
             return Get() != 0;
@@ -449,14 +743,11 @@ namespace system_stats {
         minstd::atomic<int64_t>     value_;
     };
 
-    //  Lock-free text statistic: the latest string set, up to MaxLen characters.
-    //
-    //  Set() never blocks.  If another Set() is in flight it returns FAILURE and drops its value -- the
-    //      concurrent writer wins, which is the right outcome for a latest-value statistic.  Get() returns EMPTY
-    //      (and the empty string) until the first successful Set().  See minstd::lockfree::latest_value_text.
+    //  The latest string set, up to MaxLen characters.  Set() never blocks: if another Set() is in flight it returns
+    //      FAILURE and the concurrent writer wins.  Get() returns EMPTY until the first successful Set().
 
     template<uint32_t Id, uint32_t MaxLen, uint32_t NumSlots = 4>
-    class TextStatistic : public SystemStatisticBase<Id>
+    class TextStatistic final : public StaticStatistic<TextStatisticView, StatKind::TEXT, Id>
     {
     public:
         static constexpr uint32_t MAX_LEN   = MaxLen;
@@ -465,12 +756,12 @@ namespace system_stats {
         TextStatistic( const char* group,
                        const char* name,
                        const char* description )
-            : SystemStatisticBase<Id>(group, name, description)
+            : StaticStatistic<TextStatisticView, StatKind::TEXT, Id>(group, name, description)
         {}
 
-        StatKind Kind() const noexcept override
+        uint32_t MaxLength() const noexcept override
         {
-            return StatKind::TEXT;
+            return MAX_LEN;
         }
 
         //  nullptr sets the empty string; text longer than MaxLen is stored truncated and returns TRUNCATED.
@@ -482,17 +773,17 @@ namespace system_stats {
 
         //  Always null-terminates when dest_len > 0; TRUNCATED if dest was too small.
 
-        minstd::lockfree::latest_value_result Get( char* dest, uint32_t dest_len ) const
+        minstd::lockfree::latest_value_result Get( char* dest, uint32_t dest_len ) const noexcept override
         {
             return value_.load(dest, dest_len);
         }
 
-        uint32_t Length() const
+        uint32_t Length() const noexcept override
         {
             return static_cast<uint32_t>(value_.length());
         }
 
-        bool HasValue() const
+        bool HasValue() const noexcept override
         {
             return value_.has_value();
         }
@@ -502,11 +793,10 @@ namespace system_stats {
         minstd::lockfree::latest_value_text<char, MaxLen, NumSlots> value_;
     };
 
-    //  Lock-free blob statistic: the latest byte buffer set, up to MaxBytes bytes.  Set() and Get() results as for
-    //      TextStatistic.  See minstd::lockfree::latest_value_blob.
+    //  The latest bytes set, up to MaxBytes.  Set() and Get() behave as for TextStatistic.
 
     template<uint32_t Id, uint32_t MaxBytes, uint32_t NumSlots = 4>
-    class BlobStatistic : public SystemStatisticBase<Id>
+    class BlobStatistic final : public StaticStatistic<BlobStatisticView, StatKind::BLOB, Id>
     {
     public:
 
@@ -516,12 +806,12 @@ namespace system_stats {
         BlobStatistic( const char* group,
                        const char* name,
                        const char* description )
-            : SystemStatisticBase<Id>(group, name, description)
+            : StaticStatistic<BlobStatisticView, StatKind::BLOB, Id>(group, name, description)
         {}
 
-        StatKind Kind() const noexcept override
+        uint32_t MaxSize() const noexcept override
         {
-            return StatKind::BLOB;
+            return MAX_BYTES;
         }
 
         //  src may be nullptr only when length is 0; more than MaxBytes is stored truncated and returns TRUNCATED.
@@ -533,17 +823,17 @@ namespace system_stats {
 
         //  Copies min(Size(), dest_len) bytes; TRUNCATED if dest was too small.
 
-        minstd::lockfree::latest_value_result Get( void* dest, uint32_t dest_len ) const
+        minstd::lockfree::latest_value_result Get( void* dest, uint32_t dest_len ) const noexcept override
         {
             return value_.load(dest, dest_len);
         }
 
-        uint32_t Size() const
+        uint32_t Size() const noexcept override
         {
             return static_cast<uint32_t>(value_.size());
         }
 
-        bool HasValue() const
+        bool HasValue() const noexcept override
         {
             return value_.has_value();
         }
@@ -553,13 +843,10 @@ namespace system_stats {
         minstd::lockfree::latest_value_blob<MaxBytes, NumSlots> value_;
     };
 
-    //  Probe statistic: returns a computed int64 value by calling a function
-    //  registered at construction.  There is no internal state — every Get()
-    //  invokes the probe function directly.  The function must be safe to call
-    //  from any context in which Get() is used.
+    //  Get() calls probe, so probe must be safe wherever Get() may run.  A nullptr probe reads as 0.
 
     template<uint32_t Id>
-    class ProbeStatistic : public SystemStatisticBase<Id>
+    class ProbeStatistic final : public StaticStatistic<ScalarStatisticView, StatKind::PROBE, Id>
     {
     public:
         typedef int64_t (*ProbeFunction)();
@@ -568,28 +855,258 @@ namespace system_stats {
                         const char*   name,
                         const char*   description,
                         ProbeFunction probe )
-            : SystemStatisticBase<Id>(group, name, description),
+            : StaticStatistic<ScalarStatisticView, StatKind::PROBE, Id>(group, name, description),
               probe_(probe)
         {}
 
-        StatKind Kind() const noexcept override
-        {
-            return StatKind::PROBE;
-        }
-
-        bool NumericValue(int64_t &value) const noexcept override
-        {
-            value = Get();
-            return true;
-        }
-
-        int64_t Get() const
+        int64_t Get() const noexcept override
         {
             return probe_ ? probe_() : 0;
         }
 
     private:
         ProbeFunction probe_;
+    };
+
+    //  Base of the ready-made dynamic kernel statistics: the id is given at run time and the strings are copied,
+    //      so they may be built at run time.  Only RegisteredStatistic can create the concrete classes.
+
+    template<StatisticView View, StatKind StatisticKind>
+    class DynamicKernelStatistic : public View, public DynamicStatistic
+    {
+    public:
+        static constexpr StatKind KIND = StatisticKind;
+
+        static_assert(RepresentationOf(StatisticKind) == View::REPRESENTATION, "the statistic's kind is not one its view represents");
+
+        uint32_t id() const noexcept final
+        {
+            return metadata_.id();
+        }
+
+        uint32_t ProcessId() const noexcept final
+        {
+            return SystemStatistic::KERNEL_PROCESS_ID;
+        }
+
+        StatKind Kind() const noexcept final
+        {
+            return StatisticKind;
+        }
+
+        const char* Group() const noexcept final
+        {
+            return metadata_.Group();
+        }
+
+        const char* Name() const noexcept final
+        {
+            return metadata_.Name();
+        }
+
+        const char* Description() const noexcept final
+        {
+            return metadata_.Description();
+        }
+
+    protected:
+
+        DynamicKernelStatistic( uint32_t         id,
+                                const char*      group,
+                                const char*      name,
+                                const char*      description )
+            : metadata_(SystemStatistic::KERNEL_PROCESS_ID, id, StatisticKind, group, name, description)
+        {}
+
+    private:
+
+        SystemStatisticType     metadata_;
+    };
+
+    //  The dynamic counterparts of GaugeStatistic, CounterStatistic and TimestampStatistic:
+    //
+    //          RegisteredStatistic<DynamicGaugeStatistic> queue_depth;
+    //          queue_depth.RegisterInKernel(id, "net", "queue_depth", "Packets waiting", 0);
+
+    class DynamicGaugeStatistic final : public DynamicKernelStatistic<ScalarStatisticView, StatKind::GAUGE>
+    {
+    public:
+
+        void Set( int64_t new_value )
+        {
+            value_.store(new_value, minstd::memory_order_relaxed);
+        }
+
+        //  Adds amount atomically; returns the previous value.
+
+        int64_t Increment( int64_t amount = 1 )
+        {
+            return value_.fetch_add(amount, minstd::memory_order_relaxed);
+        }
+
+        int64_t Get() const noexcept override
+        {
+            return value_.load(minstd::memory_order_relaxed);
+        }
+
+    private:
+
+        template<typename T>
+        friend class internal::DynamicStatisticHolder;
+
+        DynamicGaugeStatistic( uint32_t         id,
+                               const char*      group,
+                               const char*      name,
+                               const char*      description,
+                               int64_t          initial_value = 0 )
+            : DynamicKernelStatistic<ScalarStatisticView, StatKind::GAUGE>(id, group, name, description),
+              value_(initial_value)
+        {}
+
+        minstd::atomic<int64_t> value_;
+    };
+
+    class DynamicCounterStatistic final : public DynamicKernelStatistic<ScalarStatisticView, StatKind::COUNTER>
+    {
+    public:
+
+        //  Adds amount atomically; returns the previous value.
+
+        int64_t Increment( int64_t amount = 1 )
+        {
+            return value_.fetch_add(amount, minstd::memory_order_relaxed);
+        }
+
+        int64_t Get() const noexcept override
+        {
+            return value_.load(minstd::memory_order_relaxed);
+        }
+
+    private:
+
+        template<typename T>
+        friend class internal::DynamicStatisticHolder;
+
+        DynamicCounterStatistic( uint32_t         id,
+                                 const char*      group,
+                                 const char*      name,
+                                 const char*      description,
+                                 int64_t          initial_value = 0 )
+            : DynamicKernelStatistic<ScalarStatisticView, StatKind::COUNTER>(id, group, name, description),
+              value_(initial_value)
+        {}
+
+        minstd::atomic<int64_t> value_;
+    };
+
+    class DynamicTimestampStatistic final : public DynamicKernelStatistic<ScalarStatisticView, StatKind::TIMESTAMP>
+    {
+    public:
+
+        void Stamp()
+        {
+            Stamp(TimestampTickSource::CurrentTicks());
+        }
+
+        void Stamp( int64_t ticks )
+        {
+            value_.store(ticks, minstd::memory_order_relaxed);
+        }
+
+        int64_t Get() const noexcept override
+        {
+            return value_.load(minstd::memory_order_relaxed);
+        }
+
+        //  The stored ticks as an absolute time point; epoch-zero before the first Stamp().
+        minstd::chrono::time_point<minstd::chrono::nanoseconds> AsTimePoint() const noexcept
+        {
+            return TicksToTimePoint(Get());
+        }
+
+        bool HasOccurred() const
+        {
+            return Get() != 0;
+        }
+
+    private:
+
+        template<typename T>
+        friend class internal::DynamicStatisticHolder;
+
+        DynamicTimestampStatistic( uint32_t      id,
+                                   const char*   group,
+                                   const char*   name,
+                                   const char*   description )
+            : DynamicKernelStatistic<ScalarStatisticView, StatKind::TIMESTAMP>(id, group, name, description),
+              value_(0)
+        {}
+
+        minstd::atomic<int64_t> value_;
+    };
+
+    //  Gauges under one id, one per something -- run list depth per core, say.  Capacity is the compile-time maximum
+    //      (MAX_CORES); count is how many elements really exist (the cores the board has), clamped to Capacity.
+    //      Constructed during static initialisation, so count must be known by then.
+    //
+    //  A bad index does not trap: Set() ignores it, Increment() and GetValue() return INDEX_OUT_OF_RANGE.
+
+    template<uint32_t Id, uint32_t Capacity>
+    class GaugeArrayStatistic final : public StaticStatistic<ArrayStatisticView, StatKind::ARRAY, Id>
+    {
+    public:
+        static constexpr uint32_t CAPACITY = Capacity;
+
+        static_assert(CAPACITY > 0, "an array statistic needs room for at least one element");
+
+        GaugeArrayStatistic( const char*      group,
+                             const char*      name,
+                             const char*      description,
+                             int64_t          initial_value,
+                             uint32_t         count = Capacity )
+            : StaticStatistic<ArrayStatisticView, StatKind::ARRAY, Id>(group, name, description),
+              count_((count < CAPACITY) ? count : CAPACITY)
+        {
+            for (uint32_t i = 0; i < CAPACITY; i++)
+            {
+                values_[i].store(initial_value, minstd::memory_order_relaxed);
+            }
+        }
+
+        uint32_t Count() const noexcept override
+        {
+            return count_;
+        }
+
+        void Set(uint32_t index, int64_t new_value)
+        {
+            if (index < count_)
+            {
+                values_[index].store(new_value, minstd::memory_order_relaxed);
+            }
+        }
+
+        //  Atomic; returns the element's previous value.
+
+        StatisticValueResult<int64_t> Increment(uint32_t index, int64_t amount = 1)
+        {
+            if (index >= count_)
+            {
+                return StatisticValueResult<int64_t>::Failure(StatisticValueResultCodes::INDEX_OUT_OF_RANGE);
+            }
+
+            return StatisticValueResult<int64_t>::Success(values_[index].fetch_add(amount, minstd::memory_order_relaxed));
+        }
+
+    private:
+
+        const uint32_t          count_;
+        minstd::atomic<int64_t> values_[CAPACITY];
+
+        int64_t Element(uint32_t index) const noexcept override
+        {
+            return values_[index].load(minstd::memory_order_relaxed);
+        }
     };
 
 } // namespace system_stats

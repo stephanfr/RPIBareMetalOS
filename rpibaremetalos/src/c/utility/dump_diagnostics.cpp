@@ -15,6 +15,9 @@
 #include "platform/kernel_command_line.h"
 
 #include "devices/character_io.h"
+#include "devices/physical_timer.h"
+
+#include "utility/timespan_format.h"
 
 #include "platform/memory_manager.h"
 
@@ -74,6 +77,10 @@ void DumpDiagnostics()
     printf("\nHardware Info:\n");
     printf("MMIOBase: %p\n", platformInfo.GetMMIOBase());
     printf("Counter Frequency (cntfrq_el0): %lu Hz (%lu ticks/ms)\n", GetCounterFrequency(), GetCounterFrequency() / 1000);
+
+    char uptime_buffer[32] = {0};
+    utility::FormatTimespan(PhysicalTimer::UptimeSinceBoot(), uptime_buffer, sizeof(uptime_buffer));
+    printf("Uptime: %s\n", uptime_buffer);
 
     printf("\nKernal Command Line: %s\n", KernelCommandLine::RawCommandLine().c_str());
     

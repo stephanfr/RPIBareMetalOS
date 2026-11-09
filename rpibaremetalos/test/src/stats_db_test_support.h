@@ -150,6 +150,34 @@ inline void EnsureStaticStatisticsRegistered()
     }
 }
 
+//  A scalar statistic with a run-time process id, id and kind, never statically recorded.  Its value is always 0.
+
+class TestScalarStatistic final : public system_stats::ScalarStatisticView
+{
+public:
+    TestScalarStatistic(uint32_t process_id,
+                        uint32_t id,
+                        system_stats::StatKind kind,
+                        const char *group,
+                        const char *name,
+                        const char *description)
+        : metadata_(process_id, id, kind, group, name, description)
+    {
+    }
+
+    uint32_t id() const noexcept override { return metadata_.id(); }
+    uint32_t ProcessId() const noexcept override { return metadata_.ProcessId(); }
+    system_stats::StatKind Kind() const noexcept override { return metadata_.Kind(); }
+    const char *Group() const noexcept override { return metadata_.Group(); }
+    const char *Name() const noexcept override { return metadata_.Name(); }
+    const char *Description() const noexcept override { return metadata_.Description(); }
+
+    int64_t Get() const noexcept override { return 0; }
+
+private:
+    system_stats::SystemStatisticType metadata_;
+};
+
 //  The statistic Visit() reaches for process_id and id, or nullptr: for identity checks on statistics the test keeps
 //      alive.  Without a process id, the kernel's.
 

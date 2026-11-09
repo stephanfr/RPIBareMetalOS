@@ -6,6 +6,8 @@
 
 #include "devices/physical_timer.h"
 
+#include "services/stats_db/kernel_statistic_ids.h"
+
 
 void PhysicalTimer::Wait(microseconds delay)
 {
@@ -38,4 +40,17 @@ void PhysicalTimer::Wait(microseconds delay)
             asm volatile("nop");
         }
     } while ((current_count - start_count) < count_to_elapse);
+}
+
+namespace
+{
+    //  Reads the counter on every read, so the statistic is always current without a background updater.
+
+    int64_t UptimeSecondsProbe()
+    {
+        return minstd::chrono::duration_cast<minstd::chrono::seconds>(PhysicalTimer::UptimeSinceBoot()).count();
+    }
+
+    system_stats::KernelProbeStatistic<system_stats::KernelStatisticId::UPTIME_TICKS>
+        uptime_seconds("system", "uptime", "Seconds the system has been running since boot", &UptimeSecondsProbe);
 }

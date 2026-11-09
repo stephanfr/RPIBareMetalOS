@@ -90,28 +90,34 @@ namespace
 
     int64_t ValueOf(const SystemStatistic &stat)
     {
-        return static_cast<const UserStatistic &>(stat).Get();
+        const auto value = stat.GetValue<int64_t>();
+
+        CHECK_TRUE(value.Successful());
+        return value.Successful() ? *value : 0;
     }
 
-    class TestDynamicStatistic : public DynamicStatistic
+    class TestDynamicStatistic final : public ScalarStatisticView, public DynamicStatistic
     {
     public:
-        explicit TestDynamicStatistic(uint32_t id, uint32_t process_id = TEST_PROCESS_ID)
+        explicit TestDynamicStatistic(uint32_t id, uint32_t process_id = TEST_PROCESS_ID, StatKind kind = StatKind::GAUGE)
             : id_(id),
-              process_id_(process_id)
+              process_id_(process_id),
+              kind_(kind)
         {
         }
 
         uint32_t id() const noexcept override { return id_; }
         uint32_t ProcessId() const noexcept override { return process_id_; }
-        StatKind Kind() const noexcept override { return StatKind::GAUGE; }
+        StatKind Kind() const noexcept override { return kind_; }
         const char *Group() const noexcept override { return "test"; }
         const char *Name() const noexcept override { return "dynamic"; }
         const char *Description() const noexcept override { return "A test dynamic statistic"; }
+        int64_t Get() const noexcept override { return 0; }
 
     private:
         uint32_t id_;
         uint32_t process_id_;
+        StatKind kind_;
     };
 
     //  Helpers for calls a test expects to succeed: each checks the result and returns its value.
@@ -188,9 +194,28 @@ namespace
         CHECK_EQUAL(3u, db.Size());
     }
 
+    TEST(DynamicStatisticTests, RegistrationRefusesAKindItsViewDoesNotRepresent)
+    {
+        TestDynamicStatistic text_kind(1, TEST_PROCESS_ID, StatKind::TEXT);
+        TestDynamicStatistic array_kind(2, TEST_PROCESS_ID, StatKind::ARRAY);
+        TestDynamicStatistic counter_kind(3, TEST_PROCESS_ID, StatKind::COUNTER);
+
+        CHECK_DB_RESULT(KIND_NOT_REPRESENTED_BY_VIEW, db.RegisterDynamic(text_kind));
+
+        SystemStatisticsDB::Reservation reservation(db, 2);
+
+        CHECK_TRUE(reservation.Granted());
+        CHECK_DB_RESULT(KIND_NOT_REPRESENTED_BY_VIEW, reservation.RegisterDynamic(array_kind));
+        CHECK_DB_RESULT(SUCCESS, reservation.RegisterDynamic(counter_kind));     //  the refusal used none of the room
+
+        CHECK_EQUAL(1u, db.Size());
+        CHECK_FALSE(db.Contains(TEST_PROCESS_ID, 1));
+        CHECK_FALSE(db.Contains(TEST_PROCESS_ID, 2));
+    }
+
     TEST(DynamicStatisticTests, SameIdInDifferentProcessesAreDistinct)
     {
-        SystemStatisticType kernel(SystemStatistic::KERNEL_PROCESS_ID, 7, StatKind::GAUGE, "g", "kernel", "desc");
+        TestScalarStatistic kernel(SystemStatistic::KERNEL_PROCESS_ID, 7, StatKind::GAUGE, "g", "kernel", "desc");
         TestDynamicStatistic first_process(7, 1);
         TestDynamicStatistic second_process(7, 2);
 
@@ -484,10 +509,10 @@ namespace
 
         db.ForEach([&](const SystemStatistic &stat)
         {
-            int64_t value = -1;
+            const auto value = stat.GetValue<int64_t>();
 
-            CHECK_TRUE(stat.NumericValue(value));
-            CHECK_EQUAL(expected[seen], value);
+            CHECK_TRUE(value.Successful());
+            CHECK_EQUAL(expected[seen], *value);
 
             seen++;
 
@@ -705,7 +730,7 @@ namespace
 
         //  Kernel statistics are never reached through a handle.
 
-        SystemStatisticType compile_time(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "g", "n", "d");
+        TestScalarStatistic compile_time(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "g", "n", "d");
         CHECK_DB_RESULT(SUCCESS, db.Register(compile_time));
         CHECK_FALSE(UserStatisticHandle(db, SystemStatistic::KERNEL_PROCESS_ID, 77).Exists());
 
@@ -825,8 +850,8 @@ namespace
         SystemStatisticsDB db;
         CHECK_DB_RESULT(SUCCESS, db.Initialize(stats_db_test_resource, 3));
 
-        SystemStatisticType compile_time(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "a", "d");
-        SystemStatisticType compile_time_too_many(SystemStatistic::KERNEL_PROCESS_ID, 11, StatKind::GAUGE, "g", "b", "d");
+        TestScalarStatistic compile_time(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "a", "d");
+        TestScalarStatistic compile_time_too_many(SystemStatistic::KERNEL_PROCESS_ID, 11, StatKind::GAUGE, "g", "b", "d");
         TestDynamicStatistic first(1);
         TestDynamicStatistic second(2);
         TestDynamicStatistic too_many(3);
@@ -844,7 +869,7 @@ namespace
 
         //  A duplicate is still a duplicate when the database is full.
 
-        SystemStatisticType same_id(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "c", "d");
+        TestScalarStatistic same_id(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "c", "d");
         CHECK_DB_RESULT(DUPLICATE_ID, db.Register(same_id));
         CHECK_DB_RESULT(DUPLICATE_ID, db.Register(compile_time));
         CHECK_DB_RESULT(DUPLICATE_ID, db.RegisterDynamic(first));
@@ -865,8 +890,8 @@ namespace
         SystemStatisticsDB db;
         CHECK_DB_RESULT(SUCCESS, db.Initialize(stats_db_test_resource, 4));
 
-        SystemStatisticType compile_time(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "a", "d");
-        SystemStatisticType same_id(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "b", "d");
+        TestScalarStatistic compile_time(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "a", "d");
+        TestScalarStatistic same_id(SystemStatistic::KERNEL_PROCESS_ID, 10, StatKind::GAUGE, "g", "b", "d");
 
         CHECK_DB_RESULT(SUCCESS, db.Register(compile_time));
         CHECK_DB_RESULT(DUPLICATE_ID, db.Register(same_id));
@@ -875,7 +900,7 @@ namespace
         //  The map cannot allocate a node: the insert fails, and its room is returned.
 
         TestDynamicStatistic dynamic(1);
-        SystemStatisticType compile_time_no_memory(SystemStatistic::KERNEL_PROCESS_ID, 12, StatKind::GAUGE, "g", "d", "d");
+        TestScalarStatistic compile_time_no_memory(SystemStatistic::KERNEL_PROCESS_ID, 12, StatKind::GAUGE, "g", "d", "d");
 
         stats_db_test_resource.FailAllocations(true);
         const SystemStatisticsDB::StatsDBResultCodes dynamic_result = db.RegisterDynamic(dynamic);
@@ -1241,7 +1266,7 @@ namespace
 
     TEST(UserStatisticRecordTests, KernelAndOtherDynamicStatisticsAreNeverReturned)
     {
-        SystemStatisticType compile_time(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "fs", "reads", "A kernel statistic");
+        TestScalarStatistic compile_time(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "fs", "reads", "A kernel statistic");
         TestDynamicStatistic not_a_user_statistic(5);
 
         CHECK_DB_RESULT(SUCCESS, db.Register(compile_time));
@@ -1461,5 +1486,43 @@ namespace
 
         CHECK_EQUAL(0u, db.Size());
         CHECK_EQUAL(live_before, UserStatisticsRegion::LiveRegions());
+    }
+
+    // =========================================================================
+    //  UserStatistic as a scalar, dynamic statistic
+    // =========================================================================
+
+    template<typename Statistic>
+    concept CanRegisterDynamicStatistic = requires(SystemStatisticsDB &db, Statistic &stat) { db.RegisterDynamic(stat); };
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
+    TEST_GROUP_BASE(UserStatisticViewTests, StatsDBTestFixture)
+    {};
+#pragma GCC diagnostic pop
+
+    TEST(UserStatisticViewTests, UserStatisticsAreDynamicScalarStatistics)
+    {
+        static_assert(minstd::derived_from<UserStatistic, ScalarStatisticView>);
+        static_assert(DynamicStatisticType<UserStatistic>);
+        static_assert(DynamicStatisticType<TestDynamicStatistic>);
+        static_assert(CanRegisterDynamicStatistic<UserStatistic>);
+        static_assert(CanRegisterDynamicStatistic<TestDynamicStatistic>);
+        static_assert(!DynamicStatisticType<DynamicStatistic>);             //  the marker alone is not a statistic
+        static_assert(!DynamicStatisticType<TestScalarStatistic>);          //  a statistic without the marker
+    }
+
+    TEST(UserStatisticViewTests, DynamicStatisticsAreReadThroughTheirView)
+    {
+        TestDynamicStatistic stat(9);
+        const SystemStatistic &base = stat;
+
+        POINTERS_EQUAL(&stat, base.As<ScalarStatisticView>());
+        POINTERS_EQUAL(nullptr, base.As<ArrayStatisticView>());
+        POINTERS_EQUAL(nullptr, base.AsUserStatistic());
+
+        const auto value = base.GetValue<int64_t>();
+        CHECK_TRUE(value.Successful());
+        CHECK_EQUAL((int64_t)0, *value);
     }
 }

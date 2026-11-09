@@ -23,16 +23,16 @@ namespace
     //      O(pages) and would be paid by every reader.  The gauge is seeded in the constructor and
     //      adjusted on every claim and release, so it stays exact.
 
-    system_stats::GaugeStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_FREE_PAGES)>
+    system_stats::KernelGaugeStatistic<system_stats::KernelStatisticId::MEMORY_FREE_PAGES>
         free_pages_gauge("memory", "free_pages", "Free pages in the page allocator", 0);
 
-    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_ALLOC_FAILURES)>
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::MEMORY_ALLOC_FAILURES>
         alloc_failures_counter("memory", "alloc_failures", "GetFreeBlock calls that could not satisfy the request", 0);
 
-    system_stats::CounterStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_INVALID_RELEASES)>
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::MEMORY_INVALID_RELEASES>
         invalid_releases_counter("memory", "invalid_releases", "ReleaseBlock calls on already-free or out-of-range pages", 0);
 
-    system_stats::TimestampStatistic<system_stats::KernelStatistic(system_stats::KernelStatisticId::MEMORY_LAST_INVALID_RELEASE)>
+    system_stats::KernelTimestampStatistic<system_stats::KernelStatisticId::MEMORY_LAST_INVALID_RELEASE>
         last_invalid_release_stamp("memory", "last_invalid_release", "Tick of the most recent invalid ReleaseBlock");
 }
 

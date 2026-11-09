@@ -110,6 +110,13 @@ namespace system_stats
             return StatsDBResultCodes::NOT_KERNEL_ADDRESS;
         }
 
+        //  A statistic whose kind is chosen at run time is checked here; the others are checked at compile time.
+
+        if (RepresentationOf(stat.Kind()) != stat.Representation())
+        {
+            return StatsDBResultCodes::KIND_NOT_REPRESENTED_BY_VIEW;
+        }
+
         //  Statistics of any other process are removable: they go through RegisterDynamic().
 
         if (stat.ProcessId() != SystemStatistic::KERNEL_PROCESS_ID)
@@ -139,14 +146,7 @@ namespace system_stats
         return result;
     }
 
-    SystemStatisticsDB::StatsDBResultCodes SystemStatisticsDB::RegisterDynamic(DynamicStatistic &stat)
-    {
-        Reservation reservation(*this, 1);
-
-        return reservation.RegisterDynamic(stat);
-    }
-
-    SystemStatisticsDB::StatsDBResultCodes SystemStatisticsDB::RegisterDynamicReserved(DynamicStatistic &stat, uint32_t &reserved_count)
+    SystemStatisticsDB::StatsDBResultCodes SystemStatisticsDB::RegisterDynamicReserved(const SystemStatistic &stat, uint32_t &reserved_count)
     {
         StatisticMap *map = map_.load(minstd::memory_order_acquire);
 
@@ -158,6 +158,13 @@ namespace system_stats
         if (!InKernelMemory(stat))
         {
             return StatsDBResultCodes::NOT_KERNEL_ADDRESS;
+        }
+
+        //  A statistic whose kind is chosen at run time is checked here; the others are checked at compile time.
+
+        if (RepresentationOf(stat.Kind()) != stat.Representation())
+        {
+            return StatsDBResultCodes::KIND_NOT_REPRESENTED_BY_VIEW;
         }
 
         //  As in Register(), a duplicate is reported as one even when there is no room.
@@ -182,7 +189,7 @@ namespace system_stats
         return result;
     }
 
-    SystemStatisticsDB::StatsDBResultCodes SystemStatisticsDB::RemoveDynamic(const DynamicStatistic &stat)
+    SystemStatisticsDB::StatsDBResultCodes SystemStatisticsDB::RemoveDynamicStatistic(const SystemStatistic &stat)
     {
         StatisticMap *map = map_.load(minstd::memory_order_acquire);
 
@@ -281,11 +288,6 @@ namespace system_stats
         }
     }
 
-    SystemStatisticsDB::StatsDBResultCodes SystemStatisticsDB::Reservation::RegisterDynamic(DynamicStatistic &stat)
-    {
-        return db_.RegisterDynamicReserved(stat, remaining_);
-    }
-
     SystemStatisticsDB::StatsDBResultCodes SystemStatisticsDB::Insert(StatisticMap &map, const SystemStatistic &stat)
     {
         //  insert() returns false both for a duplicate key and for a transient failure (allocation, or its
@@ -364,9 +366,11 @@ namespace system_stats
 
         SystemStatisticsDB::StatsDBResultCodes first_error = SystemStatisticsDB::StatsDBResultCodes::SUCCESS;
 
-        for (const StaticStatisticLink *stat = StaticStatisticLink::FirstStaticStatistic(); stat != nullptr; stat = stat->NextStaticStatistic())
+        for (const StaticStatisticLink *link = StaticStatisticLink::FirstStaticStatistic(); link != nullptr; link = link->NextStaticStatistic())
         {
-            SystemStatisticsDB::StatsDBResultCodes result = db.Register(*stat);
+            const SystemStatistic &stat = link->Statistic();
+
+            SystemStatisticsDB::StatsDBResultCodes result = db.Register(stat);
 
             if (result == SystemStatisticsDB::StatsDBResultCodes::SUCCESS)
             {
@@ -380,7 +384,7 @@ namespace system_stats
 
                 bool same_statistic = false;
 
-                db.Visit(stat->ProcessId(), stat->id(), [&](const SystemStatistic &registered) { same_statistic = (&registered == stat); });
+                db.Visit(stat.ProcessId(), stat.id(), [&](const SystemStatistic &registered) { same_statistic = (&registered == &stat); });
 
                 if (same_statistic)
                 {
@@ -390,7 +394,7 @@ namespace system_stats
 
                 if (summary.duplicate_count_++ == 0)
                 {
-                    summary.first_duplicate_id_ = stat->id();
+                    summary.first_duplicate_id_ = stat.id();
                 }
             }
             else

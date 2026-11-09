@@ -6,11 +6,12 @@
 
 #include <stdint.h>
 
+#include "services/stats_db/system_stats.h"
+
 namespace system_stats
 {
-    //  The id of every kernel statistic (process SystemStatistic::KERNEL_PROCESS_ID), in one list so two statistics
-    //      cannot be given the same id by accident: the database would only reject the second at boot.  Ids are
-    //      never reused, so a removed statistic leaves a gap.
+    //  Ids of the compile-time kernel statistics, in one list so none is used twice by accident.  Ids are never
+    //      reused.  Dynamic kernel statistics share this id space.
 
     typedef enum class KernelStatisticId : uint32_t
     {
@@ -27,22 +28,59 @@ namespace system_stats
         TASK_RUNNING                    = 9,
         TASK_ZOMBIES                    = 10,
         TASK_DROPPED_ZOMBIES            = 11,
-        TASK_RUNLIST_DEPTH_CORE0        = 12,
-        TASK_RUNLIST_DEPTH_CORE1        = 13,
-        TASK_RUNLIST_DEPTH_CORE2        = 14,
-        TASK_RUNLIST_DEPTH_CORE3        = 15,
+        TASK_RUNLIST_DEPTH              = 12,
 
         SCHEDULER_MISSED_INTERRUPTS     = 16,
 
         MMU_ADDRESS_SPACES              = 17,
         MMU_DEMAND_PAGE_FAULTS          = 18,
         MMU_DEMAND_PAGE_FAILURES        = 19,
-    } KernelStatisticId;
 
-    //  For the statistic templates, which take the id as a uint32_t.
+        UPTIME_TICKS                    = 20,
+
+        EMMC_READS                      = 21,
+        EMMC_WRITES                     = 22,
+        EMMC_BLOCKS_READ                = 23,
+        EMMC_BLOCKS_WRITTEN             = 24,
+        EMMC_IO_FAILURES                = 25,
+        EMMC_LAST_IO_FAILURE            = 26,
+        EMMC_COMMAND_RETRIES            = 27,
+        EMMC_IO_TIME_US                 = 28,
+        EMMC_MAX_IO_TIME_US             = 29,
+        EMMC_CONTROLLER_WAITS           = 30,
+        EMMC_CARD_RESETS                = 31,
+        EMMC_TRANSFER_ABORTS            = 32,
+
+        HEAP_DYNAMIC_ALLOCATIONS        = 33,
+    } KernelStatisticId;
 
     constexpr uint32_t KernelStatistic(KernelStatisticId id)
     {
         return static_cast<uint32_t>(id);
     }
+
+    //  The compile-time statistics keyed by KernelStatisticId:
+    //
+    //      KernelCounterStatistic<KernelStatisticId::TASK_VOLUNTARY_SWITCHES> voluntary_switches("tasks", ...);
+
+    template<KernelStatisticId Id>
+    using KernelGaugeStatistic = GaugeStatistic<KernelStatistic(Id)>;
+
+    template<KernelStatisticId Id>
+    using KernelCounterStatistic = CounterStatistic<KernelStatistic(Id)>;
+
+    template<KernelStatisticId Id>
+    using KernelTimestampStatistic = TimestampStatistic<KernelStatistic(Id)>;
+
+    template<KernelStatisticId Id>
+    using KernelProbeStatistic = ProbeStatistic<KernelStatistic(Id)>;
+
+    template<KernelStatisticId Id, uint32_t MaxLen, uint32_t NumSlots = 4>
+    using KernelTextStatistic = TextStatistic<KernelStatistic(Id), MaxLen, NumSlots>;
+
+    template<KernelStatisticId Id, uint32_t MaxBytes, uint32_t NumSlots = 4>
+    using KernelBlobStatistic = BlobStatistic<KernelStatistic(Id), MaxBytes, NumSlots>;
+
+    template<KernelStatisticId Id, uint32_t Capacity>
+    using KernelGaugeArrayStatistic = GaugeArrayStatistic<KernelStatistic(Id), Capacity>;
 } // namespace system_stats

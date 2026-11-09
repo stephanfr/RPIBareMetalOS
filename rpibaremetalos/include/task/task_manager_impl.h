@@ -43,6 +43,33 @@ namespace task
 {
     class TaskManagerImpl : public TaskManager
     {
+    private:
+        //  Marks a lookup that may hold a TaskImpl pointer read from task_map_ without a reference.  The reaper frees
+        //      a task only after removing it from the map and then seeing no lookup in progress, so a lookup either
+        //      reaches a live task or does not find it.  The fence pairs with the one in ReapZombies().
+
+        class LookupSection
+        {
+        public:
+            explicit LookupSection(minstd::atomic<uint32_t> &active_lookups)
+                : active_lookups_(active_lookups)
+            {
+                active_lookups_.fetch_add(1, minstd::memory_order_seq_cst);
+                __atomic_thread_fence(__ATOMIC_SEQ_CST);
+            }
+
+            ~LookupSection()
+            {
+                active_lookups_.fetch_sub(1, minstd::memory_order_release);
+            }
+
+            LookupSection(const LookupSection &) = delete;
+            LookupSection &operator=(const LookupSection &) = delete;
+
+        private:
+            minstd::atomic<uint32_t> &active_lookups_;
+        };
+
     public:
         static TaskManagerImpl &Instance();
 
@@ -74,7 +101,7 @@ namespace task
         }
 
         void VisitTaskList(TaskListVisitorCallback callback) const override;
-        minstd::optional<minstd::reference_wrapper<Task>> FindTask(const UUID &task_id) override;
+        TaskHandle FindTask(const UUID &task_id) override;
 
         //  The lowest process id above after_process_id of a task loaded from binary_path that has not exited, or
         //      0 if there is none: 0 is never a user task's id.
@@ -142,6 +169,8 @@ namespace task
 
         minstd::pmr::polymorphic_allocator<uint8_t> task_map_allocator_;
         TaskMap task_map_{};
+
+        mutable minstd::atomic<uint32_t> active_lookups_{0};
 
         seconds zombie_resource_grace_{1};                                      //  Grace period before freeing kernel stack and AddressSpace
         seconds zombie_lifetime_{600};                                          //  Lifetime before destroying TaskImpl object

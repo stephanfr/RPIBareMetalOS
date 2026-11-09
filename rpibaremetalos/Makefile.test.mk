@@ -21,6 +21,7 @@ CPP_SRC :=  src/c/cli/command_parser.cpp \
 			src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
+			src/c/services/stats_db/registered_statistic.cpp \
 			src/c/services/stats_db/stats_db.cpp \
 			src/c/services/stats_db/user_statistics.cpp \
 			src/c/services/uuid.cpp \

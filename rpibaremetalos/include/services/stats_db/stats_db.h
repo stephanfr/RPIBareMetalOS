@@ -18,8 +18,6 @@
 
 namespace system_stats
 {
-    //  Schema for the system statistics, defining the structure and capacity of the entries.
-    
     class SystemStatisticsSchema
     {
     public:
@@ -34,7 +32,7 @@ namespace system_stats
     private:
         friend class SystemStatisticsDB;
 
-        //  Allocates room for entry_capacity entries; Allocated() is false if that failed.
+        //  Allocated() is false if the allocation failed.
 
         explicit SystemStatisticsSchema(uint32_t entry_capacity);
 
@@ -49,21 +47,14 @@ namespace system_stats
         SystemStatisticType* entries_;
     };
 
-    //  Lock-free database of registered statistics, keyed by process id and id.  Every operation may run
-    //      concurrently on any core, and the readers from ISRs.
+    //  Lock-free database of registered statistics, keyed by (process id, id).  Every operation may run on any core
+    //      concurrently, and the readers from ISRs.  The capacity, fixed by Initialize(), is shared by compile-time
+    //      and dynamic statistics.
     //
-    //  Initialize() builds the map from a memory resource -- the kernel's static heap -- with a fixed capacity
-    //      shared by compile-time and dynamic statistics.  Registration past it returns DATABASE_FULL, so the map
-    //      uses at most about Capacity() * MEMORY_PER_STATISTIC bytes, plus removed nodes not yet reclaimed.  Before
-    //      Initialize() the database is empty and registration returns NOT_INITIALIZED.
-    //
-    //  The database holds pointers to kernel objects, not copies.  Every statistic, compile-time or dynamic, is
-    //      reached only inside Visit() or ForEach().
-    //
-    //      Compile-time statistics are added with Register(), never removed, and must outlive the database.
-    //
-    //      Dynamic statistics are added with RegisterDynamic() and removed with RemoveDynamic().  A removed one may
-    //          be freed once ReadersQuiescent() returns true.
+    //  The database holds pointers, not copies, reachable only inside Visit() or ForEach().  Compile-time statistics
+    //      are added with Register() and never removed.  Dynamic statistics are added with RegisterDynamic() and
+    //      removed with RemoveDynamic(); a removed one may be freed once ReadersQuiescent() returns true.
+    //      RegisteredStatistic (registered_statistic.h) does this for kernel services.
 
     class SystemStatisticsDB
     {
@@ -71,8 +62,7 @@ namespace system_stats
 
         struct StatsDBTag {};
 
-        //  Sized for a few thousand statistics: 8 levels (~128 byte nodes) and 1024-slot blocks instead of the
-        //      defaults for large maps.  The tag gives the map its own static slot tables.
+        //  8 levels and 1024-slot blocks suit a few thousand statistics.  The tag gives the map its own slot tables.
 
         using StatisticMap = minstd::skip_list<uint64_t,
                                                const SystemStatistic *,
@@ -91,8 +81,8 @@ namespace system_stats
             READY
         } InitializationState;
 
-        //  Counts the reader in active_readers_ for its lifetime.  The fence orders the count before every read of the
-        //      map: it pairs with the one in ReadersQuiescent(), so either the reader sees a removal or the quiescence check sees the reader.
+        //  The fence pairs with the one in ReadersQuiescent(): either the reader sees a removal or the quiescence
+        //      check sees the reader.
 
         class ReadSection
         {
@@ -119,10 +109,8 @@ namespace system_stats
         };
 
     public:
-        //  The kernel database's capacity, and an upper bound on the map memory per statistic: a 128-byte node and its share of a slot block.
-
         static constexpr uint32_t DEFAULT_CAPACITY = 4096;
-        static constexpr uint32_t MEMORY_PER_STATISTIC = 160;
+        static constexpr uint32_t MEMORY_PER_STATISTIC = 160;      //  upper bound: a node and its share of a slot block
 
         typedef enum class StatsDBResultCodes : uint32_t
         {
@@ -140,10 +128,10 @@ namespace system_stats
             NOT_FOUND,
             DATABASE_FULL,
 
-            INVALID_USER_STATISTIC          //  a user image's (EL0) statistics section is malformed
+            INVALID_USER_STATISTIC,
+            KIND_NOT_REPRESENTED_BY_VIEW,
+            ALREADY_REGISTERED
         } StatsDBResultCodes;
-
-        //  Returned by a ForEach() callback to keep walking or stop.
 
         typedef enum class VisitAction : uint32_t
         {
@@ -154,8 +142,7 @@ namespace system_stats
         using VisitCallback = minstd::function<void(const SystemStatistic &stat)>;
         using ForEachCallback = minstd::function<VisitAction(const SystemStatistic &stat)>;
 
-        //  Holds room for statistics until RegisterDynamic() uses it; the destructor returns what is left.  Room
-        //      is taken for all of them or none: Granted() is false if there was not room for all of them, and
+        //  Room for count statistics, all or none; the destructor returns what was not used.  If not Granted(),
         //      RegisterDynamic() returns DATABASE_FULL.
 
         class Reservation
@@ -173,7 +160,11 @@ namespace system_stats
                 return granted_;
             }
 
-            StatsDBResultCodes RegisterDynamic(DynamicStatistic &stat);
+            template<DynamicStatisticType T>
+            StatsDBResultCodes RegisterDynamic(T &stat)
+            {
+                return db_.RegisterDynamicReserved(stat, remaining_);
+            }
 
         private:
 
@@ -189,8 +180,6 @@ namespace system_stats
         SystemStatisticsDB(const SystemStatisticsDB &) = delete;
         SystemStatisticsDB &operator=(const SystemStatisticsDB &) = delete;
 
-        //  Builds the map from resource with fixed capacity.
-
         StatsDBResultCodes Initialize(minstd::pmr::memory_resource &resource, uint32_t capacity = DEFAULT_CAPACITY);
 
         //  0 until Initialize() succeeds.
@@ -200,8 +189,6 @@ namespace system_stats
             return capacity_.load(minstd::memory_order_acquire);
         }
 
-        //  Remaining space for additional statistics.
-
         uint32_t Available() const
         {
             const uint32_t capacity = Capacity();
@@ -210,26 +197,31 @@ namespace system_stats
             return (committed < capacity) ? capacity - committed : 0;
         }
 
-        //  Adds a compile-time statistic under process KERNEL_PROCESS_ID and stat.id().  Only the address is kept and
-        //      it is never removed, so stat must outlive the database.  INVALID_PROCESS_ID if stat.ProcessId() is not
-        //      KERNEL_PROCESS_ID; DUPLICATE_ID if the key is already registered, even when the database is full;
-        //      DATABASE_FULL if there is no room.
+        //  Adds a kernel statistic that is never removed, so it must outlive the database.  A duplicate id is
+        //      reported as DUPLICATE_ID even when the database is full.
 
         StatsDBResultCodes Register(const SystemStatistic &stat);
 
-        //  Adds stat under stat.ProcessId() and stat.id().  'stat' must stay valid until it has been removed and
-        //      ReadersQuiescent() has returned true.  DUPLICATE_ID if the key is already registered; DATABASE_FULL if
-        //      there is no room.
+        //  stat must stay valid until it has been removed and ReadersQuiescent() has returned true.
 
-        StatsDBResultCodes RegisterDynamic(DynamicStatistic &stat);
+        template<DynamicStatisticType T>
+        StatsDBResultCodes RegisterDynamic(T &stat)
+        {
+            Reservation reservation(*this, 1);
 
-        //  Removes a statistic added by RegisterDynamic()
-        //      Cannot be called for the same statistic from two cores at once.
+            return reservation.RegisterDynamic(stat);
+        }
 
-        StatsDBResultCodes RemoveDynamic(const DynamicStatistic &stat);
+        //  NOT_FOUND if stat is not in the database; FAILURE if it could not be removed and is still there.  Not for
+        //      the same statistic from two cores at once.
 
-        //  True when no Visit(), ForEach(), Contains() or Schema() is running.  A dynamic statistic
-        //      removed before a call that returns true can no longer be reached by any reader.
+        template<DynamicStatisticType T>
+        StatsDBResultCodes RemoveDynamic(const T &stat)
+        {
+            return RemoveDynamicStatistic(stat);
+        }
+
+        //  True when no reader is running: a statistic removed before a true result can no longer be reached.
 
         bool ReadersQuiescent() const
         {
@@ -243,19 +235,16 @@ namespace system_stats
             return Visit(process_id, id, [](const SystemStatistic &) {});
         }
 
-        //  Calls callback for the statistic with this process id and id and returns true, or returns false if
-        //      absent.  The reference is only valid inside callback.
+        //  False if absent.  The reference is valid only inside callback.
 
         bool Visit(uint32_t process_id, uint32_t id, VisitCallback callback) const;
 
-        //  Calls callback for each registered statistic in ascending (process id, id) order, until it returns
-        //      VisitAction::STOP.  A statistic registered or removed concurrently may or may not be visited.
-        //The reference is only valid inside callback.
+        //  In (process id, id) order until callback returns STOP.  A statistic registered or removed concurrently
+        //      may or may not be visited.  The reference is valid only inside callback.
 
         void ForEach(ForEachCallback callback) const;
 
-        //  A snapshot of every registered statistic's metadata in ascending (process id, id) order.  NOT_INITIALIZED before
-        //      Initialize(); UNABLE_TO_ALLOCATE_MEMORY if the snapshot cannot be allocated.
+        //  A snapshot of every registered statistic's metadata, in (process id, id) order.
 
         PointerResult<StatsDBResultCodes, SystemStatisticsSchema> Schema() const;
 
@@ -280,21 +269,18 @@ namespace system_stats
             return (static_cast<uint64_t>(process_id) << 32) | id;
         }
 
-        //  Inserts stat under its key, telling a duplicate from a transient insert failure.
+        //  Tells a duplicate from a transient insert failure.
 
         StatsDBResultCodes Insert(StatisticMap &map, const SystemStatistic &stat);
 
-        //  Takes room for count statistics, all or none.
+        //  All or none.
 
         bool ReserveCapacity(uint32_t count);
         void ReleaseCapacity(uint32_t count);
 
-        //  RegisterDynamic() taking its room from reserved_count, which is decremented on success.
-
-        StatsDBResultCodes RegisterDynamicReserved(DynamicStatistic &stat, uint32_t &reserved_count);
+        StatsDBResultCodes RegisterDynamicReserved(const SystemStatistic &stat, uint32_t &reserved_count);
+        StatsDBResultCodes RemoveDynamicStatistic(const SystemStatistic &stat);
     };
-
-    //  The kernel's database.  InitializePlatform() initialises it and registers the static statistics.
 
     SystemStatisticsDB &GetSystemStatisticsDB();
 
@@ -307,11 +293,8 @@ namespace system_stats
         uint32_t first_duplicate_id_ = 0;           //  valid when duplicate_count_ > 0
     } StaticRegistrationSummary;
 
-    //  Closes static recording, then registers every recorded statistic in db.  Run it once static initialisation
-    //      is over and before other cores construct statistics; it may be run again to fill another database.
-    //
-    //  Every recorded statistic is attempted.  Returns SUCCESS if each one is now in db, or else the first error;
-    //      summary reports the counts.
+    //  Closes static recording and registers every recorded statistic in db.  Run it after static initialisation and
+    //      before other cores construct statistics.  Every statistic is attempted; the result is the first error.
 
     SystemStatisticsDB::StatsDBResultCodes RegisterStaticStatistics(SystemStatisticsDB &db, StaticRegistrationSummary &summary);
 }

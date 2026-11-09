@@ -12,6 +12,10 @@ namespace system_stats
     static_assert(USER_STATISTIC_COUNTER == static_cast<uint32_t>(StatKind::COUNTER), "user and kernel kinds must match");
     static_assert(USER_STATISTIC_TIMESTAMP == static_cast<uint32_t>(StatKind::TIMESTAMP), "user and kernel kinds must match");
 
+    static_assert(RepresentationOf(StatKind::GAUGE) == ScalarStatisticView::REPRESENTATION, "user statistics are scalar");
+    static_assert(RepresentationOf(StatKind::COUNTER) == ScalarStatisticView::REPRESENTATION, "user statistics are scalar");
+    static_assert(RepresentationOf(StatKind::TIMESTAMP) == ScalarStatisticView::REPRESENTATION, "user statistics are scalar");
+
     static_assert(USER_STATISTIC_GROUP_LENGTH == SystemStatistic::GROUP_MAX + 1, "user and kernel string sizes must match");
     static_assert(USER_STATISTIC_NAME_LENGTH == SystemStatistic::NAME_MAX + 1, "user and kernel string sizes must match");
     static_assert(USER_STATISTIC_DESCRIPTION_LENGTH == SystemStatistic::DESCRIPTION_MAX + 1, "user and kernel string sizes must match");

@@ -485,7 +485,7 @@ namespace
 
     // =========================================================================
     //  SystemStatisticsDB -- concurrent registration.  The statistics are
-    //  SystemStatisticType objects (runtime ids, never statically recorded)
+    //  TestScalarStatistic objects (runtime ids, never statically recorded)
     //  with sparse ids, so many distinct ids need no template instantiations.
     // =========================================================================
 
@@ -502,14 +502,14 @@ namespace
 
     struct db_statistic_set
     {
-        alignas(SystemStatisticType) uint8_t storage_[DB_STAT_COUNT][sizeof(SystemStatisticType)];
-        SystemStatisticType                 *statistics_[DB_STAT_COUNT];
+        alignas(TestScalarStatistic) uint8_t storage_[DB_STAT_COUNT][sizeof(TestScalarStatistic)];
+        TestScalarStatistic                 *statistics_[DB_STAT_COUNT];
 
         db_statistic_set()
         {
             for (uint32_t i = 0; i < DB_STAT_COUNT; i++)
             {
-                statistics_[i] = new (storage_[i]) SystemStatisticType(SystemStatistic::KERNEL_PROCESS_ID, db_stat_id(i), StatKind::GAUGE, "stress", "registered", "Concurrent registration");
+                statistics_[i] = new (storage_[i]) TestScalarStatistic(SystemStatistic::KERNEL_PROCESS_ID, db_stat_id(i), StatKind::GAUGE, "stress", "registered", "Concurrent registration");
             }
         }
 
@@ -517,7 +517,7 @@ namespace
         {
             for (uint32_t i = 0; i < DB_STAT_COUNT; i++)
             {
-                statistics_[i]->~SystemStatisticType();
+                statistics_[i]->~TestScalarStatistic();
             }
         }
     };
@@ -834,8 +834,8 @@ namespace
     {
         static constexpr uint32_t ROUNDS = 200;
 
-        SystemStatisticType first(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "stress", "first", "Same id, first object");
-        SystemStatisticType second(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "stress", "second", "Same id, second object");
+        TestScalarStatistic first(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "stress", "first", "Same id, first object");
+        TestScalarStatistic second(SystemStatistic::KERNEL_PROCESS_ID, 77, StatKind::GAUGE, "stress", "second", "Same id, second object");
 
         for (uint32_t round = 0; round < ROUNDS; round++)
         {

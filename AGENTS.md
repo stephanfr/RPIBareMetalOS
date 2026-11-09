@@ -73,6 +73,31 @@ private:
 ### Reference Files
 - `lockfree_single_arena_resource.h`, `avl_tree`, `list`, `forward_list`
 
+## Comments
+
+Let the code speak for itself.  Clear names and obvious code come first; a comment is for what
+the code cannot say.  Fewer, shorter comments are better than many distracting ones.
+
+### Rules
+- **Comment what a reader cannot see**: lifetime and ownership rules, threading and ISR safety,
+  memory ordering, why a choice was made, and behavior a caller depends on that the signature does
+  not show (e.g. "a duplicate id is reported even when the database is full").
+- **Don't restate names**: no comment on a method, data member, constant or enum value whose name
+  already says what it is (`// Remaining space` above `Available()`, `// The statistic this link
+  records` above `Statistic()`).  Plain enum values get no comment; annotate only a value with a
+  non-obvious meaning (`TIMESTAMP, // raw timer ticks; 0 = never`).
+- **Don't restate what the compiler enforces**: if a `static_assert`, concept, `requires` clause,
+  `= delete` or `final` already guarantees it, don't also say it in prose.
+- **Avoid fragile comments**: they go stale silently.  Don't list every result code a function can
+  return -- name only the ones whose meaning a caller relies on.  Don't name callers ("the reaper
+  task calls this"), describe history ("ids 13-15 were …"), or state facts about other modules
+  that nothing here checks.
+- **Keep them short**: a function comment is usually one line, a class comment a few lines plus,
+  where it helps, one short usage example.  Don't repeat in a member comment what the class comment
+  already says.
+- **Be correct**: when changing code, update or delete the comments it touches.  A wrong comment is
+  worse than none.
+
 ## Git Workflow
 
 ### Rules

@@ -217,11 +217,24 @@ namespace cli::commands
             group_and_name += ".";
             group_and_name += stat.Name();
 
-            int64_t value = 0;
+            const system_stats::ArrayStatisticView *array = stat.As<system_stats::ArrayStatisticView>();
 
-            if (stat.NumericValue(value))
+            if (array != nullptr)
             {
-                context.output_stream_ << minstd::format(buffer, "{:>7} {:>5} {:<9} {:<57} {}\n", stat.ProcessId(), stat.id(), system_stats::ToString(stat.Kind()), group_and_name, value);
+                //  One line per element: group.name[index].
+
+                for (uint32_t index = 0; index < array->Count(); index++)
+                {
+                    minstd::fixed_string<system_stats::SystemStatistic::GROUP_MAX + system_stats::SystemStatistic::NAME_MAX + 8> indexed(group_and_name);
+
+                    indexed += minstd::format(buffer, "[{}]", index);
+
+                    context.output_stream_ << minstd::format(buffer, "{:>7} {:>5} {:<9} {:<57} {}\n", stat.ProcessId(), stat.id(), system_stats::ToString(stat.Kind()), indexed, *array->GetValue<int64_t>(index));
+                }
+            }
+            else if (const auto value = stat.GetValue<int64_t>(); value.Successful())
+            {
+                context.output_stream_ << minstd::format(buffer, "{:>7} {:>5} {:<9} {:<57} {}\n", stat.ProcessId(), stat.id(), system_stats::ToString(stat.Kind()), group_and_name, *value);
             }
             else
             {

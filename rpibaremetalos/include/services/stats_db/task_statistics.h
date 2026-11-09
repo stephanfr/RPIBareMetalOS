@@ -21,8 +21,8 @@ namespace system_stats
     //      kernel statistic they are recorded during static initialisation and registered at boot, so the
     //      update sites need no registration call of their own.
 
-    extern GaugeStatistic<KernelStatistic(KernelStatisticId::TASK_RUNNING)> task_running;
-    extern GaugeStatistic<KernelStatistic(KernelStatisticId::TASK_ZOMBIES)> task_zombies;
-    extern CounterStatistic<KernelStatistic(KernelStatisticId::TASK_DROPPED_ZOMBIES)> task_dropped_zombies;
-    extern CounterStatistic<KernelStatistic(KernelStatisticId::SCHEDULER_MISSED_INTERRUPTS)> scheduler_missed_interrupts;
+    extern KernelGaugeStatistic<KernelStatisticId::TASK_RUNNING> task_running;
+    extern KernelGaugeStatistic<KernelStatisticId::TASK_ZOMBIES> task_zombies;
+    extern KernelCounterStatistic<KernelStatisticId::TASK_DROPPED_ZOMBIES> task_dropped_zombies;
+    extern KernelCounterStatistic<KernelStatisticId::SCHEDULER_MISSED_INTERRUPTS> scheduler_missed_interrupts;
 } // namespace system_stats

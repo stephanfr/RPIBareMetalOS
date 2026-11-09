@@ -21,7 +21,7 @@ namespace system_stats
     //  Defined here, the scheduler clock's home, and declared in task_statistics.h so the RPi3
     //      system-timer path (system_timer.cpp) counts into the same statistic.
 
-    CounterStatistic<KernelStatistic(KernelStatisticId::SCHEDULER_MISSED_INTERRUPTS)>
+    KernelCounterStatistic<KernelStatisticId::SCHEDULER_MISSED_INTERRUPTS>
         scheduler_missed_interrupts("scheduler", "missed_interrupts", "Scheduler ticks missed; the deadline was re-based on now", 0);
 }
 

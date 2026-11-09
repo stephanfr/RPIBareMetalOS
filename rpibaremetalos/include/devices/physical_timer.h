@@ -6,6 +6,7 @@
 
 #include "os_stdinclude.h"
 #include "asm_utility.h"
+#include "utility/tick_conversion.h"
 
 class PhysicalTimer
 {
@@ -19,27 +20,27 @@ public:
 
     static void Wait(microseconds delay);
 
+    //  The isb keeps the counter read from being speculated ahead of the code that precedes it.
+
     static uint64_t CurrentTicks(void)
     {
         unsigned long long current_count;
 
-        asm volatile("mrs %0, cntpct_el0" : "=r"(current_count));
+        asm volatile("isb\n\tmrs %0, cntpct_el0" : "=r"(current_count) : : "memory");
 
         return current_count;
     }
 
     static minstd::chrono::time_point<minstd::chrono::nanoseconds> Now(void)
     {
-        uint64_t counter_frequency;
-        uint64_t current_count;
+        return minstd::chrono::time_point<minstd::chrono::nanoseconds>(
+            minstd::chrono::nanoseconds(utility::TicksToNanoseconds(CurrentTicks(), GetCounterFrequency())));
+    }
 
-        //  Get the timer frequency
+    //  Time since the physical counter started at SoC reset, so it includes the firmware's boot time.
 
-        asm volatile("mrs %0, cntfrq_el0" : "=r"(counter_frequency));
-        asm volatile("mrs %0, cntpct_el0" : "=r"(current_count));
-
-        INSTRUCTION_CACHE_BARRIER;
-
-        return minstd::chrono::time_point<minstd::chrono::nanoseconds>( minstd::chrono::nanoseconds((current_count * 1000000000UL) / counter_frequency));
+    static minstd::chrono::nanoseconds UptimeSinceBoot(void)
+    {
+        return Now().time_since_epoch();
     }
 };

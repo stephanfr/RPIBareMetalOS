@@ -39,14 +39,20 @@ typedef struct EMMCCommand
     uint8_t type : 2;
     uint8_t index : 6;
     uint8_t res1 : 2;
+
+    constexpr bool operator==(const EMMCCommand &) const = default;
 } EMMCCommand;
+
+//  IssueCommand() copies a command bit-for-bit into the 32-bit CMDTM register.
+
+static_assert(sizeof(EMMCCommand) == sizeof(uint32_t));
 
 #define RESERVED_CMD                                 \
     {                                                \
         1, 1, 3, 1, 1, 0xF, 3, 1, 1, 1, 1, 3, 0xF, 3 \
     }
 
-static const EMMCCommand INVALID_CMD = RESERVED_CMD;
+static constexpr EMMCCommand INVALID_CMD = RESERVED_CMD;
 
 typedef enum EMMCCommandTypes : uint32_t
 {
@@ -59,6 +65,7 @@ typedef enum EMMCCommandTypes : uint32_t
     SelectCard = 7,
     SendIfCond = 8,
     SendCsd = 9,
+    StopTransmission = 12,
     SetBlockLen = 16,
     ReadBlock = 17,
     ReadMultiple = 18,
@@ -87,7 +94,7 @@ static constexpr EMMCCommand commands[] = {
     {0, 0, 0, 0, 0, 0, RT_136_BITS, 0, 1, 0, 0, 0, SendCsd, 0},
     RESERVED_CMD,
     RESERVED_CMD,
-    RESERVED_CMD,
+    {0, 0, 0, 0, 0, 0, RT_48_BITS_BUSY, 0, 1, 0, 0, 3, StopTransmission, 0}, //  Abort type
     RESERVED_CMD,
     RESERVED_CMD,
     RESERVED_CMD,
@@ -133,7 +140,17 @@ static constexpr EMMCCommand commands[] = {
     {0, 0, 0, 0, 0, 0, RT_48_BITS, 0, 1, 0, 0, 0, App, 0},
 };
 
-bool operator==(const EMMCCommand &command1, const EMMCCommand &command2)
+consteval bool EveryCommandIsAtItsIndex()
 {
-    return &command1 == &command2;
+    for (uint32_t i = 0; i < sizeof(commands) / sizeof(commands[0]); i++)
+    {
+        if ((commands[i] != INVALID_CMD) && (commands[i].index != i))
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
+
+static_assert(EveryCommandIsAtItsIndex());
