@@ -75,7 +75,7 @@ def case4_result_ok(output: str) -> bool:
     return is_interleaving_of_two(re.sub(r'\s+', '', match.group(1)), 'case4:isolated')
 
 
-def run(qemu: str, armstub: str, kernel: str, sdimage: str,
+def run(qemu: str, armstub: str, kernel: str, hypervisor: str, sdimage: str,
         machine: str = 'raspi3b',
         memory: str = '',
         extra_cmdline: str = '') -> int:
@@ -85,6 +85,7 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         f'{f" -m {memory}" if memory else ""}'
         f' -kernel {armstub}'
         f' -device loader,file={kernel},addr=0x80000,force-raw=on'
+        f' -device loader,file={hypervisor},addr=0x40000,force-raw=on'
         f' -drive file={sdimage},if=sd,format=raw'
         f' -serial stdio'
         f' -display none'
@@ -115,7 +116,20 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
     try:
         # Wait for the OS to boot and reach the CLI prompt
         child.expect(BOOT_READY_MARKER, timeout=TIMEOUT)
+        boot_output = child.before
         child.expect(PROMPT, timeout=TIMEOUT)  # consume the initial prompt
+
+        # The hypervisor's banner is the first output, ahead of the kernel's
+        hyp_banner = boot_output.find('HYP: hypervisor v0.')
+        kernel_banner = boot_output.find('SEF RPI Bare Metal OS')
+        if hyp_banner < 0 or kernel_banner < 0 or hyp_banner > kernel_banner:
+            print('\nFAIL [boot]: expected "HYP: hypervisor v0." before "SEF RPI Bare Metal OS"')
+            failures += 1
+        else:
+            print('\nPASS [boot]: hypervisor banner precedes the kernel banner')
+
+        # The kernel's first calls into EL2: the version query and a console write through hvc
+        check('boot', boot_output, 'Hypervisor v0.', 'HYP console: hello from EL1')
 
         # list filesystems
         output = send_command('list filesystems')
@@ -128,6 +142,35 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         # show diagnostics
         output = send_command('show diagnostics')
         check('show diagnostics', output, 'Board Info:', 'RPI Version:')
+
+        # hypervisor version / test hypervisor — the HVC ABI from EL1.  The 100-byte line goes through EL2 in three
+        # chunks, so finding it whole shows they arrived intact and in order; nothing may print for the rejected
+        # 49-byte write or the empty one.
+        output = send_command('hypervisor version')
+        check('hypervisor version', output, 'Hypervisor v0.', '(ABI 1.')
+
+        output = send_command('test hypervisor')
+        long_line = 'HYP console 100: ' + ''.join(str(i % 10) for i in range(82))
+        check('test hypervisor', output, 'PASS: hypervisor test', long_line)
+        if 'FAIL!!!' in output:
+            print('\nFAIL [test hypervisor]: a rejected or empty console write printed')
+            failures += 1
+
+        # hypervisor update — live update.  Failures first, each leaving v0.1 running.  Then the v0.2 build on the SD image
+        # replaces it on every core without a reboot, and every test after this runs on the updated hypervisor.
+        output = send_command('hypervisor update /nonexistent.bin')
+        check('hypervisor update, missing file', output, 'Hypervisor update failed: file not found')
+        output = send_command('hypervisor update /hello.bin')
+        check('hypervisor update, not a hypervisor', output, 'Hypervisor update failed: image rejected')
+        output = send_command('hypervisor version')
+        check('hypervisor version after failed updates', output, 'Hypervisor v0.1 (ABI 1.1)')
+
+        output = send_command('hypervisor update /hypervisor_v0_2.bin')
+        check('hypervisor update', output, 'HYP: live update from v0.1 to v0.2', 'Hypervisor updated: now v0.2 (ABI 1.1)')
+        output = send_command('hypervisor version')
+        check('hypervisor version after update', output, 'Hypervisor v0.2 (ABI 1.1)')
+        output = send_command('test hypervisor')
+        check('test hypervisor after update', output, 'PASS: hypervisor test', long_line)
 
         # test memory — allocator correctness + the "did we actually unlock
         # the real amount of RAM" regression guard
@@ -381,6 +424,12 @@ def run(qemu: str, armstub: str, kernel: str, sdimage: str,
         output = send_command('test soak --seconds=10', timeout=180)
         check('test soak', output, 'PASS: soak test')
 
+        # Back to v0.1, through the v0.2 image's own trampoline.
+        output = send_command('hypervisor update /hypervisor.bin')
+        check('hypervisor update back', output, 'HYP: live update from v0.2 to v0.1', 'Hypervisor updated: now v0.1 (ABI 1.1)')
+        output = send_command('test sleep', timeout=60)
+        check('test sleep after the second update', output, 'PASS: sleep test')
+
     except pexpect.TIMEOUT:
         print('\nFAIL: timed out waiting for expected output')
         failures += 1
@@ -409,6 +458,7 @@ def main() -> int:
     parser.add_argument('--qemu',    required=True, help='Path to qemu-system-aarch64')
     parser.add_argument('--armstub', required=True, help='Path to armstub_minimal.elf')
     parser.add_argument('--kernel',  required=True, help='Path to kernel8.img')
+    parser.add_argument('--hypervisor', required=True, help='Path to hypervisor.bin, loaded at 0x40000')
     parser.add_argument('--sdimage', required=True, help='Path to sd.img')
     parser.add_argument('--machine', default='raspi3b',
                         help='QEMU machine model (default: raspi3b)')
@@ -417,13 +467,13 @@ def main() -> int:
     args = parser.parse_args()
 
     print(f'=== {args.machine} Pass 1: default alignment ===')
-    result = run(args.qemu, args.armstub, args.kernel, args.sdimage,
+    result = run(args.qemu, args.armstub, args.kernel, args.hypervisor, args.sdimage,
                  machine=args.machine, memory=args.memory)
     if result != 0:
         return result
 
     print(f'\n=== {args.machine} Pass 2: strict_align=1 ===')
-    return run(args.qemu, args.armstub, args.kernel, args.sdimage,
+    return run(args.qemu, args.armstub, args.kernel, args.hypervisor, args.sdimage,
                machine=args.machine, memory=args.memory,
                extra_cmdline=' strict_align=1')
 

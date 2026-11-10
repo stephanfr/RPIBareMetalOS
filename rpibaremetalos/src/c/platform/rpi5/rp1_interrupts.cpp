@@ -235,8 +235,6 @@ bool RP1InterruptController::FindEndpoint()
 
         if (ids_by_method[static_cast<uint32_t>(method)] == RP1_VENDOR_DEVICE)
         {
-            printf("RP1 interrupts: RP1 on bus %u, config through the data %s (RC ids %08x, bus numbers were %08x)\n",
-                   endpoint_bus_, (method == ConfigAccess::WINDOW) ? "window" : "register", rc_ids, bus_numbers);
             return true;
         }
     }
@@ -367,8 +365,6 @@ bool RP1InterruptController::ProgramMSIX()
             return false;
         }
 
-        printf("RP1 interrupts: MSI-X BAR %u moved from %08lx to %08lx\n", table_bar, table_bar_bus, assigned);
-
         table_bar_bus = assigned;
     }
 
@@ -403,8 +399,6 @@ bool RP1InterruptController::ProgramMSIX()
     WriteEndpointConfig(CFG_COMMAND, WithCommandBits(ReadEndpointConfig(CFG_COMMAND), COMMAND_MEMORY | COMMAND_BUS_MASTER));
 
     WriteEndpointConfig(capability, (header & 0xFFFF) | (((control | MSIX_CONTROL_ENABLE) & ~MSIX_CONTROL_FUNCTION_MASK) << 16));
-
-    printf("RP1 interrupts: MSI-X capability %02x, %u vectors, table BAR %u + %x\n", capability, table_size, table_bar, table_offset);
 
     return true;
 }

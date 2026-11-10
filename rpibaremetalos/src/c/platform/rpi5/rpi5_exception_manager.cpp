@@ -25,7 +25,6 @@ bool RPI5ExceptionManager::Initialize()
     if (RP1DeliverySelfTest(rp1))
     {
         rp1.MarkDeliveryVerified();
-        printf("RP1 interrupts: MSI-X delivery verified\n");
         return true;
     }
 

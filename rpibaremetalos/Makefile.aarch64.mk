@@ -209,18 +209,58 @@ SUPERVISOR_BIN     := $(SUPERVISOR_ROOT)/image/supervisor.bin
 supervisor:
 	$(MAKE) -C $(SUPERVISOR_ROOT)
 
-$(SUPERVISOR_ELF) $(SUPERVISOR_BIN): supervisor
+#  An empty recipe, so make re-reads the files' timestamps after the sub-make: without one it keeps the old ones and
+#      an incremental build leaves the copies in image/ stale.
 
-$(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN)
+$(SUPERVISOR_ELF) $(SUPERVISOR_BIN): supervisor
+	@:
+
+#  The EL2 hypervisor is its own build and its own file on the boot partition, so it can be updated without a
+#      kernel rebuild: 'make hypervisor' rebuilds only it.  The kernel refuses to boot without a compatible one.
+
+HYPERVISOR_ROOT := hypervisor
+HYPERVISOR_ELF  := $(HYPERVISOR_ROOT)/image/hypervisor.elf
+HYPERVISOR_BIN  := $(HYPERVISOR_ROOT)/image/hypervisor.bin
+
+.PHONY: hypervisor
+hypervisor:
+	$(MAKE) -C $(HYPERVISOR_ROOT)
+	@mkdir -p $(IMAGE_DIR)
+	/bin/cp $(HYPERVISOR_ELF) $(HYPERVISOR_BIN) $(IMAGE_DIR)/.
+
+#  An empty recipe, so make re-reads the files' timestamps after the sub-make: without one it keeps the old ones and
+#      an incremental build leaves kernel8.img and sd.img stale.
+
+$(HYPERVISOR_ELF) $(HYPERVISOR_BIN): hypervisor
+	@:
+
+#  A second build reporting v0.2, put on the SD image next to hypervisor.bin for the live-update regression test
+#      ('hypervisor update /hypervisor_v0_2.bin', then back with 'hypervisor update /hypervisor.bin').
+
+HYPERVISOR_UPDATE_TEST_BIN := $(HYPERVISOR_ROOT)/image/v0_2/hypervisor.bin
+
+.PHONY: hypervisor-update-test
+hypervisor-update-test:
+	$(MAKE) -C $(HYPERVISOR_ROOT) BUILD_ROOT=build/v0_2 IMAGE_DIR=image/v0_2 HYP_EXTRA_FLAGS=-DHYPERVISOR_VERSION_MINOR=2
+
+$(HYPERVISOR_UPDATE_TEST_BIN): hypervisor-update-test
+	@:
+
+$(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN) $(HYPERVISOR_ELF) $(HYPERVISOR_BIN) $(HYPERVISOR_UPDATE_TEST_BIN)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
 	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
 	/bin/cp $(SUPERVISOR_ELF) image/.
 	/bin/cp $(SUPERVISOR_BIN) image/.
+	/bin/cp $(HYPERVISOR_ELF) image/.
+	/bin/cp $(HYPERVISOR_BIN) image/.
+	/bin/cp $(HYPERVISOR_UPDATE_TEST_BIN) image/hypervisor_v0_2.bin
 	/bin/cp resources/*.txt image/.
 	/bin/cp $(USER_BIN) image/hello.bin
 	/bin/cp resources/sd.img image/.
 	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
+	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(HYPERVISOR_BIN) ::/hypervisor.bin
+	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(HYPERVISOR_UPDATE_TEST_BIN) ::/hypervisor_v0_2.bin
 
 $(ELF): $(OBJ) $(LINKER_SCRIPT) $(DEP_LIBS)
 	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -g -T $(LINKER_SCRIPT) -o $(ELF)
@@ -275,6 +315,7 @@ $(BUILD_DIRS):
 clean:
 	@rm -rf $(BUILD_ROOT)
 	@rm -f image/*.*
+	@$(MAKE) -C $(HYPERVISOR_ROOT) clean
 	@rm -rf doc/html
 
 echo:
@@ -304,6 +345,7 @@ qemu-regression-rpi3: all
 		--qemu $(QEMU) \
 		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
+		--hypervisor $(IMAGE_DIR)/hypervisor.bin \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI3_MACHINE)
 
@@ -312,6 +354,7 @@ qemu-regression-rpi4: all
 		--qemu $(QEMU) \
 		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
+		--hypervisor $(IMAGE_DIR)/hypervisor.bin \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI4_MACHINE) \
 		--memory $(QEMU_RPI4_MEMORY)
@@ -335,6 +378,7 @@ endif
 QEMU_COMMON_FLAGS = \
 	-kernel $(IMAGE_DIR)/supervisor.elf \
 	-device loader,file=$(IMAGE_DIR)/kernel8.img,addr=0x80000,force-raw=on \
+	-device loader,file=$(IMAGE_DIR)/hypervisor.bin,addr=0x40000,force-raw=on \
 	-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
 	-serial stdio \
 	-display none \
@@ -362,6 +406,7 @@ qemu-cli-soak: all
 		--qemu $(QEMU) \
 		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
+		--hypervisor $(IMAGE_DIR)/hypervisor.bin \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI3_MACHINE) \
 		$(SOAK_COMMON_ARGS)

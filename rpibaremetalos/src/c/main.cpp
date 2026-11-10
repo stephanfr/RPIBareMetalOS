@@ -6,6 +6,7 @@
 
 #include "heaps.h"
 
+#include "platform/hypervisor.h"
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 
@@ -42,6 +43,13 @@ extern "C" void kernel_main()
     printf("\n\nSEF RPI Bare Metal OS V0.01\n");
 
     printf("Running on RPI Version: %s\n", GetPlatformInfo().GetBoardTypeName());
+
+    const Hypervisor::VersionInfo hypervisor_version = Hypervisor::Version();
+    printf("Hypervisor v%u.%u (ABI %u.%u)\n", hypervisor_version.major, hypervisor_version.minor,
+           hypervisor_version.abi_major, hypervisor_version.abi_minor);
+
+    static const char hvc_hello[] = "HYP console: hello from EL1\n";
+    Hypervisor::ConsoleWrite(hvc_hello, sizeof(hvc_hello) - 1);
 
     SetLogLevel(LogLevel::ERROR);
 

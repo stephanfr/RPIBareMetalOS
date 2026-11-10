@@ -14,6 +14,7 @@
 #include "cli/create_command.h"
 #include "cli/delete_command.h"
 #include "cli/halt_reboot_commands.h"
+#include "cli/hypervisor_command.h"
 #include "cli/list_command.h"
 #include "cli/rename_command.h"
 #include "cli/show_command.h"
@@ -23,7 +24,7 @@ namespace cli
 {
     //  Declare the CLI Root
 
-    class CLIRoot : public CLIParentCommand<9>
+    class CLIRoot : public CLIParentCommand<10>
     {
     public:
         static const CLIRoot instance;
@@ -37,7 +38,8 @@ namespace cli
                                     commands::CLICreateCommand::instance,
                                     commands::CLIDeleteCommand::instance,
                                     commands::CLIRenameCommand::instance,
-                                    commands::CLITestCommand::instance})
+                                    commands::CLITestCommand::instance,
+                                    commands::CLIHypervisorCommand::instance})
         {
         }
 

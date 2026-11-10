@@ -16,6 +16,7 @@
 #include "heaps.h"
 
 #include "platform/address_space.h"
+#include "platform/hypervisor.h"
 #include "task/mutex.h"
 #include "task/task_impl.h"
 #include "task/wait_queue.h"
@@ -43,6 +44,7 @@ namespace cli::commands
     const CLITestSleepCommand           CLITestSleepCommand::instance;
     const CLITestWaitCommand            CLITestWaitCommand::instance;
     const CLITestMutexCommand           CLITestMutexCommand::instance;
+    const CLITestHypervisorCommand      CLITestHypervisorCommand::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -3439,6 +3441,277 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: mutex test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test hypervisor
+    // -------------------------------------------------------------------------
+
+    namespace hypervisor_test
+    {
+        constexpr char LONG_LINE_PREFIX[] = "HYP console 100: ";
+        constexpr size_t LONG_LINE_LENGTH = 100; //  three HVC chunks: 48 + 48 + 4
+
+        bool CheckResult(CLISessionContext &context, const char *label, int64_t expected, int64_t actual)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            if (actual == expected)
+            {
+                return true;
+            }
+
+            context << minstd::format(buffer, "  FAIL: {}: expected {}, got {}\n", label, expected, actual);
+            return false;
+        }
+
+        //  An image EL2 accepts.  Its code never runs: every update staged from it is aborted.
+
+        constexpr size_t TEST_IMAGE_SIZE = 256;
+
+        void Put16(uint8_t *image, uint32_t offset, uint32_t value)
+        {
+            image[offset] = static_cast<uint8_t>(value);
+            image[offset + 1] = static_cast<uint8_t>(value >> 8);
+        }
+
+        void Put32(uint8_t *image, uint32_t offset, uint32_t value)
+        {
+            Put16(image, offset, value & 0xFFFF);
+            Put16(image, offset + 2, value >> 16);
+        }
+
+        void BuildTestImage(uint8_t *image)
+        {
+            for (size_t i = 0; i < TEST_IMAGE_SIZE; i++)
+            {
+                image[i] = 0;
+            }
+
+            Put32(image, HYPERVISOR_HDR_MAGIC, HYPERVISOR_IMAGE_MAGIC);
+            Put16(image, HYPERVISOR_HDR_HEADER_VERSION, HYPERVISOR_HEADER_VERSION);
+            Put16(image, HYPERVISOR_HDR_ABI_MAJOR, HYPERVISOR_ABI_MAJOR);
+            Put16(image, HYPERVISOR_HDR_ABI_MINOR, HYPERVISOR_ABI_MINOR);
+            Put32(image, HYPERVISOR_HDR_ENTRY_OFFSET, HYPERVISOR_HDR_SIZE);
+            Put32(image, HYPERVISOR_HDR_IMAGE_SIZE, TEST_IMAGE_SIZE);
+            Put32(image, HYPERVISOR_HDR_MEMORY_SIZE, TEST_IMAGE_SIZE);
+            Put16(image, HYPERVISOR_HDR_STATE_LAYOUT_MIN, HYPERVISOR_STATE_LAYOUT_MIN_IMPORTABLE);
+            Put16(image, HYPERVISOR_HDR_STATE_LAYOUT_CURRENT, HYPERVISOR_STATE_LAYOUT_VERSION);
+        }
+
+        //  Each corruption must be caught by EL2's validation of its staged copy, and leave nothing staged.
+
+        uint32_t CheckUpdateRejections(CLISessionContext &context, uint8_t *image)
+        {
+            struct Corruption
+            {
+                const char *label;
+                uint32_t offset;
+                uint32_t value;
+                bool word;
+            };
+
+            const Corruption corruptions[] = {
+                {"image with a bad magic", HYPERVISOR_HDR_MAGIC, 0x12345678, true},
+                {"image with ABI major 2", HYPERVISOR_HDR_ABI_MAJOR, HYPERVISOR_ABI_MAJOR + 1, false},
+                {"image larger than its slot", HYPERVISOR_HDR_MEMORY_SIZE, HYPERVISOR_IMAGE_MAX + 1, true},
+                {"image with its entry point past its end", HYPERVISOR_HDR_ENTRY_OFFSET, TEST_IMAGE_SIZE, true},
+                {"image that can't import the state", HYPERVISOR_HDR_STATE_LAYOUT_MIN, HYPERVISOR_STATE_LAYOUT_VERSION + 1, false},
+            };
+
+            uint32_t failures = 0;
+
+            for (const Corruption &corruption : corruptions)
+            {
+                BuildTestImage(image);
+
+                if (corruption.word)
+                {
+                    Put32(image, corruption.offset, corruption.value);
+                }
+                else
+                {
+                    Put16(image, corruption.offset, corruption.value);
+                }
+
+                failures += CheckResult(context, corruption.label, HVC_IMAGE_REJECTED,
+                                        Hypervisor::UpdatePrepare(image, TEST_IMAGE_SIZE)) ? 0 : 1;
+            }
+
+            const uint64_t physical = KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(image));
+
+            BuildTestImage(image);
+
+            failures += CheckResult(context, "prepare of 0 bytes", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {physical, 0}).x0) ? 0 : 1;
+            failures += CheckResult(context, "prepare larger than the staging slot", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {physical, HYPERVISOR_STAGING_SIZE + 1}).x0) ? 0 : 1;
+            failures += CheckResult(context, "prepare from inside the hypervisor region", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {HYPERVISOR_LOAD_ADDRESS, TEST_IMAGE_SIZE}).x0) ? 0 : 1;
+            failures += CheckResult(context, "prepare from a misaligned address", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {physical + 4, 64}).x0) ? 0 : 1;
+
+            failures += CheckResult(context, "prepare from outside the kernel's linear map", HVC_INVALID_PARAMETER,
+                                    Hypervisor::UpdatePrepare(reinterpret_cast<const void *>(physical), TEST_IMAGE_SIZE)) ? 0 : 1;
+
+            failures += CheckResult(context, "commit with nothing staged", HVC_INVALID_PARAMETER,
+                                    Hypervisor::UpdateCommit(0)) ? 0 : 1;
+            failures += CheckResult(context, "join with nothing staged", HVC_UPDATE_ABORTED,
+                                    Hypervisor::UpdateJoin()) ? 0 : 1;
+
+            return failures;
+        }
+
+        //  A core that never joins: COMMIT times out, every joiner returns ABORTED (CommitUpdate checks that they
+        //      agree), and the staged image is discarded.
+        //      The withheld core is the last other core, or a core that doesn't exist on a single-core system.
+
+        uint32_t CheckUpdateAbort(CLISessionContext &context, uint8_t *image)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            uint32_t failures = 0;
+
+            const uint32_t self = GetCoreID();
+            const uint32_t cores = GetPlatformInfo().GetNumberOfCores();
+
+            uint32_t withheld = self + 1;
+
+            for (uint32_t core = 0; core < cores; core++)
+            {
+                withheld = (core != self) ? core : withheld;
+            }
+
+            BuildTestImage(image);
+
+            if (!CheckResult(context, "prepare of a valid image", HVC_SUCCESS, Hypervisor::UpdatePrepare(image, TEST_IMAGE_SIZE)))
+            {
+                return 1;
+            }
+
+            const auto start = PhysicalTimer::Now();
+            const HypervisorUpdateResult result = Hypervisor::CommitUpdate(1ull << withheld);
+            const int64_t elapsed_ms = minstd::chrono::duration_cast<minstd::chrono::milliseconds>(PhysicalTimer::Now() - start).count();
+
+            if (result != HypervisorUpdateResult::ABORTED)
+            {
+                context << minstd::format(buffer, "  FAIL: update with core {} withheld: {}\n", withheld, Hypervisor::UpdateResultText(result));
+                failures++;
+            }
+
+            if (elapsed_ms < HVC_UPDATE_JOIN_TIMEOUT_MS)
+            {
+                context << minstd::format(buffer, "  FAIL: update aborted after {} ms, before the {} ms timeout\n",
+                                          elapsed_ms, static_cast<int64_t>(HVC_UPDATE_JOIN_TIMEOUT_MS));
+                failures++;
+            }
+
+            failures += CheckResult(context, "commit after the abort", HVC_INVALID_PARAMETER, Hypervisor::UpdateCommit(0)) ? 0 : 1;
+
+            failures += CheckResult(context, "prepare of a valid image", HVC_SUCCESS, Hypervisor::UpdatePrepare(image, TEST_IMAGE_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "commit naming its own core", HVC_INVALID_PARAMETER, Hypervisor::UpdateCommit(1ull << self)) ? 0 : 1;
+            failures += CheckResult(context, "commit after the rejected commit", HVC_INVALID_PARAMETER, Hypervisor::UpdateCommit(0)) ? 0 : 1;
+
+            context << minstd::format(buffer, "  update aborted after {} ms with core {} withheld\n", elapsed_ms, withheld);
+
+            return failures;
+        }
+    }
+
+    //  The register-level ABI from EL1.  The console checks print through EL2: a length of 0 or 49 must print
+    //      nothing, and the 100-byte line ("HYP console 100: " then digits) must arrive whole and in order.
+
+    void CLITestHypervisorCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace hypervisor_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest hypervisor: HVC ABI\n";
+
+        uint32_t failures = 0;
+
+        const Hypervisor::CallResult version = Hypervisor::Call(HVC_FN_VERSION, {});
+
+        failures += CheckResult(context, "ABI major", HYPERVISOR_ABI_MAJOR, static_cast<int64_t>(version.x1 >> 16)) ? 0 : 1;
+
+        if ((version.x1 & 0xFFFF) < HYPERVISOR_ABI_MINOR)
+        {
+            context << minstd::format(buffer, "  FAIL: ABI minor {} is older than this kernel's {}\n",
+                                      version.x1 & 0xFFFF, static_cast<uint32_t>(HYPERVISOR_ABI_MINOR));
+            failures++;
+        }
+
+        failures += CheckResult(context, "version with x0[63:32] set",
+                                version.x0, Hypervisor::Call((0xFFFFFFFFull << 32) | HVC_FN_VERSION, {}).x0) ? 0 : 1;
+        failures += CheckResult(context, "unknown function", HVC_NOT_SUPPORTED,
+                                Hypervisor::Call(HVC_FN_BASE + 0xFFFF, {}).x0) ? 0 : 1;
+        failures += CheckResult(context, "PSCI function ID", HVC_NOT_SUPPORTED,
+                                Hypervisor::Call(0x84000000, {}).x0) ? 0 : 1;
+
+        const uint64_t visible_if_printed = 0x0A2121214C494146ull; //  "FAIL!!!\n"
+
+        failures += CheckResult(context, "console write of 49 bytes", HVC_INVALID_PARAMETER,
+                                Hypervisor::Call(HVC_FN_CONSOLE_WRITE, {HVC_CONSOLE_WRITE_MAX + 1, visible_if_printed}).x0) ? 0 : 1;
+        failures += CheckResult(context, "console write of 0 bytes", HVC_SUCCESS,
+                                Hypervisor::Call(HVC_FN_CONSOLE_WRITE, {0, visible_if_printed}).x0) ? 0 : 1;
+
+        char line[LONG_LINE_LENGTH];
+        size_t length = 0;
+
+        for (; LONG_LINE_PREFIX[length] != '\0'; length++)
+        {
+            line[length] = LONG_LINE_PREFIX[length];
+        }
+
+        for (uint32_t digit = 0; length < LONG_LINE_LENGTH - 1; length++, digit++)
+        {
+            line[length] = static_cast<char>('0' + (digit % 10));
+        }
+
+        line[length++] = '\n';
+
+        Hypervisor::ConsoleWrite(line, length);
+
+        //  Live update, short of installing anything.
+
+        {
+            Hypervisor::UpdateLock lock;
+
+            uint8_t *image = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(TEST_IMAGE_SIZE, 64));
+
+            if (!lock.Acquired())
+            {
+                context << "  FAIL: a live update is running\n";
+                failures++;
+            }
+            else if (image == nullptr)
+            {
+                context << "  FAIL: no memory for the test image\n";
+                failures++;
+            }
+            else
+            {
+                failures += CheckUpdateRejections(context, image);
+                failures += CheckUpdateAbort(context, image);
+            }
+
+            if (image != nullptr)
+            {
+                __os_dynamic_heap_resource.deallocate(image, TEST_IMAGE_SIZE, 64);
+            }
+        }
+
+        failures += CheckResult(context, "version after the update checks", version.x0, Hypervisor::Call(HVC_FN_VERSION, {}).x0) ? 0 : 1;
+
+        if (failures == 0)
+        {
+            context << "PASS: hypervisor test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: hypervisor test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands

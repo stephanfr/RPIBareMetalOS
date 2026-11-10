@@ -70,6 +70,7 @@ def open_qemu(args: argparse.Namespace) -> pexpect.spawn:
         f'{cpu_flags(args.machine)}'
         f' -kernel {args.armstub}'
         f' -device loader,file={args.kernel},addr=0x80000,force-raw=on'
+        f' -device loader,file={args.hypervisor},addr=0x40000,force-raw=on'
         f' -drive file={args.sdimage},if=sd,format=raw'
         f' -serial stdio'
         f' -display none'
@@ -246,6 +247,7 @@ def main() -> int:
     qemu.add_argument('--qemu', help='Path to qemu-system-aarch64')
     qemu.add_argument('--armstub', help='Path to supervisor.elf')
     qemu.add_argument('--kernel', help='Path to kernel8.img')
+    qemu.add_argument('--hypervisor', help='Path to hypervisor.bin, loaded at 0x40000')
     qemu.add_argument('--sdimage', help='Path to sd.img')
     qemu.add_argument('--machine', default='raspi3b', help='QEMU machine model (default: raspi3b)')
 
@@ -289,7 +291,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.serial is None:
-        missing = [name for name in ('qemu', 'armstub', 'kernel', 'sdimage') if getattr(args, name) is None]
+        missing = [name for name in ('qemu', 'armstub', 'kernel', 'hypervisor', 'sdimage') if getattr(args, name) is None]
         if missing:
             parser.error('without --serial these are required: ' + ', '.join(f'--{name}' for name in missing))
     elif args.wait_for_boot is False and args.boot_timeout != DEFAULT_BOOT_TIMEOUT:
