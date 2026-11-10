@@ -61,6 +61,11 @@ public:
         return PL011UARTBase::getc();
     }
 
+    bool EnableInterruptDrivenInput() override
+    {
+        return EnableRxInterrupt(Interrupts::UART0);
+    }
+
 private:
 
     void RequestGPUClock()

@@ -32,6 +32,8 @@ const char *ToString(Interrupts interrupt)
         return "ARM_GENERIC_TIMER";
     case Interrupts::ARM_VIRTUAL_TIMER:
         return "ARM_VIRTUAL_TIMER";
+    case Interrupts::UART0:
+        return "UART0";
     default:
         return "NO_SUCH_INTERRUPT";
     }

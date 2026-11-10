@@ -62,6 +62,15 @@ namespace system_stats
         MUTEX_HANDOFFS                  = 39,
 
         SCHEDULER_DEADLINE_INTERRUPTS   = 40,
+
+        CONSOLE_RX_INTERRUPTS           = 41,
+        CONSOLE_RX_BYTES                = 42,
+        CONSOLE_RX_DROPPED              = 43,
+        CONSOLE_RX_ERRORS               = 44,
+        CONSOLE_WAKE_LATENCY_MAX_US     = 45,
+
+        RP1_MSIX_DELIVERIES             = 46,
+        RP1_IACKS                       = 47,
     } KernelStatisticId;
 
     constexpr uint32_t KernelStatistic(KernelStatisticId id)
