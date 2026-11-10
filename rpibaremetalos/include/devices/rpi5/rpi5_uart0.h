@@ -7,6 +7,8 @@
 #include "../uart_base.h"
 #include "./rpi5_uart_common.h"
 
+#include "platform/rpi5/rp1_interrupts.h"
+
 /**
  * @brief PL011 UART0 implementation for RPi5.
  * 
@@ -54,6 +56,16 @@ public:
     unsigned int getc(void) override
     {
         return PL011UARTBase::getc();
+    }
+
+    //  Only once RP1 interrupt delivery is up; otherwise input stays polled.
+
+    bool EnableInterruptDrivenInput() override
+    {
+        RP1InterruptController &rp1 = GetRP1InterruptController();
+
+        return rp1.EnableSource(RP1InterruptController::UART0_SOURCE, InterruptTrigger::LEVEL) &&
+               EnableRxInterrupt(Interrupts::UART0);
     }
 
 private:

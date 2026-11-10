@@ -149,6 +149,8 @@ public:
             LogError("GIC: unhandled INTID: %u\n", intid);
         }
 
+        AfterDispatch(intid);
+
         //  EOI drops priority and deactivates the interrupt (EOImode == 0).
 
         GICC(GICC_EOIR) = iar;
@@ -172,6 +174,34 @@ protected:
     {
     }
 
+    //  Runs after the ISRs for 'intid', before EOI, for interrupt sources behind a second controller.
+
+    virtual void AfterDispatch(uint32_t intid)
+    {
+        (void)intid;
+    }
+
+    bool IsPending(uint32_t intid)
+    {
+        return (GICD(GICD_ISPENDR + ((intid / 32) * 4)) & (1u << (intid % 32))) != 0;
+    }
+
+    void ClearPending(uint32_t intid)
+    {
+        GICD(GICD_ICPENDR + ((intid / 32) * 4)) = (1u << (intid % 32));
+    }
+
+    //  Two bits per INTID; the upper one selects edge.  Only while the INTID is disabled: changing the
+    //      configuration of an enabled interrupt is UNPREDICTABLE on a GICv2.
+
+    void ConfigureTrigger(uint32_t intid, InterruptTrigger trigger)
+    {
+        volatile uint32_t &icfgr = GICD(GICD_ICFGR + ((intid / 16) * 4));
+        const uint32_t edge_bit = 2u << ((intid % 16) * 2);
+
+        icfgr = (trigger == InterruptTrigger::EDGE) ? (icfgr | edge_bit) : (icfgr & ~edge_bit);
+    }
+
 private:
     uint64_t gicd_base_;
     uint64_t gicc_base_;
@@ -186,6 +216,8 @@ private:
     static constexpr uint32_t GICD_ITARGETSR                  = 0x800;
     static constexpr uint32_t GICD_ISENABLER                  = 0x100;
     static constexpr uint32_t GICD_ICENABLER                  = 0x180;
+    static constexpr uint32_t GICD_ISPENDR                    = 0x200;
+    static constexpr uint32_t GICD_ICPENDR                    = 0x280;
     static constexpr uint32_t GICD_ICFGR                      = 0xC00;
     static constexpr uint32_t GICD_SGIR                       = 0xF00;
     static constexpr uint32_t GICD_SGIR_CPU_TARGET_LIST_SHIFT = 16;
@@ -231,17 +263,6 @@ private:
         }
 
         return nullptr;
-    }
-
-    //  Two bits per INTID; the upper one selects edge.  Only while the INTID is disabled: changing the
-    //      configuration of an enabled interrupt is UNPREDICTABLE on a GICv2.
-
-    void ConfigureTrigger(uint32_t intid, InterruptTrigger trigger)
-    {
-        volatile uint32_t &icfgr = GICD(GICD_ICFGR + ((intid / 16) * 4));
-        const uint32_t edge_bit = 2u << ((intid % 16) * 2);
-
-        icfgr = (trigger == InterruptTrigger::EDGE) ? (icfgr | edge_bit) : (icfgr & ~edge_bit);
     }
 
     int32_t InterruptToINTID(Interrupts interrupt)
