@@ -15,6 +15,7 @@
 #include "devices/physical_timer.h"
 #include "filesystem/filesystems.h"
 #include "platform/address_space_layout.h"
+#include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "task/tasks.h"
 
@@ -24,7 +25,6 @@ namespace
 
     minstd::atomic<uint32_t> update_in_progress{0};
 
-    constexpr uint64_t CACHE_LINE_SIZE = 64;
     constexpr int64_t NOT_RUN = INT64_MIN;
 
     //  The update HVCs return through the trampoline, which keeps only x19-x29 of the caller's registers.
@@ -147,20 +147,13 @@ namespace
         }
     }
 
-    //  EL2 reads the image with its MMU off, straight from memory.
+    bool stage2_enabled[MAX_CORES] = {}; //  element n is written by core n only
 
-    void CleanToPointOfCoherency(const void *start, size_t length)
-    {
-        const uint64_t first = reinterpret_cast<uint64_t>(start) & ~(CACHE_LINE_SIZE - 1);
-        const uint64_t end = reinterpret_cast<uint64_t>(start) + length;
+    //  One MAILBOX_CALL message at a time, from any core: EL2 shares one reply FIFO between them, and has no lock.
 
-        for (uint64_t address = first; address < end; address += CACHE_LINE_SIZE)
-        {
-            asm volatile("dc cvac, %0" ::"r"(address) : "memory");
-        }
-
-        asm volatile("dsb sy" ::: "memory");
-    }
+    SpinLock mailbox_lock;
+    bool stage2_audit = false;
+    bool locked_down = false;
 
     //  'path' is on the boot partition; a path without a leading '/' starts at its root.
 
@@ -222,7 +215,7 @@ namespace
     {
         const Hypervisor::VersionInfo running = Hypervisor::Version();
 
-        if ((running.abi_major != HYPERVISOR_ABI_MAJOR) || (running.abi_minor < 1))
+        if (running.abi_major != HYPERVISOR_ABI_MAJOR)
         {
             return HypervisorUpdateResult::NOT_SUPPORTED;
         }
@@ -269,7 +262,14 @@ namespace
             return HypervisorUpdateResult::IMAGE_REJECTED;
         }
 
-        if (Hypervisor::UpdatePrepare(image.data(), size) != HVC_SUCCESS)
+        const int64_t prepared = Hypervisor::UpdatePrepare(image.data(), size);
+
+        if (prepared == HVC_NOT_SUPPORTED)
+        {
+            return HypervisorUpdateResult::UNSIGNED_REFUSED;
+        }
+
+        if (prepared != HVC_SUCCESS)
         {
             return HypervisorUpdateResult::IMAGE_REJECTED;
         }
@@ -327,6 +327,117 @@ void Hypervisor::ConsoleWrite(const char *text, size_t length)
     }
 }
 
+int64_t Hypervisor::MemoryDonate(uint64_t physical_address, uint64_t size)
+{
+    return Call(HVC_FN_MEMORY_DONATE, {physical_address, size}).x0;
+}
+
+int64_t Hypervisor::Stage2Enable(uint64_t ram_size, uint64_t framebuffer_physical, uint64_t framebuffer_size)
+{
+    return Call(HVC_FN_STAGE2_ENABLE, {ram_size, framebuffer_physical, framebuffer_size}).x0;
+}
+
+namespace
+{
+    int64_t EnableStage2(uint64_t framebuffer_physical, uint64_t framebuffer_size)
+    {
+        const int64_t result =
+            Hypervisor::Stage2Enable(MMUManager::Instance().AllocatableMemoryTop(), framebuffer_physical, framebuffer_size);
+
+        if (result == HVC_SUCCESS)
+        {
+            stage2_enabled[GetCoreID()] = true;
+        }
+
+        return result;
+    }
+}
+
+int64_t Hypervisor::StartStage2(uint64_t framebuffer_physical, uint64_t framebuffer_size)
+{
+    const uint64_t pool = MMUManager::Instance().HypervisorPoolPhysical();
+
+    //  The kernel maps the pool uncached, but lines cached before its tables were in use may remain, and a dirty one
+    //      must not be written back over what EL2 stores.
+
+    CleanAndInvalidateToPointOfCoherency(PhysicalToKernelVirtualAddress(pool), HYPERVISOR_POOL_SIZE);
+
+    const int64_t result = MemoryDonate(pool, HYPERVISOR_POOL_SIZE);
+
+    return (result == HVC_SUCCESS) ? EnableStage2(framebuffer_physical, framebuffer_size) : result;
+}
+
+int64_t Hypervisor::EnableStage2OnThisCore()
+{
+    return EnableStage2(0, 0);
+}
+
+bool Hypervisor::Stage2EnabledOnCore(uint32_t core)
+{
+    return (core < MAX_CORES) && stage2_enabled[core];
+}
+
+//  Core 0 turns stage-2 on first, and the tables it builds then leave the mailbox out for every core.
+
+bool Hypervisor::MailboxThroughEl2()
+{
+    return stage2_enabled[0];
+}
+
+int64_t Hypervisor::MailboxStep(uint64_t physical_address, uint32_t size, uint64_t mode)
+{
+    return Call(HVC_FN_MAILBOX_CALL, {physical_address, size, mode}).x0;
+}
+
+//  Each step holds the core at EL2 for at most HVC_MAILBOX_SLICE_MS; between steps it takes interrupts as usual.
+
+int64_t Hypervisor::MailboxCall(uint64_t physical_address, uint32_t size)
+{
+    LockGuard guard(mailbox_lock);
+
+    uint64_t counter_frequency;
+    asm volatile("mrs %0, cntfrq_el0" : "=r"(counter_frequency));
+
+    const uint64_t deadline = PhysicalTimer::CurrentTicks() + (counter_frequency * HVC_MAILBOX_TIMEOUT_MS) / 1000;
+
+    int64_t result = MailboxStep(physical_address, size, HVC_MAILBOX_SEND);
+
+    while ((result == HVC_BUSY) && (PhysicalTimer::CurrentTicks() < deadline))
+    {
+        result = MailboxStep(physical_address, size, HVC_MAILBOX_CONTINUE);
+    }
+
+    return (result == HVC_BUSY) ? HVC_TIMED_OUT : result;
+}
+
+int64_t Hypervisor::Stage2Audit()
+{
+    const int64_t result = Call(HVC_FN_STAGE2_AUDIT, {}).x0;
+
+    stage2_audit = stage2_audit || (result == HVC_SUCCESS);
+
+    return result;
+}
+
+bool Hypervisor::Stage2AuditOn()
+{
+    return stage2_audit;
+}
+
+int64_t Hypervisor::Lockdown(uint64_t table_physical, uint64_t table_size)
+{
+    const int64_t result = Call(HVC_FN_LOCKDOWN, {table_physical, table_size}).x0;
+
+    locked_down = locked_down || (result == HVC_SUCCESS);
+
+    return result;
+}
+
+bool Hypervisor::LockedDown()
+{
+    return locked_down;
+}
+
 int64_t Hypervisor::UpdatePrepare(const void *image, size_t size)
 {
     if (reinterpret_cast<uint64_t>(image) < KERNEL_VA_BASE)
@@ -334,7 +445,7 @@ int64_t Hypervisor::UpdatePrepare(const void *image, size_t size)
         return HVC_INVALID_PARAMETER;
     }
 
-    CleanToPointOfCoherency(image, size);
+    CleanToPointOfCoherency(reinterpret_cast<uintptr_t>(image), size); //  EL2 reads it with its MMU off
 
     return UpdateCall(HVC_FN_UPDATE_PREPARE, KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(image)), size);
 }
@@ -497,6 +608,8 @@ const char *Hypervisor::UpdateResultText(HypervisorUpdateResult result)
         return "file unreadable";
     case HypervisorUpdateResult::IMAGE_REJECTED:
         return "image rejected";
+    case HypervisorUpdateResult::UNSIGNED_REFUSED:
+        return "the running hypervisor takes signed images only";
     case HypervisorUpdateResult::OUT_OF_MEMORY:
         return "out of memory";
     case HypervisorUpdateResult::FORK_FAILED:

@@ -183,7 +183,20 @@ namespace cli::commands
         void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
     };
 
-    class CLITestCommand : public CLIParentCommand<13>
+    class CLITestStage2Command : public CLICommandExecutor
+    {
+    public:
+        static const CLITestStage2Command instance;
+
+        CLITestStage2Command()
+            : CLICommandExecutor("stage2")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
+    };
+
+    class CLITestCommand : public CLIParentCommand<14>
     {
     public:
         static const CLITestCommand instance;
@@ -201,7 +214,8 @@ namespace cli::commands
                                         CLITestSleepCommand::instance,
                                         CLITestWaitCommand::instance,
                                         CLITestMutexCommand::instance,
-                                        CLITestHypervisorCommand::instance})
+                                        CLITestHypervisorCommand::instance,
+                                        CLITestStage2Command::instance})
         {
         }
     };

@@ -4,6 +4,7 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 extern "C"
@@ -124,4 +125,40 @@ inline uint64_t GetCounterFrequency()
     asm volatile("mrs %0, cntfrq_el0" : "=r"(counter_frequency));
 
     return counter_frequency;
+}
+
+//  Data cache maintenance by address to the point of coherency, for memory read or written without the caches: by EL2
+//      with its MMU off, or by the VideoCore.  Each ends with a dsb sy, so the maintenance is complete on return.
+
+inline uint64_t SmallestDataCacheLineSize()
+{
+    uint64_t ctr;
+
+    asm volatile("mrs %0, ctr_el0" : "=r"(ctr));
+
+    return 4ull << ((ctr >> 16) & 0xF); //  CTR_EL0.DminLine, log2 of words
+}
+
+inline void CleanToPointOfCoherency(uintptr_t start, size_t length)
+{
+    const uint64_t line_size = SmallestDataCacheLineSize();
+
+    for (uintptr_t line = start & ~(line_size - 1); line < start + length; line += line_size)
+    {
+        asm volatile("dc cvac, %0" ::"r"(line) : "memory");
+    }
+
+    asm volatile("dsb sy" ::: "memory");
+}
+
+inline void CleanAndInvalidateToPointOfCoherency(uintptr_t start, size_t length)
+{
+    const uint64_t line_size = SmallestDataCacheLineSize();
+
+    for (uintptr_t line = start & ~(line_size - 1); line < start + length; line += line_size)
+    {
+        asm volatile("dc civac, %0" ::"r"(line) : "memory");
+    }
+
+    asm volatile("dsb sy" ::: "memory");
 }

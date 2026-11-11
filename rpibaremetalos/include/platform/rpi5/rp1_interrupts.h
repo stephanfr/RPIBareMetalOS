@@ -54,6 +54,18 @@ public:
 
     void Acknowledge(uint32_t intid);
 
+    //  Where ProgramMSIX put the vectors it uses; 0 and 0 before it has.
+
+    uint64_t MSIXTablePhysical() const
+    {
+        return msix_table_physical_;
+    }
+
+    uint64_t MSIXTableSize() const
+    {
+        return msix_table_size_;
+    }
+
     static bool IsRP1INTID(uint32_t intid)
     {
         return (intid >= GIC_INTID_BASE) && (intid < GIC_INTID_BASE + SOURCE_COUNT);
@@ -66,6 +78,8 @@ private:
     ConfigAccess config_access_ = ConfigAccess::WINDOW;
 
     uint64_t level_sources_ = 0; //  bit n: source n is level triggered and needs IACK
+    uint64_t msix_table_physical_ = 0;
+    uint64_t msix_table_size_ = 0;
 
     bool CheckLink();
     bool FindEndpoint();

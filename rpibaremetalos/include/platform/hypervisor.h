@@ -16,10 +16,11 @@ typedef enum class HypervisorUpdateResult : uint32_t
 {
     SUCCESS = 0,
     BUSY, //  another live update is running
-    NOT_SUPPORTED, //  the running hypervisor predates ABI 1.1
+    NOT_SUPPORTED, //  the running hypervisor has another ABI major
     FILE_NOT_FOUND,
     FILE_UNREADABLE,
     IMAGE_REJECTED, //  by the kernel's header check or by EL2; the old hypervisor still runs
+    UNSIGNED_REFUSED, //  stage-2 is on and the running hypervisor was built to take signed images only
     OUT_OF_MEMORY,
     FORK_FAILED,    //  a joining task couldn't be started; the update was aborted
     ABORTED,        //  a core didn't join in time; the old hypervisor still runs
@@ -53,6 +54,43 @@ public:
     //      with a spin lock, so not for interrupt handlers; kernel printf output can still interleave with it.
 
     static void ConsoleWrite(const char *text, size_t length);
+
+    //  Stage-2 protection.  Core 0 calls StartStage2 once, before the task manager starts: it donates the MMU
+    //      manager's pool to EL2 and turns stage-2 on for this core.  Every other core calls EnableStage2OnThisCore
+    //      before it runs any task.  Both return an HVC result code.  The framebuffer, physical, is the one part of
+    //      the VideoCore's memory that stays mapped; it must be allocated before StartStage2.
+
+    static int64_t StartStage2(uint64_t framebuffer_physical, uint64_t framebuffer_size);
+    static int64_t EnableStage2OnThisCore();
+    static bool Stage2EnabledOnCore(uint32_t core);
+
+    //  The raw HVCs behind them, for the ABI tests.  The framebuffer counts only on the call that builds the tables.
+
+    static int64_t MemoryDonate(uint64_t physical_address, uint64_t size);
+    static int64_t Stage2Enable(uint64_t ram_size, uint64_t framebuffer_physical = 0, uint64_t framebuffer_size = 0);
+
+    //  Once stage-2 is on, the VideoCore mailbox's registers are EL2's: a property message goes through MailboxCall,
+    //      which sends the message at 'physical_address' (16-byte aligned, in the kernel's RAM, non-cacheable or
+    //      cleaned to the point of coherency) and leaves the reply in it.  Returns an HVC result code;
+    //      HVC_INVALID_PARAMETER for a malformed message or a tag EL2 refuses, HVC_TIMED_OUT after
+    //      HVC_MAILBOX_TIMEOUT_MS.  It may block, so never call it with interrupts masked: the lock it takes is a
+    //      plain spin lock, and its holder may be a preempted task on this core.
+    //
+    //  MailboxStep is one raw MAILBOX_CALL, for the ABI tests.
+
+    static bool MailboxThroughEl2();
+    static int64_t MailboxCall(uint64_t physical_address, uint32_t size);
+    static int64_t MailboxStep(uint64_t physical_address, uint32_t size, uint64_t mode);
+
+    //  Stage-2 maps only the device pages the kernel uses.  For bringing up a board, Stage2Audit, before
+    //      StartStage2, makes a blocked page pass through with a "HYP S2 AUDIT" line instead of faulting.  Lockdown,
+    //      once, after the interrupt controllers are up, makes what routes the Pi 5's RP1 DMA and MSIs read-only:
+    //      the root complex, MIP0 and the MSI-X table at [table_physical, + table_size).
+
+    static int64_t Stage2Audit();
+    static bool Stage2AuditOn();
+    static int64_t Lockdown(uint64_t table_physical, uint64_t table_size);
+    static bool LockedDown();
 
     //  Any function ID with x1-x7 as given.  For exercising the ABI; use the typed calls above otherwise.
 

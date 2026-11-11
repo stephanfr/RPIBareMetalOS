@@ -31,6 +31,23 @@ extern "C"
 
     uint32_t HypRP1ClockRateHz(uint32_t ctrl, uint32_t div_int);
 
+    //  A VideoCore mailbox property message, HYP_MAILBOX_CLOCK_RATE_WORDS long, with one GET_CLOCK_RATE tag, and its
+    //      answer: the rate in Hz, or 0 unless the firmware answered successfully for that clock.
+
+#define HYP_MAILBOX_CLOCK_RATE_WORDS 8
+#define HYP_MAILBOX_CLOCK_UART 2
+
+    void HypMailboxClockRateRequest(uint32_t *message, uint32_t clock_id);
+    uint32_t HypMailboxClockRate(const uint32_t *message, uint32_t clock_id);
+
+    //  The same, with one GET_VC_MEMORY tag.  The answer is 1 with the firmware's base and size, as it reported them,
+    //      or 0 unless it answered successfully.
+
+#define HYP_MAILBOX_VC_MEMORY_WORDS 8
+
+    void HypMailboxVideoCoreMemoryRequest(uint32_t *message);
+    uint32_t HypMailboxVideoCoreMemory(const uint32_t *message, uint32_t *base, uint32_t *size);
+
     //  Works on every board without knowing which: the A76 (Pi 5) sets MPIDR.MT and puts the core in Aff1.
 
     uint32_t HypCoreIndex(uint64_t mpidr);

@@ -102,16 +102,8 @@ RPI3BPlusMemoryManager::RPI3BPlusMemoryManager()
         .Address = (uintptr_t)(0x40000000 / level1_blocksize_) << granule_size_shift_,
     };
 
-    //	One block for non-cached DMA memory
-
-    Stage2map1to1_[dma_block_] = (VMSAv8_64_DESCRIPTOR){
-        .EntryType = TableType::BLOCK_TABLE,
-        .MemAttr = MemoryAttribute::NORMAL_NO_CACHING,
-        .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
-        .SH = Stage2Sharability::INNER_SHAREABLE,
-        .AF = AccessFlag::ACCESSED,
-        .Address = (uintptr_t)dma_block_ << granule_size_shift_,
-    };
+    MapUncachedBlock(dma_block_);
+    MapUncachedBlock(HypervisorPoolPhysical() / level1_blocksize_);
 
     // Level 1 has 2 valid entries mapping the each 1GB in stage2
 

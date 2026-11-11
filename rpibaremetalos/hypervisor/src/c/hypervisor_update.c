@@ -12,6 +12,7 @@
 
 #include "hypervisor_image.h"
 #include "hypervisor_update.h"
+#include "stage2.h"
 
 extern const uint8_t HypervisorTrampoline[];
 extern const uint8_t HypervisorTrampolineEnd[];
@@ -97,6 +98,26 @@ static int AllArrived(volatile HypervisorState *state, uint64_t mask)
     return 1;
 }
 
+//  Once stage-2 is on, an unsigned image would let VM 1 replace what protects EL2 from it: only a build that allows
+//      it takes one (STAGE2_EL0_DRIVERS_PLAN.md D7).  The source must then also be VM 1's own RAM.
+
+static int64_t Stage2SourceCheck(volatile HypervisorState *state, uint64_t source, uint64_t size)
+{
+    if (!state->stage2_built)
+    {
+        return HVC_SUCCESS;
+    }
+
+#ifndef HYP_ALLOW_UNSIGNED_UPDATE
+    (void)source;
+    (void)size;
+    return HVC_NOT_SUPPORTED;
+#else
+    return Stage2RangeIsIdentity(&state->stage2, source, size, STAGE2_ATTRIBUTES_NORMAL) ? HVC_SUCCESS
+                                                                                          : HVC_INVALID_PARAMETER;
+#endif
+}
+
 //  Copies first and validates the copy, so the kernel can't change the image after the check.
 
 uint64_t HypervisorUpdatePrepare(HypervisorFrame *frame)
@@ -110,6 +131,11 @@ uint64_t HypervisorUpdatePrepare(HypervisorFrame *frame)
     DSB_SY();
 
     int64_t result = HypervisorUpdateSourceCheck(source, size);
+
+    if (result == HVC_SUCCESS)
+    {
+        result = Stage2SourceCheck(state, source, size);
+    }
 
     if (result == HVC_SUCCESS)
     {

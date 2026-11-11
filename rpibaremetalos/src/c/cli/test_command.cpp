@@ -10,7 +10,9 @@
 #include <format>
 #include <mutex>
 
+#include "devices/emmc.h"
 #include "devices/physical_timer.h"
+#include "devices/video/console_video_framebuffer.h"
 #include "task/tasks.h"
 #include "task/runnable.h"
 #include "heaps.h"
@@ -26,9 +28,11 @@
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
+#include "platform/rpi5/rp1_interrupts.h"
 #include "services/stats_db/user_statistics.h"
 #include "services/stats_db/kernel_statistic_ids.h"
 #include "asm_globals.h"
+#include "utility/device_probe.h"
 
 namespace cli::commands
 {
@@ -45,6 +49,7 @@ namespace cli::commands
     const CLITestWaitCommand            CLITestWaitCommand::instance;
     const CLITestMutexCommand           CLITestMutexCommand::instance;
     const CLITestHypervisorCommand      CLITestHypervisorCommand::instance;
+    const CLITestStage2Command          CLITestStage2Command::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -3619,6 +3624,109 @@ namespace cli::commands
         }
     }
 
+    namespace hypervisor_test
+    {
+        //  MAILBOX_CALL with hand-built messages, so each refusal can be aimed at one rule.  EL2's MMU is off, so the
+        //      message is cleaned to the point of coherency before the call and invalidated after it.
+
+        constexpr uint32_t MAILBOX_TAG_GET_BOARD_REVISION = 0x00010002;
+        constexpr uint32_t MAILBOX_TAG_ALLOCATE_MEMORY = 0x0003000C;
+        constexpr uint32_t MAILBOX_TAG_ALLOCATE_FRAMEBUFFER = 0x00040001;
+        constexpr uint32_t MAILBOX_WORDS = 7; //  header, one tag with a 4-byte value, end tag
+        constexpr size_t MAILBOX_BUFFER_SIZE = 64;
+
+        void BuildMailboxMessage(volatile uint32_t *message, uint32_t tag)
+        {
+            const uint32_t words[MAILBOX_WORDS] = {MAILBOX_WORDS * 4, 0, tag, 4, 0, 0, 0};
+
+            for (uint32_t i = 0; i < MAILBOX_WORDS; i++)
+            {
+                message[i] = words[i];
+            }
+
+            CleanAndInvalidateToPointOfCoherency(reinterpret_cast<uintptr_t>(message), MAILBOX_WORDS * 4);
+        }
+
+        int64_t SendMailboxMessage(volatile uint32_t *message, uint64_t offset = 0, uint32_t size = MAILBOX_WORDS * 4)
+        {
+            const int64_t result = Hypervisor::MailboxCall(KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(message)) + offset, size);
+
+            CleanAndInvalidateToPointOfCoherency(reinterpret_cast<uintptr_t>(message), MAILBOX_BUFFER_SIZE);
+
+            return result;
+        }
+
+        uint32_t CheckMailboxCall(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            volatile uint32_t *message = static_cast<volatile uint32_t *>(__os_dynamic_heap_resource.allocate(MAILBOX_BUFFER_SIZE, 64));
+
+            if (message == nullptr)
+            {
+                context << "  FAIL: no memory for the mailbox message\n";
+                return 1;
+            }
+
+            uint32_t failures = 0;
+
+            BuildMailboxMessage(message, MAILBOX_TAG_GET_BOARD_REVISION);
+
+            const auto start = PhysicalTimer::Now();
+            const int64_t result = SendMailboxMessage(message);
+            const int64_t elapsed_us = minstd::chrono::duration_cast<minstd::chrono::microseconds>(PhysicalTimer::Now() - start).count();
+
+            failures += CheckResult(context, "mailbox call for the board revision", HVC_SUCCESS, result) ? 0 : 1;
+            failures += CheckResult(context, "its response code", 0x80000000, message[1]) ? 0 : 1;
+            failures += CheckResult(context, "the board revision it returned", GetPlatformInfo().GetBoardRevision(), message[5]) ? 0 : 1;
+
+            context << minstd::format(buffer, "  mailbox call through EL2: {} us\n", elapsed_us);
+
+            //  The raw steps MailboxCall loops over: SEND, then CONTINUE while the reply hasn't come.  Outside its lock,
+            //      which is safe while nothing else is sending.
+
+            BuildMailboxMessage(message, MAILBOX_TAG_GET_BOARD_REVISION);
+
+            const uint64_t message_physical = KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(message));
+            int64_t step = Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, HVC_MAILBOX_SEND);
+            uint32_t steps = 1;
+
+            while ((step == HVC_BUSY) && (steps < 1000))
+            {
+                step = Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, HVC_MAILBOX_CONTINUE);
+                steps++;
+            }
+
+            CleanAndInvalidateToPointOfCoherency(reinterpret_cast<uintptr_t>(message), MAILBOX_BUFFER_SIZE);
+
+            failures += CheckResult(context, "mailbox send and continue", HVC_SUCCESS, step) ? 0 : 1;
+            failures += CheckResult(context, "the board revision they returned", GetPlatformInfo().GetBoardRevision(), message[5]) ? 0 : 1;
+            failures += CheckResult(context, "mailbox continue with nothing pending", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, HVC_MAILBOX_CONTINUE)) ? 0 : 1;
+            failures += CheckResult(context, "mailbox call with an unknown mode", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, 2)) ? 0 : 1;
+
+            BuildMailboxMessage(message, MAILBOX_TAG_ALLOCATE_MEMORY);
+            failures += CheckResult(context, "mailbox call with a refused tag", HVC_INVALID_PARAMETER, SendMailboxMessage(message)) ? 0 : 1;
+
+            //  A framebuffer allocated now would land in VideoCore memory, which the kernel can't reach.
+
+            BuildMailboxMessage(message, MAILBOX_TAG_ALLOCATE_FRAMEBUFFER);
+            failures += CheckResult(context, "mailbox call allocating a framebuffer", HVC_INVALID_PARAMETER, SendMailboxMessage(message)) ? 0 : 1;
+
+            BuildMailboxMessage(message, MAILBOX_TAG_GET_BOARD_REVISION);
+            failures += CheckResult(context, "mailbox call whose size word disagrees", HVC_INVALID_PARAMETER,
+                                    SendMailboxMessage(message, 0, (MAILBOX_WORDS + 1) * 4)) ? 0 : 1;
+            failures += CheckResult(context, "mailbox call from a misaligned address", HVC_INVALID_PARAMETER, SendMailboxMessage(message, 4)) ? 0 : 1;
+            failures += CheckResult(context, "mailbox call from the hypervisor's pool", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MailboxCall(MMUManager::Instance().HypervisorPoolPhysical(), MAILBOX_WORDS * 4)) ? 0 : 1;
+
+            __os_dynamic_heap_resource.deallocate(const_cast<uint32_t *>(message), MAILBOX_BUFFER_SIZE, 64);
+
+            return failures;
+        }
+    }
+
     //  The register-level ABI from EL1.  The console checks print through EL2: a length of 0 or 49 must print
     //      nothing, and the 100-byte line ("HYP console 100: " then digits) must arrive whole and in order.
 
@@ -3705,6 +3813,8 @@ namespace cli::commands
 
         failures += CheckResult(context, "version after the update checks", version.x0, Hypervisor::Call(HVC_FN_VERSION, {}).x0) ? 0 : 1;
 
+        failures += CheckMailboxCall(context);
+
         if (failures == 0)
         {
             context << "PASS: hypervisor test\n";
@@ -3712,6 +3822,647 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: hypervisor test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test stage2
+    //
+    //  VM 1's stage-2 from EL1 and EL0: every core has it on, the hypervisor's memory faults instead of reading, the
+    //      HVCs that set it up refuse a second try, and a user task writing to a blocked page is killed.  Each fault
+    //      also prints a "HYP S2 FAULT" line from EL2.
+    // -------------------------------------------------------------------------
+
+    namespace stage2_test
+    {
+        using hypervisor_test::CheckResult;
+
+        //  Only a live update writes it, so a stray write that got through would do no harm.
+
+        constexpr uint64_t BLOCKED_PAGE = HYPERVISOR_TRAMPOLINE_ADDRESS;
+
+        //  The top page of the image region: no binary reaches it, and it is never demand paged.
+
+        constexpr uint64_t USER_VA = USER_HEAP_BASE - MemoryManager::DEFAULT_PAGE_SIZE;
+
+        constexpr int64_t CASE_READY = 1; //  hello.bin cases 16 and 17
+        constexpr int64_t CASE_GO = 2;
+        constexpr uint32_t POLL_MS = 10;
+        constexpr uint32_t MAX_POLLS = 1000;
+
+        constexpr uint64_t MAILBOX_STATUS = 0x18;
+        constexpr uint64_t MAILBOX_TO_PI3_IRQ_PENDING_1 = 0x880 - 0x204;
+
+        uint64_t MailboxRegisters()
+        {
+            return KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(GetPlatformInfo().GetMailboxRegisterBase()));
+        }
+
+        //  IRQs masked: the probe flags are global, and the fault must be this load's.
+
+        bool ReadFaults(uint64_t physical_address)
+        {
+            uint32_t value;
+
+            const uint64_t daif = SaveAndDisableIRQs();
+            const bool read = ProbeDeviceRegister(reinterpret_cast<const volatile uint32_t *>(PhysicalToKernelVirtualAddress(physical_address)), value);
+            RestoreIRQs(daif);
+
+            return !read;
+        }
+
+        uint32_t CheckReads(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            //  GCC fills this array with Q-register pairs, which strict_align=1 faults unless 16-byte aligned.
+
+            struct alignas(16) Probe
+            {
+                const char *label;
+                uint64_t address;
+                bool faults;
+            };
+
+            const Probe probes[] = {
+                {"hypervisor image", HYPERVISOR_LOAD_ADDRESS, true},
+                {"hypervisor state", HYPERVISOR_STATE_ADDRESS, true},
+                {"live-update staging", HYPERVISOR_STAGING_ADDRESS, true},
+                {"live-update trampoline", HYPERVISOR_TRAMPOLINE_ADDRESS, true},
+                {"donated pool", MMUManager::Instance().HypervisorPoolPhysical(), true},
+                {"end of the donated pool", MMUManager::Instance().HypervisorPoolPhysical() + HYPERVISOR_POOL_SIZE - 4, true},
+                {"EL3 firmware", 0, true},
+                {"page below the hypervisor", HYPERVISOR_LOAD_ADDRESS - 4, true},
+                {"kernel image", HYPERVISOR_LOAD_ADDRESS + HYPERVISOR_REGION_SIZE, false},
+                {"page above the donated pool", MMUManager::Instance().HypervisorPoolPhysical() + HYPERVISOR_POOL_SIZE, false},
+                {"mailbox status register", MailboxRegisters() + MAILBOX_STATUS, true},
+            };
+
+            uint32_t failures = 0;
+
+            for (const Probe &probe : probes)
+            {
+                if (ReadFaults(probe.address) != probe.faults)
+                {
+                    context << minstd::format(buffer, "  FAIL: a read of the {} at {:#x} {}\n", probe.label, probe.address,
+                                              probe.faults ? "returned data" : "faulted");
+                    failures++;
+                }
+            }
+
+            //  The Pi 3's interrupt controller shares the mailbox's page, and EL2 passes its registers through.
+
+            if ((GetPlatformInfo().GetBoardType() == RPIBoardType::RPI3) && ReadFaults(MailboxRegisters() - MAILBOX_TO_PI3_IRQ_PENDING_1))
+            {
+                context << "  FAIL: a read of the Pi 3's IRQ pending 1 register, beside the mailbox, faulted\n";
+                failures++;
+            }
+
+            return failures;
+        }
+
+        //  EL2 asked the firmware the same question at boot, and unmapped the answer, all but the framebuffer.
+
+        uint32_t CheckVideoCoreMemory(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            GetVideocoreMemoryTag tag;
+            GPUMailboxPropertyMessage message(tag);
+
+            if (!GPUMailbox().sendMessage(message))
+            {
+                context << "  FAIL: GET_VC_MEMORY through EL2 failed\n";
+                return 1;
+            }
+
+            constexpr uint64_t PAGE = MemoryManager::DEFAULT_PAGE_SIZE;
+
+            const uint64_t base = tag.GetBaseAddress() & 0x3FFFFFFF;
+            const uint64_t end = base + tag.GetSizeInBytes();
+            const uint64_t framebuffer = VideoFrameBuffer::AllocatedPhysicalBase() & ~(PAGE - 1);
+            const uint64_t framebuffer_end = (VideoFrameBuffer::AllocatedPhysicalBase() + VideoFrameBuffer::AllocatedSizeInBytes() + PAGE - 1) & ~(PAGE - 1);
+
+            context << minstd::format(buffer, "  VideoCore memory {:#x}-{:#x}, framebuffer {:#x}-{:#x}\n", base, end, framebuffer, framebuffer_end);
+
+            uint32_t failures = 0;
+
+            //  The Pi 3's peripherals cover the top of its VideoCore memory: blocked device pages, which audit mode passes.
+
+            constexpr uint64_t PI3_PERIPHERAL_BASE = 0x3F000000;
+
+            const uint64_t top = ((GetPlatformInfo().GetBoardType() == RPIBoardType::RPI3) && (end > PI3_PERIPHERAL_BASE)) ? PI3_PERIPHERAL_BASE : end;
+            const uint64_t outside[] = {base, framebuffer_end, top - 4};
+
+            for (uint64_t address : outside)
+            {
+                if ((address >= base) && (address < top) && !((address >= framebuffer) && (address < framebuffer_end)) &&
+                    !ReadFaults(address))
+                {
+                    context << minstd::format(buffer, "  FAIL: a read of VideoCore memory at {:#x} returned data\n", address);
+                    failures++;
+                }
+            }
+
+            const uint64_t inside[] = {framebuffer, framebuffer_end - 4};
+
+            for (uint64_t address : inside)
+            {
+                if ((framebuffer_end > framebuffer) && ReadFaults(address))
+                {
+                    context << minstd::format(buffer, "  FAIL: a read of the framebuffer at {:#x} faulted\n", address);
+                    failures++;
+                }
+            }
+
+            //  Flipping the display changes only the virtual offset, which EL2 lets through.
+
+            auto display = GetOSEntityRegistry().GetEntityByAlias<ConsoleVideoFrameBuffer>("HDMI");
+
+            if (display.Successful())
+            {
+                context << minstd::format(buffer, "  framebuffer: {} buffer(s)\n", display->BufferCount());
+
+                if ((display->BufferCount() > 1) && (!display->Show(1) || (display->ShownBuffer() != 1) || !display->Show(0)))
+                {
+                    context << "  FAIL: flipping the framebuffer through EL2 failed\n";
+                    failures++;
+                }
+            }
+
+            return failures;
+        }
+
+        uint32_t CheckHypercalls(CLISessionContext &context)
+        {
+            const uint64_t pool = MMUManager::Instance().HypervisorPoolPhysical();
+            const uint64_t ram_size = MMUManager::Instance().AllocatableMemoryTop();
+
+            uint32_t failures = 0;
+
+            failures += CheckResult(context, "a second donation", HVC_INVALID_PARAMETER, Hypervisor::MemoryDonate(pool, HYPERVISOR_POOL_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "a donation of other memory", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MemoryDonate(pool - HYPERVISOR_POOL_SIZE, HYPERVISOR_POOL_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "enable with another RAM size", HVC_INVALID_PARAMETER, Hypervisor::Stage2Enable(ram_size - HYPERVISOR_POOL_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "enable again", HVC_SUCCESS, Hypervisor::Stage2Enable(ram_size)) ? 0 : 1;
+
+            //  A live update may stage only VM 1's own RAM.
+
+            Hypervisor::UpdateLock lock;
+
+            if (!lock.Acquired())
+            {
+                context << "  FAIL: a live update is running\n";
+                return failures + 1;
+            }
+
+            failures += CheckResult(context, "update staged from the pool", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {pool, hypervisor_test::TEST_IMAGE_SIZE}).x0) ? 0 : 1;
+
+            return failures;
+        }
+
+        //  Runs hello.bin case 'case_number', a service so its gauge can be found and set: once the task is ready,
+        //      maps 'physical_page' at USER_VA in it and tells it to go, then waits for it to end.  Returns the
+        //      number of failures in getting that far.
+
+        uint32_t RunWithPageMapped(CLISessionContext &context, uint32_t case_number, uint64_t physical_page, const char *name)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+            minstd::fixed_string<MAX_TASK_NAME_LENGTH> task_name(name);
+
+            auto forked = context.task_manager_.ForkServiceTask(binary, case_number | (USER_VA << 8), task::TaskDefinition{task_name});
+
+            if (forked.Failed())
+            {
+                context << minstd::format(buffer, "  FAIL: ForkServiceTask({}) -- {}\n", name, task::ErrorMessage(forked.ResultCode()));
+                return 1;
+            }
+
+            uint32_t process_id = 0;
+
+            {
+                auto task = context.task_manager_.FindTask(forked.Value());
+
+                if (task.has_value())
+                {
+                    process_id = static_cast<task::TaskImpl &>(*task).ProcessId();
+                }
+            }
+
+            system_stats::UserStatisticHandle gauge;
+            bool ready = false;
+
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && !ready; poll++)
+            {
+                const auto found = system_stats::FindUserStatistic(system_stats::GetSystemStatisticsDB(), process_id, "hello", "gauge");
+
+                if (found.Successful())
+                {
+                    gauge = *found;
+
+                    const auto value = gauge.Get();
+                    ready = value.Successful() && (*value == CASE_READY);
+                }
+
+                if (!ready)
+                {
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                }
+            }
+
+            bool mapped = false;
+
+            if (ready)
+            {
+                auto task = context.task_manager_.FindTask(forked.Value());
+                AddressSpace *space = task.has_value() ? static_cast<task::TaskImpl &>(*task).UserAddressSpace() : nullptr;
+
+                mapped = (space != nullptr) &&
+                         space->MapPages(USER_VA, physical_page, MemoryManager::DEFAULT_PAGE_SIZE,
+                                         Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false, false);
+
+                if (mapped)
+                {
+                    gauge.Visit([](const system_stats::UserStatistic &stat) { stat.SetValue(CASE_GO); });
+                }
+            }
+
+            //  Unless told to go, the task gives up after 10 s on its own.
+
+            {
+                auto task = context.task_manager_.FindTask(forked.Value());
+
+                if (task.has_value())
+                {
+                    task->Join();
+                }
+            }
+
+            if (!ready)
+            {
+                context << minstd::format(buffer, "  FAIL: hello.bin case {} never got ready\n", case_number);
+                return 1;
+            }
+
+            if (!mapped)
+            {
+                context << minstd::format(buffer, "  FAIL: could not map {:#x} into hello.bin case {}\n", physical_page, case_number);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  hello.bin case 16: a user task writing to a page stage-2 doesn't map is killed.
+
+        uint32_t CheckUserFault(CLISessionContext &context)
+        {
+            const int64_t faults_before = ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS);
+
+            if (RunWithPageMapped(context, 16, BLOCKED_PAGE, "stage2 fault") != 0)
+            {
+                return 1;
+            }
+
+            return CheckResult(context, "user tasks killed", faults_before + 1, ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS)) ? 0 : 1;
+        }
+
+        //  EL2's mediated test device (HYPERVISOR_MMIO_TEST_*), from EL1 and EL0.  Each refused or non-emulable
+        //      access prints a "HYP S2 FAULT ... reason=mediated" line.
+
+        constexpr uint64_t EL0_TEST_REGISTER = 0x20; //  what hello.bin case 17 writes
+        constexpr uint32_t EL0_TEST_VALUE = 0x17171717;
+        constexpr uint32_t TIMED_ACCESSES = 1000;
+
+        uint64_t MmioTestPage()
+        {
+            return MMUManager::Instance().HypervisorPoolPhysical() + HYPERVISOR_MMIO_TEST_OFFSET;
+        }
+
+        template <typename T>
+        volatile T &TestRegister(uint64_t offset)
+        {
+            return *reinterpret_cast<volatile T *>(PhysicalToKernelVirtualAddress(MmioTestPage() + offset));
+        }
+
+        //  A load pair is not emulable (ESR_EL2.ISV = 0), so EL2 injects an abort, which the probe path recovers.
+
+        bool PairLoadFaults(uint64_t offset)
+        {
+            const uint64_t daif = SaveAndDisableIRQs();
+
+            __device_probe_faulted = 0;
+            __device_probe_in_progress = 1;
+            asm volatile("dsb sy\n isb" ::: "memory");
+
+            uint64_t first;
+            uint64_t second;
+            asm volatile("ldp %0, %1, [%2]" : "=&r"(first), "=&r"(second) : "r"(&TestRegister<uint64_t>(offset)) : "memory");
+
+            const bool faulted = (__device_probe_faulted != 0);
+            __device_probe_in_progress = 0;
+
+            RestoreIRQs(daif);
+
+            return faulted;
+        }
+
+        uint32_t CheckMediatedAccesses(CLISessionContext &context)
+        {
+            uint32_t failures = 0;
+
+            TestRegister<uint64_t>(0) = 0x0807060504030201;
+
+            failures += CheckResult(context, "64-bit echo", static_cast<int64_t>(0x0807060504030201), static_cast<int64_t>(TestRegister<uint64_t>(0))) ? 0 : 1;
+            failures += CheckResult(context, "32-bit read", 0x08070605, TestRegister<uint32_t>(4)) ? 0 : 1;
+            failures += CheckResult(context, "16-bit read", 0x0403, TestRegister<uint16_t>(2)) ? 0 : 1;
+            failures += CheckResult(context, "8-bit read", 0x08, TestRegister<uint8_t>(7)) ? 0 : 1;
+
+            TestRegister<uint8_t>(8) = 0x80;
+            TestRegister<uint16_t>(10) = 0x8000;
+            TestRegister<uint32_t>(12) = 0x80000000;
+
+            const int64_t byte_64 = TestRegister<int8_t>(8);
+            const int32_t byte_32 = TestRegister<int8_t>(8);
+            const int64_t half_64 = TestRegister<int16_t>(10);
+            const int64_t word_64 = TestRegister<int32_t>(12);
+
+            failures += CheckResult(context, "sign-extended byte into an X register", -0x80, byte_64) ? 0 : 1;
+            failures += CheckResult(context, "sign-extended byte into a W register", -0x80, byte_32) ? 0 : 1;
+            failures += CheckResult(context, "sign-extended halfword", -0x8000, half_64) ? 0 : 1;
+            failures += CheckResult(context, "sign-extended word", -0x80000000ll, word_64) ? 0 : 1;
+            failures += CheckResult(context, "zero-extended byte", 0x80, TestRegister<uint8_t>(8)) ? 0 : 1;
+
+            TestRegister<uint32_t>(16) = 0x12345678;
+            TestRegister<uint32_t>(16) = 0; //  a store from wzr
+
+            failures += CheckResult(context, "store of zero", 0, TestRegister<uint32_t>(16)) ? 0 : 1;
+
+            if (!stage2_test::ReadFaults(MmioTestPage() + HYPERVISOR_MMIO_TEST_SIZE))
+            {
+                context << "  FAIL: a read past the test device's registers was not refused\n";
+                failures++;
+            }
+
+            if (!PairLoadFaults(0))
+            {
+                context << "  FAIL: a load pair from the test device did not fault\n";
+                failures++;
+            }
+
+            //  EL2's own access faults; that comes back here as an abort rather than parking the core.
+
+            if (!stage2_test::ReadFaults(MmioTestPage() + HYPERVISOR_MMIO_TEST_DEVICE_FAULT))
+            {
+                context << "  FAIL: a device fault during EL2's access was not passed back\n";
+                failures++;
+            }
+
+            return failures;
+        }
+
+        //  Nanoseconds per mediated access, timed over TIMED_ACCESSES reads of the test device.
+
+        int64_t ReportTrapCost(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            volatile uint32_t &test_register = TestRegister<uint32_t>(0);
+            uint32_t sum = 0;
+
+            const uint64_t daif = SaveAndDisableIRQs();
+            const auto start = PhysicalTimer::Now();
+
+            for (uint32_t i = 0; i < TIMED_ACCESSES; i++)
+            {
+                sum += test_register;
+            }
+
+            const auto elapsed = PhysicalTimer::Now() - start;
+            RestoreIRQs(daif);
+
+            asm volatile("" : : "r"(sum));
+
+            const int64_t each_ns = minstd::chrono::duration_cast<minstd::chrono::nanoseconds>(elapsed).count() / TIMED_ACCESSES;
+
+            context << minstd::format(buffer, "  mediated access: {} ns each, over {} reads\n", each_ns, TIMED_ACCESSES);
+
+            return each_ns;
+        }
+
+        //  The SD controller is mediated: its registers past 0xFF are refused, and every PIO read of the data port
+        //      traps.  Times raw block reads, below the filesystem's cache, so the cost can be weighed (plan D4).
+
+        constexpr uint32_t SD_READ_BLOCKS = 2048;
+        constexpr uint32_t SD_READ_CHUNK_BLOCKS = 64;
+        constexpr uint32_t SD_BLOCK_SIZE = 512;
+        constexpr uint32_t SD_DATA_READS_PER_BLOCK = SD_BLOCK_SIZE / sizeof(uint32_t);
+        constexpr uint64_t SDHCI_REGISTERS_SIZE = 0x100;
+
+        uint32_t CheckSdController(CLISessionContext &context, int64_t trap_ns)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            uint32_t failures = 0;
+
+            const uint64_t controller = KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(GetPlatformInfo().GetEMMCBase()));
+
+            if (!ReadFaults(controller + SDHCI_REGISTERS_SIZE))
+            {
+                context << "  FAIL: a read past the SD controller's registers was not refused\n";
+                failures++;
+            }
+
+            constexpr size_t CHUNK_BYTES = SD_READ_CHUNK_BLOCKS * SD_BLOCK_SIZE;
+
+            uint8_t *chunk = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(CHUNK_BYTES, 64));
+
+            if (chunk == nullptr)
+            {
+                context << "  FAIL: no memory for the SD read buffer\n";
+                return failures + 1;
+            }
+
+            ExternalMassMediaController &sd_card = GetExternalMassMediaController();
+
+            const auto start = PhysicalTimer::Now();
+
+            for (uint32_t block = 0; block < SD_READ_BLOCKS; block += SD_READ_CHUNK_BLOCKS)
+            {
+                const auto read = sd_card.ReadFromBlock(chunk, block, SD_READ_CHUNK_BLOCKS);
+
+                if (read.Failed() || (*read != SD_READ_CHUNK_BLOCKS))
+                {
+                    context << minstd::format(buffer, "  FAIL: SD read of blocks {}-{} failed\n", block, block + SD_READ_CHUNK_BLOCKS - 1);
+                    failures++;
+                    break;
+                }
+            }
+
+            const int64_t elapsed_us = minstd::chrono::duration_cast<minstd::chrono::microseconds>(PhysicalTimer::Now() - start).count();
+
+            __os_dynamic_heap_resource.deallocate(chunk, CHUNK_BYTES, 64);
+
+            if (elapsed_us > 0)
+            {
+                const int64_t kb_per_s = (static_cast<int64_t>(SD_READ_BLOCKS) * SD_BLOCK_SIZE * 1000000 / 1024) / elapsed_us;
+
+                context << minstd::format(buffer, "  SD read through EL2: {} KB/s, {} us per block; its {} data-port reads cost about {} us\n",
+                                          kb_per_s, elapsed_us / SD_READ_BLOCKS, SD_DATA_READS_PER_BLOCK,
+                                          (trap_ns * SD_DATA_READS_PER_BLOCK) / 1000);
+            }
+
+            return failures;
+        }
+
+        //  Stage-2 maps only the device pages the kernel uses (plan B4).  A DMA engine's page is blocked: a read
+        //      faults, or in audit mode passes through with a "HYP S2 AUDIT" line.  On the Pi 5 the PCIe root complex is
+        //      read-only once locked down.
+
+        uint64_t BlockedDmaPage()
+        {
+            switch (GetPlatformInfo().GetBoardType())
+            {
+            case RPIBoardType::RPI3:
+                return 0x3F007000;
+
+            case RPIBoardType::RPI4:
+                return 0xFE007000;
+
+            default:
+                return 0x1F00188000; //  RP1's DMA controller
+            }
+        }
+
+        //  Writes back what the register holds, so nothing changes if the write gets through.
+
+        bool RewriteFaults(uint64_t physical_address)
+        {
+            volatile uint32_t *address = reinterpret_cast<volatile uint32_t *>(PhysicalToKernelVirtualAddress(physical_address));
+
+            const uint64_t daif = SaveAndDisableIRQs();
+            const uint32_t value = *address;
+
+            __device_probe_faulted = 0;
+            __device_probe_in_progress = 1;
+            asm volatile("dsb sy\n isb" ::: "memory");
+
+            *address = value;
+            asm volatile("dsb sy" ::: "memory");
+
+            const bool faulted = (__device_probe_faulted != 0);
+            __device_probe_in_progress = 0;
+
+            RestoreIRQs(daif);
+
+            return faulted;
+        }
+
+        //  RP1's inbound window onto MIP0, which only RP1's bring-up writes.
+
+        constexpr uint64_t PI5_RC_BAR1_CONFIG_LO = 0x1000120000 + 0x402C;
+
+        uint32_t CheckAllowList(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            uint32_t failures = 0;
+
+            const bool audit = Hypervisor::Stage2AuditOn();
+
+            if (ReadFaults(BlockedDmaPage()) == audit)
+            {
+                context << minstd::format(buffer, "  FAIL: a read of the blocked DMA controller at {:#x} {}\n", BlockedDmaPage(),
+                                          audit ? "faulted in audit mode" : "returned data");
+                failures++;
+            }
+
+            if (!Hypervisor::LockedDown())
+            {
+                context << "  FAIL: stage-2 was not locked down at boot\n";
+                failures++;
+            }
+
+            failures += CheckResult(context, "audit mode after boot", HVC_INVALID_PARAMETER, Hypervisor::Stage2Audit()) ? 0 : 1;
+            failures += CheckResult(context, "a second lockdown", HVC_INVALID_PARAMETER, Hypervisor::Lockdown(0, 0)) ? 0 : 1;
+
+            if ((GetPlatformInfo().GetBoardType() == RPIBoardType::RPI5) && !RewriteFaults(PI5_RC_BAR1_CONFIG_LO))
+            {
+                context << "  FAIL: a write to the locked-down PCIe root complex got through\n";
+                failures++;
+            }
+
+            if (GetPlatformInfo().GetBoardType() == RPIBoardType::RPI5)
+            {
+                const RP1InterruptController &rp1 = GetRP1InterruptController();
+
+                context << minstd::format(buffer, "  RP1 MSI-X table, locked down: {:#x}, {} bytes\n", rp1.MSIXTablePhysical(), rp1.MSIXTableSize());
+            }
+
+            context << (audit ? "  stage-2 allow-list in AUDIT mode\n" : "  stage-2 allow-list enforced\n");
+
+            return failures;
+        }
+
+        //  hello.bin case 17 writes and reads back EL0_TEST_REGISTER, and must not be killed.
+
+        uint32_t CheckMediatedAccessFromEl0(CLISessionContext &context)
+        {
+            const int64_t faults_before = ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS);
+
+            TestRegister<uint32_t>(EL0_TEST_REGISTER) = 0;
+
+            if (RunWithPageMapped(context, 17, MmioTestPage(), "mediated access") != 0)
+            {
+                return 1;
+            }
+
+            uint32_t failures = 0;
+
+            failures += CheckResult(context, "user tasks killed", faults_before, ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS)) ? 0 : 1;
+            failures += CheckResult(context, "the test register hello.bin case 17 wrote", EL0_TEST_VALUE, TestRegister<uint32_t>(EL0_TEST_REGISTER)) ? 0 : 1;
+
+            return failures;
+        }
+    } // namespace stage2_test
+
+    void CLITestStage2Command::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace stage2_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest stage2: VM 1 stage-2\n";
+
+        uint32_t failures = 0;
+
+        for (uint32_t core = 0; core < GetPlatformInfo().GetNumberOfCores(); core++)
+        {
+            if (!Hypervisor::Stage2EnabledOnCore(core))
+            {
+                context << minstd::format(buffer, "  FAIL: stage-2 is off on core {}\n", core);
+                failures++;
+            }
+        }
+
+        failures += CheckReads(context);
+        failures += CheckVideoCoreMemory(context);
+        failures += CheckHypercalls(context);
+        failures += CheckUserFault(context);
+        failures += CheckMediatedAccesses(context);
+        failures += CheckMediatedAccessFromEl0(context);
+        failures += CheckSdController(context, ReportTrapCost(context));
+        failures += CheckAllowList(context);
+
+        if (failures == 0)
+        {
+            context << "PASS: stage2 test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: stage2 test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands

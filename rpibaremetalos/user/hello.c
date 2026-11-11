@@ -25,6 +25,9 @@
 //      13 -> the statistics system calls, run while a case 12 process (payload: its process id) waits (a service)
 //      14 -> an ordinary process: its statistics are private data, never registered
 //      15 -> sc_Sleep for payload milliseconds, timed with the system counter
+//      16 -> writes to payload, a page the kernel maps but stage-2 doesn't, once the kernel sets the gauge to 2
+//      17 -> writes and reads back offset 0x20 of payload, EL2's mediated test device, once the gauge is 2
+//                                                         -> killed by the abort EL2 injects (a service)
 
 
 #include <stdint.h>
@@ -86,6 +89,28 @@ static uint64_t CounterFrequency(void)
     uint64_t frequency;
     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
     return frequency;
+}
+
+//  Cases 16 and 17: sets the gauge to 1, then waits up to 10 s for the kernel to set it to 2.
+
+static int WaitForTheKernel(const char *timeout_message)
+{
+    UserGaugeSet(&hello_gauge, 1);
+
+    const uint64_t deadline = CounterTicks() + (10 * CounterFrequency());
+
+    while (UserStatisticGet(&hello_gauge) != 2)
+    {
+        if (CounterTicks() > deadline)
+        {
+            sc_Write(timeout_message);
+            return 0;
+        }
+
+        sc_Yield();
+    }
+
+    return 1;
 }
 
 //  1MB of stack, touched one page at a time from the top down: 256 demand faults.
@@ -482,6 +507,33 @@ int main(unsigned long arg)
             const uint64_t elapsed = CounterTicks() - start;
 
             sc_Write(elapsed >= requested_ticks ? "case 15: sleep OK\n" : "case 15: sleep returned early\n");
+            break;
+        }
+
+        case 16:
+        {
+            if (!WaitForTheKernel("case 16: TIMED OUT waiting for the kernel\n"))
+            {
+                return 0;
+            }
+
+            sc_Write("case 16: writing to a page stage-2 blocks\n");
+            *(volatile uint64_t *)payload = 0x16;
+            sc_Write("case 16: NOT KILLED\n");
+            break;
+        }
+
+        case 17:
+        {
+            if (!WaitForTheKernel("case 17: TIMED OUT waiting for the kernel\n"))
+            {
+                return 0;
+            }
+
+            volatile uint32_t *test_register = (volatile uint32_t *)(payload + 0x20);
+
+            *test_register = 0x17171717;
+            sc_Write((*test_register == 0x17171717) ? "case 17: mediated echo OK\n" : "case 17: mediated echo WRONG\n");
             break;
         }
 

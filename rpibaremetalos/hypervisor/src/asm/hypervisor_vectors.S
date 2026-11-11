@@ -2,9 +2,11 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//  VBAR_EL2 table.  Only a synchronous exception from AArch64 EL1 is expected (an hvc): it is dispatched and returns
-//      with every register restored from the frame, which the handler edits to return results.  Every other entry
-//      reports a fatal error and parks the core.  HCR_EL2.IMO/FMO/AMO are clear, so interrupts stay at EL1.
+//  VBAR_EL2 table.  Only a synchronous exception from a lower AArch64 EL is expected (an hvc, or a stage-2 abort): it
+//      is dispatched and returns with every register restored from the frame, which the handler edits to return
+//      results.  A synchronous exception at EL2 itself is recovered only when it is a device fault in
+//      hypervisor_device_access.S.  Every other entry reports a fatal error and parks the core.  HCR_EL2.IMO/FMO/AMO are clear, so
+//      interrupts stay at EL1.
 //
 //  The frame is a HypervisorFrame (hypervisor_hvc.h): x0-x30, then padding, on SP_EL2.
 
@@ -41,6 +43,13 @@
     b       HypervisorFatalEntry
 .endm
 
+.macro SYNC_CURRENT_VECTOR
+    .balign 0x80
+    sub     sp, sp, #FRAME_SIZE
+    stp     x0, x1, [sp, #0]
+    b       HypervisorSyncCurrentEntry
+.endm
+
 .macro SYNC_LOWER_VECTOR
     .balign 0x80
     sub     sp, sp, #FRAME_SIZE
@@ -57,7 +66,7 @@ __hyp_vectors:
     FATAL_VECTOR 1
     FATAL_VECTOR 2
     FATAL_VECTOR 3
-    FATAL_VECTOR 4      //  current EL, SP_EL2
+    SYNC_CURRENT_VECTOR //  current EL, SP_EL2: sync (4), IRQ, FIQ, SError
     FATAL_VECTOR 5
     FATAL_VECTOR 6
     FATAL_VECTOR 7
@@ -84,6 +93,15 @@ HypervisorFatalEntry:
     wfe
     b       1b
 
+//  Returns only to resume at HypDeviceAccessFaulted.
+
+HypervisorSyncCurrentEntry:
+    SAVE_X2_TO_X30
+
+    mov     x0, sp
+    bl      HypervisorHandleSyncCurrent
+    b       RestoreAndReturn
+
 //  Run to completion: nothing stays on SP_EL2 once this erets or enters the trampoline.
 
 HypervisorSyncLowerEntry:
@@ -93,6 +111,7 @@ HypervisorSyncLowerEntry:
     bl      HypervisorHandleSync
     cbnz    x0, ExitToTrampoline
 
+RestoreAndReturn:
     ldp     x0, x1, [sp, #0]
     ldp     x2, x3, [sp, #16]
     ldp     x4, x5, [sp, #32]

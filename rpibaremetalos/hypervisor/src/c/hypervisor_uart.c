@@ -4,6 +4,8 @@
 
 #include "hypervisor_uart.h"
 
+#include "hypervisor_internal.h"
+#include "hypervisor_memory.h"
 #include "hypervisor_support.h"
 
 #include "cpu_part_nums.h"
@@ -15,7 +17,8 @@
 #define BCM_GPFSEL1 0x04
 #define BCM_GPFSEL1_PIN14_15_MASK ((7u << 12) | (7u << 15))
 #define BCM_GPFSEL1_PIN14_15_ALT0 ((4u << 12) | (4u << 15))
-#define BCM_UART0_CLOCK_HZ 4000000u //  init_uart_clock in config.txt; QEMU ignores it
+#define BCM_UART0_DEFAULT_CLOCK_HZ 48000000u //  the firmware's, should the mailbox not answer
+#define MAILBOX_TIMEOUT_MS 100u
 
 #define RP1_WINDOW_BASE 0x1F00000000ul
 #define RP1_CLOCKS_BASE (RP1_WINDOW_BASE + 0x18000ul)
@@ -49,16 +52,6 @@
 
 #define CONSOLE_BAUD 115200u
 
-static inline uint32_t Read32(uint64_t address)
-{
-    return *(volatile uint32_t *)address;
-}
-
-static inline void Write32(uint64_t address, uint32_t value)
-{
-    *(volatile uint32_t *)address = value;
-}
-
 static uint64_t UartBase(uint32_t board)
 {
     switch (board)
@@ -77,13 +70,36 @@ static uint64_t UartBase(uint32_t board)
     }
 }
 
+//  In the image, not on the stack, so an answer arriving after the timeout lands here and nowhere else.  Below 1 GB,
+//      as the mailbox's bus addresses require.  In .data because the image may not have .bss.
+
+static uint32_t mailbox_message[HYP_MAILBOX_CLOCK_RATE_WORDS] __attribute__((aligned(16), section(".data")));
+
+//  The PL011's clock as the firmware left it: the kernel sets its own rate only later, and config.txt's
+//      init_uart_clock isn't reliably honoured.  The firmware's default if it doesn't answer within MAILBOX_TIMEOUT_MS.
+
+static uint32_t BCMUartClockHz(uint32_t board)
+{
+    HypMailboxClockRateRequest(mailbox_message, HYP_MAILBOX_CLOCK_UART);
+
+    uint32_t clock_hz = 0;
+
+    if (HypervisorMailboxExchange(HypervisorMailboxRegisters(board), (uint64_t)(uintptr_t)mailbox_message,
+                                  MAILBOX_TIMEOUT_MS))
+    {
+        clock_hz = HypMailboxClockRate(mailbox_message, HYP_MAILBOX_CLOCK_UART);
+    }
+
+    return (clock_hz != 0) ? clock_hz : BCM_UART0_DEFAULT_CLOCK_HZ;
+}
+
 //  Function select only.  The kernel's driver sets the RX pull-up when it re-initializes; EL2 only transmits.
 
 static void ConfigureBCMPins(uint64_t peripheral_base)
 {
     uint64_t gpfsel1 = peripheral_base + BCM_GPIO_OFFSET + BCM_GPFSEL1;
 
-    Write32(gpfsel1, (Read32(gpfsel1) & ~BCM_GPFSEL1_PIN14_15_MASK) | BCM_GPFSEL1_PIN14_15_ALT0);
+    HypWrite32(gpfsel1, (HypRead32(gpfsel1) & ~BCM_GPFSEL1_PIN14_15_MASK) | BCM_GPFSEL1_PIN14_15_ALT0);
 }
 
 //  The same pin and pad settings as the kernel's RPi5UART0 driver.
@@ -94,14 +110,14 @@ static void ConfigureRP1Pins(void)
     {
         uint64_t ctrl = RP1_GPIO_BASE + (uint64_t)pin * 8 + 4;
 
-        Write32(ctrl, (Read32(ctrl) & ~RP1_GPIO_CTRL_FUNCSEL_MASK) | RP1_FUNCSEL_UART0);
+        HypWrite32(ctrl, (HypRead32(ctrl) & ~RP1_GPIO_CTRL_FUNCSEL_MASK) | RP1_FUNCSEL_UART0);
     }
 
     uint64_t tx_pad = RP1_PADS_BASE + RP1_PADS_BANK0_OFFSET + 14 * 4;
     uint64_t rx_pad = RP1_PADS_BASE + RP1_PADS_BANK0_OFFSET + 15 * 4;
 
-    Write32(tx_pad, Read32(tx_pad) & ~(RP1_PAD_PULL_MASK | RP1_PAD_IN_ENABLE | RP1_PAD_OUT_DISABLE));
-    Write32(rx_pad, (Read32(rx_pad) & ~RP1_PAD_PULL_MASK) | RP1_PAD_PULL_UP | RP1_PAD_IN_ENABLE | RP1_PAD_OUT_DISABLE);
+    HypWrite32(tx_pad, HypRead32(tx_pad) & ~(RP1_PAD_PULL_MASK | RP1_PAD_IN_ENABLE | RP1_PAD_OUT_DISABLE));
+    HypWrite32(rx_pad, (HypRead32(rx_pad) & ~RP1_PAD_PULL_MASK) | RP1_PAD_PULL_UP | RP1_PAD_IN_ENABLE | RP1_PAD_OUT_DISABLE);
 }
 
 uint32_t HypUartInit(uint32_t board)
@@ -112,17 +128,17 @@ uint32_t HypUartInit(uint32_t board)
     {
     case RPI_BOARD_ENUM_RPI3:
         ConfigureBCMPins(RPI3_PERIPHERAL_BASE);
-        clock_hz = BCM_UART0_CLOCK_HZ;
+        clock_hz = BCMUartClockHz(board);
         break;
 
     case RPI_BOARD_ENUM_RPI4:
         ConfigureBCMPins(RPI4_PERIPHERAL_BASE);
-        clock_hz = BCM_UART0_CLOCK_HZ;
+        clock_hz = BCMUartClockHz(board);
         break;
 
     case RPI_BOARD_ENUM_RPI5:
-        clock_hz = HypRP1ClockRateHz(Read32(RP1_CLOCKS_BASE + RP1_CLK_UART0_CTRL),
-                                     Read32(RP1_CLOCKS_BASE + RP1_CLK_UART0_DIV_INT));
+        clock_hz = HypRP1ClockRateHz(HypRead32(RP1_CLOCKS_BASE + RP1_CLK_UART0_CTRL),
+                                     HypRead32(RP1_CLOCKS_BASE + RP1_CLK_UART0_DIV_INT));
         if (clock_hz == 0)
         {
             return 0;
@@ -140,18 +156,18 @@ uint32_t HypUartInit(uint32_t board)
 
     HypPL011Divisors(clock_hz, CONSOLE_BAUD, &ibrd, &fbrd);
 
-    Write32(base + PL011_CR, 0);
+    HypWrite32(base + PL011_CR, 0);
 
-    while (Read32(base + PL011_FR) & PL011_FR_BUSY)
+    while (HypRead32(base + PL011_FR) & PL011_FR_BUSY)
     {
     }
 
-    Write32(base + PL011_ICR, PL011_ICR_ALL);
-    Write32(base + PL011_IBRD, ibrd);
-    Write32(base + PL011_FBRD, fbrd);
-    Write32(base + PL011_LCRH, PL011_LCRH_8N1_FIFO);
-    Write32(base + PL011_IMSC, 0);
-    Write32(base + PL011_CR, PL011_CR_ENABLE_TX_RX);
+    HypWrite32(base + PL011_ICR, PL011_ICR_ALL);
+    HypWrite32(base + PL011_IBRD, ibrd);
+    HypWrite32(base + PL011_FBRD, fbrd);
+    HypWrite32(base + PL011_LCRH, PL011_LCRH_8N1_FIFO);
+    HypWrite32(base + PL011_IMSC, 0);
+    HypWrite32(base + PL011_CR, PL011_CR_ENABLE_TX_RX);
 
     return 1;
 }
@@ -170,11 +186,11 @@ void HypUartPutc(uint32_t board, char c)
         HypUartPutc(board, '\r');
     }
 
-    while (Read32(base + PL011_FR) & PL011_FR_TXFF)
+    while (HypRead32(base + PL011_FR) & PL011_FR_TXFF)
     {
     }
 
-    Write32(base + PL011_DR, (uint32_t)(uint8_t)c);
+    HypWrite32(base + PL011_DR, (uint32_t)(uint8_t)c);
 }
 
 void HypUartPuts(uint32_t board, const char *s)
@@ -210,7 +226,7 @@ void HypUartDrain(uint32_t board)
         return;
     }
 
-    while (Read32(base + PL011_FR) & PL011_FR_BUSY)
+    while (HypRead32(base + PL011_FR) & PL011_FR_BUSY)
     {
     }
 }

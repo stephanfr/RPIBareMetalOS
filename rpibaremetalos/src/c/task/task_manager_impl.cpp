@@ -17,6 +17,7 @@
 #include "asm_utility.h"
 
 #include "platform/exception_manager.h"
+#include "platform/hypervisor.h"
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
@@ -152,6 +153,12 @@ namespace task
         {
             TaskImpl &task = task::TaskManagerImpl::Instance().CurrentTask();
 
+            if (!Hypervisor::Stage2EnabledOnCore(GetCoreID()))
+            {
+                LogError("Stage-2 is off on core %d: user task %s not started\n", GetCoreID(), task.Name().c_str());
+                task.Exit();
+            }
+
             auto err = task.MoveToUserSpace(task.UserArg());
 
             if (Failed(err))
@@ -164,6 +171,12 @@ namespace task
         extern "C" void SecondaryCoreMain()
         {
             uint32_t core_id = GetCoreID();
+
+            if (Hypervisor::EnableStage2OnThisCore() != HVC_SUCCESS)
+            {
+                LogFatal("Core %d could not enable stage-2\n", core_id);
+                ParkCore();
+            }
 
             auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
             

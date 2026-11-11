@@ -16,6 +16,13 @@
 
 #define MPIDR_MT (1ul << 24)
 
+#define MAILBOX_TAG_GET_CLOCK_RATE 0x00030002u
+#define MAILBOX_CLOCK_RATE_VALUE_BYTES 8u //  clock id, then rate
+#define MAILBOX_TAG_GET_VC_MEMORY 0x00010006u
+#define MAILBOX_VC_MEMORY_VALUE_BYTES 8u //  base, then size
+#define MAILBOX_RESPONSE_SUCCESS 0x80000000u
+#define MAILBOX_TAG_RESPONSE 0x80000000u
+
 uint32_t HypFormatHex(char *buffer, uint64_t value)
 {
     static const char digits[] = "0123456789ABCDEF";
@@ -88,6 +95,61 @@ uint32_t HypRP1ClockRateHz(uint32_t ctrl, uint32_t div_int)
     default:
         return 0;
     }
+}
+
+void HypMailboxClockRateRequest(uint32_t *message, uint32_t clock_id)
+{
+    message[0] = HYP_MAILBOX_CLOCK_RATE_WORDS * sizeof(uint32_t);
+    message[1] = 0; //  a request
+    message[2] = MAILBOX_TAG_GET_CLOCK_RATE;
+    message[3] = MAILBOX_CLOCK_RATE_VALUE_BYTES;
+    message[4] = 0;
+    message[5] = clock_id;
+    message[6] = 0;
+    message[7] = 0; //  end tag
+}
+
+uint32_t HypMailboxClockRate(const uint32_t *message, uint32_t clock_id)
+{
+    const uint32_t tag_status = message[4];
+
+    if ((message[1] != MAILBOX_RESPONSE_SUCCESS) || (message[2] != MAILBOX_TAG_GET_CLOCK_RATE) ||
+        ((tag_status & MAILBOX_TAG_RESPONSE) == 0) ||
+        ((tag_status & ~MAILBOX_TAG_RESPONSE) < MAILBOX_CLOCK_RATE_VALUE_BYTES) || (message[5] != clock_id))
+    {
+        return 0;
+    }
+
+    return message[6];
+}
+
+void HypMailboxVideoCoreMemoryRequest(uint32_t *message)
+{
+    message[0] = HYP_MAILBOX_VC_MEMORY_WORDS * sizeof(uint32_t);
+    message[1] = 0; //  a request
+    message[2] = MAILBOX_TAG_GET_VC_MEMORY;
+    message[3] = MAILBOX_VC_MEMORY_VALUE_BYTES;
+    message[4] = 0;
+    message[5] = 0;
+    message[6] = 0;
+    message[7] = 0; //  end tag
+}
+
+uint32_t HypMailboxVideoCoreMemory(const uint32_t *message, uint32_t *base, uint32_t *size)
+{
+    const uint32_t tag_status = message[4];
+
+    if ((message[1] != MAILBOX_RESPONSE_SUCCESS) || (message[2] != MAILBOX_TAG_GET_VC_MEMORY) ||
+        ((tag_status & MAILBOX_TAG_RESPONSE) == 0) ||
+        ((tag_status & ~MAILBOX_TAG_RESPONSE) < MAILBOX_VC_MEMORY_VALUE_BYTES))
+    {
+        return 0;
+    }
+
+    *base = message[5];
+    *size = message[6];
+
+    return 1;
 }
 
 uint32_t HypCoreIndex(uint64_t mpidr)

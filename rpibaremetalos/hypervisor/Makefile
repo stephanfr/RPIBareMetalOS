@@ -32,9 +32,20 @@ BUILD_DIRS := $(BUILD_ROOT)/asm $(BUILD_ROOT)/c $(IMAGE_DIR)
 
 HYP_EXTRA_FLAGS ?=
 
-#  Rewritten only when HYP_EXTRA_FLAGS changes, so switching between a normal and a test build recompiles.
+#  Live update with stage-2 on takes unsigned images only when this is 1.  Every build sets it until signed images
+#      exist (STAGE2_EL0_DRIVERS_PLAN.md D7, part D); a build that must not be replaceable passes 0.
+HYP_ALLOW_UNSIGNED_UPDATE ?= 1
+
+#  Separate from HYP_EXTRA_FLAGS, which a command-line assignment replaces whole.
+HYP_DEFINES := $(HYP_EXTRA_FLAGS)
+
+ifeq ($(HYP_ALLOW_UNSIGNED_UPDATE),1)
+    HYP_DEFINES += -DHYP_ALLOW_UNSIGNED_UPDATE
+endif
+
+#  Rewritten only when the defines change, so switching between a normal and a test build recompiles.
 FLAGS_STAMP := $(BUILD_ROOT)/hyp_extra_flags
-$(shell mkdir -p $(BUILD_ROOT); echo '$(HYP_EXTRA_FLAGS)' | cmp -s - $(FLAGS_STAMP) || echo '$(HYP_EXTRA_FLAGS)' > $(FLAGS_STAMP))
+$(shell mkdir -p $(BUILD_ROOT); echo '$(HYP_DEFINES)' | cmp -s - $(FLAGS_STAMP) || echo '$(HYP_DEFINES)' > $(FLAGS_STAMP))
 
 HYP_INCLUDES := -Iinclude -I../include $(INCLUDE_DIRS)
 
@@ -60,13 +71,13 @@ $(BUILD_DIRS):
 	@mkdir -p $@
 
 $(BUILD_ROOT)/asm/%.o: $(SRC_ROOT)/asm/%.S $(FLAGS_STAMP) | $(BUILD_DIRS)
-	$(CC) -x assembler-with-cpp $(HYP_INCLUDES) $(ASM_FLAGS) $(HYP_EXTRA_FLAGS) -MMD -MP -g3 -c $< -o $@
+	$(CC) -x assembler-with-cpp $(HYP_INCLUDES) $(ASM_FLAGS) $(HYP_DEFINES) -MMD -MP -g3 -c $< -o $@
 
 $(BUILD_ROOT)/c/%.o: $(SRC_ROOT)/c/%.c $(FLAGS_STAMP) | $(BUILD_DIRS)
-	$(CC) $(HYP_INCLUDES) $(HYP_C_FLAGS) $(HYP_EXTRA_FLAGS) -MMD -MP -g3 -c $< -o $@
+	$(CC) $(HYP_INCLUDES) $(HYP_C_FLAGS) $(HYP_DEFINES) -MMD -MP -g3 -c $< -o $@
 
 $(LINKER_SCRIPT): $(LINKER_SCRIPT_TEMPLATE) ../include/hypervisor_config.h $(FLAGS_STAMP) | $(BUILD_DIRS)
-	$(CPREPROCESSOR) -P -Iinclude -I../include $(HYP_EXTRA_FLAGS) $< -o $@
+	$(CPREPROCESSOR) -P -Iinclude -I../include $(HYP_DEFINES) $< -o $@
 
 $(ELF): $(OBJ) $(LINKER_SCRIPT) | $(BUILD_DIRS)
 	$(LD) $(HYPERVISOR_LD_FLAGS) -T $(LINKER_SCRIPT) -o $@ $(OBJ)

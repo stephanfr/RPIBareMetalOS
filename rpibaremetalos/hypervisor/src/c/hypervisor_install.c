@@ -9,9 +9,6 @@
 
 #include "cpu_part_nums.h"
 
-#define HCR_RW (1UL << 31)  //  EL1 is AArch64
-#define HCR_SWIO (1UL << 1) //  set/way invalidation override; hardwired on the Pi 3
-
 #define CPTR_EL2_NO_TRAPS 0x33FF //  RES1 bits only: no FP/SIMD or other traps
 
 #define CNTHCTL_EL1PCTEN (1UL << 0) //  EL1/EL0 may read CNTPCT
@@ -59,7 +56,8 @@ static void PrintLiveUpdate(uint32_t board, uint32_t previous_version)
 }
 
 //  Every core, every entry into start.S, and every core in a live update: idempotent per core.  Never touches *_EL1,
-//      ELR_EL2 or SPSR_EL2.  A live install leaves the UART alone: the kernel's driver owns its configuration.
+//      ELR_EL2 or SPSR_EL2.  A live install leaves the UART alone: the kernel's driver owns its configuration, and it
+//      keeps stage-2 on where it was on.
 
 uint64_t HypervisorInstallCore(uint64_t board, uint64_t core, uint64_t mode)
 {
@@ -74,7 +72,6 @@ uint64_t HypervisorInstallCore(uint64_t board, uint64_t core, uint64_t mode)
     WRITE_SYSREG(VPIDR_EL2, READ_SYSREG(MIDR_EL1));
     WRITE_SYSREG(VMPIDR_EL2, READ_SYSREG(MPIDR_EL1));
 
-    WRITE_SYSREG(HCR_EL2, HCR_RW | HCR_SWIO);
     WRITE_SYSREG(CPTR_EL2, CPTR_EL2_NO_TRAPS);
     WRITE_SYSREG(HSTR_EL2, 0);
 
@@ -114,6 +111,19 @@ uint64_t HypervisorInstallCore(uint64_t board, uint64_t core, uint64_t mode)
         }
 
         DSB_SY();
+    }
+
+    //  HCR_EL2 is written once, with its final value.  A live install never clears VM, even briefly: EL1&0 entries
+    //      cached meanwhile would skip stage-2.
+
+    if (mode == HYPERVISOR_INSTALL_COLD)
+    {
+        WRITE_SYSREG(VTTBR_EL2, 0);
+        WRITE_SYSREG(HCR_EL2, HCR_EL2_BASE);
+    }
+    else
+    {
+        HypervisorStage2Reapply(HYP_STATE, (uint32_t)core);
     }
 
     ISB();

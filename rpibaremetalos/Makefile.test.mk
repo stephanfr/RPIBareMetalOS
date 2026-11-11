@@ -33,7 +33,9 @@ CPP_TEST_SRC := $(foreach sdir,$(CPP_TEST_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 #  Pure-logic hypervisor sources: no EL2 code, so they compile natively for the hypervisor_*_test.cpp tests.
 HYP_SRC_ROOT := hypervisor/src/c
 HYP_C_SRC    := $(HYP_SRC_ROOT)/hypervisor_state.c $(HYP_SRC_ROOT)/hypervisor_support.c $(HYP_SRC_ROOT)/hypervisor_hvc.c \
-                $(HYP_SRC_ROOT)/hypervisor_image.c
+                $(HYP_SRC_ROOT)/hypervisor_image.c $(HYP_SRC_ROOT)/stage2.c \
+                $(HYP_SRC_ROOT)/hypervisor_memory.c $(HYP_SRC_ROOT)/hypervisor_abort.c $(HYP_SRC_ROOT)/hypervisor_mmio.c \
+                $(HYP_SRC_ROOT)/hypervisor_mailbox.c
 
 TEST_BUILD_DIRS := $(patsubst $(SRC_ROOT)/c/%,$(TEST_BUILD_ROOT)/c/%,$(sort $(patsubst %/,%,$(dir $(CPP_SRC))) $(patsubst %/,%,$(dir $(C_SRC))) ))
 TEST_BUILD_DIRS += $(patsubst $(CPP_TEST_SRC_ROOT)%,$(TEST_BUILD_ROOT)%, $(CPP_TEST_SRC_DIRS))

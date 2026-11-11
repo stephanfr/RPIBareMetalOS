@@ -20,6 +20,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "stage2.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -46,6 +48,23 @@ extern "C"
         uint32_t update_copy_done;         //  writer: PREPARE, the committer's trampoline
         uint32_t update_import_done;       //  writer: PREPARE, the committer's trampoline
         uint32_t update_arrived[MAX_CORES]; //  writer of element n: core n.  1 = in JOIN, 2 = in the trampoline
+
+        //  Layout 2: VM 1's stage-2.  Writer: core 0, in MEMORY_DONATE and the first STAGE2_ENABLE, except where noted.
+
+        uint32_t stage2_built;              //  written last: the tables, ram_size, vtcr and vttbr are complete
+        uint32_t stage2_enabled[MAX_CORES]; //  writer of element n: core n
+        uint64_t ram_size;
+        uint64_t vtcr;
+        uint64_t vttbr;
+        Stage2Tables stage2; //  stage2.pool_pages != 0 once the kernel has donated its pool
+
+        //  Layout 3: device mediation.  The test registers are written by whichever core traps; nothing orders two
+        //      cores' accesses.  The rest: core 0, in STAGE2_AUDIT and LOCKDOWN, except where noted.
+
+        uint8_t mmio_test_registers[HYPERVISOR_MMIO_TEST_SIZE];
+        uint32_t stage2_audit;  //  blocked pages pass through, reported; settable only before the tables are built
+        uint32_t audit_reports; //  writer: whichever core reports.  Stops counting at HYPERVISOR_AUDIT_REPORTS_MAX
+        uint32_t locked_down;
     } HypervisorState;
 
 #ifdef __cplusplus
@@ -54,7 +73,14 @@ extern "C"
 #define HYP_STATE_STATIC_ASSERT _Static_assert
 #endif
 
+//  Each layout ended where the next one's fields begin.
+
+#define HYPERVISOR_STATE_LAYOUT_1_SIZE offsetof(HypervisorState, stage2_built)
+#define HYPERVISOR_STATE_LAYOUT_2_SIZE offsetof(HypervisorState, mmio_test_registers)
+
     HYP_STATE_STATIC_ASSERT(sizeof(HypervisorState) <= HYPERVISOR_STATE_SIZE, "HypervisorState outgrew its page");
+    HYP_STATE_STATIC_ASSERT(HYPERVISOR_STATE_LAYOUT_1_SIZE == 0x70, "layout 1's fields moved");
+    HYP_STATE_STATIC_ASSERT(HYPERVISOR_STATE_LAYOUT_2_SIZE == 0xF0, "layout 2's fields moved");
     HYP_STATE_STATIC_ASSERT(offsetof(HypervisorState, board) == HYP_STATE_BOARD, "trampoline offset");
     HYP_STATE_STATIC_ASSERT(offsetof(HypervisorState, update_staged_image_size) == HYP_STATE_UPDATE_STAGED_IMAGE_SIZE,
                             "trampoline offset");

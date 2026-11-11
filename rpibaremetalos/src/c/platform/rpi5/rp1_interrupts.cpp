@@ -368,8 +368,9 @@ bool RP1InterruptController::ProgramMSIX()
         table_bar_bus = assigned;
     }
 
-    volatile uint32_t *table = reinterpret_cast<volatile uint32_t *>(
-        PhysicalToKernelVirtualAddress(RP1::WINDOW_BASE + (table_bar_bus - peripheral_bus) + table_offset));
+    const uint64_t table_physical = RP1::WINDOW_BASE + (table_bar_bus - peripheral_bus) + table_offset;
+
+    volatile uint32_t *table = reinterpret_cast<volatile uint32_t *>(PhysicalToKernelVirtualAddress(table_physical));
 
     //  Function-masked while the table is written, so no vector fires half programmed.
 
@@ -399,6 +400,9 @@ bool RP1InterruptController::ProgramMSIX()
     WriteEndpointConfig(CFG_COMMAND, WithCommandBits(ReadEndpointConfig(CFG_COMMAND), COMMAND_MEMORY | COMMAND_BUS_MASTER));
 
     WriteEndpointConfig(capability, (header & 0xFFFF) | (((control | MSIX_CONTROL_ENABLE) & ~MSIX_CONTROL_FUNCTION_MASK) << 16));
+
+    msix_table_physical_ = table_physical;
+    msix_table_size_ = 16 * vectors;
 
     return true;
 }

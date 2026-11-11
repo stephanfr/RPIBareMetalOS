@@ -6,12 +6,18 @@
 
 #include "heaps.h"
 
+#include <fixed_string>
+#include <string.h>
+
 #include "platform/hypervisor.h"
+#include "platform/kernel_command_line.h"
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
+#include "platform/rpi5/rp1_interrupts.h"
 
 #include "devices/character_io.h"
 #include "devices/power_manager.h"
+#include "devices/video/video_framebuffer.h"
 #include "devices/std_streams.h"
 #include "devices/scheduler_clock.h"
 
@@ -51,6 +57,32 @@ extern "C" void kernel_main()
     static const char hvc_hello[] = "HYP console: hello from EL1\n";
     Hypervisor::ConsoleWrite(hvc_hello, sizeof(hvc_hello) - 1);
 
+    //  stage2=audit on the command line, for bringing up a board: blocked device pages pass through, reported.
+
+    minstd::fixed_string<MAX_KERNEL_COMMAND_LINE_VALUE> stage2_setting;
+
+    if (KernelCommandLine::FindSetting("stage2", stage2_setting) && (strncmp(stage2_setting.c_str(), "audit", 6) == 0))
+    {
+        const int64_t audit_result = Hypervisor::Stage2Audit();
+
+        printf((audit_result == HVC_SUCCESS) ? "Stage-2 AUDIT mode: blocked devices pass through, reported\n"
+                                             : "Stage-2 audit mode refused: %d\n",
+               static_cast<int>(audit_result));
+    }
+
+    //  Before the task manager starts, so no core runs a task, at EL0 or EL1, without stage-2.
+
+    const int64_t stage2_result =
+        Hypervisor::StartStage2(VideoFrameBuffer::AllocatedPhysicalBase(), VideoFrameBuffer::AllocatedSizeInBytes());
+
+    if (stage2_result != HVC_SUCCESS)
+    {
+        printf("Stage-2 protection could not be enabled: %d\n", static_cast<int>(stage2_result));
+        PowerManager().Halt();
+    }
+
+    printf("Stage-2 protection enabled\n");
+
     SetLogLevel(LogLevel::ERROR);
 
     //  Setup the ISRs
@@ -80,6 +112,21 @@ extern "C" void kernel_main()
     }
 
     printf("ISRs started\n");
+
+    //  The interrupt controllers, RP1's included, are set up: what routes RP1's DMA and MSIs can go read-only.  A
+    //      failure leaves them writable, which test stage2 reports, rather than stopping the boot.
+
+    const RP1InterruptController &rp1 = GetRP1InterruptController();
+    const int64_t lockdown_result = Hypervisor::Lockdown(rp1.MSIXTablePhysical(), rp1.MSIXTableSize());
+
+    if (lockdown_result == HVC_SUCCESS)
+    {
+        printf("Stage-2 lockdown done\n");
+    }
+    else
+    {
+        printf("Stage-2 lockdown failed: %d\n", static_cast<int>(lockdown_result));
+    }
 
     //  Initialize the task manager
 
