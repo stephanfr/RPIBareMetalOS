@@ -9,11 +9,9 @@
 #include "isr/isr.h"
 #include "platform/exception_manager.h"
 #include "platform/platform_info.h"
-#include "task/io_doorbell.h"
 #include "task/tasks.h"
 
 #include <cstdint>
-#include <lockfree/spsc_queue>
 
 typedef enum class StandardPL011Registers : uintptr_t
 {
@@ -167,68 +165,13 @@ protected:
     }
 };
 
-//  Console input statistics, kept by whichever PL011 has its RX interrupt enabled.
-
-class ConsoleRxStatistics
-{
-public:
-    static void Interrupt();
-    static void Byte();
-    static void Dropped();
-    static void Error();
-    static void WakeLatency(uint64_t ticks);
-};
-
-//  Polled until EnableRxInterrupt(), then interrupt driven: the ISR drains the RX FIFO into a ring and rings a
-//      doorbell, and getc() blocks on the doorbell while the ring is empty.  One reader task at a time.
+//  Polled.  As the console, the kernel only sets it up: the console driver at EL0 runs it (devices/console_proxy.h).
 
 template<class RegLayout>
 class PL011UARTBase : public UARTBase
 {
 private:
-    static constexpr uint32_t RX_RING_SIZE = 256;
-
-    static constexpr uint32_t FR_RXFE      = 1u << 4;
-    static constexpr uint32_t DR_ERRORS    = 0xF00;     //  framing, parity, break, overrun
-    static constexpr uint32_t IFLS_RX_MASK = 7u << 3;   //  0 = interrupt at 1/8 full
-    static constexpr uint32_t INT_RX       = 1u << 4;
-    static constexpr uint32_t INT_RT       = 1u << 6;   //  receive timeout: data below the trigger level
-    static constexpr uint32_t INT_OE       = 1u << 10;
-
-    class RxISR final : public InterruptServiceRoutine
-    {
-    public:
-        explicit RxISR(PL011UARTBase &uart)
-            : uart_(uart)
-        {
-        }
-
-        constexpr Interrupts InterruptType() const noexcept override
-        {
-            return interrupt_;
-        }
-
-        constexpr InterruptServiceRoutineType ISRType() const noexcept override
-        {
-            return InterruptServiceRoutineType::DEVICE;
-        }
-
-        const char *Name() const noexcept override
-        {
-            return "PL011 RX ISR";
-        }
-
-        void HandleInterrupt() override
-        {
-            uart_.HandleRxInterrupt();
-        }
-
-    private:
-        friend class PL011UARTBase;
-
-        PL011UARTBase &uart_;
-        Interrupts interrupt_ = Interrupts::NO_SUCH_INTERRUPT;
-    };
+    static constexpr uint32_t FR_RXFE = 1u << 4;
 
 public:
     PL011UARTBase(void *base_address, BaudRates baud_rate, uint32_t clock_hz)
@@ -247,116 +190,22 @@ public:
         initialized_ = true;
     }
 
-    //  Once, before any task reads.  The ISR runs on core 0; the reader may be on any core.
+    //  The byte received, untranslated, if one is waiting.
 
-    bool EnableRxInterrupt(Interrupts interrupt)
+    bool TryGetc(unsigned int &c)
     {
-        if (rx_interrupt_enabled_ || (rx_ring_.capacity() == 0))
+        if ((ReadRegister(FR_REG_OFFSET) & FR_RXFE) != 0)
         {
             return false;
         }
 
-        rx_isr_.interrupt_ = interrupt;
-
-        WriteRegister(IFLS_REG_OFFSET, ReadRegister(IFLS_REG_OFFSET) & ~IFLS_RX_MASK);
-
-        if (!GetExceptionManager().AddInterruptServiceRoutine(&rx_isr_, CoreList(CoreList::CoreID::CORE0)))
-        {
-            return false;
-        }
-
-        //  Characters already waiting may have no interrupt left to announce them.  Anything arriving after the
-        //      drain raises one once unmasked.
-
-        DrainRxFifo();
-
-        rx_interrupt_enabled_ = true;
-
-        WriteRegister(IMSC_REG_OFFSET, ReadRegister(IMSC_REG_OFFSET) | INT_RX | INT_RT | INT_OE);
+        c = ReadRegister(DR_REG_OFFSET) & 0xFF;
 
         return true;
     }
 
-    unsigned int getc()
-    {
-        if (!rx_interrupt_enabled_)
-        {
-            return UARTBase::getc();
-        }
-
-        uint8_t c;
-
-        while (!rx_ring_.pop_front(c))
-        {
-            rx_doorbell_.Wait(task::WaitReason::DEVICE);
-
-            if (rx_doorbell_.LastWakeLatencyTicks() != 0)
-            {
-                ConsoleRxStatistics::WakeLatency(rx_doorbell_.LastWakeLatencyTicks());
-            }
-        }
-
-        return c == '\r' ? '\n' : c;
-    }
-
 protected:
     uint32_t uart_clock_hz_;
-
-private:
-    static_allocator<uint8_t> rx_allocator_;
-    minstd::spsc_queue<uint8_t> rx_ring_{rx_allocator_, RX_RING_SIZE};
-
-    task::IODoorbell rx_doorbell_;
-    RxISR rx_isr_{*this};
-
-    bool rx_interrupt_enabled_ = false;
-
-    //  The ISR is the only producer once rx_interrupt_enabled_ is set.
-
-    void DrainRxFifo()
-    {
-        while ((ReadRegister(FR_REG_OFFSET) & FR_RXFE) == 0)
-        {
-            const uint32_t data = ReadRegister(DR_REG_OFFSET);
-
-            if ((data & DR_ERRORS) != 0)
-            {
-                ConsoleRxStatistics::Error();
-            }
-
-            if (rx_ring_.push_back(static_cast<uint8_t>(data)))
-            {
-                ConsoleRxStatistics::Byte();
-            }
-            else
-            {
-                ConsoleRxStatistics::Dropped();
-            }
-        }
-    }
-
-    //  RX and RT clear as the FIFO drains; overrun must be cleared explicitly.
-
-    void HandleRxInterrupt()
-    {
-        const uint32_t status = ReadRegister(MIS_REG_OFFSET);
-
-        if ((status & (INT_RX | INT_RT | INT_OE)) == 0)
-        {
-            return;     //  another PL011 on a shared interrupt line
-        }
-
-        ConsoleRxStatistics::Interrupt();
-
-        if ((status & INT_OE) != 0)
-        {
-            WriteRegister(ICR_REG_OFFSET, INT_OE);
-        }
-
-        DrainRxFifo();
-
-        rx_doorbell_.Ring();
-    }
 };
 
 class MiniUARTBase : public UARTBase

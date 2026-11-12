@@ -12,6 +12,10 @@ armstub=supervisor.bin
 os_check=0
 pciex4_reset=0
 
+#  The EL2 hypervisor, a separate file on this partition (rpibaremetalos/hypervisor).  The kernel refuses to boot
+#      without a compatible one at this address.
+initramfs hypervisor.bin 0x40000
+
 #  Specify the load address explicitly.
 kernel_address=0x80000
 

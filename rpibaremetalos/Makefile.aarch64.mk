@@ -178,6 +178,13 @@ USER_ELF      := $(USER_BUILD)/hello.elf
 USER_LD_TEMPLATE := $(USER_DIR)/user.template.ld
 USER_LD       := $(USER_BUILD)/user.ld
 USER_SRC      := $(USER_DIR)/crt0.S $(USER_DIR)/syscalls.S $(USER_DIR)/hello.c
+USER_RUNTIME  := $(USER_DIR)/crt0.S $(USER_DIR)/syscalls.S
+
+#  The EL0 drivers: user images like hello.bin, one per user/<name>_driver.c, linked into the kernel rather than put
+#      on the SD card.
+
+USER_DRIVERS := hw_rng console sd_card
+DRIVER_BINS  := $(foreach driver,$(USER_DRIVERS),$(USER_BUILD)/$(driver)_driver.bin)
 USER_FLAGS    := -ffreestanding -nostdlib -nostartfiles -static -no-pie -Wl,--build-id=none \
                  -mcpu=cortex-a53 -mstrict-align -mno-outline-atomics -O1 -Wall -Iinclude/uapi
 
@@ -199,7 +206,18 @@ $(USER_BIN): $(USER_SRC) $(USER_LD) $(wildcard include/uapi/*.h)
 	$(CC) $(USER_FLAGS) -T $(USER_LD) -o $(USER_ELF) $(USER_SRC)
 	$(OBJCOPY) -O binary $(USER_ELF) $(USER_BIN)
 
-user: checkdirs $(USER_BIN)
+$(USER_BUILD)/%_driver.bin: $(USER_RUNTIME) $(USER_DIR)/%_driver.c $(USER_LD) $(wildcard include/uapi/*.h)
+	$(CC) $(USER_FLAGS) -T $(USER_LD) -o $(USER_BUILD)/$*_driver.elf $(USER_RUNTIME) $(USER_DIR)/$*_driver.c
+	$(OBJCOPY) -O binary $(USER_BUILD)/$*_driver.elf $@
+
+user: checkdirs $(USER_BIN) $(DRIVER_BINS)
+
+#  The user images linked into the kernel (src/asm/embedded_images.S, D8 in STAGE2_EL0_DRIVERS_PLAN.md).  .incbin
+#      isn't in the assembler's dependency output, so the object names them here.
+
+EMBEDDED_IMAGES := $(USER_BIN) $(DRIVER_BINS)
+
+$(BUILD_ROOT)/asm/embedded_images.o: $(EMBEDDED_IMAGES)
 
 SUPERVISOR_ROOT    := supervisor
 SUPERVISOR_ELF     := $(SUPERVISOR_ROOT)/image/supervisor.elf
@@ -209,18 +227,58 @@ SUPERVISOR_BIN     := $(SUPERVISOR_ROOT)/image/supervisor.bin
 supervisor:
 	$(MAKE) -C $(SUPERVISOR_ROOT)
 
-$(SUPERVISOR_ELF) $(SUPERVISOR_BIN): supervisor
+#  An empty recipe, so make re-reads the files' timestamps after the sub-make: without one it keeps the old ones and
+#      an incremental build leaves the copies in image/ stale.
 
-$(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN)
+$(SUPERVISOR_ELF) $(SUPERVISOR_BIN): supervisor
+	@:
+
+#  The EL2 hypervisor is its own build and its own file on the boot partition, so it can be updated without a
+#      kernel rebuild: 'make hypervisor' rebuilds only it.  The kernel refuses to boot without a compatible one.
+
+HYPERVISOR_ROOT := hypervisor
+HYPERVISOR_ELF  := $(HYPERVISOR_ROOT)/image/hypervisor.elf
+HYPERVISOR_BIN  := $(HYPERVISOR_ROOT)/image/hypervisor.bin
+
+.PHONY: hypervisor
+hypervisor:
+	$(MAKE) -C $(HYPERVISOR_ROOT)
+	@mkdir -p $(IMAGE_DIR)
+	/bin/cp $(HYPERVISOR_ELF) $(HYPERVISOR_BIN) $(IMAGE_DIR)/.
+
+#  An empty recipe, so make re-reads the files' timestamps after the sub-make: without one it keeps the old ones and
+#      an incremental build leaves kernel8.img and sd.img stale.
+
+$(HYPERVISOR_ELF) $(HYPERVISOR_BIN): hypervisor
+	@:
+
+#  A second build reporting v0.2, put on the SD image next to hypervisor.bin for the live-update regression test
+#      ('hypervisor update /hypervisor_v0_2.bin', then back with 'hypervisor update /hypervisor.bin').
+
+HYPERVISOR_UPDATE_TEST_BIN := $(HYPERVISOR_ROOT)/image/v0_2/hypervisor.bin
+
+.PHONY: hypervisor-update-test
+hypervisor-update-test:
+	$(MAKE) -C $(HYPERVISOR_ROOT) BUILD_ROOT=build/v0_2 IMAGE_DIR=image/v0_2 HYP_EXTRA_FLAGS=-DHYPERVISOR_VERSION_MINOR=2
+
+$(HYPERVISOR_UPDATE_TEST_BIN): hypervisor-update-test
+	@:
+
+$(IMG): $(ELF) $(USER_BIN) $(SUPERVISOR_ELF) $(SUPERVISOR_BIN) $(HYPERVISOR_ELF) $(HYPERVISOR_BIN) $(HYPERVISOR_UPDATE_TEST_BIN)
 	$(OBJCOPY) -O binary $(ELF) $(IMG)
 	$(OBJCOPY) --only-keep-debug $(ELF) $(SYM)
 	/bin/cp redistrib/*.* image/.
 	/bin/cp $(SUPERVISOR_ELF) image/.
 	/bin/cp $(SUPERVISOR_BIN) image/.
+	/bin/cp $(HYPERVISOR_ELF) image/.
+	/bin/cp $(HYPERVISOR_BIN) image/.
+	/bin/cp $(HYPERVISOR_UPDATE_TEST_BIN) image/hypervisor_v0_2.bin
 	/bin/cp resources/*.txt image/.
 	/bin/cp $(USER_BIN) image/hello.bin
 	/bin/cp resources/sd.img image/.
 	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(USER_BIN) ::/hello.bin
+	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(HYPERVISOR_BIN) ::/hypervisor.bin
+	mcopy -o -i image/sd.img@@$(SD_BOOT_PARTITION_OFFSET) $(HYPERVISOR_UPDATE_TEST_BIN) ::/hypervisor_v0_2.bin
 
 $(ELF): $(OBJ) $(LINKER_SCRIPT) $(DEP_LIBS)
 	$(LD) $(LDFLAGS) $(OBJ) $(LDLIBS) -g -T $(LINKER_SCRIPT) -o $(ELF)
@@ -275,6 +333,7 @@ $(BUILD_DIRS):
 clean:
 	@rm -rf $(BUILD_ROOT)
 	@rm -f image/*.*
+	@$(MAKE) -C $(HYPERVISOR_ROOT) clean
 	@rm -rf doc/html
 
 echo:
@@ -304,6 +363,7 @@ qemu-regression-rpi3: all
 		--qemu $(QEMU) \
 		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
+		--hypervisor $(IMAGE_DIR)/hypervisor.bin \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI3_MACHINE)
 
@@ -312,6 +372,7 @@ qemu-regression-rpi4: all
 		--qemu $(QEMU) \
 		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
+		--hypervisor $(IMAGE_DIR)/hypervisor.bin \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI4_MACHINE) \
 		--memory $(QEMU_RPI4_MEMORY)
@@ -335,6 +396,7 @@ endif
 QEMU_COMMON_FLAGS = \
 	-kernel $(IMAGE_DIR)/supervisor.elf \
 	-device loader,file=$(IMAGE_DIR)/kernel8.img,addr=0x80000,force-raw=on \
+	-device loader,file=$(IMAGE_DIR)/hypervisor.bin,addr=0x40000,force-raw=on \
 	-drive file=$(IMAGE_DIR)/sd.img,if=sd,format=raw \
 	-serial stdio \
 	-display none \
@@ -362,6 +424,7 @@ qemu-cli-soak: all
 		--qemu $(QEMU) \
 		--armstub $(IMAGE_DIR)/supervisor.elf \
 		--kernel $(IMAGE_DIR)/kernel8.img \
+		--hypervisor $(IMAGE_DIR)/hypervisor.bin \
 		--sdimage $(IMAGE_DIR)/sd.img \
 		--machine $(QEMU_RPI3_MACHINE) \
 		$(SOAK_COMMON_ARGS)

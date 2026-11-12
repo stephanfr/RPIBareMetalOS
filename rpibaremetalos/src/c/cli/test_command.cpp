@@ -10,12 +10,20 @@
 #include <format>
 #include <mutex>
 
+#include "devices/emmc.h"
 #include "devices/physical_timer.h"
+#include "devices/user_devices.h"
+#include "devices/video/console_video_framebuffer.h"
+#include "devices/rng_entity.h"
+#include "services/driver_manager.h"
+#include "task/channels.h"
+#include "uapi/hw_rng.h"
 #include "task/tasks.h"
 #include "task/runnable.h"
 #include "heaps.h"
 
 #include "platform/address_space.h"
+#include "platform/hypervisor.h"
 #include "task/mutex.h"
 #include "task/task_impl.h"
 #include "task/wait_queue.h"
@@ -25,9 +33,11 @@
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
+#include "platform/rpi5/rp1_interrupts.h"
 #include "services/stats_db/user_statistics.h"
 #include "services/stats_db/kernel_statistic_ids.h"
 #include "asm_globals.h"
+#include "utility/device_probe.h"
 
 namespace cli::commands
 {
@@ -43,6 +53,9 @@ namespace cli::commands
     const CLITestSleepCommand           CLITestSleepCommand::instance;
     const CLITestWaitCommand            CLITestWaitCommand::instance;
     const CLITestMutexCommand           CLITestMutexCommand::instance;
+    const CLITestHypervisorCommand      CLITestHypervisorCommand::instance;
+    const CLITestStage2Command          CLITestStage2Command::instance;
+    const CLITestDriversCommand         CLITestDriversCommand::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -3439,6 +3452,1968 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: mutex test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test hypervisor
+    // -------------------------------------------------------------------------
+
+    namespace hypervisor_test
+    {
+        constexpr char LONG_LINE_PREFIX[] = "HYP console 100: ";
+        constexpr size_t LONG_LINE_LENGTH = 100; //  three HVC chunks: 48 + 48 + 4
+
+        bool CheckResult(CLISessionContext &context, const char *label, int64_t expected, int64_t actual)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            if (actual == expected)
+            {
+                return true;
+            }
+
+            context << minstd::format(buffer, "  FAIL: {}: expected {}, got {}\n", label, expected, actual);
+            return false;
+        }
+
+        //  An image EL2 accepts.  Its code never runs: every update staged from it is aborted.
+
+        constexpr size_t TEST_IMAGE_SIZE = 256;
+
+        void Put16(uint8_t *image, uint32_t offset, uint32_t value)
+        {
+            image[offset] = static_cast<uint8_t>(value);
+            image[offset + 1] = static_cast<uint8_t>(value >> 8);
+        }
+
+        void Put32(uint8_t *image, uint32_t offset, uint32_t value)
+        {
+            Put16(image, offset, value & 0xFFFF);
+            Put16(image, offset + 2, value >> 16);
+        }
+
+        void BuildTestImage(uint8_t *image)
+        {
+            for (size_t i = 0; i < TEST_IMAGE_SIZE; i++)
+            {
+                image[i] = 0;
+            }
+
+            Put32(image, HYPERVISOR_HDR_MAGIC, HYPERVISOR_IMAGE_MAGIC);
+            Put16(image, HYPERVISOR_HDR_HEADER_VERSION, HYPERVISOR_HEADER_VERSION);
+            Put16(image, HYPERVISOR_HDR_ABI_MAJOR, HYPERVISOR_ABI_MAJOR);
+            Put16(image, HYPERVISOR_HDR_ABI_MINOR, HYPERVISOR_ABI_MINOR);
+            Put32(image, HYPERVISOR_HDR_ENTRY_OFFSET, HYPERVISOR_HDR_SIZE);
+            Put32(image, HYPERVISOR_HDR_IMAGE_SIZE, TEST_IMAGE_SIZE);
+            Put32(image, HYPERVISOR_HDR_MEMORY_SIZE, TEST_IMAGE_SIZE);
+            Put16(image, HYPERVISOR_HDR_STATE_LAYOUT_MIN, HYPERVISOR_STATE_LAYOUT_MIN_IMPORTABLE);
+            Put16(image, HYPERVISOR_HDR_STATE_LAYOUT_CURRENT, HYPERVISOR_STATE_LAYOUT_VERSION);
+        }
+
+        //  Each corruption must be caught by EL2's validation of its staged copy, and leave nothing staged.
+
+        uint32_t CheckUpdateRejections(CLISessionContext &context, uint8_t *image)
+        {
+            struct Corruption
+            {
+                const char *label;
+                uint32_t offset;
+                uint32_t value;
+                bool word;
+            };
+
+            const Corruption corruptions[] = {
+                {"image with a bad magic", HYPERVISOR_HDR_MAGIC, 0x12345678, true},
+                {"image with ABI major 2", HYPERVISOR_HDR_ABI_MAJOR, HYPERVISOR_ABI_MAJOR + 1, false},
+                {"image larger than its slot", HYPERVISOR_HDR_MEMORY_SIZE, HYPERVISOR_IMAGE_MAX + 1, true},
+                {"image with its entry point past its end", HYPERVISOR_HDR_ENTRY_OFFSET, TEST_IMAGE_SIZE, true},
+                {"image that can't import the state", HYPERVISOR_HDR_STATE_LAYOUT_MIN, HYPERVISOR_STATE_LAYOUT_VERSION + 1, false},
+            };
+
+            uint32_t failures = 0;
+
+            for (const Corruption &corruption : corruptions)
+            {
+                BuildTestImage(image);
+
+                if (corruption.word)
+                {
+                    Put32(image, corruption.offset, corruption.value);
+                }
+                else
+                {
+                    Put16(image, corruption.offset, corruption.value);
+                }
+
+                failures += CheckResult(context, corruption.label, HVC_IMAGE_REJECTED,
+                                        Hypervisor::UpdatePrepare(image, TEST_IMAGE_SIZE)) ? 0 : 1;
+            }
+
+            const uint64_t physical = KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(image));
+
+            BuildTestImage(image);
+
+            failures += CheckResult(context, "prepare of 0 bytes", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {physical, 0}).x0) ? 0 : 1;
+            failures += CheckResult(context, "prepare larger than the staging slot", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {physical, HYPERVISOR_STAGING_SIZE + 1}).x0) ? 0 : 1;
+            failures += CheckResult(context, "prepare from inside the hypervisor region", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {HYPERVISOR_LOAD_ADDRESS, TEST_IMAGE_SIZE}).x0) ? 0 : 1;
+            failures += CheckResult(context, "prepare from a misaligned address", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {physical + 4, 64}).x0) ? 0 : 1;
+
+            failures += CheckResult(context, "prepare from outside the kernel's linear map", HVC_INVALID_PARAMETER,
+                                    Hypervisor::UpdatePrepare(reinterpret_cast<const void *>(physical), TEST_IMAGE_SIZE)) ? 0 : 1;
+
+            failures += CheckResult(context, "commit with nothing staged", HVC_INVALID_PARAMETER,
+                                    Hypervisor::UpdateCommit(0)) ? 0 : 1;
+            failures += CheckResult(context, "join with nothing staged", HVC_UPDATE_ABORTED,
+                                    Hypervisor::UpdateJoin()) ? 0 : 1;
+
+            return failures;
+        }
+
+        //  A core that never joins: COMMIT times out, every joiner returns ABORTED (CommitUpdate checks that they
+        //      agree), and the staged image is discarded.
+        //      The withheld core is the last other core, or a core that doesn't exist on a single-core system.
+
+        uint32_t CheckUpdateAbort(CLISessionContext &context, uint8_t *image)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            uint32_t failures = 0;
+
+            const uint32_t self = GetCoreID();
+            const uint32_t cores = GetPlatformInfo().GetNumberOfCores();
+
+            uint32_t withheld = self + 1;
+
+            for (uint32_t core = 0; core < cores; core++)
+            {
+                withheld = (core != self) ? core : withheld;
+            }
+
+            BuildTestImage(image);
+
+            if (!CheckResult(context, "prepare of a valid image", HVC_SUCCESS, Hypervisor::UpdatePrepare(image, TEST_IMAGE_SIZE)))
+            {
+                return 1;
+            }
+
+            const auto start = PhysicalTimer::Now();
+            const HypervisorUpdateResult result = Hypervisor::CommitUpdate(1ull << withheld);
+            const int64_t elapsed_ms = minstd::chrono::duration_cast<minstd::chrono::milliseconds>(PhysicalTimer::Now() - start).count();
+
+            if (result != HypervisorUpdateResult::ABORTED)
+            {
+                context << minstd::format(buffer, "  FAIL: update with core {} withheld: {}\n", withheld, Hypervisor::UpdateResultText(result));
+                failures++;
+            }
+
+            if (elapsed_ms < HVC_UPDATE_JOIN_TIMEOUT_MS)
+            {
+                context << minstd::format(buffer, "  FAIL: update aborted after {} ms, before the {} ms timeout\n",
+                                          elapsed_ms, static_cast<int64_t>(HVC_UPDATE_JOIN_TIMEOUT_MS));
+                failures++;
+            }
+
+            failures += CheckResult(context, "commit after the abort", HVC_INVALID_PARAMETER, Hypervisor::UpdateCommit(0)) ? 0 : 1;
+
+            failures += CheckResult(context, "prepare of a valid image", HVC_SUCCESS, Hypervisor::UpdatePrepare(image, TEST_IMAGE_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "commit naming its own core", HVC_INVALID_PARAMETER, Hypervisor::UpdateCommit(1ull << self)) ? 0 : 1;
+            failures += CheckResult(context, "commit after the rejected commit", HVC_INVALID_PARAMETER, Hypervisor::UpdateCommit(0)) ? 0 : 1;
+
+            context << minstd::format(buffer, "  update aborted after {} ms with core {} withheld\n", elapsed_ms, withheld);
+
+            return failures;
+        }
+    }
+
+    namespace hypervisor_test
+    {
+        //  MAILBOX_CALL with hand-built messages, so each refusal can be aimed at one rule.  EL2's MMU is off, so the
+        //      message is cleaned to the point of coherency before the call and invalidated after it.
+
+        constexpr uint32_t MAILBOX_TAG_GET_BOARD_REVISION = 0x00010002;
+        constexpr uint32_t MAILBOX_TAG_ALLOCATE_MEMORY = 0x0003000C;
+        constexpr uint32_t MAILBOX_TAG_ALLOCATE_FRAMEBUFFER = 0x00040001;
+        constexpr uint32_t MAILBOX_WORDS = 7; //  header, one tag with a 4-byte value, end tag
+        constexpr size_t MAILBOX_BUFFER_SIZE = 64;
+
+        void BuildMailboxMessage(volatile uint32_t *message, uint32_t tag)
+        {
+            const uint32_t words[MAILBOX_WORDS] = {MAILBOX_WORDS * 4, 0, tag, 4, 0, 0, 0};
+
+            for (uint32_t i = 0; i < MAILBOX_WORDS; i++)
+            {
+                message[i] = words[i];
+            }
+
+            CleanAndInvalidateToPointOfCoherency(reinterpret_cast<uintptr_t>(message), MAILBOX_WORDS * 4);
+        }
+
+        int64_t SendMailboxMessage(volatile uint32_t *message, uint64_t offset = 0, uint32_t size = MAILBOX_WORDS * 4)
+        {
+            const int64_t result = Hypervisor::MailboxCall(KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(message)) + offset, size);
+
+            CleanAndInvalidateToPointOfCoherency(reinterpret_cast<uintptr_t>(message), MAILBOX_BUFFER_SIZE);
+
+            return result;
+        }
+
+        uint32_t CheckMailboxCall(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            volatile uint32_t *message = static_cast<volatile uint32_t *>(__os_dynamic_heap_resource.allocate(MAILBOX_BUFFER_SIZE, 64));
+
+            if (message == nullptr)
+            {
+                context << "  FAIL: no memory for the mailbox message\n";
+                return 1;
+            }
+
+            uint32_t failures = 0;
+
+            BuildMailboxMessage(message, MAILBOX_TAG_GET_BOARD_REVISION);
+
+            const auto start = PhysicalTimer::Now();
+            const int64_t result = SendMailboxMessage(message);
+            const int64_t elapsed_us = minstd::chrono::duration_cast<minstd::chrono::microseconds>(PhysicalTimer::Now() - start).count();
+
+            failures += CheckResult(context, "mailbox call for the board revision", HVC_SUCCESS, result) ? 0 : 1;
+            failures += CheckResult(context, "its response code", 0x80000000, message[1]) ? 0 : 1;
+            failures += CheckResult(context, "the board revision it returned", GetPlatformInfo().GetBoardRevision(), message[5]) ? 0 : 1;
+
+            context << minstd::format(buffer, "  mailbox call through EL2: {} us\n", elapsed_us);
+
+            //  The raw steps MailboxCall loops over: SEND, then CONTINUE while the reply hasn't come.  Outside its lock,
+            //      which is safe while nothing else is sending.
+
+            BuildMailboxMessage(message, MAILBOX_TAG_GET_BOARD_REVISION);
+
+            const uint64_t message_physical = KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(message));
+            int64_t step = Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, HVC_MAILBOX_SEND);
+            uint32_t steps = 1;
+
+            while ((step == HVC_BUSY) && (steps < 1000))
+            {
+                step = Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, HVC_MAILBOX_CONTINUE);
+                steps++;
+            }
+
+            CleanAndInvalidateToPointOfCoherency(reinterpret_cast<uintptr_t>(message), MAILBOX_BUFFER_SIZE);
+
+            failures += CheckResult(context, "mailbox send and continue", HVC_SUCCESS, step) ? 0 : 1;
+            failures += CheckResult(context, "the board revision they returned", GetPlatformInfo().GetBoardRevision(), message[5]) ? 0 : 1;
+            failures += CheckResult(context, "mailbox continue with nothing pending", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, HVC_MAILBOX_CONTINUE)) ? 0 : 1;
+            failures += CheckResult(context, "mailbox call with an unknown mode", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MailboxStep(message_physical, MAILBOX_WORDS * 4, 2)) ? 0 : 1;
+
+            BuildMailboxMessage(message, MAILBOX_TAG_ALLOCATE_MEMORY);
+            failures += CheckResult(context, "mailbox call with a refused tag", HVC_INVALID_PARAMETER, SendMailboxMessage(message)) ? 0 : 1;
+
+            //  A framebuffer allocated now would land in VideoCore memory, which the kernel can't reach.
+
+            BuildMailboxMessage(message, MAILBOX_TAG_ALLOCATE_FRAMEBUFFER);
+            failures += CheckResult(context, "mailbox call allocating a framebuffer", HVC_INVALID_PARAMETER, SendMailboxMessage(message)) ? 0 : 1;
+
+            BuildMailboxMessage(message, MAILBOX_TAG_GET_BOARD_REVISION);
+            failures += CheckResult(context, "mailbox call whose size word disagrees", HVC_INVALID_PARAMETER,
+                                    SendMailboxMessage(message, 0, (MAILBOX_WORDS + 1) * 4)) ? 0 : 1;
+            failures += CheckResult(context, "mailbox call from a misaligned address", HVC_INVALID_PARAMETER, SendMailboxMessage(message, 4)) ? 0 : 1;
+            failures += CheckResult(context, "mailbox call from the hypervisor's pool", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MailboxCall(MMUManager::Instance().HypervisorPoolPhysical(), MAILBOX_WORDS * 4)) ? 0 : 1;
+
+            __os_dynamic_heap_resource.deallocate(const_cast<uint32_t *>(message), MAILBOX_BUFFER_SIZE, 64);
+
+            return failures;
+        }
+    }
+
+    //  The register-level ABI from EL1.  The console checks print through EL2: a length of 0 or 49 must print
+    //      nothing, and the 100-byte line ("HYP console 100: " then digits) must arrive whole and in order.
+
+    void CLITestHypervisorCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace hypervisor_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest hypervisor: HVC ABI\n";
+
+        uint32_t failures = 0;
+
+        const Hypervisor::CallResult version = Hypervisor::Call(HVC_FN_VERSION, {});
+
+        failures += CheckResult(context, "ABI major", HYPERVISOR_ABI_MAJOR, static_cast<int64_t>(version.x1 >> 16)) ? 0 : 1;
+
+        if ((version.x1 & 0xFFFF) < HYPERVISOR_ABI_MINOR)
+        {
+            context << minstd::format(buffer, "  FAIL: ABI minor {} is older than this kernel's {}\n",
+                                      version.x1 & 0xFFFF, static_cast<uint32_t>(HYPERVISOR_ABI_MINOR));
+            failures++;
+        }
+
+        failures += CheckResult(context, "version with x0[63:32] set",
+                                version.x0, Hypervisor::Call((0xFFFFFFFFull << 32) | HVC_FN_VERSION, {}).x0) ? 0 : 1;
+        failures += CheckResult(context, "unknown function", HVC_NOT_SUPPORTED,
+                                Hypervisor::Call(HVC_FN_BASE + 0xFFFF, {}).x0) ? 0 : 1;
+        failures += CheckResult(context, "PSCI function ID", HVC_NOT_SUPPORTED,
+                                Hypervisor::Call(0x84000000, {}).x0) ? 0 : 1;
+
+        const uint64_t visible_if_printed = 0x0A2121214C494146ull; //  "FAIL!!!\n"
+
+        failures += CheckResult(context, "console write of 49 bytes", HVC_INVALID_PARAMETER,
+                                Hypervisor::Call(HVC_FN_CONSOLE_WRITE, {HVC_CONSOLE_WRITE_MAX + 1, visible_if_printed}).x0) ? 0 : 1;
+        failures += CheckResult(context, "console write of 0 bytes", HVC_SUCCESS,
+                                Hypervisor::Call(HVC_FN_CONSOLE_WRITE, {0, visible_if_printed}).x0) ? 0 : 1;
+
+        char line[LONG_LINE_LENGTH];
+        size_t length = 0;
+
+        for (; LONG_LINE_PREFIX[length] != '\0'; length++)
+        {
+            line[length] = LONG_LINE_PREFIX[length];
+        }
+
+        for (uint32_t digit = 0; length < LONG_LINE_LENGTH - 1; length++, digit++)
+        {
+            line[length] = static_cast<char>('0' + (digit % 10));
+        }
+
+        line[length++] = '\n';
+
+        Hypervisor::ConsoleWrite(line, length);
+
+        //  Live update, short of installing anything.
+
+        {
+            Hypervisor::UpdateLock lock;
+
+            uint8_t *image = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(TEST_IMAGE_SIZE, 64));
+
+            if (!lock.Acquired())
+            {
+                context << "  FAIL: a live update is running\n";
+                failures++;
+            }
+            else if (image == nullptr)
+            {
+                context << "  FAIL: no memory for the test image\n";
+                failures++;
+            }
+            else
+            {
+                failures += CheckUpdateRejections(context, image);
+                failures += CheckUpdateAbort(context, image);
+            }
+
+            if (image != nullptr)
+            {
+                __os_dynamic_heap_resource.deallocate(image, TEST_IMAGE_SIZE, 64);
+            }
+        }
+
+        failures += CheckResult(context, "version after the update checks", version.x0, Hypervisor::Call(HVC_FN_VERSION, {}).x0) ? 0 : 1;
+
+        failures += CheckMailboxCall(context);
+
+        if (failures == 0)
+        {
+            context << "PASS: hypervisor test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: hypervisor test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    //  test stage2
+    //
+    //  VM 1's stage-2 from EL1 and EL0: every core has it on, the hypervisor's memory faults instead of reading, the
+    //      HVCs that set it up refuse a second try, and a user task writing to a blocked page is killed.  Each fault
+    //      also prints a "HYP S2 FAULT" line from EL2.
+    // -------------------------------------------------------------------------
+
+    namespace stage2_test
+    {
+        using hypervisor_test::CheckResult;
+
+        //  Only a live update writes it, so a stray write that got through would do no harm.
+
+        constexpr uint64_t BLOCKED_PAGE = HYPERVISOR_TRAMPOLINE_ADDRESS;
+
+        //  Between the device windows and the heap: nothing else maps it, and it is never demand paged.
+
+        constexpr uint64_t USER_VA = USER_HEAP_BASE - MemoryManager::DEFAULT_PAGE_SIZE;
+
+        constexpr int64_t CASE_READY = 1; //  hello.bin cases 16 and 17
+        constexpr int64_t CASE_GO = 2;
+        constexpr uint32_t POLL_MS = 10;
+        constexpr uint32_t MAX_POLLS = 1000;
+
+        constexpr uint64_t MAILBOX_STATUS = 0x18;
+        constexpr uint64_t MAILBOX_TO_PI3_IRQ_PENDING_1 = 0x880 - 0x204;
+
+        uint64_t MailboxRegisters()
+        {
+            return KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(GetPlatformInfo().GetMailboxRegisterBase()));
+        }
+
+        //  IRQs masked: the probe flags are global, and the fault must be this load's.
+
+        bool ReadFaults(uint64_t physical_address)
+        {
+            uint32_t value;
+
+            const uint64_t daif = SaveAndDisableIRQs();
+            const bool read = ProbeDeviceRegister(reinterpret_cast<const volatile uint32_t *>(PhysicalToKernelVirtualAddress(physical_address)), value);
+            RestoreIRQs(daif);
+
+            return !read;
+        }
+
+        uint32_t CheckReads(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            //  GCC fills this array with Q-register pairs, which strict_align=1 faults unless 16-byte aligned.
+
+            struct alignas(16) Probe
+            {
+                const char *label;
+                uint64_t address;
+                bool faults;
+            };
+
+            const Probe probes[] = {
+                {"hypervisor image", HYPERVISOR_LOAD_ADDRESS, true},
+                {"hypervisor state", HYPERVISOR_STATE_ADDRESS, true},
+                {"live-update staging", HYPERVISOR_STAGING_ADDRESS, true},
+                {"live-update trampoline", HYPERVISOR_TRAMPOLINE_ADDRESS, true},
+                {"donated pool", MMUManager::Instance().HypervisorPoolPhysical(), true},
+                {"end of the donated pool", MMUManager::Instance().HypervisorPoolPhysical() + HYPERVISOR_POOL_SIZE - 4, true},
+                {"EL3 firmware", 0, true},
+                {"page below the hypervisor", HYPERVISOR_LOAD_ADDRESS - 4, true},
+                {"kernel image", HYPERVISOR_LOAD_ADDRESS + HYPERVISOR_REGION_SIZE, false},
+                {"page above the donated pool", MMUManager::Instance().HypervisorPoolPhysical() + HYPERVISOR_POOL_SIZE, false},
+                {"mailbox status register", MailboxRegisters() + MAILBOX_STATUS, true},
+            };
+
+            uint32_t failures = 0;
+
+            for (const Probe &probe : probes)
+            {
+                if (ReadFaults(probe.address) != probe.faults)
+                {
+                    context << minstd::format(buffer, "  FAIL: a read of the {} at {:#x} {}\n", probe.label, probe.address,
+                                              probe.faults ? "returned data" : "faulted");
+                    failures++;
+                }
+            }
+
+            //  The Pi 3's interrupt controller shares the mailbox's page, and EL2 passes its registers through.
+
+            if ((GetPlatformInfo().GetBoardType() == RPIBoardType::RPI3) && ReadFaults(MailboxRegisters() - MAILBOX_TO_PI3_IRQ_PENDING_1))
+            {
+                context << "  FAIL: a read of the Pi 3's IRQ pending 1 register, beside the mailbox, faulted\n";
+                failures++;
+            }
+
+            return failures;
+        }
+
+        //  EL2 asked the firmware the same question at boot, and unmapped the answer, all but the framebuffer.
+
+        uint32_t CheckVideoCoreMemory(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            GetVideocoreMemoryTag tag;
+            GPUMailboxPropertyMessage message(tag);
+
+            if (!GPUMailbox().sendMessage(message))
+            {
+                context << "  FAIL: GET_VC_MEMORY through EL2 failed\n";
+                return 1;
+            }
+
+            constexpr uint64_t PAGE = MemoryManager::DEFAULT_PAGE_SIZE;
+
+            const uint64_t base = tag.GetBaseAddress() & 0x3FFFFFFF;
+            const uint64_t end = base + tag.GetSizeInBytes();
+            const uint64_t framebuffer = VideoFrameBuffer::AllocatedPhysicalBase() & ~(PAGE - 1);
+            const uint64_t framebuffer_end = (VideoFrameBuffer::AllocatedPhysicalBase() + VideoFrameBuffer::AllocatedSizeInBytes() + PAGE - 1) & ~(PAGE - 1);
+
+            context << minstd::format(buffer, "  VideoCore memory {:#x}-{:#x}, framebuffer {:#x}-{:#x}\n", base, end, framebuffer, framebuffer_end);
+
+            uint32_t failures = 0;
+
+            //  The Pi 3's peripherals cover the top of its VideoCore memory: blocked device pages, which audit mode passes.
+
+            constexpr uint64_t PI3_PERIPHERAL_BASE = 0x3F000000;
+
+            const uint64_t top = ((GetPlatformInfo().GetBoardType() == RPIBoardType::RPI3) && (end > PI3_PERIPHERAL_BASE)) ? PI3_PERIPHERAL_BASE : end;
+            const uint64_t outside[] = {base, framebuffer_end, top - 4};
+
+            for (uint64_t address : outside)
+            {
+                if ((address >= base) && (address < top) && !((address >= framebuffer) && (address < framebuffer_end)) &&
+                    !ReadFaults(address))
+                {
+                    context << minstd::format(buffer, "  FAIL: a read of VideoCore memory at {:#x} returned data\n", address);
+                    failures++;
+                }
+            }
+
+            const uint64_t inside[] = {framebuffer, framebuffer_end - 4};
+
+            for (uint64_t address : inside)
+            {
+                if ((framebuffer_end > framebuffer) && ReadFaults(address))
+                {
+                    context << minstd::format(buffer, "  FAIL: a read of the framebuffer at {:#x} faulted\n", address);
+                    failures++;
+                }
+            }
+
+            //  Flipping the display changes only the virtual offset, which EL2 lets through.
+
+            auto display = GetOSEntityRegistry().GetEntityByAlias<ConsoleVideoFrameBuffer>("HDMI");
+
+            if (display.Successful())
+            {
+                context << minstd::format(buffer, "  framebuffer: {} buffer(s)\n", display->BufferCount());
+
+                if ((display->BufferCount() > 1) && (!display->Show(1) || (display->ShownBuffer() != 1) || !display->Show(0)))
+                {
+                    context << "  FAIL: flipping the framebuffer through EL2 failed\n";
+                    failures++;
+                }
+            }
+
+            return failures;
+        }
+
+        uint32_t CheckHypercalls(CLISessionContext &context)
+        {
+            const uint64_t pool = MMUManager::Instance().HypervisorPoolPhysical();
+            const uint64_t ram_size = MMUManager::Instance().AllocatableMemoryTop();
+
+            uint32_t failures = 0;
+
+            failures += CheckResult(context, "a second donation", HVC_INVALID_PARAMETER, Hypervisor::MemoryDonate(pool, HYPERVISOR_POOL_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "a donation of other memory", HVC_INVALID_PARAMETER,
+                                    Hypervisor::MemoryDonate(pool - HYPERVISOR_POOL_SIZE, HYPERVISOR_POOL_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "enable with another RAM size", HVC_INVALID_PARAMETER, Hypervisor::Stage2Enable(ram_size - HYPERVISOR_POOL_SIZE)) ? 0 : 1;
+            failures += CheckResult(context, "enable again", HVC_SUCCESS, Hypervisor::Stage2Enable(ram_size)) ? 0 : 1;
+
+            //  A live update may stage only VM 1's own RAM.
+
+            Hypervisor::UpdateLock lock;
+
+            if (!lock.Acquired())
+            {
+                context << "  FAIL: a live update is running\n";
+                return failures + 1;
+            }
+
+            failures += CheckResult(context, "update staged from the pool", HVC_INVALID_PARAMETER,
+                                    Hypervisor::Call(HVC_FN_UPDATE_PREPARE, {pool, hypervisor_test::TEST_IMAGE_SIZE}).x0) ? 0 : 1;
+
+            return failures;
+        }
+
+        //  Runs hello.bin case 'case_number', a service so its gauge can be found and set: once the task is ready,
+        //      maps 'physical_page' at USER_VA in it and tells it to go, then waits for it to end.  Returns the
+        //      number of failures in getting that far.
+
+        uint32_t RunWithPageMapped(CLISessionContext &context, uint32_t case_number, uint64_t physical_page, const char *name)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+            minstd::fixed_string<MAX_TASK_NAME_LENGTH> task_name(name);
+
+            auto forked = context.task_manager_.ForkServiceTask(binary, case_number | (USER_VA << 8), task::TaskDefinition{task_name});
+
+            if (forked.Failed())
+            {
+                context << minstd::format(buffer, "  FAIL: ForkServiceTask({}) -- {}\n", name, task::ErrorMessage(forked.ResultCode()));
+                return 1;
+            }
+
+            uint32_t process_id = 0;
+
+            {
+                auto task = context.task_manager_.FindTask(forked.Value());
+
+                if (task.has_value())
+                {
+                    process_id = static_cast<task::TaskImpl &>(*task).ProcessId();
+                }
+            }
+
+            system_stats::UserStatisticHandle gauge;
+            bool ready = false;
+
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && !ready; poll++)
+            {
+                const auto found = system_stats::FindUserStatistic(system_stats::GetSystemStatisticsDB(), process_id, "hello", "gauge");
+
+                if (found.Successful())
+                {
+                    gauge = *found;
+
+                    const auto value = gauge.Get();
+                    ready = value.Successful() && (*value == CASE_READY);
+                }
+
+                if (!ready)
+                {
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                }
+            }
+
+            bool mapped = false;
+
+            if (ready)
+            {
+                auto task = context.task_manager_.FindTask(forked.Value());
+                AddressSpace *space = task.has_value() ? static_cast<task::TaskImpl &>(*task).UserAddressSpace() : nullptr;
+
+                mapped = (space != nullptr) &&
+                         space->MapPages(USER_VA, physical_page, MemoryManager::DEFAULT_PAGE_SIZE,
+                                         Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false, false);
+
+                if (mapped)
+                {
+                    gauge.Visit([](const system_stats::UserStatistic &stat) { stat.SetValue(CASE_GO); });
+                }
+            }
+
+            //  Unless told to go, the task gives up after 10 s on its own.
+
+            {
+                auto task = context.task_manager_.FindTask(forked.Value());
+
+                if (task.has_value())
+                {
+                    task->Join();
+                }
+            }
+
+            if (!ready)
+            {
+                context << minstd::format(buffer, "  FAIL: hello.bin case {} never got ready\n", case_number);
+                return 1;
+            }
+
+            if (!mapped)
+            {
+                context << minstd::format(buffer, "  FAIL: could not map {:#x} into hello.bin case {}\n", physical_page, case_number);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  hello.bin case 16: a user task writing to a page stage-2 doesn't map is killed.
+
+        uint32_t CheckUserFault(CLISessionContext &context)
+        {
+            const int64_t faults_before = ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS);
+
+            if (RunWithPageMapped(context, 16, BLOCKED_PAGE, "stage2 fault") != 0)
+            {
+                return 1;
+            }
+
+            return CheckResult(context, "user tasks killed", faults_before + 1, ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS)) ? 0 : 1;
+        }
+
+        //  EL2's mediated test device (HYPERVISOR_MMIO_TEST_*), from EL1 and EL0.  Each refused or non-emulable
+        //      access prints a "HYP S2 FAULT ... reason=mediated" line.
+
+        constexpr uint64_t EL0_TEST_REGISTER = 0x20; //  what hello.bin case 17 writes
+        constexpr uint32_t EL0_TEST_VALUE = 0x17171717;
+        constexpr uint32_t TIMED_ACCESSES = 1000;
+
+        uint64_t MmioTestPage()
+        {
+            return MMUManager::Instance().HypervisorPoolPhysical() + HYPERVISOR_MMIO_TEST_OFFSET;
+        }
+
+        template <typename T>
+        volatile T &TestRegister(uint64_t offset)
+        {
+            return *reinterpret_cast<volatile T *>(PhysicalToKernelVirtualAddress(MmioTestPage() + offset));
+        }
+
+        //  A load pair is not emulable (ESR_EL2.ISV = 0), so EL2 injects an abort, which the probe path recovers.
+
+        bool PairLoadFaults(uint64_t offset)
+        {
+            const uint64_t daif = SaveAndDisableIRQs();
+
+            __device_probe_faulted = 0;
+            __device_probe_in_progress = 1;
+            asm volatile("dsb sy\n isb" ::: "memory");
+
+            uint64_t first;
+            uint64_t second;
+            asm volatile("ldp %0, %1, [%2]" : "=&r"(first), "=&r"(second) : "r"(&TestRegister<uint64_t>(offset)) : "memory");
+
+            const bool faulted = (__device_probe_faulted != 0);
+            __device_probe_in_progress = 0;
+
+            RestoreIRQs(daif);
+
+            return faulted;
+        }
+
+        uint32_t CheckMediatedAccesses(CLISessionContext &context)
+        {
+            uint32_t failures = 0;
+
+            TestRegister<uint64_t>(0) = 0x0807060504030201;
+
+            failures += CheckResult(context, "64-bit echo", static_cast<int64_t>(0x0807060504030201), static_cast<int64_t>(TestRegister<uint64_t>(0))) ? 0 : 1;
+            failures += CheckResult(context, "32-bit read", 0x08070605, TestRegister<uint32_t>(4)) ? 0 : 1;
+            failures += CheckResult(context, "16-bit read", 0x0403, TestRegister<uint16_t>(2)) ? 0 : 1;
+            failures += CheckResult(context, "8-bit read", 0x08, TestRegister<uint8_t>(7)) ? 0 : 1;
+
+            TestRegister<uint8_t>(8) = 0x80;
+            TestRegister<uint16_t>(10) = 0x8000;
+            TestRegister<uint32_t>(12) = 0x80000000;
+
+            const int64_t byte_64 = TestRegister<int8_t>(8);
+            const int32_t byte_32 = TestRegister<int8_t>(8);
+            const int64_t half_64 = TestRegister<int16_t>(10);
+            const int64_t word_64 = TestRegister<int32_t>(12);
+
+            failures += CheckResult(context, "sign-extended byte into an X register", -0x80, byte_64) ? 0 : 1;
+            failures += CheckResult(context, "sign-extended byte into a W register", -0x80, byte_32) ? 0 : 1;
+            failures += CheckResult(context, "sign-extended halfword", -0x8000, half_64) ? 0 : 1;
+            failures += CheckResult(context, "sign-extended word", -0x80000000ll, word_64) ? 0 : 1;
+            failures += CheckResult(context, "zero-extended byte", 0x80, TestRegister<uint8_t>(8)) ? 0 : 1;
+
+            TestRegister<uint32_t>(16) = 0x12345678;
+            TestRegister<uint32_t>(16) = 0; //  a store from wzr
+
+            failures += CheckResult(context, "store of zero", 0, TestRegister<uint32_t>(16)) ? 0 : 1;
+
+            if (!stage2_test::ReadFaults(MmioTestPage() + HYPERVISOR_MMIO_TEST_SIZE))
+            {
+                context << "  FAIL: a read past the test device's registers was not refused\n";
+                failures++;
+            }
+
+            if (!PairLoadFaults(0))
+            {
+                context << "  FAIL: a load pair from the test device did not fault\n";
+                failures++;
+            }
+
+            //  EL2's own access faults; that comes back here as an abort rather than parking the core.
+
+            if (!stage2_test::ReadFaults(MmioTestPage() + HYPERVISOR_MMIO_TEST_DEVICE_FAULT))
+            {
+                context << "  FAIL: a device fault during EL2's access was not passed back\n";
+                failures++;
+            }
+
+            return failures;
+        }
+
+        //  Nanoseconds per mediated access, timed over TIMED_ACCESSES reads of the test device.
+
+        int64_t ReportTrapCost(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            volatile uint32_t &test_register = TestRegister<uint32_t>(0);
+            uint32_t sum = 0;
+
+            const uint64_t daif = SaveAndDisableIRQs();
+            const auto start = PhysicalTimer::Now();
+
+            for (uint32_t i = 0; i < TIMED_ACCESSES; i++)
+            {
+                sum += test_register;
+            }
+
+            const auto elapsed = PhysicalTimer::Now() - start;
+            RestoreIRQs(daif);
+
+            asm volatile("" : : "r"(sum));
+
+            const int64_t each_ns = minstd::chrono::duration_cast<minstd::chrono::nanoseconds>(elapsed).count() / TIMED_ACCESSES;
+
+            context << minstd::format(buffer, "  mediated access: {} ns each, over {} reads\n", each_ns, TIMED_ACCESSES);
+
+            return each_ns;
+        }
+
+        //  The SD controller is mediated: its registers past 0xFF are refused, and every PIO read of the data port
+        //      traps.  Times raw block reads, below the filesystem's cache, so the cost can be weighed (plan D4).
+
+        constexpr uint32_t SD_READ_BLOCKS = 2048;
+        constexpr uint32_t SD_READ_CHUNK_BLOCKS = 64;
+        constexpr uint32_t SD_BLOCK_SIZE = 512;
+        constexpr uint32_t SD_DATA_READS_PER_BLOCK = SD_BLOCK_SIZE / sizeof(uint32_t);
+        constexpr uint64_t SDHCI_REGISTERS_SIZE = 0x100;
+
+        uint32_t CheckSdController(CLISessionContext &context, int64_t trap_ns)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            uint32_t failures = 0;
+
+            const uint64_t controller = KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(GetPlatformInfo().GetEMMCBase()));
+
+            if (!ReadFaults(controller + SDHCI_REGISTERS_SIZE))
+            {
+                context << "  FAIL: a read past the SD controller's registers was not refused\n";
+                failures++;
+            }
+
+            constexpr size_t CHUNK_BYTES = SD_READ_CHUNK_BLOCKS * SD_BLOCK_SIZE;
+
+            uint8_t *chunk = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(CHUNK_BYTES, 64));
+
+            if (chunk == nullptr)
+            {
+                context << "  FAIL: no memory for the SD read buffer\n";
+                return failures + 1;
+            }
+
+            ExternalMassMediaController &sd_card = GetExternalMassMediaController();
+
+            const auto start = PhysicalTimer::Now();
+
+            for (uint32_t block = 0; block < SD_READ_BLOCKS; block += SD_READ_CHUNK_BLOCKS)
+            {
+                const auto read = sd_card.ReadFromBlock(chunk, block, SD_READ_CHUNK_BLOCKS);
+
+                if (read.Failed() || (*read != SD_READ_CHUNK_BLOCKS))
+                {
+                    context << minstd::format(buffer, "  FAIL: SD read of blocks {}-{} failed\n", block, block + SD_READ_CHUNK_BLOCKS - 1);
+                    failures++;
+                    break;
+                }
+            }
+
+            const int64_t elapsed_us = minstd::chrono::duration_cast<minstd::chrono::microseconds>(PhysicalTimer::Now() - start).count();
+
+            __os_dynamic_heap_resource.deallocate(chunk, CHUNK_BYTES, 64);
+
+            if (elapsed_us > 0)
+            {
+                const int64_t kb_per_s = (static_cast<int64_t>(SD_READ_BLOCKS) * SD_BLOCK_SIZE * 1000000 / 1024) / elapsed_us;
+
+                context << minstd::format(buffer, "  SD read through EL2: {} KB/s, {} us per block; its {} data-port reads cost about {} us\n",
+                                          kb_per_s, elapsed_us / SD_READ_BLOCKS, SD_DATA_READS_PER_BLOCK,
+                                          (trap_ns * SD_DATA_READS_PER_BLOCK) / 1000);
+            }
+
+            return failures;
+        }
+
+        //  Stage-2 maps only the device pages the kernel uses (plan B4).  A DMA engine's page is blocked: a read
+        //      faults, or in audit mode passes through with a "HYP S2 AUDIT" line.  On the Pi 5 the PCIe root complex is
+        //      read-only once locked down.
+
+        uint64_t BlockedDmaPage()
+        {
+            switch (GetPlatformInfo().GetBoardType())
+            {
+            case RPIBoardType::RPI3:
+                return 0x3F007000;
+
+            case RPIBoardType::RPI4:
+                return 0xFE007000;
+
+            default:
+                return 0x1F00188000; //  RP1's DMA controller
+            }
+        }
+
+        //  Writes back what the register holds, so nothing changes if the write gets through.
+
+        bool RewriteFaults(uint64_t physical_address)
+        {
+            volatile uint32_t *address = reinterpret_cast<volatile uint32_t *>(PhysicalToKernelVirtualAddress(physical_address));
+
+            const uint64_t daif = SaveAndDisableIRQs();
+            const uint32_t value = *address;
+
+            __device_probe_faulted = 0;
+            __device_probe_in_progress = 1;
+            asm volatile("dsb sy\n isb" ::: "memory");
+
+            *address = value;
+            asm volatile("dsb sy" ::: "memory");
+
+            const bool faulted = (__device_probe_faulted != 0);
+            __device_probe_in_progress = 0;
+
+            RestoreIRQs(daif);
+
+            return faulted;
+        }
+
+        //  RP1's inbound window onto MIP0, which only RP1's bring-up writes.
+
+        constexpr uint64_t PI5_RC_BAR1_CONFIG_LO = 0x1000120000 + 0x402C;
+
+        uint32_t CheckAllowList(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            uint32_t failures = 0;
+
+            const bool audit = Hypervisor::Stage2AuditOn();
+
+            if (ReadFaults(BlockedDmaPage()) == audit)
+            {
+                context << minstd::format(buffer, "  FAIL: a read of the blocked DMA controller at {:#x} {}\n", BlockedDmaPage(),
+                                          audit ? "faulted in audit mode" : "returned data");
+                failures++;
+            }
+
+            if (!Hypervisor::LockedDown())
+            {
+                context << "  FAIL: stage-2 was not locked down at boot\n";
+                failures++;
+            }
+
+            failures += CheckResult(context, "audit mode after boot", HVC_INVALID_PARAMETER, Hypervisor::Stage2Audit()) ? 0 : 1;
+            failures += CheckResult(context, "a second lockdown", HVC_INVALID_PARAMETER, Hypervisor::Lockdown(0, 0)) ? 0 : 1;
+
+            if ((GetPlatformInfo().GetBoardType() == RPIBoardType::RPI5) && !RewriteFaults(PI5_RC_BAR1_CONFIG_LO))
+            {
+                context << "  FAIL: a write to the locked-down PCIe root complex got through\n";
+                failures++;
+            }
+
+            if (GetPlatformInfo().GetBoardType() == RPIBoardType::RPI5)
+            {
+                const RP1InterruptController &rp1 = GetRP1InterruptController();
+
+                context << minstd::format(buffer, "  RP1 MSI-X table, locked down: {:#x}, {} bytes\n", rp1.MSIXTablePhysical(), rp1.MSIXTableSize());
+            }
+
+            context << (audit ? "  stage-2 allow-list in AUDIT mode\n" : "  stage-2 allow-list enforced\n");
+
+            return failures;
+        }
+
+        //  hello.bin case 17 writes and reads back EL0_TEST_REGISTER, and must not be killed.
+
+        uint32_t CheckMediatedAccessFromEl0(CLISessionContext &context)
+        {
+            const int64_t faults_before = ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS);
+
+            TestRegister<uint32_t>(EL0_TEST_REGISTER) = 0;
+
+            if (RunWithPageMapped(context, 17, MmioTestPage(), "mediated access") != 0)
+            {
+                return 1;
+            }
+
+            uint32_t failures = 0;
+
+            failures += CheckResult(context, "user tasks killed", faults_before, ReadKernelStatistic(system_stats::KernelStatisticId::USER_TASK_FAULTS)) ? 0 : 1;
+            failures += CheckResult(context, "the test register hello.bin case 17 wrote", EL0_TEST_VALUE, TestRegister<uint32_t>(EL0_TEST_REGISTER)) ? 0 : 1;
+
+            return failures;
+        }
+    } // namespace stage2_test
+
+    void CLITestStage2Command::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        using namespace stage2_test;
+
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest stage2: VM 1 stage-2\n";
+
+        uint32_t failures = 0;
+
+        for (uint32_t core = 0; core < GetPlatformInfo().GetNumberOfCores(); core++)
+        {
+            if (!Hypervisor::Stage2EnabledOnCore(core))
+            {
+                context << minstd::format(buffer, "  FAIL: stage-2 is off on core {}\n", core);
+                failures++;
+            }
+        }
+
+        failures += CheckReads(context);
+        failures += CheckVideoCoreMemory(context);
+        failures += CheckHypercalls(context);
+        failures += CheckUserFault(context);
+        failures += CheckMediatedAccesses(context);
+        failures += CheckMediatedAccessFromEl0(context);
+        failures += CheckSdController(context, ReportTrapCost(context));
+        failures += CheckAllowList(context);
+
+        if (failures == 0)
+        {
+            context << "PASS: stage2 test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: stage2 test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    //  test drivers
+
+    namespace drivers_test
+    {
+        //  hello.bin cases 18 and 19, their flags and reports, and case 19's protocol (user/hello.c).
+
+        constexpr unsigned long CASE_18 = 18;
+        constexpr unsigned long CASE_18_EXPECT_DENIED = 0x1;
+        constexpr unsigned long CASE_18_EXPECT_BUSY = 0x2;
+        constexpr unsigned long CASE_18_NO_INTERRUPTS = 0x4;
+        constexpr int64_t CASE_18_REPORT = 0x1800;
+
+        constexpr unsigned long CASE_19 = 19;
+        constexpr unsigned long CASE_19_EXPECT_DENIED = 0x1;
+        constexpr unsigned long CASE_19_EXPECT_BUSY = 0x2;
+        constexpr unsigned long CASE_19_CHECKS = 0x4;
+        constexpr int64_t CASE_19_REPORT = 0x1900;
+
+        constexpr uint8_t ECHO_OP_ECHO = 1;
+        constexpr uint8_t ECHO_OP_SLOW = 2;
+        constexpr uint8_t ECHO_OP_STATUS = 3;
+        constexpr uint8_t ECHO_OP_OVERSIZE = 4;
+        constexpr uint8_t ECHO_OP_EXIT = 5;
+        constexpr uint8_t ECHO_OP_DATA = 6;
+        constexpr uint8_t ECHO_OP_CRASH = 7;
+        constexpr uint8_t ECHO_OP_HANG = 8;
+
+        constexpr int64_t REPORT_MASK = ~int64_t{0xFF};
+        constexpr int64_t CASE_GO = 2;
+
+        constexpr uint32_t POLL_MS = 10;
+        constexpr uint32_t MAX_POLLS = 1000;
+
+        constexpr minstd::chrono::microseconds CALL_TIMEOUT = minstd::chrono::milliseconds(1000);
+
+        //  A forked hello.bin: its report is its failure count, or -1 when it never reported.
+
+        struct HelloCase
+        {
+            unsigned long test_case = 0;
+            int64_t report = 0;
+            UUID task_id;
+            uint32_t process_id = 0;
+            system_stats::UserStatisticHandle gauge;
+            int64_t failures = -1;
+        };
+
+        bool Start(CLISessionContext &context, HelloCase &hello, unsigned long test_case, unsigned long flags,
+                   DeviceCapabilities devices, ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+
+            hello.test_case = test_case;
+            hello.report = (test_case == CASE_18) ? CASE_18_REPORT : CASE_19_REPORT;
+
+            auto forked = context.task_manager_.ForkServiceTask(binary, test_case | (flags << 8), task::TaskDefinition{"driver calls"}, devices, channels);
+
+            if (forked.Failed())
+            {
+                context << minstd::format(buffer, "  FAIL: ForkServiceTask(driver calls) -- {}\n", task::ErrorMessage(forked.ResultCode()));
+                return false;
+            }
+
+            hello.task_id = forked.Value();
+
+            auto task = context.task_manager_.FindTask(hello.task_id);
+
+            if (task.has_value())
+            {
+                hello.process_id = static_cast<task::TaskImpl &>(*task).ProcessId();
+            }
+
+            return true;
+        }
+
+        //  Waits for the case's report; it keeps running, and owning what it opened, until Finish().
+
+        void AwaitReport(HelloCase &hello)
+        {
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && (hello.failures < 0); poll++)
+            {
+                const auto found = system_stats::FindUserStatistic(system_stats::GetSystemStatisticsDB(), hello.process_id, "hello", "gauge");
+
+                if (found.Successful())
+                {
+                    hello.gauge = *found;
+
+                    const auto value = hello.gauge.Get();
+
+                    if (value.Successful() && ((*value & REPORT_MASK) == hello.report))
+                    {
+                        hello.failures = *value - hello.report;
+                        break;
+                    }
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+        }
+
+        void Finish(CLISessionContext &context, HelloCase &hello)
+        {
+            if (hello.failures >= 0)
+            {
+                hello.gauge.Visit([](const system_stats::UserStatistic &stat) { stat.SetValue(CASE_GO); });
+            }
+
+            auto task = context.task_manager_.FindTask(hello.task_id);
+
+            if (task.has_value())
+            {
+                task->Join();
+            }
+        }
+
+        uint32_t Failures(CLISessionContext &context, const HelloCase &hello, const char *label)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            if (hello.failures < 0)
+            {
+                context << minstd::format(buffer, "  FAIL: {}: hello.bin case {} never reported\n", label, hello.test_case);
+                return 1;
+            }
+
+            if (hello.failures > 0)
+            {
+                context << minstd::format(buffer, "  FAIL: {}: {} check(s) failed in hello.bin\n", label, hello.failures);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  A case that only checks it is refused: forked, its report awaited, then let go.
+
+        uint32_t RunRefused(CLISessionContext &context, unsigned long test_case, unsigned long flags, DeviceCapabilities devices,
+                            ChannelCapabilities channels, const char *label)
+        {
+            HelloCase hello;
+
+            if (!Start(context, hello, test_case, flags, devices, channels))
+            {
+                return 1;
+            }
+
+            AwaitReport(hello);
+            Finish(context, hello);
+
+            return Failures(context, hello, label);
+        }
+
+        //  The reaper gives a dead owner's devices back, so this waits for it.
+
+        bool AwaitRelease(UserDeviceId id)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                if (UserDeviceOwner(id) == 0)
+                {
+                    return true;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return false;
+        }
+
+        //  An owner, a second process that finds the device busy, then one without the capability.
+
+        uint32_t CheckDeviceCalls(CLISessionContext &context)
+        {
+            uint32_t failures = 0;
+
+            HelloCase owner;
+
+            //  QEMU's raspi4b wires the system timer only to the legacy interrupt controller, not to the GIC.
+
+            const bool interrupts = (GetPlatformInfo().GetHostType() != HostType::QEMU) ||
+                                    (GetPlatformInfo().GetBoardType() != RPIBoardType::RPI4);
+
+            if (!interrupts)
+            {
+                context << "  the test timer's interrupt is not checked: QEMU doesn't route it to the GIC\n";
+            }
+
+            if (!Start(context, owner, CASE_18, interrupts ? 0 : CASE_18_NO_INTERRUPTS, CapabilityFor(UserDeviceId::TEST_TIMER)))
+            {
+                return 1;
+            }
+
+            AwaitReport(owner);
+
+            failures += RunRefused(context, CASE_18, CASE_18_EXPECT_BUSY, CapabilityFor(UserDeviceId::TEST_TIMER), NO_CHANNEL_CAPABILITIES,
+                                   "a second owner");
+
+            Finish(context, owner);
+            failures += Failures(context, owner, "the test timer's owner");
+
+            if (!AwaitRelease(UserDeviceId::TEST_TIMER))
+            {
+                context << "  FAIL: the test timer was not given back when its owner exited\n";
+                failures++;
+            }
+
+            failures += RunRefused(context, CASE_18, CASE_18_EXPECT_DENIED, NO_DEVICE_CAPABILITIES, NO_CHANNEL_CAPABILITIES,
+                                   "a process without the capability");
+
+            return failures;
+        }
+
+        //  One call on the test-echo channel; 'expected' is the result it should have.
+
+        uint32_t Call(CLISessionContext &context, const uint8_t *request, size_t request_length, uint8_t *reply, size_t reply_capacity,
+                      size_t &reply_length, minstd::chrono::microseconds timeout, int expected, const char *label)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            const int result = GetChannel(ChannelId::TEST_ECHO).Call(request, request_length, reply, reply_capacity, reply_length, timeout);
+
+            if (result != expected)
+            {
+                context << minstd::format(buffer, "  FAIL: {}: the call returned {}, not {}\n", label, result, expected);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  Echo requests of 'length' bytes, the operation then 1, 2, 3 ...; each reply byte is the request's plus one.
+
+        uint32_t CheckEcho(CLISessionContext &context, size_t length)
+        {
+            static uint8_t request[CHANNEL_MESSAGE_MAX];
+            static uint8_t reply[CHANNEL_MESSAGE_MAX];
+            size_t reply_length = 0;
+
+            request[0] = ECHO_OP_ECHO;
+
+            for (size_t i = 1; i < length; i++)
+            {
+                request[i] = static_cast<uint8_t>(i);
+            }
+
+            if (Call(context, request, length, reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_SUCCESS, "an echo") != 0)
+            {
+                return 1;
+            }
+
+            bool matches = (reply_length == length);
+
+            for (size_t i = 0; matches && (i < length); i++)
+            {
+                matches = (reply[i] == static_cast<uint8_t>(request[i] + 1));
+            }
+
+            if (!matches)
+            {
+                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+                context << minstd::format(buffer, "  FAIL: an echo of {} bytes came back wrong\n", length);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  'length' bytes of data to the driver and back, each byte complemented, beside a 1-byte request.
+
+        uint32_t CheckData(CLISessionContext &context, size_t length)
+        {
+            static uint8_t out[CHANNEL_DATA_MAX + 1];
+            static uint8_t in[CHANNEL_DATA_MAX];
+
+            const uint8_t request[1] = {ECHO_OP_DATA};
+            uint8_t reply[4] = {};
+
+            for (size_t i = 0; i < length; i++)
+            {
+                out[i] = static_cast<uint8_t>((i * 13) + (i >> 8));
+                in[i] = 0;
+            }
+
+            task::ChannelCall call;
+
+            call.request = request;
+            call.request_length = sizeof(request);
+            call.reply = reply;
+            call.reply_capacity = sizeof(reply);
+            call.data_out = out;
+            call.data_out_length = length;
+            call.data_in = in;
+            call.data_in_capacity = sizeof(in);
+
+            const int expected = (length > GetChannel(ChannelId::TEST_ECHO).DataSize()) ? CHANNEL_TOO_LONG : CHANNEL_SUCCESS;
+            const int result = GetChannel(ChannelId::TEST_ECHO).Call(call, CALL_TIMEOUT);
+
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            if (result != expected)
+            {
+                context << minstd::format(buffer, "  FAIL: {} bytes of data: the call returned {}, not {}\n", length, result, expected);
+                return 1;
+            }
+
+            if (result != CHANNEL_SUCCESS)
+            {
+                return 0;
+            }
+
+            const uint32_t seen = reply[0] | (reply[1] << 8) | (reply[2] << 16) | (static_cast<uint32_t>(reply[3]) << 24);
+            bool matches = (call.reply_length == sizeof(reply)) && (seen == length) && (call.data_in_length == length);
+
+            for (size_t i = 0; matches && (i < length); i++)
+            {
+                matches = (in[i] == static_cast<uint8_t>(~out[i]));
+            }
+
+            if (!matches)
+            {
+                context << minstd::format(buffer, "  FAIL: {} bytes of data came back wrong\n", length);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  The test-echo driver's own failure count and the replies the kernel dropped.
+
+        bool EchoStatus(CLISessionContext &context, uint32_t &failures, uint32_t &abandoned)
+        {
+            const uint8_t request[1] = {ECHO_OP_STATUS};
+            uint8_t reply[8] = {};
+            size_t reply_length = 0;
+
+            if ((Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_SUCCESS, "the status") != 0) ||
+                (reply_length != sizeof(reply)))
+            {
+                return false;
+            }
+
+            failures = reply[0] | (reply[1] << 8) | (reply[2] << 16) | (static_cast<uint32_t>(reply[3]) << 24);
+            abandoned = reply[4] | (reply[5] << 8) | (reply[6] << 16) | (static_cast<uint32_t>(reply[7]) << 24);
+
+            return true;
+        }
+
+        //  hello.bin case 19 serves the channel: echoes, data both ways, a caller that gives up on a slow reply, a reply too long, a
+        //      second process that finds the channel served, then the driver exiting with a request in hand.  Last, a
+        //      process without the capability.
+
+        uint32_t CheckChannels(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            uint32_t failures = 0;
+
+            task::Channel &channel = GetChannel(ChannelId::TEST_ECHO);
+
+            uint8_t reply[16] = {};
+            size_t reply_length = 0;
+            const uint8_t exit_request[1] = {ECHO_OP_EXIT};
+
+            if (channel.Server() != 0)
+            {
+                context << "  FAIL: the test-echo channel is already served\n";
+                return 1;
+            }
+
+            failures += Call(context, exit_request, sizeof(exit_request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_NO_SERVER,
+                             "a call with no driver");
+
+            HelloCase driver;
+
+            if (!Start(context, driver, CASE_19, CASE_19_CHECKS, NO_DEVICE_CAPABILITIES, CapabilityFor(ChannelId::TEST_ECHO)))
+            {
+                return failures + 1;
+            }
+
+            //  Its start-up checks include a receive that must time out, so no call goes before its report.
+
+            AwaitReport(driver);
+            failures += Failures(context, driver, "the test-echo driver's start-up");
+
+            if (channel.Server() != driver.process_id)
+            {
+                context << "  FAIL: hello.bin case 19 never served the test-echo channel\n";
+                Finish(context, driver);
+                return failures + 1;
+            }
+
+            failures += RunRefused(context, CASE_19, CASE_19_EXPECT_BUSY, NO_DEVICE_CAPABILITIES, CapabilityFor(ChannelId::TEST_ECHO),
+                                   "a second driver");
+
+            const size_t lengths[] = {1, 2, 3, 64, 511, 512, CHANNEL_MESSAGE_MAX - 1, CHANNEL_MESSAGE_MAX};
+
+            for (size_t length : lengths)
+            {
+                failures += CheckEcho(context, length);
+            }
+
+            for (uint32_t i = 0; i < 100; i++)
+            {
+                failures += CheckEcho(context, 1 + ((i * 37) % CHANNEL_MESSAGE_MAX));
+            }
+
+            const size_t data_lengths[] = {1, 512, 4096, 32768, 0x10000, 0x10001};
+
+            for (size_t length : data_lengths)
+            {
+                failures += CheckData(context, length);
+            }
+
+            static uint8_t overlong[CHANNEL_MESSAGE_MAX + 1] = {ECHO_OP_ECHO};
+
+            failures += Call(context, overlong, sizeof(overlong), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_TOO_LONG,
+                             "a request too long");
+
+            //  The driver sleeps 300 ms; the caller gives up after 50.  The next call waits for the late reply.
+
+            const uint8_t slow[5] = {ECHO_OP_SLOW, 0x2C, 0x01, 0, 0};
+
+            failures += Call(context, slow, sizeof(slow), reply, sizeof(reply), reply_length, minstd::chrono::milliseconds(50), CHANNEL_TIMED_OUT,
+                             "a call the driver is too slow for");
+            failures += CheckEcho(context, 4);
+
+            const uint8_t oversize[1] = {ECHO_OP_OVERSIZE};
+            uint8_t small_reply[8] = {};
+
+            failures += Call(context, oversize, sizeof(oversize), small_reply, sizeof(small_reply), reply_length, CALL_TIMEOUT, CHANNEL_SUCCESS,
+                             "a reply too long");
+
+            if ((reply_length != sizeof(small_reply)) || (small_reply[0] != 0x44) || (small_reply[7] != 0x44))
+            {
+                context << "  FAIL: the reply after one too long came back wrong\n";
+                failures++;
+            }
+
+            uint32_t driver_failures = 0;
+            uint32_t abandoned = 0;
+
+            if (!EchoStatus(context, driver_failures, abandoned))
+            {
+                failures++;
+            }
+            else if ((driver_failures != 0) || (abandoned != 1))
+            {
+                context << minstd::format(buffer, "  FAIL: the driver counted {} failure(s) and {} dropped repl(ies), not 0 and 1\n",
+                                          driver_failures, abandoned);
+                failures++;
+            }
+
+            //  The driver exits holding the request: the reaper fails the call, long before its timeout.
+
+            failures += Call(context, exit_request, sizeof(exit_request), reply, sizeof(reply), reply_length, minstd::chrono::seconds(10),
+                             CHANNEL_SERVER_EXITED, "a call the driver exits holding");
+            failures += Call(context, exit_request, sizeof(exit_request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_NO_SERVER,
+                             "a call after the driver exited");
+
+            Finish(context, driver);
+
+            if (failures == 0)
+            {
+                context << "  channel calls OK\n";
+            }
+
+            failures += RunRefused(context, CASE_19, CASE_19_EXPECT_DENIED, NO_DEVICE_CAPABILITIES, NO_CHANNEL_CAPABILITIES,
+                                   "a driver without the capability");
+
+            return failures;
+        }
+
+        //  Waits for the test-echo channel to be served by the manager's driver, by a process other than 'previous'.
+
+        uint32_t AwaitManagedEcho(uint32_t previous)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                const DriverStatus status = GetDriverStatus(DriverId::TEST_ECHO);
+                const uint32_t server = GetChannel(ChannelId::TEST_ECHO).Server();
+
+                if ((status.state == DriverState::RUNNING) && (server != 0) && (server != previous) && (server == status.process_id))
+                {
+                    return server;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return 0;
+        }
+
+        //  A request the driver exits on, crashing or not: the call fails once the reaper releases the driver.
+
+        uint32_t EndTheDriver(CLISessionContext &context, uint8_t operation, const char *label)
+        {
+            const uint8_t request[1] = {operation};
+            uint8_t reply[4] = {};
+            size_t reply_length = 0;
+
+            return Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, minstd::chrono::seconds(10), CHANNEL_SERVER_EXITED, label);
+        }
+
+        //  Waits for 'id''s driver to be running again as a process other than 'previous'; 0 if it never is.
+
+        uint32_t AwaitRestart(DriverId id, uint32_t previous)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                const DriverStatus status = GetDriverStatus(id);
+
+                if ((status.state == DriverState::RUNNING) && (status.process_id != 0) && (status.process_id != previous))
+                {
+                    return status.process_id;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return 0;
+        }
+
+        bool AwaitStopped(DriverId id)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                if (GetDriverStatus(id).state == DriverState::STOPPED)
+                {
+                    return true;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return false;
+        }
+
+        //  The driver manager runs hello.bin case 19 from the kernel's embedded copy as the test-echo driver: started,
+        //      crashed twice and restarted after 100 then 200 ms, hung at EL0 and killed, restarted after 400 ms, then
+        //      stopped by a kill while it waits for a request.
+
+        uint32_t CheckDriverManager(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            uint32_t failures = 0;
+
+            const DriverStatus before = GetDriverStatus(DriverId::TEST_ECHO);
+
+            if ((before.state != DriverState::STOPPED) || (GetChannel(ChannelId::TEST_ECHO).Server() != 0))
+            {
+                context << minstd::format(buffer, "  FAIL: the test-echo driver is {}, not stopped and unserved\n", ToString(before.state));
+                return 1;
+            }
+
+            StartDriver(DriverId::TEST_ECHO);
+
+            uint32_t process_id = AwaitManagedEcho(0);
+
+            if (process_id == 0)
+            {
+                context << "  FAIL: the driver manager never started the test-echo driver\n";
+                StopDriver(DriverId::TEST_ECHO);
+                return failures + 1;
+            }
+
+            failures += CheckEcho(context, 16);
+            failures += CheckData(context, 4096);
+
+            const uint32_t expected_delays[] = {100, 200};
+
+            for (uint32_t crash = 0; crash < 2; crash++)
+            {
+                failures += EndTheDriver(context, ECHO_OP_CRASH, "a call the driver crashes on");
+
+                const uint32_t restarted = AwaitManagedEcho(process_id);
+
+                if (restarted == 0)
+                {
+                    context << "  FAIL: the driver manager did not restart the crashed driver\n";
+                    StopDriver(DriverId::TEST_ECHO);
+                    return failures + 1;
+                }
+
+                process_id = restarted;
+
+                const DriverStatus status = GetDriverStatus(DriverId::TEST_ECHO);
+
+                if ((status.exits != before.exits + crash + 1) || (status.starts != before.starts + crash + 2) ||
+                    (status.last_restart_delay_ms != expected_delays[crash]))
+                {
+                    context << minstd::format(buffer, "  FAIL: after crash {}: {} exit(s), {} start(s), restarted after {} ms\n",
+                                              crash + 1, status.exits - before.exits, status.starts - before.starts, status.last_restart_delay_ms);
+                    failures++;
+                }
+
+                failures += CheckEcho(context, 16);
+            }
+
+            //  Hung: spinning at EL0, so only a kill ends it.
+
+            {
+                const uint8_t request[1] = {ECHO_OP_HANG};
+                uint8_t reply[4] = {};
+                size_t reply_length = 0;
+
+                failures += Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, minstd::chrono::milliseconds(200),
+                                 CHANNEL_TIMED_OUT, "a call the driver hangs on");
+            }
+
+            RestartDriver(DriverId::TEST_ECHO);
+
+            const uint32_t unhung = AwaitManagedEcho(process_id);
+
+            if (unhung == 0)
+            {
+                context << "  FAIL: the driver manager did not kill and restart the hung driver\n";
+                StopDriver(DriverId::TEST_ECHO);
+                return failures + 1;
+            }
+
+            {
+                const DriverStatus status = GetDriverStatus(DriverId::TEST_ECHO);
+
+                if ((status.kills != before.kills + 1) || (status.exits != before.exits + 3) || (status.last_restart_delay_ms != 400))
+                {
+                    context << minstd::format(buffer, "  FAIL: after the hang: {} kill(s), {} exit(s), restarted after {} ms\n",
+                                              status.kills - before.kills, status.exits - before.exits, status.last_restart_delay_ms);
+                    failures++;
+                }
+            }
+
+            failures += CheckEcho(context, 16);
+
+            //  Stopped: killed while it waits for a request, and stays down.
+
+            StopDriver(DriverId::TEST_ECHO);
+
+            const bool stopped = AwaitStopped(DriverId::TEST_ECHO);
+
+            PhysicalTimer::Wait(minstd::chrono::milliseconds(500));
+
+            const DriverStatus after = GetDriverStatus(DriverId::TEST_ECHO);
+
+            if (!stopped || (after.state != DriverState::STOPPED) || (after.process_id != 0) || (GetChannel(ChannelId::TEST_ECHO).Server() != 0) ||
+                (after.kills != before.kills + 2))
+            {
+                context << minstd::format(buffer, "  FAIL: the stopped driver is {}, process {}, after {} kill(s)\n", ToString(after.state), after.process_id,
+                                          after.kills - before.kills);
+                failures++;
+            }
+
+            const uint8_t request[1] = {ECHO_OP_ECHO};
+            uint8_t reply[4] = {};
+            size_t reply_length = 0;
+
+            failures += Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_NO_SERVER,
+                             "a call after the driver stopped");
+
+            if (failures == 0)
+            {
+                context << "  driver manager OK\n";
+            }
+
+            return failures;
+        }
+        //  The "HWRNG" entity, through the hw-rng driver where the board has a hardware RNG: reads across the
+        //      channel's limit, then the driver killed, reads failing, and the restarted driver serving again.
+
+        uint32_t CheckRandomNumberGenerator(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            uint32_t failures = 0;
+
+            auto lookup = GetOSEntityRegistry().GetEntityByAlias<RandomNumberGeneratorOSEntity>("HWRNG");
+
+            if (lookup.Failed())
+            {
+                context << "  FAIL: there is no HWRNG entity\n";
+                return 1;
+            }
+
+            RandomNumberGeneratorOSEntity &rng = *lookup;
+
+            constexpr size_t WORDS = HW_RNG_MAX_WORDS + 100;
+            static uint32_t first[WORDS];
+            static uint32_t second[WORDS];
+
+            if (!rng.Read(first, WORDS) || !rng.Read(second, WORDS))
+            {
+                context << "  FAIL: the random number generator did not answer\n";
+                return 1;
+            }
+
+            //  Random words agree by chance about once in 2^32: a few matches mean a stuck or repeating generator.
+
+            uint32_t repeats = 0;
+
+            for (size_t i = 0; i < WORDS; i++)
+            {
+                repeats += (first[i] == second[i]) ? 1 : 0;
+                repeats += ((i > 0) && (first[i] == first[i - 1])) ? 1 : 0;
+            }
+
+            if (repeats > 2)
+            {
+                context << minstd::format(buffer, "  FAIL: {} repeated words from the random number generator\n", repeats);
+                failures++;
+            }
+
+            if (!rng.FromHardware())
+            {
+                context << "  hw-rng: no hardware RNG, so the kernel's software generator serves\n";
+                return failures;
+            }
+
+            const DriverStatus before = GetDriverStatus(DriverId::HW_RNG);
+
+            if (before.state != DriverState::RUNNING)
+            {
+                context << minstd::format(buffer, "  FAIL: the hw-rng driver is {}\n", ToString(before.state));
+                return failures + 1;
+            }
+
+            RestartDriver(DriverId::HW_RNG);
+
+            uint32_t failed_reads = 0;
+            bool recovered = false;
+
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && !recovered; poll++)
+            {
+                uint32_t words[4];
+                const bool read = rng.Read(words, 4);
+                const DriverStatus status = GetDriverStatus(DriverId::HW_RNG);
+
+                failed_reads += read ? 0 : 1;
+                recovered = read && (failed_reads > 0) && (status.process_id != before.process_id);
+
+                if (!recovered)
+                {
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                }
+            }
+
+            const DriverStatus after = GetDriverStatus(DriverId::HW_RNG);
+
+            if (!recovered || (after.kills != before.kills + 1) || (after.starts != before.starts + 1))
+            {
+                context << minstd::format(buffer, "  FAIL: the killed hw-rng driver: {} failed read(s), {} kill(s), {} start(s), recovered {}\n",
+                                          failed_reads, after.kills - before.kills, after.starts - before.starts, recovered);
+                failures++;
+            }
+
+            if (failures == 0)
+            {
+                context << "  hw-rng OK\n";
+            }
+
+            return failures;
+        }
+        //  The console driver killed while the CLI writes: what is written meanwhile goes out through EL2, and the
+        //      restarted driver carries the console again.  The commands after this test show that its input works.
+
+        uint32_t CheckConsole(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            const DriverStatus before = GetDriverStatus(DriverId::CONSOLE);
+
+            if ((before.state != DriverState::RUNNING) || (GetChannel(ChannelId::CONSOLE).Server() != before.process_id))
+            {
+                context << minstd::format(buffer, "  FAIL: the console driver is {}, process {}\n", ToString(before.state), before.process_id);
+                return 1;
+            }
+
+            context << "  console: written before its driver is killed\n";
+
+            RestartDriver(DriverId::CONSOLE);
+
+            //  After the manager's line about the kill, and well before the reaper releases the driver.
+
+            PhysicalTimer::Wait(minstd::chrono::milliseconds(300));
+
+            context << "  console: written while its driver restarts\n";
+
+            uint32_t restarted = AwaitRestart(DriverId::CONSOLE, before.process_id);
+
+            for (uint32_t poll = 0; (restarted != 0) && (poll < MAX_POLLS) && (GetChannel(ChannelId::CONSOLE).Server() != restarted); poll++)
+            {
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            context << "  console: written after its driver restarted\n";
+
+            const DriverStatus after = GetDriverStatus(DriverId::CONSOLE);
+
+            if ((restarted == 0) || (GetChannel(ChannelId::CONSOLE).Server() != restarted) || (after.kills != before.kills + 1) ||
+                (after.starts != before.starts + 1))
+            {
+                context << minstd::format(buffer, "  FAIL: the killed console driver: process {}, {} kill(s), {} start(s)\n", restarted,
+                                          after.kills - before.kills, after.starts - before.starts);
+                return 1;
+            }
+
+            context << "  console OK\n";
+
+            return 0;
+        }
+
+        //  Restarts a driver after a delay, from its own task, while the test's task is blocked in a call to it.
+
+        class DelayedDriverRestart : public Runnable
+        {
+        public:
+            DelayedDriverRestart(DriverId id, minstd::chrono::milliseconds delay)
+                : id_(id),
+                  delay_(delay)
+            {
+            }
+
+            void Run() override
+            {
+                task::TaskImpl::GetTask().SleepFor(minstd::chrono::duration_cast<minstd::chrono::microseconds>(delay_));
+                RestartDriver(id_);
+            }
+
+        private:
+            DriverId id_;
+            minstd::chrono::milliseconds delay_;
+        };
+
+        //  The SD card driver killed 50 ms into a 1 MB read, which takes the better part of a second through EL2's
+        //      traps: that read fails, and the next one waits for the restarted driver and reads what the card held
+        //      before.
+
+        uint32_t CheckSDCard(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            constexpr uint32_t LONG_READ_BLOCKS = 2048;
+            constexpr uint32_t CHECK_BLOCKS = 64;
+            constexpr size_t BLOCK_SIZE = 512;
+
+            const DriverStatus before = GetDriverStatus(DriverId::SD_CARD);
+
+            if ((before.state != DriverState::RUNNING) || (GetChannel(ChannelId::SD_CARD).Server() != before.process_id))
+            {
+                context << minstd::format(buffer, "  FAIL: the sd-card driver is {}, process {}\n", ToString(before.state), before.process_id);
+                return 1;
+            }
+
+            ExternalMassMediaController &sd_card = GetExternalMassMediaController();
+
+            uint8_t *long_read = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(LONG_READ_BLOCKS * BLOCK_SIZE, 64));
+            uint8_t *reference = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(CHECK_BLOCKS * BLOCK_SIZE, 64));
+
+            if ((long_read == nullptr) || (reference == nullptr))
+            {
+                context << "  FAIL: no memory for the SD card reads\n";
+                return 1;
+            }
+
+            uint32_t failures = 0;
+
+            if (sd_card.ReadFromBlock(reference, 0, CHECK_BLOCKS).Failed())
+            {
+                context << "  FAIL: the SD card read before the kill failed\n";
+                failures++;
+            }
+
+            static DelayedDriverRestart restart(DriverId::SD_CARD, minstd::chrono::milliseconds(50));
+
+            if (task::GetTaskManager().ForkKernelTask(&restart, "SD driver restart").Failed())
+            {
+                context << "  FAIL: the task to kill the sd-card driver could not be forked\n";
+                failures++;
+            }
+            else
+            {
+                const bool killed_read_failed = sd_card.ReadFromBlock(long_read, 0, LONG_READ_BLOCKS).Failed();
+
+                //  Reported after the manager's lines about the exit, so they don't interleave.
+
+                const uint32_t restarted = AwaitRestart(DriverId::SD_CARD, before.process_id);
+
+                if (killed_read_failed)
+                {
+                    context << "  sd-card: a read failed when its driver was killed\n";
+                }
+                else
+                {
+                    context << "  FAIL: the read the sd-card driver was killed in succeeded\n";
+                    failures++;
+                }
+
+                //  Read into the long read's buffer, which the failed read left part written.
+
+                const auto next_read = sd_card.ReadFromBlock(long_read, 0, CHECK_BLOCKS);
+                const DriverStatus after = GetDriverStatus(DriverId::SD_CARD);
+
+                if (next_read.Failed() || (memcmp(long_read, reference, CHECK_BLOCKS * BLOCK_SIZE) != 0))
+                {
+                    context << "  FAIL: the SD card read after the restart failed or differs\n";
+                    failures++;
+                }
+
+                if ((restarted == 0) || (after.kills != before.kills + 1) || (after.starts != before.starts + 1))
+                {
+                    context << minstd::format(buffer, "  FAIL: the killed sd-card driver: process {}, {} kill(s), {} start(s)\n", restarted,
+                                              after.kills - before.kills, after.starts - before.starts);
+                    failures++;
+                }
+            }
+
+            __os_dynamic_heap_resource.deallocate(reference, CHECK_BLOCKS * BLOCK_SIZE, 64);
+            __os_dynamic_heap_resource.deallocate(long_read, LONG_READ_BLOCKS * BLOCK_SIZE, 64);
+
+            if (failures == 0)
+            {
+                context << "  sd-card OK\n";
+            }
+
+            return failures;
+        }
+    } // namespace drivers_test
+
+    void CLITestDriversCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest drivers: device access, channels, the driver manager, and the hw-rng, console and sd-card drivers\n";
+
+        const uint32_t failures = drivers_test::CheckDeviceCalls(context) + drivers_test::CheckChannels(context) +
+                                  drivers_test::CheckDriverManager(context) + drivers_test::CheckRandomNumberGenerator(context) +
+                                  drivers_test::CheckConsole(context) + drivers_test::CheckSDCard(context);
+
+        if (failures == 0)
+        {
+            context << "PASS: drivers test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: drivers test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands

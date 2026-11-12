@@ -70,9 +70,26 @@ namespace cli::commands
                           CLISessionContext &context) const override;
     };
 
+    //  The driver manager's EL0 drivers: state, process, starts, exits and the last restart delay.
+
+    class CLIListDriversCommand : public CLICommandExecutor
+    {
+    public:
+
+        static const CLIListDriversCommand instance;
+
+        CLIListDriversCommand()
+            : CLICommandExecutor("drivers")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser,
+                          CLISessionContext &context) const override;
+    };
+
     //  Create the top-level list command
 
-    class CLIListCommand : public CLIParentCommand<4>
+    class CLIListCommand : public CLIParentCommand<5>
     {
     public:
 
@@ -82,7 +99,8 @@ namespace cli::commands
             : CLIParentCommand("list", {CLIListFilesystemsCommand::instance,
                                         CLIListDirectoryCommand::instance,
                                         CLIListTasksCommand::instance,
-                                        CLIListStatisticsCommand::instance})
+                                        CLIListStatisticsCommand::instance,
+                                        CLIListDriversCommand::instance})
         {
         }
     };

@@ -12,6 +12,10 @@
 #include <map>
 
 #include "devices/physical_timer.h"
+#include "devices/user_device_registry.h"
+#include "devices/user_devices.h"
+#include "task/channels.h"
+#include "services/driver_manager.h"
 
 #include "platform/exception_manager.h"
 #include "platform/address_space.h"
@@ -261,6 +265,21 @@ namespace task
 
             //  After the address space: nothing maps the process's pages any more.
 
+            if (device_capabilities_ != NO_DEVICE_CAPABILITIES)
+            {
+                ReleaseUserDevices(user_visible_id_);
+            }
+
+            if (channel_capabilities_ != NO_CHANNEL_CAPABILITIES)
+            {
+                ReleaseChannels(user_visible_id_);
+            }
+
+            if ((device_capabilities_ != NO_DEVICE_CAPABILITIES) || (channel_capabilities_ != NO_CHANNEL_CAPABILITIES))
+            {
+                NotifyProcessReleased(user_visible_id_);
+            }
+
             ReleaseResourcesAfterAddressSpace();
 
             if (stack_ != 0)
@@ -376,6 +395,13 @@ namespace task
         //  Join() runs on any core, so it reads this rather than state_, which only the owning core may touch.
 
         minstd::atomic<bool> has_exited_{false};
+
+        //  Set once by TaskManagerImpl::KillTask().  It and interruptible_wait_ are a Dekker pair with wait_status_:
+        //      the killer stores the flag then reads the wait, the task stores WAITING then reads the flag, all
+        //      sequentially consistent, so one of them ends an interruptible wait.
+
+        minstd::atomic<bool> kill_requested_{false};
+        minstd::atomic<bool> interruptible_wait_{false};
         WaitQueue exit_waiters_;
 
         long counter_;
@@ -388,6 +414,8 @@ namespace task
         unsigned long user_arg_ = 0;                            //  the single argument a user task receives in x0
         uint64_t user_heap_break_ = USER_HEAP_BASE;
         uint32_t user_visible_id_ = 0;                          //  what tpidrro_el0 holds
+        DeviceCapabilities device_capabilities_ = NO_DEVICE_CAPABILITIES;   //  a service task's, from its fork
+        ChannelCapabilities channel_capabilities_ = NO_CHANNEL_CAPABILITIES;
 
         TaskImpl::FullCPUState *initial_full_cpu_state_location_;
 
@@ -398,6 +426,20 @@ namespace task
         //      0 for a task that is not a user task.
 
         uint32_t ProcessId() const { return user_visible_id_; }
+
+        //  The devices it may open with sc_DeviceOpen.
+
+        DeviceCapabilities GrantedDevices() const { return device_capabilities_; }
+
+        //  The channels it may serve with sc_ChannelOpen.
+
+        ChannelCapabilities GrantedChannels() const { return channel_capabilities_; }
+
+        bool KillRequested() const { return kill_requested_.load(minstd::memory_order_seq_cst); }
+
+        //  Whether the caller, this core's current task, may block now.
+
+        bool MayBlock() const { return (preempt_count_ == 0) && !InInterrupt() && AreIRQsEnabled(); }
 
         //  The single argument a user task receives in x0.  Read by StartUserTaskWrapper,
         //      which is a free function rather than a member and so cannot see user_arg_.

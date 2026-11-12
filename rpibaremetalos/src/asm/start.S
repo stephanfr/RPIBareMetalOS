@@ -6,6 +6,7 @@
 #include "processor_cores.h"
 #include "os_memory_config.h"
 #include "enable_disable_irqs.h"
+#include "hypervisor_config.h"
 
 #define BIT(x) (1 << (x))
 
@@ -238,6 +239,8 @@ skip_gic_config:
 
     //  Set up SCTLR_EL2
 	//      All set bits below are res1. LE, no WXN/I/SA/C/A/M
+	//      The hypervisor sets its own value on install; this one makes the EL2 code before that (the
+	//      hypervisor header check) run with a defined endianness and alignment-check setting.
 
 	ldr     x9, =0x30c50830
 	msr     SCTLR_EL2, x9
@@ -287,27 +290,45 @@ skip_set_core_started_el2:
     add     x12, x12, x10
     msr     SP_EL0, x12
 
-    //  Enable CNTP for lower exception levels
+    //  A compatible hypervisor must be loaded at HYPERVISOR_LOAD_ADDRESS.  (A numeric constant, not a symbol, so
+    //      `ldr =` is fine under rule R2.)
 
-    mrs     x9, CNTHCTL_EL2
-    orr     x9, x9, #3
-    msr     CNTHCTL_EL2, x9
-    msr     CNTVOFF_EL2, xzr
+    ldr     x9, =HYPERVISOR_LOAD_ADDRESS
+    ldr     w10, [x9, #HYPERVISOR_HDR_MAGIC]
+    ldr     w11, =HYPERVISOR_IMAGE_MAGIC
+    cmp     w10, w11
+    b.ne    hypervisor_rejected
+    ldrh    w10, [x9, #HYPERVISOR_HDR_ABI_MAJOR]
+    cmp     w10, #HYPERVISOR_ABI_MAJOR
+    b.ne    hypervisor_rejected
+    ldr     w10, [x9, #HYPERVISOR_HDR_MEMORY_SIZE]
+    ldr     w11, =HYPERVISOR_IMAGE_MAX
+    cmp     w10, w11
+    b.hi    hypervisor_rejected
 
-    //  Disable various CPU architectural feature traps
+    //  Install (or re-install) it on this core.  It owns every *_EL2 register from here on: HCR_EL2, CPTR_EL2,
+    //      HSTR_EL2, CNTHCTL_EL2, CNTVOFF_EL2, SCTLR_EL2, VPIDR_EL2, VMPIDR_EL2.  Preserves x19-x29.
 
-    mov     x9, #0x33FF
-    msr     CPTR_EL2, x9
-    msr     HSTR_EL2, xzr
+    ldr     w10, [x9, #HYPERVISOR_HDR_ENTRY_OFFSET]
+    add     x9, x9, x10
+    mov     x0, x20_boardHWId
+    mov     x1, x19_coreNumber
+    mov     x2, #HYPERVISOR_INSTALL_COLD
+    blr     x9
+    cbz     x0, hypervisor_installed
+
+    //  Missing, incompatible, or the install failed.  A distinct label, so a parked core is easy to spot in GDB or
+    //      QEMU -d.  No output: the UART isn't up yet.
+
+hypervisor_rejected:
+    b       ParkCore
+
+hypervisor_installed:
+
+    //  FP/SIMD at EL1 and EL0
+
     mov     x9, #(3 << 20)
     msr     CPACR_EL1, x9
-
-    //  Enable AArch64 in EL1
-
-    mov     x9, #(1 << 31)                                      // AArch64
-    orr     x9, x9, #(1 << 1)                                   // SWIO hardwired on Pi3
-    msr     HCR_EL2, x9
-    mrs     x9, HCR_EL2
 
     //  Configure CPU for EL1 and EL0
 

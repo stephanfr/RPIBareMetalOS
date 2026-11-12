@@ -58,14 +58,16 @@ public:
         return PL011UARTBase::getc();
     }
 
-    //  Only once RP1 interrupt delivery is up; otherwise input stays polled.
+    //  Only once RP1 interrupt delivery is up; otherwise the console's input stays polled.
 
-    bool EnableInterruptDrivenInput() override
+    bool EnableInterruptSource() override
     {
-        RP1InterruptController &rp1 = GetRP1InterruptController();
+        return GetRP1InterruptController().EnableSource(RP1InterruptController::UART0_SOURCE, InterruptTrigger::LEVEL);
+    }
 
-        return rp1.EnableSource(RP1InterruptController::UART0_SOURCE, InterruptTrigger::LEVEL) &&
-               EnableRxInterrupt(Interrupts::UART0);
+    bool TryGetc(unsigned int &c) override
+    {
+        return PL011UARTBase::TryGetc(c);
     }
 
 private:

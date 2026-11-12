@@ -61,3 +61,51 @@ sc_FindProcess:
     mov     w8, #SYS_FIND_PROCESS_NUMBER
     svc     #0
     ret
+
+    .globl sc_DeviceOpen
+sc_DeviceOpen:
+    mov     w8, #SYS_DEVICE_OPEN_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_InterruptWait
+sc_InterruptWait:
+    mov     w8, #SYS_INTERRUPT_WAIT_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_InterruptAck
+sc_InterruptAck:
+    mov     w8, #SYS_INTERRUPT_ACK_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_ChannelOpen
+sc_ChannelOpen:
+    mov     w8, #SYS_CHANNEL_OPEN_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_ChannelReceive
+sc_ChannelReceive:
+    mov     w8, #SYS_CHANNEL_RECEIVE_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_ChannelReply
+sc_ChannelReply:
+    mov     w8, #SYS_CHANNEL_REPLY_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_ChannelPost
+sc_ChannelPost:
+    mov     w8, #SYS_CHANNEL_POST_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_InterruptRoute
+sc_InterruptRoute:
+    mov     w8, #SYS_INTERRUPT_ROUTE_NUMBER
+    svc     #0
+    ret

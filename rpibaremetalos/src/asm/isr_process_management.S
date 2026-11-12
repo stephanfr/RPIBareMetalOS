@@ -287,6 +287,7 @@ EL1_IRQ:
 EL0_IRQ:
 	KernelEntry EL0 
 	bl	HandleIRQ
+	bl	ReturningToUserSpace								//	exits the task instead if it is being killed
 	KernelExit EL0 
 
 //
@@ -375,6 +376,7 @@ EL0_SynchronousException:
 	bl		HandleDemandPageFault
 	cbz		w0, EL0_UserFault									//	int return: only w0 is defined (AAPCS64)
 
+	bl		ReturningToUserSpace
 	KernelExit EL0												//	page faulted in: retry the instruction
 
 EL0_UserFault:
@@ -402,6 +404,7 @@ EL0_SyscallDispatcher:
 	ldr		x16, [syscall_table_ptr, syscall_number, lsl #3]	//	address in the syscall table
 	blr		x16													//	call system_call routine
 	str		x0, [sp, 0]											// 	Returned x0 - zero is offset of x0 in the stack frame
+	bl		ReturningToUserSpace
 	KernelExit EL0
 
 EL0_SyscallIndexOutOfRange:
@@ -426,6 +429,7 @@ ReturnFromForkASMStub:
 	blr	x19
 
 ReturnToUserSpace:
+	bl	ReturningToUserSpace
 
 	//	Reload SP with this task's initial CPU-state frame before KernelExit pops it.
 	//

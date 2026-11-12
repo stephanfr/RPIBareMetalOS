@@ -5,9 +5,12 @@
 #include "platform/gpu_mailbox.h"
 
 #include "asm_utility.h"
+#include "synchronization.h"
 #include "devices/physical_timer.h"
 #include "devices/log.h"
 
+#include "platform/hypervisor.h"
+#include "platform/memory_model.h"
 #include "platform/mmu_manager.h"
 
 bool GPUMailboxPropertyMessage::AddTag(GPUMailboxPropertyMessageTag &tag)
@@ -82,6 +85,69 @@ namespace
 
         return ticks_per_microsecond * timeout_in_microseconds;
     }
+
+    constexpr uint32_t MAILBOX_DRAIN_MAX = 64; //  the read FIFO holds 8; the bound only guards against a stuck device
+
+    //  The DMA buffer every message is copied into, and before stage-2 the mailbox registers, are shared by every
+    //      core: one message at a time.
+
+    SpinLock message_lock;
+
+    //  Exclusive loads and stores need the MMU on.  Before it is, only core 0 runs.
+
+    class MessageLockGuard
+    {
+    public:
+        MessageLockGuard()
+        {
+            uint64_t sctlr;
+            asm volatile("mrs %0, sctlr_el1" : "=r"(sctlr));
+
+            held_ = (sctlr & 1) != 0;
+
+            if (held_)
+            {
+                message_lock.Lock();
+            }
+        }
+
+        ~MessageLockGuard()
+        {
+            if (held_)
+            {
+                message_lock.Unlock();
+            }
+        }
+
+        MessageLockGuard(const MessageLockGuard &) = delete;
+        MessageLockGuard &operator=(const MessageLockGuard &) = delete;
+
+    private:
+        bool held_;
+    };
+}
+
+//  0x80000001 is a PARTIAL response, not a failed one: per the mailbox property interface spec, the firmware
+//      processed every tag it recognized and set this code because at least one tag was unknown to it ("unknown
+//      tags are ignored -- the response bit will not be set").  The tags it did answer are valid and must still be
+//      harvested; each tag's own ResponseWasProvided() tells a caller which values to trust.  On the RPi5 that keeps
+//      a valid board revision whose message held a tag the board's firmware doesn't support.
+
+bool GPUMailbox::HarvestResponse(GPUMailboxPropertyMessage &message, const uint32_t *response_message)
+{
+    if ((response_message[1] == MBOX_STATUS_RESPONSE_SUCCESS) ||
+        (response_message[1] == MBOX_STATUS_REQUEST_PARSING_ERROR))
+    {
+        message.ReturnTags((const char *)response_message);
+
+        message.Reset();
+
+        return true;
+    }
+
+    LogError("GPUMailbox error, Response Code: %u\n", response_message[1]);
+
+    return false;
 }
 
 bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
@@ -89,6 +155,13 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
     //  Append the 'Last Tag' to the message
 
     message.AddLastTag();
+
+    MessageLockGuard guard;
+
+    if (Hypervisor::MailboxThroughEl2())
+    {
+        return SendThroughEl2(message);
+    }
 
     //  Wait until we can write to the mailbox
 
@@ -118,9 +191,20 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
 
     void *message_ARM_address = reinterpret_cast<void *>(((uint64_t)(uncached_memory_base) & 0xFFFFFFFFFFFFFFF0) | ((uint64_t)MailboxChannels::PROP & 0x000000000000000F));
 
+    //  Replies nobody is waiting for -- a late answer to a timed-out message, EL2's own at boot -- would otherwise be
+    //      read as this one's.
+
+    for (uint32_t i = 0; (i < MAILBOX_DRAIN_MAX) && !(Register(MailboxRegister::STATUS) & MBOX_STATUS_EMPTY); i++)
+    {
+        const uint32_t stale = Register(MailboxRegister::READ); //  the read pops the FIFO
+        (void)stale;
+    }
+
+    const uint32_t request = (uint32_t) reinterpret_cast<uint64_t>(MMUManager::Instance().ARMToGPUAddress(message_ARM_address));
+
     asm volatile("dsb sy" ::: "memory");
 
-    Register(MailboxRegister::WRITE) = (uint32_t) reinterpret_cast<uint64_t>(MMUManager::Instance().ARMToGPUAddress(message_ARM_address));
+    Register(MailboxRegister::WRITE) = request;
 
     //  Now wait for the response. The deadline covers the whole wait, including
     //      any messages we read and discard from other channels -- unlike the
@@ -144,48 +228,39 @@ bool GPUMailbox::sendMessage(GPUMailboxPropertyMessage &message)
             CPUTicksDelay(50);
         }
 
-        //  Loop until we read a response on the property channel.
-        //      This *should* be a response to our request.
+        //  The reply echoes the request word: our buffer's address and the channel.  Anything else is not ours.
 
-        uint32_t result = Register(MailboxRegister::READ);
-
-        unsigned char read_channel = (unsigned char)(result & 0x0F);
-
-        if (read_channel != (unsigned char)MailboxChannels::PROP)
+        if (Register(MailboxRegister::READ) != request)
         {
             continue;
         }
 
-        //  Get a pointer to the new buffer.  This should always be the same address we passed to the GPU.
-        //      The pointer is the upper 28 bits of the return value, so it is implicitly 16 byte aligned.
-
         uint32_t *response_message = reinterpret_cast<uint32_t *>(reinterpret_cast<uint64_t>(message_ARM_address) & 0xFFFFFFFFFFFFFFF0);
 
-        //  0x80000001 is a PARTIAL response, not a failed one: per the mailbox
-        //      property interface spec, the firmware processed every tag it
-        //      recognized and set this code because at least one tag was unknown
-        //      to it ("unknown tags are ignored -- the response bit will not be
-        //      set"). The tags it did answer are valid and must still be
-        //      harvested; each tag's own ResponseWasProvided() is what tells a
-        //      caller which values to trust. Returning without ReturnTags() here
-        //      discarded good data -- on RPi5 that threw away a perfectly valid
-        //      board revision because an unrelated tag in the same message was
-        //      not supported by that board's firmware.
-
-        if ((response_message[1] == MBOX_STATUS_RESPONSE_SUCCESS) ||
-            (response_message[1] == MBOX_STATUS_REQUEST_PARSING_ERROR))
-        {
-            message.ReturnTags((const char *)response_message);
-
-            message.Reset();
-
-            return true;
-        }
-
-        LogError("GPUMailbox error, Response Code: %u\n", response_message[1]);
-
-        return false;
+        return HarvestResponse(message, response_message);
     }
 
     return false;
+}
+
+//  The DMA block is non-cacheable in the kernel's tables, so EL2, whose MMU is off, sees the message as written.
+
+bool GPUMailbox::SendThroughEl2(GPUMailboxPropertyMessage &message)
+{
+    void *uncached_memory_base = MMUManager::Instance().DMAUncachedMemoryBase();
+
+    memcpy(uncached_memory_base, message.AsUint32Buffer(), MAX_MAILBOX_MESSAGE_SIZE_IN_BYTES);
+
+    asm volatile("dsb sy" ::: "memory");
+
+    const int64_t result = Hypervisor::MailboxCall(KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(uncached_memory_base)),
+                                                   message.message_buffer_.header_.buffer_size_);
+
+    if (result != HVC_SUCCESS)
+    {
+        LogError("GPUMailbox: the hypervisor refused or timed out on the message: %d\n", static_cast<int>(result));
+        return false;
+    }
+
+    return HarvestResponse(message, reinterpret_cast<const uint32_t *>(uncached_memory_base));
 }

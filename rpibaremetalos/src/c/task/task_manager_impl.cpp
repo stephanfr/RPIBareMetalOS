@@ -17,6 +17,7 @@
 #include "asm_utility.h"
 
 #include "platform/exception_manager.h"
+#include "platform/hypervisor.h"
 #include "platform/mmu_manager.h"
 #include "platform/platform_info.h"
 #include "platform/platform_sw_rngs.h"
@@ -64,6 +65,9 @@ namespace
 
     system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS>
         task_wait_timeouts("tasks", "wait_timeouts", "Waits ended by their timeout", 0);
+
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_KILLS>
+        task_kills("tasks", "kills", "User tasks killed by request", 0);
 }
 
 UUID GetCurrentTaskId(void)
@@ -152,6 +156,12 @@ namespace task
         {
             TaskImpl &task = task::TaskManagerImpl::Instance().CurrentTask();
 
+            if (!Hypervisor::Stage2EnabledOnCore(GetCoreID()))
+            {
+                LogError("Stage-2 is off on core %d: user task %s not started\n", GetCoreID(), task.Name().c_str());
+                task.Exit();
+            }
+
             auto err = task.MoveToUserSpace(task.UserArg());
 
             if (Failed(err))
@@ -164,6 +174,12 @@ namespace task
         extern "C" void SecondaryCoreMain()
         {
             uint32_t core_id = GetCoreID();
+
+            if (Hypervisor::EnableStage2OnThisCore() != HVC_SUCCESS)
+            {
+                LogFatal("Core %d could not enable stage-2\n", core_id);
+                ParkCore();
+            }
 
             auto core_main_task = dynamic_new<task::TaskImpl>(TaskDefinition{"Secondary Core Main Task", 1, DEFAULT_TASK_STACK_SIZE_IN_BYTES, ((uint32_t)0x01 << core_id)}, task::Task::TaskType::KERNEL_TASK);
             
@@ -442,14 +458,16 @@ namespace task
     }
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkServiceTask(const minstd::string &binary_path, unsigned long arg,
-                                                                        const TaskDefinition &task_definition)
+                                                                        const TaskDefinition &task_definition, DeviceCapabilities devices,
+                                                                        ChannelCapabilities channels)
     {
-        return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg, true);
+        return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg, true, devices, channels);
     }
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition &task_definition,
                                                                               const minstd::string *user_binary_path, unsigned long user_arg,
-                                                                              bool service)
+                                                                              bool service, DeviceCapabilities devices,
+                                                                              ChannelCapabilities channels)
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
@@ -504,6 +522,12 @@ namespace task
         {
             new_task->binary_path_ = *user_binary_path;
             new_task->user_arg_ = user_arg;
+        }
+
+        if (service)
+        {
+            new_task->device_capabilities_ = devices;
+            new_task->channel_capabilities_ = channels;
         }
 
         //  Add the task to our task map
@@ -639,6 +663,41 @@ namespace task
         return TaskHandle(*task_itr->second);
     }
 
+    bool TaskManagerImpl::KillTask(const UUID &task_id)
+    {
+        TaskHandle handle = FindTask(task_id);
+
+        if (!handle)
+        {
+            return false;
+        }
+
+        TaskImpl &task = static_cast<TaskImpl &>(*handle);
+
+        //  A service task is a kernel task until it has loaded its binary, but has its path from the fork.
+
+        const bool user_process = (task.Type() == Task::TaskType::USER_TASK) || (task.Type() == Task::TaskType::SERVICE_TASK) ||
+                                  !task.binary_path_.empty();
+
+        if (!user_process || task.has_exited_.load(minstd::memory_order_acquire))
+        {
+            return false;
+        }
+
+        task.kill_requested_.store(true, minstd::memory_order_seq_cst);
+
+        if (task.interruptible_wait_.load(minstd::memory_order_seq_cst))
+        {
+            WakeTask(task, WaitStatus::INTERRUPTED);
+        }
+
+        //  Running at EL0 on its core, it sees the flag when this interrupt returns there.
+
+        RequestReschedule(task.schedule_on_core_.load());
+
+        return true;
+    }
+
     /**
      * @brief Preemptively schedules the next task.
      *
@@ -681,6 +740,21 @@ namespace task
         RequestReschedule(core);
 
         return true;
+    }
+
+    //  Every return to EL0 comes through here, outside interrupt context.  A kill that lands after the check is
+    //      seen at the next one: its IPI is pending until the eret unmasks IRQs.
+
+    extern "C" void ReturningToUserSpace()
+    {
+        TaskImpl &task = TaskImpl::GetTask();
+
+        if (task.KillRequested())
+        {
+            task_kills.Increment();
+            LogWarning("Task %s (process %u) killed\n", task.Name().c_str(), task.ProcessId());
+            task.Exit();
+        }
     }
 
     void TaskManagerImpl::RequestReschedule(uint32_t core)

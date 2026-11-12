@@ -511,6 +511,9 @@ private:
 
     const uint8_t *mailbox_register_base_;
 
+    bool SendThroughEl2(GPUMailboxPropertyMessage &message);
+    bool HarvestResponse(GPUMailboxPropertyMessage &message, const uint32_t *response_message);
+
     volatile uint32_t &Register(MailboxRegister reg)
     {
         return *((volatile uint32_t *)(mailbox_register_base_ + (uint32_t)reg));

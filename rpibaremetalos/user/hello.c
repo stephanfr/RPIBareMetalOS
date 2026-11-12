@@ -25,6 +25,15 @@
 //      13 -> the statistics system calls, run while a case 12 process (payload: its process id) waits (a service)
 //      14 -> an ordinary process: its statistics are private data, never registered
 //      15 -> sc_Sleep for payload milliseconds, timed with the system counter
+//      16 -> writes to payload, a page the kernel maps but stage-2 doesn't, once the kernel sets the gauge to 2
+//      17 -> writes and reads back offset 0x20 of payload, EL2's mediated test device, once the gauge is 2
+//                                                         -> killed by the abort EL2 injects (a service)
+//      18 -> the device calls on the test timer; payload holds CASE_18_* flags.  Reports 0x1800 + its failure count
+//                in the gauge, then waits for the kernel to set it to 2 (a service)
+//      19 -> serves the test-echo channel until asked to exit or crash (a service; the driver manager's test-echo
+//                driver runs it from the copy embedded in the kernel).  With CASE_19_CHECKS it first reports 0x1900 +
+//                its start-up failures in the gauge.  With CASE_19_EXPECT_* it only checks that opening the channel
+//                is refused, and reports 0x1900 + its failure count as case 18 does
 
 
 #include <stdint.h>
@@ -86,6 +95,348 @@ static uint64_t CounterFrequency(void)
     uint64_t frequency;
     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(frequency));
     return frequency;
+}
+
+//  Cases 16 and 17: sets the gauge to 1, then waits up to 10 s for the kernel to set it to 2.
+
+static int WaitForTheKernel(const char *timeout_message)
+{
+    UserGaugeSet(&hello_gauge, 1);
+
+    const uint64_t deadline = CounterTicks() + (10 * CounterFrequency());
+
+    while (UserStatisticGet(&hello_gauge) != 2)
+    {
+        if (CounterTicks() > deadline)
+        {
+            sc_Write(timeout_message);
+            return 0;
+        }
+
+        sc_Yield();
+    }
+
+    return 1;
+}
+
+//  Cases 18 and 19: sets the gauge to 'report', then waits up to 10 s for the kernel to set it to 2.
+
+#define CASE_18_REPORT          0x1800LL
+#define CASE_18_EXPECT_DENIED   0x1             /* forked without the capability */
+#define CASE_18_EXPECT_BUSY     0x2             /* forked while another process owns the timer */
+#define CASE_18_NO_INTERRUPTS   0x4             /* QEMU's raspi4b: the timer's interrupt never reaches the GIC */
+#define CASE_18_INTERRUPTS      10
+
+#define TIMER_CS                0x00
+#define TIMER_CLO               0x04
+#define TIMER_C3                0x18
+#define TIMER_MATCH_3           0x08
+#define TIMER_TICKS_PER_MS      1000            /* the system timer runs at 1 MHz */
+
+static void ReportToTheKernel(long long report)
+{
+    UserGaugeSet(&hello_gauge, report);
+
+    const uint64_t deadline = CounterTicks() + (10 * CounterFrequency());
+
+    while ((UserStatisticGet(&hello_gauge) != 2) && (CounterTicks() <= deadline))
+    {
+        sc_Yield();
+    }
+}
+
+static int Check(int passed, const char *failure)
+{
+    if (!passed)
+    {
+        sc_Write(failure);
+    }
+
+    return passed ? 0 : 1;
+}
+
+static int TestTimerInterrupts(uint32_t timer, uint64_t registers)
+{
+    int failures = 0;
+
+    for (int i = 0; i < CASE_18_INTERRUPTS; i++)
+    {
+        DeviceWrite32(registers + TIMER_CS, TIMER_MATCH_3);
+        DeviceWrite32(registers + TIMER_C3, DeviceRead32(registers + TIMER_CLO) + (2 * TIMER_TICKS_PER_MS));
+
+        failures += Check(sc_InterruptWait(timer, 1000000) == DEVICE_SUCCESS, "case 18: FAIL no timer interrupt within 1 s\n");
+        failures += Check((DeviceRead32(registers + TIMER_CS) & TIMER_MATCH_3) != 0, "case 18: FAIL woken without a match\n");
+
+        DeviceWrite32(registers + TIMER_CS, TIMER_MATCH_3);
+
+        failures += Check(sc_InterruptAck(timer) == DEVICE_SUCCESS, "case 18: FAIL the ack was refused\n");
+    }
+
+    return failures;
+}
+
+static int TestDeviceCalls(unsigned long flags)
+{
+    uint32_t timer = 0;
+    uint64_t registers = 0;
+    int failures = 0;
+
+    failures += Check(sc_DeviceOpen("no-such-device", &timer, &registers) == DEVICE_NOT_FOUND, "case 18: FAIL an unknown device was not refused\n");
+    failures += Check(sc_InterruptWait(0, 1000) == DEVICE_INVALID_HANDLE, "case 18: FAIL a wait on an unopened device was not refused\n");
+    failures += Check(sc_InterruptAck(0x100) == DEVICE_INVALID_HANDLE, "case 18: FAIL a bad handle was not refused\n");
+
+    const int opened = sc_DeviceOpen(DEVICE_NAME_TEST_TIMER, &timer, &registers);
+
+    if (flags & CASE_18_EXPECT_DENIED)
+    {
+        failures += Check(opened == DEVICE_NOT_PERMITTED, "case 18: FAIL opened without the capability\n");
+        return failures;
+    }
+
+    if (flags & CASE_18_EXPECT_BUSY)
+    {
+        failures += Check(opened == DEVICE_BUSY, "case 18: FAIL opened a device another process owns\n");
+        return failures;
+    }
+
+    if (opened != DEVICE_SUCCESS)
+    {
+        sc_Write("case 18: FAIL the test timer did not open\n");
+        return failures + 1;
+    }
+
+    uint32_t reopened = 0xFFFFFFFF;
+    uint64_t registers_again = 0;
+
+    failures += Check((sc_DeviceOpen(DEVICE_NAME_TEST_TIMER, &reopened, &registers_again) == DEVICE_SUCCESS) &&
+                      (reopened == timer) && (registers_again == registers),
+                      "case 18: FAIL opening it again gave a different answer\n");
+    failures += Check((registers >= S_USER_DEVICE_BASE) && (registers < S_USER_DEVICE_TOP), "case 18: FAIL mapped outside the device windows\n");
+    failures += Check(sc_DeviceOpen(DEVICE_NAME_TEST_TIMER, &timer, (uint64_t *)KERNEL_VA_BASE) == DEVICE_BAD_ADDRESS,
+                      "case 18: FAIL a kernel address for the result was not refused\n");
+
+    const uint32_t before = DeviceRead32(registers + TIMER_CLO);
+    sc_Sleep(2000);
+    failures += Check(DeviceRead32(registers + TIMER_CLO) - before >= 2 * TIMER_TICKS_PER_MS, "case 18: FAIL the timer's counter did not advance\n");
+
+    //  Nothing armed: C3 a full counter wrap away, and any match from before cleared and its ring drained.
+
+    DeviceWrite32(registers + TIMER_CS, TIMER_MATCH_3);
+    DeviceWrite32(registers + TIMER_C3, DeviceRead32(registers + TIMER_CLO) - 1);
+    sc_InterruptAck(timer);
+    sc_InterruptWait(timer, 1000);
+
+    failures += Check(sc_InterruptWait(timer, 20000) == DEVICE_TIMED_OUT, "case 18: FAIL a wait with nothing armed did not time out\n");
+
+    if (!(flags & CASE_18_NO_INTERRUPTS))
+    {
+        failures += TestTimerInterrupts(timer, registers);
+
+        if (failures == 0)
+        {
+            sc_Write("case 18: device interrupts OK\n");
+        }
+    }
+
+    if (failures == 0)
+    {
+        sc_Write("case 18: device calls OK\n");
+    }
+
+    return failures;
+}
+
+//  Case 19: the test-echo channel's protocol.  The first byte of a request is its operation; `test drivers` sends
+//      them (src/c/cli/test_command.cpp).
+
+#define CASE_19_REPORT          0x1900LL
+#define CASE_19_EXPECT_DENIED   0x1             /* forked without the capability */
+#define CASE_19_EXPECT_BUSY     0x2             /* forked while another process serves the channel */
+#define CASE_19_CHECKS          0x4             /* nobody calls until it reports its start-up checks in the gauge */
+
+#define ECHO_OP_ECHO            1               /* replies with each byte of the request plus one */
+#define ECHO_OP_SLOW            2               /* sleeps for the little-endian milliseconds in bytes 1-4, then replies */
+#define ECHO_OP_STATUS          3               /* replies with its failure count, then the replies the kernel dropped */
+#define ECHO_OP_OVERSIZE        4               /* tries replies too long, then replies with 8 bytes of 0x44 */
+#define ECHO_OP_EXIT            5               /* exits without replying */
+#define ECHO_OP_DATA            6               /* replies with the data's length, and the data with each byte complemented */
+#define ECHO_OP_CRASH           7               /* writes to the kernel's memory, and is killed */
+#define ECHO_OP_HANG            8               /* spins at EL0 without replying, until it is killed */
+
+#define ECHO_DATA_SIZE          0x10000         /* the test-echo channel's data area */
+
+#define ECHO_IDLE_US            10000000        /* exits after 10 s with no request */
+
+static int TestChannelRefused(unsigned long flags)
+{
+    uint32_t channel = 0;
+    uint64_t page = 0;
+    uint64_t data_size = 0;
+    const int opened = sc_ChannelOpen(CHANNEL_NAME_TEST_ECHO, &channel, &page, &data_size);
+
+    if (flags & CASE_19_EXPECT_DENIED)
+    {
+        return Check(opened == CHANNEL_NOT_PERMITTED, "case 19: FAIL served a channel without the capability\n");
+    }
+
+    return Check(opened == CHANNEL_BUSY, "case 19: FAIL served a channel another process serves\n");
+}
+
+static void PutWord(volatile uint8_t *bytes, uint32_t value)
+{
+    for (int i = 0; i < 4; i++)
+    {
+        bytes[i] = (uint8_t)(value >> (8 * i));
+    }
+}
+
+static void ServeEchoChannel(unsigned long flags)
+{
+    uint32_t channel = 0;
+    uint64_t page = 0;
+    uint64_t data_size = 0;
+    uint64_t data_length = 0;
+    uint32_t failures = 0;
+    uint32_t abandoned = 0;
+
+    failures += Check(sc_ChannelOpen("no-such-channel", &channel, &page, &data_size) == CHANNEL_NOT_FOUND, "case 19: FAIL an unknown channel was not refused\n");
+    failures += Check(sc_ChannelReceive(0, 1000, 0) == CHANNEL_INVALID_HANDLE, "case 19: FAIL a receive on an unopened channel was not refused\n");
+    failures += Check(sc_ChannelReply(0x100, 0, 0) == CHANNEL_INVALID_HANDLE, "case 19: FAIL a bad handle was not refused\n");
+
+    if (sc_ChannelOpen(CHANNEL_NAME_TEST_ECHO, &channel, &page, &data_size) != CHANNEL_SUCCESS)
+    {
+        sc_Write("case 19: FAIL the test-echo channel did not open\n");
+        return;
+    }
+
+    uint32_t reopened = 0xFFFFFFFF;
+    uint64_t page_again = 0;
+    uint64_t data_size_again = 0;
+
+    failures += Check((sc_ChannelOpen(CHANNEL_NAME_TEST_ECHO, &reopened, &page_again, &data_size_again) == CHANNEL_SUCCESS) &&
+                      (reopened == channel) && (page_again == page) && (data_size_again == data_size),
+                      "case 19: FAIL opening it again gave a different answer\n");
+    failures += Check(data_size == ECHO_DATA_SIZE, "case 19: FAIL the data area is the wrong size\n");
+    failures += Check((page >= S_USER_CHANNEL_BASE) && (page + CHANNEL_DATA_OFFSET + data_size <= S_USER_CHANNEL_TOP),
+                      "case 19: FAIL mapped outside the channel memory\n");
+    failures += Check(sc_ChannelReply(channel, 0, 0) == CHANNEL_NOT_SERVING, "case 19: FAIL a reply with no request was not refused\n");
+    failures += Check(sc_ChannelReply(channel, 0, data_size + 1) == CHANNEL_TOO_LONG, "case 19: FAIL a reply with too much data was not refused\n");
+    failures += Check(sc_ChannelReceive(channel, 20000, (uint64_t *)KERNEL_VA_BASE) == CHANNEL_BAD_ADDRESS,
+                      "case 19: FAIL a kernel address for the data length was not refused\n");
+
+    //  Only while nobody calls: as a managed driver, its first request may already be waiting.
+
+    if (flags & CASE_19_CHECKS)
+    {
+        failures += Check(sc_ChannelReceive(channel, 20000, &data_length) == CHANNEL_TIMED_OUT, "case 19: FAIL a receive with no caller did not time out\n");
+        UserGaugeSet(&hello_gauge, CASE_19_REPORT + failures);
+    }
+
+    volatile uint8_t *request = (volatile uint8_t *)(page + CHANNEL_REQUEST_OFFSET);
+    volatile uint8_t *reply = (volatile uint8_t *)(page + CHANNEL_REPLY_OFFSET);
+    volatile uint8_t *data = (volatile uint8_t *)(page + CHANNEL_DATA_OFFSET);
+
+    for (;;)
+    {
+        const int length = sc_ChannelReceive(channel, ECHO_IDLE_US, &data_length);
+
+        if (length == CHANNEL_TIMED_OUT)
+        {
+            sc_Write("case 19: FAIL no request for 10 s\n");
+            return;
+        }
+
+        if ((length < 1) || (length > CHANNEL_MESSAGE_MAX))
+        {
+            sc_Write("case 19: FAIL a receive returned an impossible length\n");
+            return;
+        }
+
+        int result = CHANNEL_SUCCESS;
+
+        switch (request[0])
+        {
+            case ECHO_OP_ECHO:
+                failures += Check(sc_ChannelReceive(channel, 1000, 0) == CHANNEL_REPLY_PENDING, "case 19: FAIL a second receive was not refused\n");
+                failures += Check(data_length == 0, "case 19: FAIL an echo came with data\n");
+
+                for (int i = 0; i < length; i++)
+                {
+                    reply[i] = (uint8_t)(request[i] + 1);
+                }
+
+                result = sc_ChannelReply(channel, (uint64_t)length, 0);
+                break;
+
+            case ECHO_OP_DATA:
+                for (uint64_t i = 0; i < data_length; i++)
+                {
+                    data[i] = (uint8_t)~data[i];
+                }
+
+                PutWord(reply, (uint32_t)data_length);
+                result = sc_ChannelReply(channel, 4, data_length);
+                break;
+
+            case ECHO_OP_SLOW:
+            {
+                const uint32_t milliseconds = (uint32_t)request[1] | ((uint32_t)request[2] << 8) | ((uint32_t)request[3] << 16) | ((uint32_t)request[4] << 24);
+
+                sc_Sleep((uint64_t)milliseconds * 1000);
+
+                reply[0] = ECHO_OP_SLOW;
+                result = sc_ChannelReply(channel, 1, 0);
+
+                if (result == CHANNEL_ABANDONED)
+                {
+                    abandoned++;
+                    result = CHANNEL_SUCCESS;
+                }
+
+                break;
+            }
+
+            case ECHO_OP_STATUS:
+                PutWord(reply, failures);
+                PutWord(reply + 4, abandoned);
+                result = sc_ChannelReply(channel, 8, 0);
+                break;
+
+            case ECHO_OP_OVERSIZE:
+                failures += Check(sc_ChannelReply(channel, CHANNEL_MESSAGE_MAX + 1, 0) == CHANNEL_TOO_LONG, "case 19: FAIL an overlong reply was not refused\n");
+                failures += Check(sc_ChannelReply(channel, 16, 0) == CHANNEL_TOO_LONG, "case 19: FAIL a reply longer than the caller takes was not refused\n");
+                failures += Check(sc_ChannelReply(channel, 8, 1) == CHANNEL_TOO_LONG, "case 19: FAIL data the caller doesn't take was not refused\n");
+
+                for (int i = 0; i < 8; i++)
+                {
+                    reply[i] = 0x44;
+                }
+
+                result = sc_ChannelReply(channel, 8, 0);
+                break;
+
+            case ECHO_OP_EXIT:
+                return;
+
+            case ECHO_OP_CRASH:
+                *(volatile uint64_t *)KERNEL_VA_BASE = 0;
+                sc_Write("case 19: FAIL NOT KILLED\n");
+                return;
+
+            case ECHO_OP_HANG:
+                for (volatile uint64_t spins = 0;; spins++)
+                {
+                }
+
+            default:
+                sc_Write("case 19: FAIL an unknown operation\n");
+                failures++;
+                result = sc_ChannelReply(channel, 0, 0);
+                break;
+        }
+
+        failures += Check(result == CHANNEL_SUCCESS, "case 19: FAIL a reply was refused\n");
+    }
 }
 
 //  1MB of stack, touched one page at a time from the top down: 256 demand faults.
@@ -482,6 +833,61 @@ int main(unsigned long arg)
             const uint64_t elapsed = CounterTicks() - start;
 
             sc_Write(elapsed >= requested_ticks ? "case 15: sleep OK\n" : "case 15: sleep returned early\n");
+            break;
+        }
+
+        case 16:
+        {
+            if (!WaitForTheKernel("case 16: TIMED OUT waiting for the kernel\n"))
+            {
+                return 0;
+            }
+
+            sc_Write("case 16: writing to a page stage-2 blocks\n");
+            *(volatile uint64_t *)payload = 0x16;
+            sc_Write("case 16: NOT KILLED\n");
+            break;
+        }
+
+        case 17:
+        {
+            if (!WaitForTheKernel("case 17: TIMED OUT waiting for the kernel\n"))
+            {
+                return 0;
+            }
+
+            volatile uint32_t *test_register = (volatile uint32_t *)(payload + 0x20);
+
+            *test_register = 0x17171717;
+            sc_Write((*test_register == 0x17171717) ? "case 17: mediated echo OK\n" : "case 17: mediated echo WRONG\n");
+            break;
+        }
+
+        case 18:
+        {
+            const int failures = TestDeviceCalls(payload);
+
+            if (payload & (CASE_18_EXPECT_DENIED | CASE_18_EXPECT_BUSY))
+            {
+                sc_Write(failures == 0 ? "case 18: device refused OK\n" : "case 18: device refusal WRONG\n");
+            }
+
+            ReportToTheKernel(CASE_18_REPORT + failures);
+            break;
+        }
+
+        case 19:
+        {
+            if (payload & (CASE_19_EXPECT_DENIED | CASE_19_EXPECT_BUSY))
+            {
+                const int failures = TestChannelRefused(payload);
+
+                sc_Write(failures == 0 ? "case 19: channel refused OK\n" : "case 19: channel refusal WRONG\n");
+                ReportToTheKernel(CASE_19_REPORT + failures);
+                break;
+            }
+
+            ServeEchoChannel(payload);
             break;
         }
 

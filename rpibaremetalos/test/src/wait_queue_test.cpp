@@ -173,6 +173,97 @@ namespace
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-variable"
+    TEST_GROUP(WaitQueueInterruptTests)
+    {
+        void setup() override
+        {
+            ResetAll();
+        }
+    };
+#pragma GCC diagnostic pop
+
+    void InterruptBlocked(FakeTask &blocked)
+    {
+        FakeWaitPolicy::Wake(blocked, task::WaitStatus::INTERRUPTED);
+    }
+
+    TEST(WaitQueueInterruptTests, AnInterruptEndsAnInterruptibleWaitWithItsConditionUnmet)
+    {
+        WaitQueue queue;
+        FakeWaitPolicy::current_ = &a;
+
+        a.on_block_ = InterruptBlocked;
+        CHECK_EQUAL(AsInt(Outcome::INTERRUPTED), AsInt(queue.WaitOnce([]() { return false; }, task::WaitReason::CHANNEL, 0, Position::TAIL)));
+        POINTERS_EQUAL(nullptr, a.wait_queue_next_);
+        POINTERS_EQUAL(nullptr, a.wait_queue_prev_);
+
+        a.on_block_ = InterruptBlocked;
+        queue.Wait([]() { return false; }, task::WaitReason::INTERRUPT);
+
+        a.on_block_ = InterruptBlocked;
+        CHECK_FALSE(queue.Wait([]() { return false; }, task::WaitReason::SLEEP, microseconds(10)));
+
+        CHECK_EQUAL(3U, a.blocks_);
+        CHECK_EQUAL(0U, queue.WakeAll());
+    }
+
+    TEST(WaitQueueInterruptTests, AnInterruptedWaitStillReportsAConditionThatBecameTrue)
+    {
+        WaitQueue queue;
+        static bool ready = false;
+        ready = false;
+
+        a.on_block_ = [](FakeTask &blocked)
+        {
+            ready = true;
+            InterruptBlocked(blocked);
+        };
+
+        FakeWaitPolicy::current_ = &a;
+        CHECK_EQUAL(AsInt(Outcome::CONDITION_MET), AsInt(queue.WaitOnce([]() { return ready; }, task::WaitReason::CHANNEL, 0, Position::TAIL)));
+    }
+
+    TEST(WaitQueueInterruptTests, AnInterruptOfAnUninterruptibleWaitIsASpuriousWake)
+    {
+        static WaitQueue queue;
+        static bool ready = false;
+        ready = false;
+
+        a.on_block_ = [](FakeTask &blocked)
+        {
+            InterruptBlocked(blocked);
+
+            blocked.on_block_ = [](FakeTask &)
+            {
+                FakeWaitPolicy::current_ = &waker;
+                ready = true;
+                CHECK_EQUAL(1U, queue.WakeOne());
+            };
+        };
+
+        FakeWaitPolicy::current_ = &a;
+        queue.Wait([]() { return ready; }, task::WaitReason::LOCK);
+
+        CHECK_TRUE(ready);
+        CHECK_EQUAL(2U, a.blocks_);
+    }
+
+    TEST(WaitQueueInterruptTests, OnlyWaitsWhoseCallersReturnToEL0AreInterruptible)
+    {
+        CHECK_TRUE(task::IsInterruptible(task::WaitReason::SLEEP));
+        CHECK_TRUE(task::IsInterruptible(task::WaitReason::CHANNEL));
+        CHECK_TRUE(task::IsInterruptible(task::WaitReason::INTERRUPT));
+
+        CHECK_FALSE(task::IsInterruptible(task::WaitReason::NONE));
+        CHECK_FALSE(task::IsInterruptible(task::WaitReason::IO));
+        CHECK_FALSE(task::IsInterruptible(task::WaitReason::DEVICE));
+        CHECK_FALSE(task::IsInterruptible(task::WaitReason::LOCK));
+        CHECK_FALSE(task::IsInterruptible(task::WaitReason::JOIN));
+        CHECK_FALSE(task::IsInterruptible(task::WaitReason::EVENT));
+    }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-variable"
     TEST_GROUP(WaitQueueLinkTests)
     {
         void setup() override

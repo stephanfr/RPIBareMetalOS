@@ -41,12 +41,13 @@ void SetLogLevel(LogLevel new_level)
 //  Functions to output logging at the specified level, filtered by the global level
 //
 
+extern "C" void putchar_(char c);
+
 extern "C" void putchar_with_level(char c, void *extra_arg)
 {
-    if ((stdout != NULL) &&
-        (*((uint32_t *)extra_arg) <= static_cast<uint32_t>(__current_log_level)))
+    if (*((uint32_t *)extra_arg) <= static_cast<uint32_t>(__current_log_level))
     {
-        stdout->putc(c);
+        putchar_(c);
     }
 }
 
@@ -55,6 +56,11 @@ void __LogInternal(LogLevel log_level, const char *filename, int line_number, co
     if (log_level > __current_log_level)
     {
         return;
+    }
+
+    if (log_level == LogLevel::FATAL)
+    {
+        UseEL2Console();
     }
 
     char line_num_buffer[24];
@@ -93,6 +99,11 @@ void __LogWithoutLineNumberInternal(LogLevel log_level, const char *filename, co
     if (log_level > __current_log_level)
     {
         return;
+    }
+
+    if (log_level == LogLevel::FATAL)
+    {
+        UseEL2Console();
     }
 
     char modified_format[MAX_MODIFIED_FORMAT_LENGTH + 1];

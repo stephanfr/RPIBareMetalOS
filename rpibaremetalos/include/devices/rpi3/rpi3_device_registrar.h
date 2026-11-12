@@ -17,7 +17,6 @@
 #include "rpi3_uart1.h"
 #include "rpi3_hw_rng.h"
 
-#include "devices/rng_entity.h"
 
 
 class RPi3DeviceRegistrar : public DeviceRegistrar
@@ -34,17 +33,11 @@ public:
     }
 
 
-    void RegisterDevices(minstd::random_device *hw_rng) override
+    void RegisterDevices() override
     {
-        //  Register the Hardware Random Number Generator (HWRNG) for RPi3
-        
-        auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(
-                              true, "hw_rng", "HWRNG", *hw_rng);
-        GetOSEntityRegistry().AddEntity(rng_entity);
-        
         // Register UART0 (PL011 at 4MHz)
 
-        auto uart0 = make_static_unique<RPi3UART0>(BaudRates::BAUD_RATE_115200, "CONSOLE", 4000000);
+        auto uart0 = make_static_unique<RPi3UART0>(BaudRates::BAUD_RATE_115200, "SERIAL", 4000000);
         uart0->Initialize();
         GetOSEntityRegistry().AddEntity(uart0);
 

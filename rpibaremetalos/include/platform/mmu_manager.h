@@ -53,6 +53,11 @@ public:
     virtual uint32_t ReservedMemoryRegionCount() const = 0;
     virtual ReservedMemoryRegion ReservedMemoryRegionAt(uint32_t index) const = 0;
 
+    //  HYPERVISOR_POOL_SIZE bytes, aligned to that size, inside a reserved region, that the kernel never uses: it is
+    //      donated to EL2 at boot.
+
+    virtual uint64_t HypervisorPoolPhysical() const = 0;
+
     static bool IsMMUEnabled()
     {
         return (platform_memory_manager_ != nullptr);

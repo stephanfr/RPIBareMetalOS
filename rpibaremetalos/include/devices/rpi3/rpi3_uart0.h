@@ -61,9 +61,16 @@ public:
         return PL011UARTBase::getc();
     }
 
-    bool EnableInterruptDrivenInput() override
+    //  Its interrupt goes straight to the interrupt controller.
+
+    bool EnableInterruptSource() override
     {
-        return EnableRxInterrupt(Interrupts::UART0);
+        return true;
+    }
+
+    bool TryGetc(unsigned int &c) override
+    {
+        return PL011UARTBase::TryGetc(c);
     }
 
 private:

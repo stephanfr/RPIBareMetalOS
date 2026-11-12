@@ -9,6 +9,7 @@
 #include <array>
 
 #include "asm_globals.h"
+#include "hypervisor_config.h"
 
 #include "platform/address_space_layout.h"
 #include "platform/memory_model.h"
@@ -180,6 +181,13 @@ public:
         return reserved_regions_[index];
     }
 
+    //  The block below the page-table block.
+
+    uint64_t HypervisorPoolPhysical() const override
+    {
+        return (page_table_block_ - 1) * level1_blocksize_;
+    }
+
 protected:
 
     uint32_t board_revision_;
@@ -216,6 +224,21 @@ protected:
         asm volatile("dsb sy" ::: "memory");
     }
 
+    //  Normal non-cacheable, for memory something else reads and writes uncached: the DMA block (the VideoCore) and
+    //      the hypervisor pool (EL2, MMU off).  A cacheable mapping would let speculative reads bring stale lines back.
+
+    void MapUncachedBlock(uint64_t block)
+    {
+        Stage2map1to1_[block] = (VMSAv8_64_DESCRIPTOR){
+            .EntryType = TableType::BLOCK_TABLE,
+            .MemAttr = MemoryAttribute::NORMAL_NO_CACHING,
+            .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
+            .SH = Stage2Sharability::INNER_SHAREABLE,
+            .AF = AccessFlag::ACCESSED,
+            .Address = (uintptr_t)block << granule_size_shift_,
+        };
+    }
+
     //  Each board's constructor declares its own carve-outs once its block
     //      layout is computed.  Overlapping regions are harmless -- MemoryManager
     //      only marks pages occupied, so marking one twice costs nothing.
@@ -232,13 +255,15 @@ protected:
         }
     }
 
-    //  The page-table block, the DMA block and VideoCore's own memory are placed
-    //      contiguously by every board (dma = videocore_start - 1 block,
-    //      page_table = dma - 1), so they are one run.
+    //  The hypervisor pool, the page-table block, the DMA block and VideoCore's own
+    //      memory are placed contiguously by every board (dma = videocore_start - 1
+    //      block, page_table = dma - 1, pool = page_table - 1), so they are one run.
 
     void AddStandardReservedRegions()
     {
-        const uint64_t base = page_table_block_ * level1_blocksize_;
+        static_assert(HYPERVISOR_POOL_SIZE == BYTES_1M * 2, "the pool is one level-1 block");
+
+        const uint64_t base = HypervisorPoolPhysical();
         const uint64_t top = (uint64_t)videocore_memory_start_ + videocore_memory_size_;
 
         AddReservedRegion(base, top - base);

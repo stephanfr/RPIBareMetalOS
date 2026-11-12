@@ -12,6 +12,7 @@
 #include "asm_utility.h"
 
 #include "devices/log.h"
+#include "devices/std_streams.h"
 #include "task/task_impl.h"
 #include "task/task_manager_impl.h"
 #include "sysregs.h"
@@ -90,6 +91,8 @@ extern "C" void HandleUserTaskFault(unsigned long esr, unsigned long elr, unsign
 
 void ExceptionManager::HandleException(unsigned int type, unsigned long esr, unsigned long address, unsigned long far)
 {
+    UseEL2Console();
+
     LogError("%s, Core: %d ESR: %016lx PC: %016lx FAR: %016lx\r\n", entry_error_messages[type], GetCoreID(), esr, address, far);
 
     //  TTBR0 holds no kernel mapping, so a kernel pointer never converted with

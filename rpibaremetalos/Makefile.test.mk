@@ -18,6 +18,7 @@ CPP_TEST_SRC_DIRS := test/src
 
 C_SRC   :=
 CPP_SRC :=  src/c/cli/command_parser.cpp \
+			src/c/devices/user_device_registry.cpp \
 			src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \
@@ -30,15 +31,24 @@ CPP_SRC :=  src/c/cli/command_parser.cpp \
 
 CPP_TEST_SRC := $(foreach sdir,$(CPP_TEST_SRC_DIRS),$(wildcard $(sdir)/*.cpp))
 
+#  Pure-logic hypervisor sources: no EL2 code, so they compile natively for the hypervisor_*_test.cpp tests.
+HYP_SRC_ROOT := hypervisor/src/c
+HYP_C_SRC    := $(HYP_SRC_ROOT)/hypervisor_state.c $(HYP_SRC_ROOT)/hypervisor_support.c $(HYP_SRC_ROOT)/hypervisor_hvc.c \
+                $(HYP_SRC_ROOT)/hypervisor_image.c $(HYP_SRC_ROOT)/stage2.c \
+                $(HYP_SRC_ROOT)/hypervisor_memory.c $(HYP_SRC_ROOT)/hypervisor_abort.c $(HYP_SRC_ROOT)/hypervisor_mmio.c \
+                $(HYP_SRC_ROOT)/hypervisor_mailbox.c
+
 TEST_BUILD_DIRS := $(patsubst $(SRC_ROOT)/c/%,$(TEST_BUILD_ROOT)/c/%,$(sort $(patsubst %/,%,$(dir $(CPP_SRC))) $(patsubst %/,%,$(dir $(C_SRC))) ))
 TEST_BUILD_DIRS += $(patsubst $(CPP_TEST_SRC_ROOT)%,$(TEST_BUILD_ROOT)%, $(CPP_TEST_SRC_DIRS))
+TEST_BUILD_DIRS += $(TEST_BUILD_ROOT)/hypervisor
 
 OBJ := $(patsubst $(SRC_ROOT)/c/%.c,$(TEST_BUILD_ROOT)/c/%.o,$(C_SRC)) $(patsubst $(SRC_ROOT)/c/%.cpp,$(TEST_BUILD_ROOT)/c/%.o,$(CPP_SRC))
+OBJ += $(patsubst $(HYP_SRC_ROOT)/%.c,$(TEST_BUILD_ROOT)/hypervisor/%.o,$(HYP_C_SRC))
 TEST_OBJ := $(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(TEST_BUILD_ROOT)/%.o,$(CPP_TEST_SRC))
 
 TEST_EXE := $(TEST_OBJ_DIR)/cpputest_main.exe
 
-INCLUDE_DIRS := -Iinclude -I../deps/fat32filesystem/include -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include
+INCLUDE_DIRS := -Iinclude -Ihypervisor/include -I../deps/fat32filesystem/include -I../deps/minimalstdio/include -I../deps/minimalclib/include -I../deps/minimalstdlib/include $(INCLUDE_DIRS) -I$(CPPUTEST_PATH)/include
 LDFLAGS += -L../deps/fat32filesystem/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalclib/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdio/lib/$(NATIVE_BUILD_DIR) -L../deps/minimalstdlib/lib/$(NATIVE_BUILD_DIR) -L$(CPPUTEST_PATH)/lib
 LDLIBS = -lCppUTest -lCppUTestExt -lfat32filesystem -lminimalclib -lminimalstdio -lminimalstdlib -lpthread
 
@@ -72,6 +82,7 @@ endef
 
 $(foreach file,$(C_SRC), $(eval $(call make-c-goal,$(patsubst $(SRC_ROOT)/c/%.c,$(TEST_BUILD_ROOT)/c/%.o,$(file)),$(file))))
 $(foreach file,$(CPP_SRC), $(eval $(call make-cpp-goal,$(patsubst $(SRC_ROOT)/c/%.cpp,$(TEST_BUILD_ROOT)/c/%.o,$(file)),$(file))))
+$(foreach file,$(HYP_C_SRC), $(eval $(call make-c-goal,$(patsubst $(HYP_SRC_ROOT)/%.c,$(TEST_BUILD_ROOT)/hypervisor/%.o,$(file)),$(file))))
 
 $(foreach file,$(CPP_TEST_SRC), $(eval $(call make-cpp-goal,$(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(TEST_BUILD_ROOT)/%.o,$(file)),$(file))))
 
@@ -88,8 +99,10 @@ COVERAGE_OBJ_DIR := test/coverage
 
 COVERAGE_BUILD_DIRS := $(patsubst $(SRC_ROOT)/c/%,$(COVERAGE_BUILD_ROOT)/c/%,$(sort $(patsubst %/,%,$(dir $(CPP_SRC))) $(patsubst %/,%,$(dir $(C_SRC))) ))
 COVERAGE_BUILD_DIRS += $(patsubst $(CPP_TEST_SRC_ROOT)%,$(COVERAGE_BUILD_ROOT)%, $(CPP_TEST_SRC_DIRS))
+COVERAGE_BUILD_DIRS += $(COVERAGE_BUILD_ROOT)/hypervisor
 
 COVERAGE_OBJ := $(patsubst $(SRC_ROOT)/c/%.c,$(COVERAGE_BUILD_ROOT)/c/%.o,$(C_SRC)) $(patsubst $(SRC_ROOT)/c/%.cpp,$(COVERAGE_BUILD_ROOT)/c/%.o,$(CPP_SRC))
+COVERAGE_OBJ += $(patsubst $(HYP_SRC_ROOT)/%.c,$(COVERAGE_BUILD_ROOT)/hypervisor/%.o,$(HYP_C_SRC))
 COVERAGE_TEST_OBJ := $(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(COVERAGE_BUILD_ROOT)/%.o,$(CPP_TEST_SRC))
 
 COVERAGE_EXE := $(COVERAGE_OBJ_DIR)/coverage.exe
@@ -118,6 +131,7 @@ endef
 
 $(foreach file,$(C_SRC), $(eval $(call make-coverage-c-goal,$(patsubst $(SRC_ROOT)/c/%.c,$(COVERAGE_BUILD_ROOT)/c/%.o,$(file)),$(file))))
 $(foreach file,$(CPP_SRC), $(eval $(call make-coverage-cpp-goal,$(patsubst $(SRC_ROOT)/c/%.cpp,$(COVERAGE_BUILD_ROOT)/c/%.o,$(file)),$(file))))
+$(foreach file,$(HYP_C_SRC), $(eval $(call make-coverage-c-goal,$(patsubst $(HYP_SRC_ROOT)/%.c,$(COVERAGE_BUILD_ROOT)/hypervisor/%.o,$(file)),$(file))))
 
 $(foreach file,$(CPP_TEST_SRC), $(eval $(call make-coverage-cpp-goal,$(patsubst $(CPP_TEST_SRC_ROOT)/%.cpp,$(COVERAGE_BUILD_ROOT)/%.o,$(file)),$(file))))
 

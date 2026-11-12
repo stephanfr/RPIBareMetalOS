@@ -13,7 +13,11 @@ ConsoleVideoFrameBuffer::ConsoleVideoFrameBuffer(const char *alias, uint32_t for
 {
     if (Allocate())
     {
-        Clear(background_color_);
+        for (uint32_t buffer = BufferCount(); buffer-- > 0;)
+        {
+            DrawTo(buffer);
+            Clear(background_color_);
+        }
     }
 
     //  NOTE: if Allocate() failed here, this object is constructed but

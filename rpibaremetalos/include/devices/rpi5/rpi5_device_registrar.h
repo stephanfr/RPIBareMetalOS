@@ -12,7 +12,6 @@
 #include "devices/uart_base.h"
 #include "devices/gpio.h"
 #include "devices/device_registrar.h"
-#include "devices/rng_entity.h"
 
 #include "rpi5_uart0.h"
 #include "rpi5_uart1.h"
@@ -45,16 +44,11 @@ public:
         return hardware_rng_.get();
     }
 
-    void RegisterDevices(minstd::random_device *hw_rng) override
+    void RegisterDevices() override
     {
-        //  Create and register the Hardware Random Number Generator (HWRNG) for RPi5
-
-        auto rng_entity = make_static_unique<RandomNumberGeneratorOSEntity<OSEntityTypes::HARDWARE_RNG>>(true, "hw_rng", "HWRNG", *hw_rng);
-        GetOSEntityRegistry().AddEntity(rng_entity);
-
         // Register primary RPi5 UART0 (preferred on RPi5)
 
-        auto rpi5_uart0 = make_static_unique<RPi5UART0>(BaudRates::BAUD_RATE_115200, "CONSOLE");
+        auto rpi5_uart0 = make_static_unique<RPi5UART0>(BaudRates::BAUD_RATE_115200, "SERIAL");
         rpi5_uart0->Initialize();
         GetOSEntityRegistry().AddEntity(rpi5_uart0);
 

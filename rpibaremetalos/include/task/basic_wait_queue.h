@@ -36,6 +36,7 @@ namespace task
             CONDITION_MET = 0,
             WOKEN, //  but the condition did not hold when re-checked
             TIMED_OUT,
+            INTERRUPTED, //  only for an interruptible reason (IsInterruptible())
         } Outcome;
 
         typedef enum class Position : uint32_t
@@ -68,15 +69,23 @@ namespace task
         BasicWaitQueue &operator=(const BasicWaitQueue &) = delete;
         BasicWaitQueue &operator=(BasicWaitQueue &&) = delete;
 
+        //  Returns with the condition unmet only if the wait was interrupted, which needs an interruptible reason.
+
         template <typename Condition>
         void Wait(Condition &&condition, WaitReason reason)
         {
-            while (WaitOnce(condition, reason, 0, Position::TAIL) != Outcome::CONDITION_MET)
+            for (;;)
             {
+                const Outcome outcome = WaitOnce(condition, reason, 0, Position::TAIL);
+
+                if ((outcome == Outcome::CONDITION_MET) || (outcome == Outcome::INTERRUPTED))
+                {
+                    return;
+                }
             }
         }
 
-        //  False if timeout passes first.
+        //  False if timeout passes first, or the wait was interrupted.
 
         template <typename Condition>
         bool Wait(Condition &&condition, WaitReason reason, microseconds timeout)
@@ -91,6 +100,7 @@ namespace task
                     return true;
 
                 case Outcome::TIMED_OUT:
+                case Outcome::INTERRUPTED:
                     return false;
 
                 default:
@@ -151,7 +161,14 @@ namespace task
                 return Outcome::CONDITION_MET;
             }
 
-            return (how == WaitStatus::TIMED_OUT) ? Outcome::TIMED_OUT : Outcome::WOKEN;
+            if (how == WaitStatus::TIMED_OUT)
+            {
+                return Outcome::TIMED_OUT;
+            }
+
+            //  A kill that raced a change of wait may address a wait that isn't interruptible: that is a spurious wake.
+
+            return ((how == WaitStatus::INTERRUPTED) && IsInterruptible(reason)) ? Outcome::INTERRUPTED : Outcome::WOKEN;
         }
 
         //  The number of tasks woken, 0 or 1.  Waiters whose wait already ended are skipped.

@@ -13,6 +13,8 @@
 #include <map>
 
 #include "os_entity.h"
+#include "devices/user_device_registry.h"
+#include "task/channel_registry.h"
 
 #include "platform/memory_manager.h"
 
@@ -102,6 +104,7 @@ namespace task
         WAITING,
         WOKEN,
         TIMED_OUT,
+        INTERRUPTED,    //  the task is being killed (IsInterruptible())
     } WaitStatus;
 
     //  IO is storage I/O the task started and that is certain to finish; only it is
@@ -116,7 +119,17 @@ namespace task
         LOCK,
         JOIN,
         EVENT,
+        CHANNEL,        //  a driver waiting for a request
+        INTERRUPT,      //  a driver waiting for its device's interrupt
     } WaitReason;
+
+    //  The waits a kill ends early, whose callers return to EL0 when one does.  Any other wait runs to its end, and
+    //      the task exits on its way back to EL0.
+
+    inline bool IsInterruptible(WaitReason reason)
+    {
+        return (reason == WaitReason::SLEEP) || (reason == WaitReason::CHANNEL) || (reason == WaitReason::INTERRUPT);
+    }
 
     class Task
     {
@@ -168,7 +181,7 @@ namespace task
         virtual void Exit() = 0;
         virtual void Join() = 0;
 
-        //  Blocks without being scheduled.  Never returns early.
+        //  Blocks without being scheduled.  Never returns early, unless the task is being killed.
         //      SleepFor(0) is a yield.
 
         virtual void SleepFor(microseconds duration) = 0;
@@ -305,6 +318,8 @@ namespace task
             return "Woken";
         case WaitStatus::TIMED_OUT:
             return "Timed Out";
+        case WaitStatus::INTERRUPTED:
+            return "Interrupted";
         default:
             return "Unknown Wait Status";
         }
@@ -328,6 +343,10 @@ namespace task
             return "Join";
         case WaitReason::EVENT:
             return "Event";
+        case WaitReason::CHANNEL:
+            return "Channel";
+        case WaitReason::INTERRUPT:
+            return "Interrupt";
         default:
             return "Unknown Wait Reason";
         }
@@ -351,7 +370,18 @@ namespace task
 
         virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
         virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;
-        virtual ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;
+        //  'devices' are the devices it may open (devices/user_device_registry.h), 'channels' the channels it may serve
+        //      (task/channel_registry.h).
+
+        virtual ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition,
+                                                                   DeviceCapabilities devices = NO_DEVICE_CAPABILITIES,
+                                                                   ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES) = 0;
+
+        //  Kills a user or service task: it exits on its next way back to EL0, which an interrupt forces if it is
+        //      running there.  An interruptible wait (IsInterruptible()) ends at once; any other runs to its end
+        //      first.  False if there is no such task or it has already exited.  Only that task: not its clones.
+
+        virtual bool KillTask(const UUID &task_id) = 0;
 
     protected:
         TaskManager()

@@ -43,13 +43,23 @@ constexpr uint64_t USER_SPACE_L1_INDEX_END   = (USER_SPACE_TOP - 1) >> 30;      
 //      the stack grows DOWN from stack_top.
 
 constexpr uint64_t USER_IMAGE_BASE   = S_USER_IMAGE_BASE;                                                           //  +4MB    header+text RO+X, then data+bss RW+XN
+constexpr uint64_t USER_DEVICE_BASE  = S_USER_DEVICE_BASE;                                                          //  +192MB  device windows, Device-nGnRE
+constexpr uint64_t USER_DEVICE_TOP   = S_USER_DEVICE_TOP;
+constexpr uint64_t USER_DEVICE_SLOT  = S_USER_DEVICE_SLOT;
+constexpr uint64_t USER_CHANNEL_BASE = S_USER_CHANNEL_BASE;                                                         //  +224MB  channel memory
+constexpr uint64_t USER_CHANNEL_TOP  = S_USER_CHANNEL_TOP;
+constexpr uint64_t USER_CHANNEL_SLOT = S_USER_CHANNEL_SLOT;
 constexpr uint64_t USER_HEAP_BASE    = S_USER_HEAP_BASE;                                                            //  +256MB  RW+XN, grows up
 constexpr uint64_t USER_STACK_TOP    = S_USER_STACK_TOP;                                                            //  top of window
 constexpr uint64_t USER_STACK_BOTTOM = S_USER_STACK_BOTTOM;                                                         //  stack grows down to here
 constexpr uint64_t USER_GUARD_BOTTOM = S_USER_GUARD_BOTTOM;                                                         //  [guard_bottom, stack_bottom) unmapped
 constexpr uint64_t USER_HEAP_TOP     = S_USER_HEAP_TOP;                                                             //  exclusive heap ceiling
 
-static_assert(USER_IMAGE_BASE < USER_HEAP_BASE,        "image must sit below the heap");
+static_assert(USER_IMAGE_BASE < USER_DEVICE_BASE,      "image must sit below the device windows");
+static_assert(USER_DEVICE_TOP <= USER_CHANNEL_BASE,    "device windows must sit below the channel memory");
+static_assert(USER_CHANNEL_TOP <= USER_HEAP_BASE,      "channel memory must sit below the heap");
+static_assert((USER_CHANNEL_BASE % USER_CHANNEL_SLOT) == 0, "channel slots must be slot-aligned");
+static_assert((USER_DEVICE_BASE % USER_DEVICE_SLOT) == 0, "device slots must be slot-aligned");
 static_assert(USER_HEAP_BASE < USER_HEAP_TOP,          "heap region must be non-empty");
 static_assert(USER_HEAP_TOP == USER_GUARD_BOTTOM,      "heap ceiling abuts the guard");
 static_assert(USER_GUARD_BOTTOM < USER_STACK_BOTTOM,   "guard gap must be non-empty");

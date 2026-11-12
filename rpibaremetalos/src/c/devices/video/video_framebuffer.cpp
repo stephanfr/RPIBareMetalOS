@@ -5,6 +5,9 @@
 #include "devices/video/video_framebuffer.h"
 #include "platform/address_space_layout.h"
 
+uint64_t VideoFrameBuffer::allocated_physical_base_ = 0;
+uint64_t VideoFrameBuffer::allocated_size_in_bytes_ = 0;
+
 bool VideoFrameBuffer::Allocate()
 {
     GPUMailbox mbox;
@@ -28,11 +31,22 @@ bool VideoFrameBuffer::Allocate()
         requested_height = getPhysicalWidthHeightTag.GetHeight();
     }
 
+    //  Two buffers when the VideoCore has room for them, else one.
+
+    return AllocateBuffers(requested_width, requested_height, MAX_BUFFERS) ||
+           AllocateBuffers(requested_width, requested_height, 1);
+}
+
+bool VideoFrameBuffer::AllocateBuffers(uint32_t requested_width, uint32_t requested_height, uint32_t buffers)
+{
+    GPUMailbox mbox;
+
     //  One combined message: set physical/virtual size, offset, depth,
     //      pixel order, allocate the buffer, and read back the pitch.
+    //      The buffers are stacked vertically in the virtual screen.
 
     SetPhysicalWidthHeightTag setPhysicalWidthHeightTag(requested_width, requested_height);
-    SetVirtualWidthHeightTag setVirtualWidthHeightTag(requested_width, requested_height);
+    SetVirtualWidthHeightTag setVirtualWidthHeightTag(requested_width, requested_height * buffers);
     SetVirtualOffsetTag setVirtualOffsetTag(0, 0);
     SetColourDepthTag setColourDepthTag(REQUESTED_DEPTH_BITS_PER_PIXEL);
     SetPixelOrderTag setPixelOrderTag(FrameBufferPixelOrder::RGB);
@@ -61,6 +75,7 @@ bool VideoFrameBuffer::Allocate()
 
     uint32_t applied_width = setPhysicalWidthHeightTag.GetAppliedWidth();
     uint32_t applied_height = setPhysicalWidthHeightTag.GetAppliedHeight();
+    uint32_t applied_virtual_height = setVirtualWidthHeightTag.GetAppliedHeight();
     uint32_t base_address_raw = allocateFrameBufferTag.GetBaseAddress();
     uint32_t size_in_bytes = allocateFrameBufferTag.GetSizeInBytes();
     uint32_t pitch = getPitchTag.GetPitch();
@@ -70,6 +85,15 @@ bool VideoFrameBuffer::Allocate()
         (base_address_raw == 0) ||
         (size_in_bytes == 0) ||
         (pitch == 0))
+    {
+        return false;
+    }
+
+    //  The firmware may trim the virtual height; anything short of every buffer is a failure, so the caller can ask
+    //      for fewer.
+
+    if ((applied_virtual_height < applied_height * buffers) ||
+        (static_cast<uint64_t>(size_in_bytes) < static_cast<uint64_t>(pitch) * applied_height * buffers))
     {
         return false;
     }
@@ -92,11 +116,37 @@ bool VideoFrameBuffer::Allocate()
     //      physical address. Masking them off is the standard Pi3/4/5
     //      convention.
 
-    base_address_ = reinterpret_cast<volatile uint8_t *>(PhysicalToKernelVirtualAddress(static_cast<uintptr_t>(base_address_raw & 0x3FFFFFFF)));
+    allocated_physical_base_ = base_address_raw & 0x3FFFFFFF;
+    allocated_size_in_bytes_ = size_in_bytes;
+
+    base_address_ = reinterpret_cast<volatile uint8_t *>(PhysicalToKernelVirtualAddress(static_cast<uintptr_t>(allocated_physical_base_)));
     size_in_bytes_ = size_in_bytes;
     pitch_ = pitch;
     width_ = applied_width;
     height_ = applied_height;
+    buffer_count_ = buffers;
+    draw_buffer_ = 0;
+    shown_buffer_ = 0;
+
+    return true;
+}
+
+bool VideoFrameBuffer::Show(uint32_t buffer)
+{
+    if (!IsAllocated() || (buffer >= buffer_count_))
+    {
+        return false;
+    }
+
+    SetVirtualOffsetTag setVirtualOffsetTag(0, buffer * height_);
+    GPUMailboxPropertyMessage message(setVirtualOffsetTag);
+
+    if (!GPUMailbox().sendMessage(message) || (setVirtualOffsetTag.GetAppliedYOffset() != buffer * height_))
+    {
+        return false;
+    }
+
+    shown_buffer_ = buffer;
 
     return true;
 }
@@ -112,7 +162,7 @@ void VideoFrameBuffer::ScrollUp(uint32_t rows, uint32_t fill_color)
     uint32_t shift_words = words_per_row * rows;
     uint32_t total_words = words_per_row * height_;
 
-    volatile uint32_t *base = reinterpret_cast<volatile uint32_t *>(base_address_);
+    volatile uint32_t *base = reinterpret_cast<volatile uint32_t *>(RowAt(0));
 
     //  The copy below moves whole 32-bit words regardless of depth, so the fill
     //      value must be the native pixel replicated across the word -- at 16bpp

@@ -103,6 +103,8 @@ namespace task
         void VisitTaskList(TaskListVisitorCallback callback) const override;
         TaskHandle FindTask(const UUID &task_id) override;
 
+        bool KillTask(const UUID &task_id) override;
+
         //  The lowest process id above after_process_id of a task loaded from binary_path that has not exited, or
         //      0 if there is none: 0 is never a user task's id.
 
@@ -147,7 +149,9 @@ namespace task
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
         ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
-        ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
+        ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition,
+                                                           DeviceCapabilities devices = NO_DEVICE_CAPABILITIES,
+                                                           ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES) override;
 
         ValueResult<TaskResultCodes, UUID> CloneTask(const TaskDefinition& task_definition, MemoryPagePointer stack);
 
@@ -259,6 +263,8 @@ namespace task
                                                                    const TaskDefinition& task_definition,
                                                                    const minstd::string *user_binary_path = nullptr,
                                                                    unsigned long user_arg = 0,
-                                                                   bool service = false );
+                                                                   bool service = false,
+                                                                   DeviceCapabilities devices = NO_DEVICE_CAPABILITIES,
+                                                                   ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES );
     };
 } // namespace task

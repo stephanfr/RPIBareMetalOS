@@ -150,16 +150,8 @@ RPI5MemoryManager::RPI5MemoryManager()
         };
     }
 
-    //  One block for non-cached DMA memory (mailbox/framebuffer traffic)
-
-    Stage2map1to1_[dma_block_] = (VMSAv8_64_DESCRIPTOR){
-        .EntryType = TableType::BLOCK_TABLE,
-        .MemAttr = MemoryAttribute::NORMAL_NO_CACHING,
-        .S2AP = Stage2AccessPermission::EL1_READ_WRITE,
-        .SH = Stage2Sharability::INNER_SHAREABLE,
-        .AF = AccessFlag::ACCESSED,
-        .Address = (uintptr_t)dma_block_ << granule_size_shift_,
-    };
+    MapUncachedBlock(dma_block_);
+    MapUncachedBlock(HypervisorPoolPhysical() / level1_blocksize_);
 
     //  Map the kernel 1:1 tables into the stage-2 map -- this only needs to
     //  cover actual installed RAM (a handful of entries), nowhere near the
