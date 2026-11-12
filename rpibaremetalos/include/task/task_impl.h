@@ -12,6 +12,10 @@
 #include <map>
 
 #include "devices/physical_timer.h"
+#include "devices/user_device_registry.h"
+#include "devices/user_devices.h"
+#include "task/channels.h"
+#include "services/driver_manager.h"
 
 #include "platform/exception_manager.h"
 #include "platform/address_space.h"
@@ -261,6 +265,21 @@ namespace task
 
             //  After the address space: nothing maps the process's pages any more.
 
+            if (device_capabilities_ != NO_DEVICE_CAPABILITIES)
+            {
+                ReleaseUserDevices(user_visible_id_);
+            }
+
+            if (channel_capabilities_ != NO_CHANNEL_CAPABILITIES)
+            {
+                ReleaseChannels(user_visible_id_);
+            }
+
+            if ((device_capabilities_ != NO_DEVICE_CAPABILITIES) || (channel_capabilities_ != NO_CHANNEL_CAPABILITIES))
+            {
+                NotifyProcessReleased(user_visible_id_);
+            }
+
             ReleaseResourcesAfterAddressSpace();
 
             if (stack_ != 0)
@@ -388,6 +407,8 @@ namespace task
         unsigned long user_arg_ = 0;                            //  the single argument a user task receives in x0
         uint64_t user_heap_break_ = USER_HEAP_BASE;
         uint32_t user_visible_id_ = 0;                          //  what tpidrro_el0 holds
+        DeviceCapabilities device_capabilities_ = NO_DEVICE_CAPABILITIES;   //  a service task's, from its fork
+        ChannelCapabilities channel_capabilities_ = NO_CHANNEL_CAPABILITIES;
 
         TaskImpl::FullCPUState *initial_full_cpu_state_location_;
 
@@ -398,6 +419,14 @@ namespace task
         //      0 for a task that is not a user task.
 
         uint32_t ProcessId() const { return user_visible_id_; }
+
+        //  The devices it may open with sc_DeviceOpen.
+
+        DeviceCapabilities GrantedDevices() const { return device_capabilities_; }
+
+        //  The channels it may serve with sc_ChannelOpen.
+
+        ChannelCapabilities GrantedChannels() const { return channel_capabilities_; }
 
         //  The single argument a user task receives in x0.  Read by StartUserTaskWrapper,
         //      which is a free function rather than a member and so cannot see user_arg_.

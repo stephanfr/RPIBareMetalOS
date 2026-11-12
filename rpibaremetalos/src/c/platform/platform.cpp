@@ -237,6 +237,7 @@ void InitializePlatform()
 
     if (!SetupSerialConsole())
     {
+        LogFatal("The serial console could not be set up\n");
         ParkCore();
     }
 

@@ -272,7 +272,8 @@ const uint64_t *AddressSpace::L3EntryFor(uint64_t user_va) const
 }
 
 bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t size,
-                            Stage2AccessPermission ap, bool executable, bool take_ownership)
+                            Stage2AccessPermission ap, bool executable, bool take_ownership,
+                            MemoryAttribute attribute)
 {
     const UserSpaceLayout &layout = MemoryModel::UserSpace();
 
@@ -319,12 +320,17 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
         if (entry == nullptr)
         {
             //  The caller releases the block on false, so the descriptors already written
-            //      must not keep pointing at it.  No TLBI: MapPages only runs on a space that
-            //      is not yet installed (loader, test addrspace), so nothing is cached.
+            //      must not keep pointing at it.  The space may be installed (a driver opening a
+            //      device), so the walker may have cached them.
 
             for (uint64_t undo = 0; undo < offset; undo += PAGE_SIZE)
             {
                 *L3EntryFor(user_va + undo, false) = 0;
+            }
+
+            if (offset != 0)
+            {
+                asm volatile("dsb ishst\n tlbi aside1is, %0\n dsb ish\n isb" ::"r"(static_cast<uint64_t>(asid_) << 48) : "memory");
             }
 
             return false;
@@ -337,7 +343,7 @@ bool AddressSpace::MapPages(uint64_t user_va, uint64_t physical_base, uint64_t s
         //      encoding; PAGE_TABLE is the right enumerator here despite the name.
 
         page.EntryType = TableType::PAGE_TABLE;
-        page.MemAttr = MemoryAttribute::NORMAL;
+        page.MemAttr = attribute;
         page.S2AP = ap;
         page.SH = Stage2Sharability::INNER_SHAREABLE;
         page.AF = AccessFlag::ACCESSED;

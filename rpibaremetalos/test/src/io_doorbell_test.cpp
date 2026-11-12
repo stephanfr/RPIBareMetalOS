@@ -157,6 +157,19 @@ namespace
         CHECK_EQUAL(1U, a.blocks_);
     }
 
+    TEST(IODoorbellRaceTests, DiscardForgetsAnUnconsumedRingOnly)
+    {
+        doorbell->Ring();
+        doorbell->Discard();
+
+        CHECK_FALSE(doorbell->Wait(task::WaitReason::DEVICE, microseconds(100)));
+
+        doorbell->Discard();
+        doorbell->Ring();
+
+        CHECK_TRUE(doorbell->Wait(task::WaitReason::DEVICE, microseconds(100)));
+    }
+
     TEST(IODoorbellRaceTests, SecondConcurrentWaiterIsFatal)
     {
         FakeWaitPolicy::expected_fatal_ = "IODoorbell has a second waiter";

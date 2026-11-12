@@ -6,6 +6,8 @@
 
 #include <stddef.h>
 
+#include "platform/hypervisor.h"
+
 CharacterIODevice *stdout = nullptr;
 CharacterIODevice *stdin = nullptr;
 
@@ -16,7 +18,9 @@ void SetStandardStreams( CharacterIODevice* new_stdout, CharacterIODevice* new_s
     stdin = new_stdin;
 }
 //
-//  putchar_ is required for the minimalstdio implementation of 'printf' to output characters.
+//  putchar_ is required for the minimalstdio implementation of 'printf' to output characters.  Until the console is
+//      set up, or if it never is, output goes through EL2's console instead, a character at a time: early boot and the
+//      reason a console fails are not lost.
 //
 
 extern "C" void putchar_(char c)
@@ -24,6 +28,9 @@ extern "C" void putchar_(char c)
     if (stdout != NULL)
     {
         stdout->putc(c);
+        return;
     }
+
+    Hypervisor::ConsoleWrite(&c, 1);
 }
 

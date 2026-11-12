@@ -196,7 +196,20 @@ namespace cli::commands
         void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
     };
 
-    class CLITestCommand : public CLIParentCommand<14>
+    class CLITestDriversCommand : public CLICommandExecutor
+    {
+    public:
+        static const CLITestDriversCommand instance;
+
+        CLITestDriversCommand()
+            : CLICommandExecutor("drivers")
+        {
+        }
+
+        void ProcessToken(CommandParser &parser, CLISessionContext &context) const override;
+    };
+
+    class CLITestCommand : public CLIParentCommand<15>
     {
     public:
         static const CLITestCommand instance;
@@ -215,7 +228,8 @@ namespace cli::commands
                                         CLITestWaitCommand::instance,
                                         CLITestMutexCommand::instance,
                                         CLITestHypervisorCommand::instance,
-                                        CLITestStage2Command::instance})
+                                        CLITestStage2Command::instance,
+                                        CLITestDriversCommand::instance})
         {
         }
     };

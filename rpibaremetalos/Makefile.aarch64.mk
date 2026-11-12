@@ -201,6 +201,13 @@ $(USER_BIN): $(USER_SRC) $(USER_LD) $(wildcard include/uapi/*.h)
 
 user: checkdirs $(USER_BIN)
 
+#  The user images linked into the kernel (src/asm/embedded_images.S, D8 in STAGE2_EL0_DRIVERS_PLAN.md).  .incbin
+#      isn't in the assembler's dependency output, so the object names them here.
+
+EMBEDDED_IMAGES := $(USER_BIN)
+
+$(BUILD_ROOT)/asm/embedded_images.o: $(EMBEDDED_IMAGES)
+
 SUPERVISOR_ROOT    := supervisor
 SUPERVISOR_ELF     := $(SUPERVISOR_ROOT)/image/supervisor.elf
 SUPERVISOR_BIN     := $(SUPERVISOR_ROOT)/image/supervisor.bin

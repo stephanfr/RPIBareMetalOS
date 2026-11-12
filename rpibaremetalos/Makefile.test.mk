@@ -18,6 +18,7 @@ CPP_TEST_SRC_DIRS := test/src
 
 C_SRC   :=
 CPP_SRC :=  src/c/cli/command_parser.cpp \
+			src/c/devices/user_device_registry.cpp \
 			src/c/platform/platform_sw_rngs.cpp \
 			src/c/services/os_entity_registry.cpp \
 			src/c/services/murmur_hash.cpp \

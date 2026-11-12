@@ -19,14 +19,22 @@
 #define SYS_READ_STATISTIC_NUMBER   6
 #define SYS_FIND_PROCESS_NUMBER     7
 #define SYS_SLEEP_NUMBER            8
+#define SYS_DEVICE_OPEN_NUMBER      9
+#define SYS_INTERRUPT_WAIT_NUMBER   10
+#define SYS_INTERRUPT_ACK_NUMBER    11
+#define SYS_CHANNEL_OPEN_NUMBER     12
+#define SYS_CHANNEL_RECEIVE_NUMBER  13
+#define SYS_CHANNEL_REPLY_NUMBER    14
 
-#define NUMBER_OF_SYSTEM_CALLS 9
+#define NUMBER_OF_SYSTEM_CALLS 15
 
 #ifndef __ASSEMBLER__
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include "channels.h"
+#include "user_devices.h"
 #include "user_statistics.h"
 
 #ifdef __cplusplus
@@ -50,6 +58,18 @@ extern "C"
     int sc_ReadStatistic(uint32_t process_id, uint32_t id, UserStatisticRecord *record);
 
     int sc_FindProcess(const char *binary_path, uint32_t after_process_id, uint32_t *process_id);
+
+    //  The device calls, for a driver: results and the MMIO rules are in user_devices.h.
+
+    int sc_DeviceOpen(const char *name, uint32_t *handle, uint64_t *registers);
+    int sc_InterruptWait(uint32_t handle, uint64_t timeout_microseconds);
+    int sc_InterruptAck(uint32_t handle);
+
+    //  The channel calls, for a driver: results and the memory's layout are in channels.h.
+
+    int sc_ChannelOpen(const char *name, uint32_t *handle, uint64_t *page, uint64_t *data_size);
+    int sc_ChannelReceive(uint32_t handle, uint64_t timeout_microseconds, uint64_t *data_length);
+    int sc_ChannelReply(uint32_t handle, uint64_t length, uint64_t data_length);
 
 #ifdef __cplusplus
 }

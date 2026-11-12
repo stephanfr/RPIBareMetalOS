@@ -55,6 +55,15 @@ namespace task
             return WaitUntil(reason, Policy::DeadlineAfter(timeout));
         }
 
+        //  Forgets a ring nobody waited for.  Not while a task waits.
+
+        void Discard()
+        {
+            uintptr_t expected = RUNG;
+
+            word_.compare_exchange_strong(expected, IDLE, minstd::memory_order_acq_rel, minstd::memory_order_acquire);
+        }
+
         void Ring()
         {
             ring_ticks_.store(Policy::NowTicks(), minstd::memory_order_relaxed);

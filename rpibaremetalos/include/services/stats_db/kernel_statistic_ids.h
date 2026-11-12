@@ -71,6 +71,9 @@ namespace system_stats
 
         RP1_MSIX_DELIVERIES             = 46,
         RP1_IACKS                       = 47,
+
+        DRIVER_STARTS                   = 48,
+        DRIVER_RESTARTS                 = 49,
     } KernelStatisticId;
 
     constexpr uint32_t KernelStatistic(KernelStatisticId id)

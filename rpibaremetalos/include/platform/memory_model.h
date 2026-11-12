@@ -32,6 +32,8 @@ struct UserSpaceLayout
     uint64_t l1_index_start;    //  space_base >> 30  (first L1 slot the window occupies)
     uint64_t l1_index_end;      //  (space_top - 1) >> 30  (last L1 slot, inclusive)
     uint64_t image_base;        //  header + text (fixed)
+    uint64_t device_base;       //  the image ends below this; device windows from here to device_top
+    uint64_t device_top;
     uint64_t heap_base;         //  sc_Malloc grows up from here
     uint64_t heap_top;          //  exclusive ceiling for the heap (== guard_bottom)
     uint64_t guard_bottom;      //  [guard_bottom, stack_bottom) is never mapped
@@ -63,6 +65,8 @@ public:
             USER_SPACE_L1_INDEX_START,
             USER_SPACE_L1_INDEX_END,
             USER_IMAGE_BASE,
+            USER_DEVICE_BASE,
+            USER_DEVICE_TOP,
             USER_HEAP_BASE,
             USER_HEAP_TOP,
             USER_GUARD_BOTTOM,

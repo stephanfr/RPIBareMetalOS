@@ -41,12 +41,13 @@ void SetLogLevel(LogLevel new_level)
 //  Functions to output logging at the specified level, filtered by the global level
 //
 
+extern "C" void putchar_(char c);
+
 extern "C" void putchar_with_level(char c, void *extra_arg)
 {
-    if ((stdout != NULL) &&
-        (*((uint32_t *)extra_arg) <= static_cast<uint32_t>(__current_log_level)))
+    if (*((uint32_t *)extra_arg) <= static_cast<uint32_t>(__current_log_level))
     {
-        stdout->putc(c);
+        putchar_(c);
     }
 }
 

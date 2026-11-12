@@ -10,6 +10,7 @@
 
 #include "filesystem/filesystems.h"
 #include "task/tasks.h"
+#include "services/driver_manager.h"
 #include "services/stats_db/stats_db.h"
 
 #include <format>
@@ -25,6 +26,7 @@ namespace cli::commands
     const CLIListFilesystemsCommand CLIListFilesystemsCommand::instance;
     const CLIListTasksCommand CLIListTasksCommand::instance;
     const CLIListStatisticsCommand CLIListStatisticsCommand::instance;
+    const CLIListDriversCommand CLIListDriversCommand::instance;
 
     //  Now for the parent command
 
@@ -194,6 +196,22 @@ namespace cli::commands
         };
 
         context.task_manager_.VisitTaskList(callback);
+    }
+
+    void CLIListDriversCommand::ProcessToken(CommandParser &parser,
+                                             CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context.output_stream_ << "Driver           State             Process  Starts  Exits  Last restart delay (ms)\n";
+
+        for (uint32_t id = 0; id < static_cast<uint32_t>(DriverId::COUNT); id++)
+        {
+            const DriverStatus status = GetDriverStatus(static_cast<DriverId>(id));
+
+            context.output_stream_ << minstd::format(buffer, "{:<16} {:<17} {:>7}  {:>6}  {:>5}  {:>7}\n", status.name, ToString(status.state),
+                                                     status.process_id, status.starts, status.exits, status.last_restart_delay_ms);
+        }
     }
 
     void CLIListStatisticsCommand::ProcessToken(CommandParser &parser,

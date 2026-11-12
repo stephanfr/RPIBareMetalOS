@@ -12,7 +12,10 @@
 
 #include "devices/emmc.h"
 #include "devices/physical_timer.h"
+#include "devices/user_devices.h"
 #include "devices/video/console_video_framebuffer.h"
+#include "services/driver_manager.h"
+#include "task/channels.h"
 #include "task/tasks.h"
 #include "task/runnable.h"
 #include "heaps.h"
@@ -50,6 +53,7 @@ namespace cli::commands
     const CLITestMutexCommand           CLITestMutexCommand::instance;
     const CLITestHypervisorCommand      CLITestHypervisorCommand::instance;
     const CLITestStage2Command          CLITestStage2Command::instance;
+    const CLITestDriversCommand         CLITestDriversCommand::instance;
     const CLITestCommand                CLITestCommand::instance;
 
     // -------------------------------------------------------------------------
@@ -3841,7 +3845,7 @@ namespace cli::commands
 
         constexpr uint64_t BLOCKED_PAGE = HYPERVISOR_TRAMPOLINE_ADDRESS;
 
-        //  The top page of the image region: no binary reaches it, and it is never demand paged.
+        //  Between the device windows and the heap: nothing else maps it, and it is never demand paged.
 
         constexpr uint64_t USER_VA = USER_HEAP_BASE - MemoryManager::DEFAULT_PAGE_SIZE;
 
@@ -4463,6 +4467,630 @@ namespace cli::commands
         else
         {
             context << minstd::format(buffer, "FAIL: stage2 test -- {} check(s) failed\n", failures);
+        }
+    }
+
+    //  test drivers
+
+    namespace drivers_test
+    {
+        //  hello.bin cases 18 and 19, their flags and reports, and case 19's protocol (user/hello.c).
+
+        constexpr unsigned long CASE_18 = 18;
+        constexpr unsigned long CASE_18_EXPECT_DENIED = 0x1;
+        constexpr unsigned long CASE_18_EXPECT_BUSY = 0x2;
+        constexpr unsigned long CASE_18_NO_INTERRUPTS = 0x4;
+        constexpr int64_t CASE_18_REPORT = 0x1800;
+
+        constexpr unsigned long CASE_19 = 19;
+        constexpr unsigned long CASE_19_EXPECT_DENIED = 0x1;
+        constexpr unsigned long CASE_19_EXPECT_BUSY = 0x2;
+        constexpr unsigned long CASE_19_CHECKS = 0x4;
+        constexpr int64_t CASE_19_REPORT = 0x1900;
+
+        constexpr uint8_t ECHO_OP_ECHO = 1;
+        constexpr uint8_t ECHO_OP_SLOW = 2;
+        constexpr uint8_t ECHO_OP_STATUS = 3;
+        constexpr uint8_t ECHO_OP_OVERSIZE = 4;
+        constexpr uint8_t ECHO_OP_EXIT = 5;
+        constexpr uint8_t ECHO_OP_DATA = 6;
+        constexpr uint8_t ECHO_OP_CRASH = 7;
+
+        constexpr int64_t REPORT_MASK = ~int64_t{0xFF};
+        constexpr int64_t CASE_GO = 2;
+
+        constexpr uint32_t POLL_MS = 10;
+        constexpr uint32_t MAX_POLLS = 1000;
+
+        constexpr minstd::chrono::microseconds CALL_TIMEOUT = minstd::chrono::milliseconds(1000);
+
+        //  A forked hello.bin: its report is its failure count, or -1 when it never reported.
+
+        struct HelloCase
+        {
+            unsigned long test_case = 0;
+            int64_t report = 0;
+            UUID task_id;
+            uint32_t process_id = 0;
+            system_stats::UserStatisticHandle gauge;
+            int64_t failures = -1;
+        };
+
+        bool Start(CLISessionContext &context, HelloCase &hello, unsigned long test_case, unsigned long flags,
+                   DeviceCapabilities devices, ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            minstd::fixed_string<MAX_FILENAME_LENGTH> binary("hello.bin");
+
+            hello.test_case = test_case;
+            hello.report = (test_case == CASE_18) ? CASE_18_REPORT : CASE_19_REPORT;
+
+            auto forked = context.task_manager_.ForkServiceTask(binary, test_case | (flags << 8), task::TaskDefinition{"driver calls"}, devices, channels);
+
+            if (forked.Failed())
+            {
+                context << minstd::format(buffer, "  FAIL: ForkServiceTask(driver calls) -- {}\n", task::ErrorMessage(forked.ResultCode()));
+                return false;
+            }
+
+            hello.task_id = forked.Value();
+
+            auto task = context.task_manager_.FindTask(hello.task_id);
+
+            if (task.has_value())
+            {
+                hello.process_id = static_cast<task::TaskImpl &>(*task).ProcessId();
+            }
+
+            return true;
+        }
+
+        //  Waits for the case's report; it keeps running, and owning what it opened, until Finish().
+
+        void AwaitReport(HelloCase &hello)
+        {
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && (hello.failures < 0); poll++)
+            {
+                const auto found = system_stats::FindUserStatistic(system_stats::GetSystemStatisticsDB(), hello.process_id, "hello", "gauge");
+
+                if (found.Successful())
+                {
+                    hello.gauge = *found;
+
+                    const auto value = hello.gauge.Get();
+
+                    if (value.Successful() && ((*value & REPORT_MASK) == hello.report))
+                    {
+                        hello.failures = *value - hello.report;
+                        break;
+                    }
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+        }
+
+        void Finish(CLISessionContext &context, HelloCase &hello)
+        {
+            if (hello.failures >= 0)
+            {
+                hello.gauge.Visit([](const system_stats::UserStatistic &stat) { stat.SetValue(CASE_GO); });
+            }
+
+            auto task = context.task_manager_.FindTask(hello.task_id);
+
+            if (task.has_value())
+            {
+                task->Join();
+            }
+        }
+
+        uint32_t Failures(CLISessionContext &context, const HelloCase &hello, const char *label)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            if (hello.failures < 0)
+            {
+                context << minstd::format(buffer, "  FAIL: {}: hello.bin case {} never reported\n", label, hello.test_case);
+                return 1;
+            }
+
+            if (hello.failures > 0)
+            {
+                context << minstd::format(buffer, "  FAIL: {}: {} check(s) failed in hello.bin\n", label, hello.failures);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  A case that only checks it is refused: forked, its report awaited, then let go.
+
+        uint32_t RunRefused(CLISessionContext &context, unsigned long test_case, unsigned long flags, DeviceCapabilities devices,
+                            ChannelCapabilities channels, const char *label)
+        {
+            HelloCase hello;
+
+            if (!Start(context, hello, test_case, flags, devices, channels))
+            {
+                return 1;
+            }
+
+            AwaitReport(hello);
+            Finish(context, hello);
+
+            return Failures(context, hello, label);
+        }
+
+        //  The reaper gives a dead owner's devices back, so this waits for it.
+
+        bool AwaitRelease(UserDeviceId id)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                if (UserDeviceOwner(id) == 0)
+                {
+                    return true;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return false;
+        }
+
+        //  An owner, a second process that finds the device busy, then one without the capability.
+
+        uint32_t CheckDeviceCalls(CLISessionContext &context)
+        {
+            uint32_t failures = 0;
+
+            HelloCase owner;
+
+            //  QEMU's raspi4b wires the system timer only to the legacy interrupt controller, not to the GIC.
+
+            const bool interrupts = (GetPlatformInfo().GetHostType() != HostType::QEMU) ||
+                                    (GetPlatformInfo().GetBoardType() != RPIBoardType::RPI4);
+
+            if (!interrupts)
+            {
+                context << "  the test timer's interrupt is not checked: QEMU doesn't route it to the GIC\n";
+            }
+
+            if (!Start(context, owner, CASE_18, interrupts ? 0 : CASE_18_NO_INTERRUPTS, CapabilityFor(UserDeviceId::TEST_TIMER)))
+            {
+                return 1;
+            }
+
+            AwaitReport(owner);
+
+            failures += RunRefused(context, CASE_18, CASE_18_EXPECT_BUSY, CapabilityFor(UserDeviceId::TEST_TIMER), NO_CHANNEL_CAPABILITIES,
+                                   "a second owner");
+
+            Finish(context, owner);
+            failures += Failures(context, owner, "the test timer's owner");
+
+            if (!AwaitRelease(UserDeviceId::TEST_TIMER))
+            {
+                context << "  FAIL: the test timer was not given back when its owner exited\n";
+                failures++;
+            }
+
+            failures += RunRefused(context, CASE_18, CASE_18_EXPECT_DENIED, NO_DEVICE_CAPABILITIES, NO_CHANNEL_CAPABILITIES,
+                                   "a process without the capability");
+
+            return failures;
+        }
+
+        //  One call on the test-echo channel; 'expected' is the result it should have.
+
+        uint32_t Call(CLISessionContext &context, const uint8_t *request, size_t request_length, uint8_t *reply, size_t reply_capacity,
+                      size_t &reply_length, minstd::chrono::microseconds timeout, int expected, const char *label)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            const int result = GetChannel(ChannelId::TEST_ECHO).Call(request, request_length, reply, reply_capacity, reply_length, timeout);
+
+            if (result != expected)
+            {
+                context << minstd::format(buffer, "  FAIL: {}: the call returned {}, not {}\n", label, result, expected);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  Echo requests of 'length' bytes, the operation then 1, 2, 3 ...; each reply byte is the request's plus one.
+
+        uint32_t CheckEcho(CLISessionContext &context, size_t length)
+        {
+            static uint8_t request[CHANNEL_MESSAGE_MAX];
+            static uint8_t reply[CHANNEL_MESSAGE_MAX];
+            size_t reply_length = 0;
+
+            request[0] = ECHO_OP_ECHO;
+
+            for (size_t i = 1; i < length; i++)
+            {
+                request[i] = static_cast<uint8_t>(i);
+            }
+
+            if (Call(context, request, length, reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_SUCCESS, "an echo") != 0)
+            {
+                return 1;
+            }
+
+            bool matches = (reply_length == length);
+
+            for (size_t i = 0; matches && (i < length); i++)
+            {
+                matches = (reply[i] == static_cast<uint8_t>(request[i] + 1));
+            }
+
+            if (!matches)
+            {
+                minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+                context << minstd::format(buffer, "  FAIL: an echo of {} bytes came back wrong\n", length);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  'length' bytes of data to the driver and back, each byte complemented, beside a 1-byte request.
+
+        uint32_t CheckData(CLISessionContext &context, size_t length)
+        {
+            static uint8_t out[CHANNEL_DATA_MAX + 1];
+            static uint8_t in[CHANNEL_DATA_MAX];
+
+            const uint8_t request[1] = {ECHO_OP_DATA};
+            uint8_t reply[4] = {};
+
+            for (size_t i = 0; i < length; i++)
+            {
+                out[i] = static_cast<uint8_t>((i * 13) + (i >> 8));
+                in[i] = 0;
+            }
+
+            task::ChannelCall call;
+
+            call.request = request;
+            call.request_length = sizeof(request);
+            call.reply = reply;
+            call.reply_capacity = sizeof(reply);
+            call.data_out = out;
+            call.data_out_length = length;
+            call.data_in = in;
+            call.data_in_capacity = sizeof(in);
+
+            const int expected = (length > GetChannel(ChannelId::TEST_ECHO).DataSize()) ? CHANNEL_TOO_LONG : CHANNEL_SUCCESS;
+            const int result = GetChannel(ChannelId::TEST_ECHO).Call(call, CALL_TIMEOUT);
+
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            if (result != expected)
+            {
+                context << minstd::format(buffer, "  FAIL: {} bytes of data: the call returned {}, not {}\n", length, result, expected);
+                return 1;
+            }
+
+            if (result != CHANNEL_SUCCESS)
+            {
+                return 0;
+            }
+
+            const uint32_t seen = reply[0] | (reply[1] << 8) | (reply[2] << 16) | (static_cast<uint32_t>(reply[3]) << 24);
+            bool matches = (call.reply_length == sizeof(reply)) && (seen == length) && (call.data_in_length == length);
+
+            for (size_t i = 0; matches && (i < length); i++)
+            {
+                matches = (in[i] == static_cast<uint8_t>(~out[i]));
+            }
+
+            if (!matches)
+            {
+                context << minstd::format(buffer, "  FAIL: {} bytes of data came back wrong\n", length);
+                return 1;
+            }
+
+            return 0;
+        }
+
+        //  The test-echo driver's own failure count and the replies the kernel dropped.
+
+        bool EchoStatus(CLISessionContext &context, uint32_t &failures, uint32_t &abandoned)
+        {
+            const uint8_t request[1] = {ECHO_OP_STATUS};
+            uint8_t reply[8] = {};
+            size_t reply_length = 0;
+
+            if ((Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_SUCCESS, "the status") != 0) ||
+                (reply_length != sizeof(reply)))
+            {
+                return false;
+            }
+
+            failures = reply[0] | (reply[1] << 8) | (reply[2] << 16) | (static_cast<uint32_t>(reply[3]) << 24);
+            abandoned = reply[4] | (reply[5] << 8) | (reply[6] << 16) | (static_cast<uint32_t>(reply[7]) << 24);
+
+            return true;
+        }
+
+        //  hello.bin case 19 serves the channel: echoes, data both ways, a caller that gives up on a slow reply, a reply too long, a
+        //      second process that finds the channel served, then the driver exiting with a request in hand.  Last, a
+        //      process without the capability.
+
+        uint32_t CheckChannels(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            uint32_t failures = 0;
+
+            task::Channel &channel = GetChannel(ChannelId::TEST_ECHO);
+
+            uint8_t reply[16] = {};
+            size_t reply_length = 0;
+            const uint8_t exit_request[1] = {ECHO_OP_EXIT};
+
+            if (channel.Server() != 0)
+            {
+                context << "  FAIL: the test-echo channel is already served\n";
+                return 1;
+            }
+
+            failures += Call(context, exit_request, sizeof(exit_request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_NO_SERVER,
+                             "a call with no driver");
+
+            HelloCase driver;
+
+            if (!Start(context, driver, CASE_19, CASE_19_CHECKS, NO_DEVICE_CAPABILITIES, CapabilityFor(ChannelId::TEST_ECHO)))
+            {
+                return failures + 1;
+            }
+
+            //  Its start-up checks include a receive that must time out, so no call goes before its report.
+
+            AwaitReport(driver);
+            failures += Failures(context, driver, "the test-echo driver's start-up");
+
+            if (channel.Server() != driver.process_id)
+            {
+                context << "  FAIL: hello.bin case 19 never served the test-echo channel\n";
+                Finish(context, driver);
+                return failures + 1;
+            }
+
+            failures += RunRefused(context, CASE_19, CASE_19_EXPECT_BUSY, NO_DEVICE_CAPABILITIES, CapabilityFor(ChannelId::TEST_ECHO),
+                                   "a second driver");
+
+            const size_t lengths[] = {1, 2, 3, 64, 511, 512, CHANNEL_MESSAGE_MAX - 1, CHANNEL_MESSAGE_MAX};
+
+            for (size_t length : lengths)
+            {
+                failures += CheckEcho(context, length);
+            }
+
+            for (uint32_t i = 0; i < 100; i++)
+            {
+                failures += CheckEcho(context, 1 + ((i * 37) % CHANNEL_MESSAGE_MAX));
+            }
+
+            const size_t data_lengths[] = {1, 512, 4096, 32768, 0x10000, 0x10001};
+
+            for (size_t length : data_lengths)
+            {
+                failures += CheckData(context, length);
+            }
+
+            static uint8_t overlong[CHANNEL_MESSAGE_MAX + 1] = {ECHO_OP_ECHO};
+
+            failures += Call(context, overlong, sizeof(overlong), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_TOO_LONG,
+                             "a request too long");
+
+            //  The driver sleeps 300 ms; the caller gives up after 50.  The next call waits for the late reply.
+
+            const uint8_t slow[5] = {ECHO_OP_SLOW, 0x2C, 0x01, 0, 0};
+
+            failures += Call(context, slow, sizeof(slow), reply, sizeof(reply), reply_length, minstd::chrono::milliseconds(50), CHANNEL_TIMED_OUT,
+                             "a call the driver is too slow for");
+            failures += CheckEcho(context, 4);
+
+            const uint8_t oversize[1] = {ECHO_OP_OVERSIZE};
+            uint8_t small_reply[8] = {};
+
+            failures += Call(context, oversize, sizeof(oversize), small_reply, sizeof(small_reply), reply_length, CALL_TIMEOUT, CHANNEL_SUCCESS,
+                             "a reply too long");
+
+            if ((reply_length != sizeof(small_reply)) || (small_reply[0] != 0x44) || (small_reply[7] != 0x44))
+            {
+                context << "  FAIL: the reply after one too long came back wrong\n";
+                failures++;
+            }
+
+            uint32_t driver_failures = 0;
+            uint32_t abandoned = 0;
+
+            if (!EchoStatus(context, driver_failures, abandoned))
+            {
+                failures++;
+            }
+            else if ((driver_failures != 0) || (abandoned != 1))
+            {
+                context << minstd::format(buffer, "  FAIL: the driver counted {} failure(s) and {} dropped repl(ies), not 0 and 1\n",
+                                          driver_failures, abandoned);
+                failures++;
+            }
+
+            //  The driver exits holding the request: the reaper fails the call, long before its timeout.
+
+            failures += Call(context, exit_request, sizeof(exit_request), reply, sizeof(reply), reply_length, minstd::chrono::seconds(10),
+                             CHANNEL_SERVER_EXITED, "a call the driver exits holding");
+            failures += Call(context, exit_request, sizeof(exit_request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_NO_SERVER,
+                             "a call after the driver exited");
+
+            Finish(context, driver);
+
+            if (failures == 0)
+            {
+                context << "  channel calls OK\n";
+            }
+
+            failures += RunRefused(context, CASE_19, CASE_19_EXPECT_DENIED, NO_DEVICE_CAPABILITIES, NO_CHANNEL_CAPABILITIES,
+                                   "a driver without the capability");
+
+            return failures;
+        }
+
+        //  Waits for the test-echo channel to be served by the manager's driver, by a process other than 'previous'.
+
+        uint32_t AwaitManagedEcho(uint32_t previous)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                const DriverStatus status = GetDriverStatus(DriverId::TEST_ECHO);
+                const uint32_t server = GetChannel(ChannelId::TEST_ECHO).Server();
+
+                if ((status.state == DriverState::RUNNING) && (server != 0) && (server != previous) && (server == status.process_id))
+                {
+                    return server;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return 0;
+        }
+
+        //  A request the driver exits on, crashing or not: the call fails once the reaper releases the driver.
+
+        uint32_t EndTheDriver(CLISessionContext &context, uint8_t operation, const char *label)
+        {
+            const uint8_t request[1] = {operation};
+            uint8_t reply[4] = {};
+            size_t reply_length = 0;
+
+            return Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, minstd::chrono::seconds(10), CHANNEL_SERVER_EXITED, label);
+        }
+
+        //  The driver manager runs hello.bin case 19 from the kernel's embedded copy as the test-echo driver: started,
+        //      crashed twice and restarted after 100 then 200 ms, then stopped.
+
+        uint32_t CheckDriverManager(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            uint32_t failures = 0;
+
+            const DriverStatus before = GetDriverStatus(DriverId::TEST_ECHO);
+
+            if ((before.state != DriverState::STOPPED) || (GetChannel(ChannelId::TEST_ECHO).Server() != 0))
+            {
+                context << minstd::format(buffer, "  FAIL: the test-echo driver is {}, not stopped and unserved\n", ToString(before.state));
+                return 1;
+            }
+
+            StartDriver(DriverId::TEST_ECHO);
+
+            uint32_t process_id = AwaitManagedEcho(0);
+
+            if (process_id == 0)
+            {
+                context << "  FAIL: the driver manager never started the test-echo driver\n";
+                StopDriver(DriverId::TEST_ECHO);
+                return failures + 1;
+            }
+
+            failures += CheckEcho(context, 16);
+            failures += CheckData(context, 4096);
+
+            const uint32_t expected_delays[] = {100, 200};
+
+            for (uint32_t crash = 0; crash < 2; crash++)
+            {
+                failures += EndTheDriver(context, ECHO_OP_CRASH, "a call the driver crashes on");
+
+                const uint32_t restarted = AwaitManagedEcho(process_id);
+
+                if (restarted == 0)
+                {
+                    context << "  FAIL: the driver manager did not restart the crashed driver\n";
+                    StopDriver(DriverId::TEST_ECHO);
+                    return failures + 1;
+                }
+
+                process_id = restarted;
+
+                const DriverStatus status = GetDriverStatus(DriverId::TEST_ECHO);
+
+                if ((status.exits != before.exits + crash + 1) || (status.starts != before.starts + crash + 2) ||
+                    (status.last_restart_delay_ms != expected_delays[crash]))
+                {
+                    context << minstd::format(buffer, "  FAIL: after crash {}: {} exit(s), {} start(s), restarted after {} ms\n",
+                                              crash + 1, status.exits - before.exits, status.starts - before.starts, status.last_restart_delay_ms);
+                    failures++;
+                }
+
+                failures += CheckEcho(context, 16);
+            }
+
+            //  Stopped: the driver runs on until it exits, then stays down.
+
+            StopDriver(DriverId::TEST_ECHO);
+            failures += EndTheDriver(context, ECHO_OP_EXIT, "a call the stopped driver exits on");
+
+            bool stopped = false;
+
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && !stopped; poll++)
+            {
+                stopped = (GetDriverStatus(DriverId::TEST_ECHO).state == DriverState::STOPPED);
+
+                if (!stopped)
+                {
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                }
+            }
+
+            PhysicalTimer::Wait(minstd::chrono::milliseconds(500));
+
+            const DriverStatus after = GetDriverStatus(DriverId::TEST_ECHO);
+
+            if (!stopped || (after.state != DriverState::STOPPED) || (after.process_id != 0) || (GetChannel(ChannelId::TEST_ECHO).Server() != 0))
+            {
+                context << minstd::format(buffer, "  FAIL: the stopped driver is {}, process {}\n", ToString(after.state), after.process_id);
+                failures++;
+            }
+
+            const uint8_t request[1] = {ECHO_OP_ECHO};
+            uint8_t reply[4] = {};
+            size_t reply_length = 0;
+
+            failures += Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, CALL_TIMEOUT, CHANNEL_NO_SERVER,
+                             "a call after the driver stopped");
+
+            if (failures == 0)
+            {
+                context << "  driver manager OK\n";
+            }
+
+            return failures;
+        }
+    } // namespace drivers_test
+
+    void CLITestDriversCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
+    {
+        minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+        context << "\ntest drivers: device access, channels and the driver manager\n";
+
+        const uint32_t failures = drivers_test::CheckDeviceCalls(context) + drivers_test::CheckChannels(context) +
+                                  drivers_test::CheckDriverManager(context);
+
+        if (failures == 0)
+        {
+            context << "PASS: drivers test\n";
+        }
+        else
+        {
+            context << minstd::format(buffer, "FAIL: drivers test -- {} check(s) failed\n", failures);
         }
     }
 } // namespace cli::commands

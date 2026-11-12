@@ -455,14 +455,16 @@ namespace task
     }
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkServiceTask(const minstd::string &binary_path, unsigned long arg,
-                                                                        const TaskDefinition &task_definition)
+                                                                        const TaskDefinition &task_definition, DeviceCapabilities devices,
+                                                                        ChannelCapabilities channels)
     {
-        return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg, true);
+        return ForkKernelTaskInternal(nullptr, &internal::StartUserTaskWrapper, task_definition, &binary_path, arg, true, devices, channels);
     }
 
     ValueResult<TaskResultCodes, UUID> TaskManagerImpl::ForkKernelTaskInternal(Runnable *runnable, void (*wrapper)(Runnable *), const TaskDefinition &task_definition,
                                                                               const minstd::string *user_binary_path, unsigned long user_arg,
-                                                                              bool service)
+                                                                              bool service, DeviceCapabilities devices,
+                                                                              ChannelCapabilities channels)
     {
         using Result = ValueResult<TaskResultCodes, UUID>;
 
@@ -517,6 +519,12 @@ namespace task
         {
             new_task->binary_path_ = *user_binary_path;
             new_task->user_arg_ = user_arg;
+        }
+
+        if (service)
+        {
+            new_task->device_capabilities_ = devices;
+            new_task->channel_capabilities_ = channels;
         }
 
         //  Add the task to our task map

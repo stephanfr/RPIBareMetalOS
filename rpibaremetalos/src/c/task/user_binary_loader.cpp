@@ -14,6 +14,7 @@
 #include "devices/log.h"
 #include "heaps.h"
 #include "platform/memory_model.h"
+#include "task/embedded_images.h"
 
 namespace task
 {
@@ -155,35 +156,23 @@ namespace task
             MemoryModel::ReleaseUserFrame(MemoryPagePointer{KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(pages))}, size);
         }
 
-        //  statistics is null for an ordinary process.
+        //  Reads 'path' from the boot filesystem into file_block, RoundUpToPage(image_size) bytes the caller releases.
 
-        ValueResult<TaskResultCodes, uint64_t> LoadImage(const minstd::string &path,
-                                                         AddressSpace &address_space,
-                                                         uint32_t process_id,
-                                                         system_stats::UserStatisticsRegion **statistics)
+        TaskResultCodes ReadImageFile(const minstd::string &path, MemoryPagePointer &file_block, uint64_t &image_size)
         {
-            using Result = ValueResult<TaskResultCodes, uint64_t>;
-
-            if (statistics != nullptr)
-            {
-                *statistics = nullptr;
-            }
-
-            const UserSpaceLayout &layout = MemoryModel::UserSpace();
-
             filesystems::Filesystem *filesystem = FindBootFilesystem();
 
             if (filesystem == nullptr)
             {
                 LogError("LoadUserBinary: no boot filesystem is mounted\n");
-                return Result::Failure(TaskResultCodes::USER_BINARY_NOT_FOUND);
+                return TaskResultCodes::USER_BINARY_NOT_FOUND;
             }
 
             auto root_directory = filesystem->GetRootDirectory();
 
             if (root_directory.Failed())
             {
-                return Result::Failure(TaskResultCodes::USER_BINARY_NOT_FOUND);
+                return TaskResultCodes::USER_BINARY_NOT_FOUND;
             }
 
             auto file = root_directory->OpenFile(path, filesystems::FileModes::READ);
@@ -191,34 +180,33 @@ namespace task
             if (file.Failed())
             {
                 LogError("LoadUserBinary: cannot open '%s'\n", path.c_str());
-                return Result::Failure(TaskResultCodes::USER_BINARY_NOT_FOUND);
+                return TaskResultCodes::USER_BINARY_NOT_FOUND;
             }
 
             auto file_size = file->Size();
 
             if (file_size.Failed() || (file_size.Value() < UserImageHeader::SIZE))
             {
-                return Result::Failure(TaskResultCodes::USER_BINARY_MALFORMED);
+                return TaskResultCodes::USER_BINARY_MALFORMED;
             }
 
-            const uint64_t image_size = file_size.Value();
+            image_size = file_size.Value();
 
             //  Read the whole file into a kernel buffer, dereferenced through the kernel VA.
 
-            MemoryPagePointer file_block = MemoryModel::AllocateUserFrame(RoundUpToPage(image_size));
+            file_block = MemoryModel::AllocateUserFrame(RoundUpToPage(image_size));
 
             if (file_block == 0)
             {
-                return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
+                return TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK;
             }
 
-            uint8_t *image = (uint8_t *)file_block;
-            raw_buffer image_buffer(image, RoundUpToPage(image_size));
+            raw_buffer image_buffer((uint8_t *)file_block, RoundUpToPage(image_size));
 
             if (file->Read(image_buffer) != filesystems::FilesystemResultCodes::SUCCESS)
             {
                 MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
-                return Result::Failure(TaskResultCodes::USER_BINARY_UNREADABLE);
+                return TaskResultCodes::USER_BINARY_UNREADABLE;
             }
 
             file->Close();
@@ -231,7 +219,29 @@ namespace task
                 LogError("LoadUserBinary: read %lu of %lu bytes of '%s'\n",
                          (unsigned long)image_buffer.size(), (unsigned long)image_size, path.c_str());
                 MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
-                return Result::Failure(TaskResultCodes::USER_BINARY_UNREADABLE);
+                return TaskResultCodes::USER_BINARY_UNREADABLE;
+            }
+
+            return TaskResultCodes::SUCCESS;
+        }
+
+        //  Validates the image in [image, image + image_size), a kernel buffer the caller keeps, and maps a copy of it.
+        //      statistics is null for an ordinary process.
+
+        ValueResult<TaskResultCodes, uint64_t> MapImage(const minstd::string &path,
+                                                        const uint8_t *image,
+                                                        uint64_t image_size,
+                                                        AddressSpace &address_space,
+                                                        uint32_t process_id,
+                                                        system_stats::UserStatisticsRegion **statistics)
+        {
+            using Result = ValueResult<TaskResultCodes, uint64_t>;
+
+            const UserSpaceLayout &layout = MemoryModel::UserSpace();
+
+            if (image_size < UserImageHeader::SIZE)
+            {
+                return Result::Failure(TaskResultCodes::USER_BINARY_MALFORMED);
             }
 
             //  Validate before mapping anything.
@@ -243,7 +253,7 @@ namespace task
             const uint64_t data_size = header->data_size_;
             const uint64_t bss_size = header->bss_size_;
             const uint64_t data_span = RoundUpToPage(data_size + bss_size);
-            const uint64_t image_span = layout.heap_base - layout.image_base;
+            const uint64_t image_span = layout.device_base - layout.image_base;
 
             //  Each size is bounded on its own before any sum, so the sums cannot wrap.
 
@@ -261,7 +271,6 @@ namespace task
             if (!valid)
             {
                 LogError("LoadUserBinary: '%s' is not a valid user image\n", path.c_str());
-                MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                 return Result::Failure(TaskResultCodes::USER_BINARY_MALFORMED);
             }
 
@@ -271,7 +280,6 @@ namespace task
 
             if (text_block == 0)
             {
-                MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                 return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
             }
 
@@ -282,7 +290,6 @@ namespace task
                                         Stage2AccessPermission::EL1_READ_ONLY_EL0_READ_ONLY, true))
             {
                 MemoryModel::ReleaseUserFrame(text_block, text_size);
-                MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                 return Result::Failure(TaskResultCodes::UNABLE_TO_MAP_USER_BINARY);
             }
 
@@ -295,7 +302,6 @@ namespace task
 
                 if (stats_block == 0)
                 {
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
                 }
 
@@ -305,7 +311,6 @@ namespace task
                                             Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false))
                 {
                     MemoryModel::ReleaseUserFrame(stats_block, stats_size);
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::UNABLE_TO_MAP_USER_BINARY);
                 }
             }
@@ -319,7 +324,6 @@ namespace task
 
                 if (stats_block == 0)
                 {
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
                 }
 
@@ -331,7 +335,6 @@ namespace task
                 {
                     LogError("LoadUserBinary: '%s' has a malformed statistics section\n", path.c_str());
                     MemoryModel::ReleaseUserFrame(stats_block, stats_size);
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::USER_BINARY_MALFORMED);
                 }
 
@@ -344,7 +347,6 @@ namespace task
                     LogError("LoadUserBinary: '%s' defines %u statistics, more than the %u the system can hold\n",
                              path.c_str(), statistic_count, system_stats::GetSystemStatisticsDB().Capacity());
                     MemoryModel::ReleaseUserFrame(stats_block, stats_size);
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::USER_BINARY_MALFORMED);
                 }
 
@@ -353,7 +355,6 @@ namespace task
                 if (region.Failed())
                 {
                     MemoryModel::ReleaseUserFrame(stats_block, stats_size);
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
                 }
 
@@ -364,7 +365,6 @@ namespace task
                 if (!address_space.MapPages(layout.image_base + text_size, stats_block.Physical(), stats_size,
                                             Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false, false))
                 {
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::UNABLE_TO_MAP_USER_BINARY);
                 }
 
@@ -387,7 +387,6 @@ namespace task
 
                 if (data_block == 0)
                 {
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::UNABLE_TO_ALLOCATE_MEMORY_FOR_NEW_TASK);
                 }
 
@@ -404,14 +403,56 @@ namespace task
                                             Stage2AccessPermission::EL1_READ_WRITE_EL0_READ_WRITE, false))
                 {
                     MemoryModel::ReleaseUserFrame(data_block, data_span);
-                    MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
                     return Result::Failure(TaskResultCodes::UNABLE_TO_MAP_USER_BINARY);
                 }
             }
 
-            MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
 
             return Result::Success(layout.image_base + UserImageHeader::SIZE);
+        }
+
+        ValueResult<TaskResultCodes, uint64_t> LoadImage(const minstd::string &path,
+                                                         AddressSpace &address_space,
+                                                         uint32_t process_id,
+                                                         system_stats::UserStatisticsRegion **statistics)
+        {
+            using Result = ValueResult<TaskResultCodes, uint64_t>;
+
+            if (statistics != nullptr)
+            {
+                *statistics = nullptr;
+            }
+
+            //  An embedded image is mapped straight from the kernel image.
+
+            if (strncmp(path.c_str(), EMBEDDED_IMAGE_PREFIX, sizeof(EMBEDDED_IMAGE_PREFIX) - 1) == 0)
+            {
+                EmbeddedImage embedded;
+
+                if (!FindEmbeddedImage(path.c_str() + sizeof(EMBEDDED_IMAGE_PREFIX) - 1, embedded))
+                {
+                    LogError("LoadUserBinary: no embedded image '%s'\n", path.c_str());
+                    return Result::Failure(TaskResultCodes::USER_BINARY_NOT_FOUND);
+                }
+
+                return MapImage(path, embedded.image, embedded.size, address_space, process_id, statistics);
+            }
+
+            MemoryPagePointer file_block{0};
+            uint64_t image_size = 0;
+
+            const TaskResultCodes read = ReadImageFile(path, file_block, image_size);
+
+            if (read != TaskResultCodes::SUCCESS)
+            {
+                return Result::Failure(read);
+            }
+
+            const auto mapped = MapImage(path, (const uint8_t *)file_block, image_size, address_space, process_id, statistics);
+
+            MemoryModel::ReleaseUserFrame(file_block, RoundUpToPage(image_size));
+
+            return mapped;
         }
     }
 

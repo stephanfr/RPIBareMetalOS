@@ -199,6 +199,15 @@ def run(qemu: str, armstub: str, kernel: str, hypervisor: str, sdimage: str,
 
         check_stage2('test stage2')
 
+        # test drivers -- a service process opens the test timer, has its interrupts forwarded, and gives it back on
+        # exit; another serves the test-echo channel for the kernel's calls, and exits holding one.  Second owners and
+        # processes without the capability are refused.  Then the driver manager runs the embedded test-echo driver,
+        # restarts it after two crashes, and leaves it stopped.
+        output = send_command('test drivers', timeout=90)
+        check('test drivers', output, 'PASS: drivers test', 'case 18: device calls OK', 'case 18: device refused OK',
+              'channel calls OK', 'case 19: channel refused OK', 'driver manager OK',
+              *(['case 18: device interrupts OK'] if machine == 'raspi3b' else []))
+
         # hypervisor update — live update.  Failures first, each leaving v0.1 running.  Then the v0.2 build on the SD image
         # replaces it on every core without a reboot, and every test after this runs on the updated hypervisor.
         output = send_command('hypervisor update /nonexistent.bin')
@@ -335,8 +344,9 @@ def run(qemu: str, armstub: str, kernel: str, hypervisor: str, sdimage: str,
         check('test mutex', output, 'PASS: mutex test')
 
         # list statistics — the kernel counts every user task a fault killed: the seven test usertask cases
-        # above, and the case 16 task each of the two test stage2 runs kills.
-        expected_user_faults = 7 + 2
+        # above, the case 16 task each of the two test stage2 runs kills, and the two crashes of the test-echo
+        # driver in test drivers.
+        expected_user_faults = 7 + 2 + 2
         output = send_command('list statistics')
         check('list statistics', output, 'Statistics:', 'tasks.user_faults')
 
@@ -347,6 +357,16 @@ def run(qemu: str, armstub: str, kernel: str, hypervisor: str, sdimage: str,
             failures += 1
         else:
             print(f'\nPASS [list statistics]: tasks.user_faults is {expected_user_faults}')
+
+        # The driver manager started the test-echo driver once and restarted it after each of its two crashes.
+        for stat_id, name, expected in ((48, 'drivers.starts', 3), (49, 'drivers.restarts', 2)):
+            found = re.search(rf'^\s*0\s+{stat_id}\s+counter\s+{re.escape(name)}\s+(\d+)\s*$', output, re.MULTILINE)
+            if found is None or int(found.group(1)) != expected:
+                print(f'\nFAIL [list statistics]: expected {name} to be {expected}, got '
+                      f'{found.group(1) if found else "no " + name + " line"}')
+                failures += 1
+            else:
+                print(f'\nPASS [list statistics]: {name} is {expected}')
 
         # The memory metrics are maintained by the page allocator itself.  free_pages is a running
         # gauge, so it must be a plausible nonzero count; invalid_releases and last_invalid_release

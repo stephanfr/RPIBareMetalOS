@@ -19,6 +19,9 @@
 #include "devices/power_manager.h"
 #include "devices/video/video_framebuffer.h"
 #include "devices/std_streams.h"
+#include "devices/user_devices.h"
+#include "task/channels.h"
+#include "services/driver_manager.h"
 #include "devices/scheduler_clock.h"
 
 #include "devices/deadline_timer.h"
@@ -101,6 +104,9 @@ extern "C" void kernel_main()
     DeadlineTimer::Disarm();
     GetExceptionManager().AddInterruptServiceRoutine(&deadlineTimerISR, CoreList(CoreList::CoreID::ALL_CORES));
 
+    InitializeUserDevices();
+    InitializeChannels();
+
     //  This registers an ISR too.  The ISR map is not locked against concurrent dispatch, so every registration
     //      happens here, before interrupts flow.
 
@@ -168,6 +174,11 @@ extern "C" void kernel_main()
     }
 
     cli::CommandLineInterface &cli = *start_cli_result;
+
+    if (!StartDriverManager())
+    {
+        printf("Failed to start the driver manager\n");
+    }
 
     printf("Forking CLI\n");
 

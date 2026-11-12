@@ -9,6 +9,8 @@
 #include "platform/memory_model.h"
 
 #include "devices/std_streams.h"
+#include "devices/user_devices.h"
+#include "task/channels.h"
 
 #include "services/stats_db/user_statistics.h"
 
@@ -180,6 +182,112 @@ namespace syscall
         return USER_STATISTIC_SUCCESS;
     }
 
+    //  The device calls (see uapi/user_devices.h).  name, handle and registers are USER pointers.
+
+    int DeviceOpen(const char *name, uint32_t *handle, uint64_t *registers)
+    {
+        char local_name[DEVICE_NAME_LENGTH];
+
+        if (!task::CopyStringFromUserSpaceToKernelSpace(local_name, (uint64_t)name, sizeof(local_name)))
+        {
+            return DEVICE_NOT_FOUND;
+        }
+
+        uint32_t opened_handle = 0;
+        uint64_t mapped_registers = 0;
+
+        const int result = OpenUserDevice(task::TaskImpl::GetTask(), local_name, opened_handle, mapped_registers);
+
+        if (result != DEVICE_SUCCESS)
+        {
+            return result;
+        }
+
+        //  The device stays open: a process that can't take its handle can open it again.
+
+        if (!task::CopyToUserSpaceFromKernelSpace((uint64_t)handle, &opened_handle, sizeof(opened_handle)) ||
+            !task::CopyToUserSpaceFromKernelSpace((uint64_t)registers, &mapped_registers, sizeof(mapped_registers)))
+        {
+            return DEVICE_BAD_ADDRESS;
+        }
+
+        return DEVICE_SUCCESS;
+    }
+
+    int InterruptWait(uint32_t handle, uint64_t timeout_microseconds)
+    {
+        return WaitForUserDeviceInterrupt(task::TaskImpl::GetTask(), handle, timeout_microseconds);
+    }
+
+    int InterruptAck(uint32_t handle)
+    {
+        return AcknowledgeUserDeviceInterrupt(task::TaskImpl::GetTask(), handle);
+    }
+
+    //  The channel calls (see uapi/channels.h).  name, handle, page, data_size and data_length are USER pointers.
+
+    int ChannelOpen(const char *name, uint32_t *handle, uint64_t *page, uint64_t *data_size)
+    {
+        char local_name[CHANNEL_NAME_LENGTH];
+
+        if (!task::CopyStringFromUserSpaceToKernelSpace(local_name, (uint64_t)name, sizeof(local_name)))
+        {
+            return CHANNEL_NOT_FOUND;
+        }
+
+        uint32_t opened_handle = 0;
+        uint64_t mapped_page = 0;
+        uint64_t mapped_data_size = 0;
+
+        const int result = OpenChannel(task::TaskImpl::GetTask(), local_name, opened_handle, mapped_page, mapped_data_size);
+
+        if (result != CHANNEL_SUCCESS)
+        {
+            return result;
+        }
+
+        //  The channel stays open: a process that can't take its handle can open it again.
+
+        if (!task::CopyToUserSpaceFromKernelSpace((uint64_t)handle, &opened_handle, sizeof(opened_handle)) ||
+            !task::CopyToUserSpaceFromKernelSpace((uint64_t)page, &mapped_page, sizeof(mapped_page)) ||
+            !task::CopyToUserSpaceFromKernelSpace((uint64_t)data_size, &mapped_data_size, sizeof(mapped_data_size)))
+        {
+            return CHANNEL_BAD_ADDRESS;
+        }
+
+        return CHANNEL_SUCCESS;
+    }
+
+    //  data_length may be null.  Otherwise it is written before the wait, so it can't fail once the request is taken.
+
+    int ChannelReceive(uint32_t handle, uint64_t timeout_microseconds, uint64_t *data_length)
+    {
+        uint64_t received_data_length = 0;
+
+        if ((data_length != nullptr) &&
+            !task::CopyToUserSpaceFromKernelSpace((uint64_t)data_length, &received_data_length, sizeof(received_data_length)))
+        {
+            return CHANNEL_BAD_ADDRESS;
+        }
+
+        size_t length = 0;
+
+        const int result = ReceiveOnChannel(task::TaskImpl::GetTask(), handle, timeout_microseconds, length);
+
+        if ((result >= 0) && (data_length != nullptr))
+        {
+            received_data_length = length;
+            task::CopyToUserSpaceFromKernelSpace((uint64_t)data_length, &received_data_length, sizeof(received_data_length));
+        }
+
+        return result;
+    }
+
+    int ChannelReply(uint32_t handle, uint64_t length, uint64_t data_length)
+    {
+        return ReplyOnChannel(task::TaskImpl::GetTask(), handle, length, data_length);
+    }
+
     void Exit()
     {
         task::Task::GetTask().Exit();
@@ -210,6 +318,8 @@ namespace syscall
 
 extern "C" void *const __system_call_table[] = {(void *)syscall::Write, (void *)syscall::Malloc, (void *)syscall::CloneTask, (void *)syscall::Exit, (void *)syscall::Yield,
                                                (void *)syscall::FindStatistic, (void *)syscall::ReadStatistic,
-                                               (void *)syscall::FindProcess, (void *)syscall::Sleep};
+                                               (void *)syscall::FindProcess, (void *)syscall::Sleep,
+                                               (void *)syscall::DeviceOpen, (void *)syscall::InterruptWait, (void *)syscall::InterruptAck,
+                                               (void *)syscall::ChannelOpen, (void *)syscall::ChannelReceive, (void *)syscall::ChannelReply};
 
 static_assert(sizeof(__system_call_table) / sizeof(__system_call_table[0]) == NUMBER_OF_SYSTEM_CALLS, "one entry per system call number");

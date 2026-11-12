@@ -13,6 +13,8 @@
 #include <map>
 
 #include "os_entity.h"
+#include "devices/user_device_registry.h"
+#include "task/channel_registry.h"
 
 #include "platform/memory_manager.h"
 
@@ -116,6 +118,7 @@ namespace task
         LOCK,
         JOIN,
         EVENT,
+        CHANNEL,        //  a driver waiting for a request
     } WaitReason;
 
     class Task
@@ -328,6 +331,8 @@ namespace task
             return "Join";
         case WaitReason::EVENT:
             return "Event";
+        case WaitReason::CHANNEL:
+            return "Channel";
         default:
             return "Unknown Wait Reason";
         }
@@ -351,7 +356,12 @@ namespace task
 
         virtual ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) = 0;
         virtual ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;
-        virtual ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) = 0;
+        //  'devices' are the devices it may open (devices/user_device_registry.h), 'channels' the channels it may serve
+        //      (task/channel_registry.h).
+
+        virtual ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition,
+                                                                   DeviceCapabilities devices = NO_DEVICE_CAPABILITIES,
+                                                                   ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES) = 0;
 
     protected:
         TaskManager()

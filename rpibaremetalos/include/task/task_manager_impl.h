@@ -147,7 +147,9 @@ namespace task
 
         ValueResult<TaskResultCodes, UUID> ForkKernelTask(Runnable *runnable, const TaskDefinition& task_definition) override;
         ValueResult<TaskResultCodes, UUID> ForkUserTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
-        ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition) override;
+        ValueResult<TaskResultCodes, UUID> ForkServiceTask(const minstd::string &binary_path, unsigned long arg, const TaskDefinition &task_definition,
+                                                           DeviceCapabilities devices = NO_DEVICE_CAPABILITIES,
+                                                           ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES) override;
 
         ValueResult<TaskResultCodes, UUID> CloneTask(const TaskDefinition& task_definition, MemoryPagePointer stack);
 
@@ -259,6 +261,8 @@ namespace task
                                                                    const TaskDefinition& task_definition,
                                                                    const minstd::string *user_binary_path = nullptr,
                                                                    unsigned long user_arg = 0,
-                                                                   bool service = false );
+                                                                   bool service = false,
+                                                                   DeviceCapabilities devices = NO_DEVICE_CAPABILITIES,
+                                                                   ChannelCapabilities channels = NO_CHANNEL_CAPABILITIES );
     };
 } // namespace task
