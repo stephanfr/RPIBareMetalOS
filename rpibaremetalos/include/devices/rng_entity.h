@@ -8,29 +8,51 @@
 
 #include <random>
 
+//  The system's random number generator, registered as "HWRNG".  On a board with a hardware RNG it reads the device
+//      through its EL0 driver (devices/rng_proxy.h); otherwise it is a software generator in the kernel.
 
-template<OSEntityTypes OS_ENTITY_TYPE>
 class RandomNumberGeneratorOSEntity : public OSEntity
 {
 public:
-    RandomNumberGeneratorOSEntity( bool permanent,
-                                   const char *name,
-                                   const char *alias,
-                                   minstd::random_device &rng)
-        : OSEntity(permanent, name, alias),
-          rng_(rng)
-    {}
+    RandomNumberGeneratorOSEntity(const char *name, const char *alias)
+        : OSEntity(true, name, alias)
+    {
+    }
 
     OSEntityTypes OSEntityType() const noexcept override
     {
-        return OS_ENTITY_TYPE;
+        return OSEntityTypes::HARDWARE_RNG;
     }
 
-    uint32_t Next32BitValue() { return rng_(); }
+    //  False when the generator could not supply all 'count' words: its driver is restarting, say.
 
-    uint64_t Next64BitValue()
+    virtual bool Read(uint32_t *words, size_t count) = 0;
+
+    virtual bool FromHardware() const = 0;
+};
+
+class LocalRandomNumberGenerator : public RandomNumberGeneratorOSEntity
+{
+public:
+    LocalRandomNumberGenerator(const char *name, const char *alias, minstd::random_device &rng)
+        : RandomNumberGeneratorOSEntity(name, alias),
+          rng_(rng)
     {
-        return (static_cast<uint64_t>(rng_()) << 32) | rng_();
+    }
+
+    bool Read(uint32_t *words, size_t count) override
+    {
+        for (size_t i = 0; i < count; i++)
+        {
+            words[i] = rng_();
+        }
+
+        return true;
+    }
+
+    bool FromHardware() const override
+    {
+        return false;
     }
 
 private:

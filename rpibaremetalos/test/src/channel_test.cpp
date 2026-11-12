@@ -382,6 +382,99 @@ namespace
         STRCMP_EQUAL("B", FakeWaitPolicy::wake_log_);
     }
 
+    TEST(ChannelTests, AKillEndsTheDriversReceiveAndLeavesTheChannelServed)
+    {
+        Channel under_test;
+        Reset(under_test);
+
+        CHECK_TRUE(channel->Bind(DRIVER));
+
+        FakeWaitPolicy::current_ = &b;
+        b.on_block_ = [](FakeTask &blocked) { FakeWaitPolicy::Wake(blocked, task::WaitStatus::INTERRUPTED); };
+
+        CHECK_EQUAL(CHANNEL_INTERRUPTED, channel->Receive(TIMEOUT));
+        CHECK_EQUAL(DRIVER, channel->Server());
+
+        CHECK_EQUAL(CHANNEL_SUCCESS, EchoCall(2));
+    }
+
+    TEST(ChannelTests, ASignalEndsTheDriversReceiveWithAnEvent)
+    {
+        Channel under_test;
+        Reset(under_test);
+
+        CHECK_TRUE(channel->Bind(DRIVER));
+
+        FakeWaitPolicy::current_ = &b;
+        b.on_block_ = [](FakeTask &) { channel->Signal(); };
+
+        CHECK_EQUAL(CHANNEL_EVENT, channel->Receive(TIMEOUT));
+        CHECK_EQUAL(1U, b.blocks_);
+        STRCMP_EQUAL("B", FakeWaitPolicy::wake_log_);
+    }
+
+    TEST(ChannelTests, SignalsMergeUntilAReceiveTakesThem)
+    {
+        Channel under_test;
+        Reset(under_test);
+
+        CHECK_TRUE(channel->Bind(DRIVER));
+
+        channel->Signal();
+        channel->Signal();
+
+        FakeWaitPolicy::current_ = &b;
+
+        CHECK_EQUAL(CHANNEL_EVENT, channel->Receive(TIMEOUT));
+        CHECK_EQUAL(0U, b.blocks_);
+        CHECK_EQUAL(CHANNEL_TIMED_OUT, channel->Receive(TIMEOUT));
+    }
+
+    void DriverReceivesWithAnEventPending(FakeTask &)
+    {
+        FakeWaitPolicy::current_ = &b;
+
+        channel->Signal();
+        received = channel->Receive(TIMEOUT);
+        replied = channel->Reply(Answer(static_cast<size_t>(received)));
+    }
+
+    TEST(ChannelTests, ARequestComesBeforeAPendingEvent)
+    {
+        Channel under_test;
+        Reset(under_test);
+
+        CHECK_TRUE(channel->Bind(DRIVER));
+
+        uint8_t request[2] = {1, 2};
+        uint8_t reply[2] = {};
+        size_t reply_length = 0;
+
+        a.on_block_ = DriverReceivesWithAnEventPending;
+
+        CHECK_EQUAL(CHANNEL_SUCCESS, channel->Call(request, sizeof(request), reply, sizeof(reply), reply_length, TIMEOUT));
+        CHECK_EQUAL(2, received);
+        CHECK_EQUAL(CHANNEL_SUCCESS, replied);
+
+        FakeWaitPolicy::current_ = &b;
+        CHECK_EQUAL(CHANNEL_EVENT, channel->Receive(TIMEOUT));
+    }
+
+    TEST(ChannelTests, AnEventDoesNotOutliveItsDriver)
+    {
+        Channel under_test;
+        Reset(under_test);
+
+        CHECK_TRUE(channel->Bind(DRIVER));
+        channel->Signal();
+        channel->Unbind(DRIVER);
+
+        CHECK_TRUE(channel->Bind(OTHER_DRIVER));
+
+        FakeWaitPolicy::current_ = &b;
+        CHECK_EQUAL(CHANNEL_TIMED_OUT, channel->Receive(TIMEOUT));
+    }
+
     TEST(ChannelTests, LateReplyAfterATimeoutIsDroppedAndTheChannelRecovers)
     {
         Channel under_test;

@@ -14,8 +14,10 @@
 #include "devices/physical_timer.h"
 #include "devices/user_devices.h"
 #include "devices/video/console_video_framebuffer.h"
+#include "devices/rng_entity.h"
 #include "services/driver_manager.h"
 #include "task/channels.h"
+#include "uapi/hw_rng.h"
 #include "task/tasks.h"
 #include "task/runnable.h"
 #include "heaps.h"
@@ -4495,6 +4497,7 @@ namespace cli::commands
         constexpr uint8_t ECHO_OP_EXIT = 5;
         constexpr uint8_t ECHO_OP_DATA = 6;
         constexpr uint8_t ECHO_OP_CRASH = 7;
+        constexpr uint8_t ECHO_OP_HANG = 8;
 
         constexpr int64_t REPORT_MASK = ~int64_t{0xFF};
         constexpr int64_t CASE_GO = 2;
@@ -4972,8 +4975,43 @@ namespace cli::commands
             return Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, minstd::chrono::seconds(10), CHANNEL_SERVER_EXITED, label);
         }
 
+        //  Waits for 'id''s driver to be running again as a process other than 'previous'; 0 if it never is.
+
+        uint32_t AwaitRestart(DriverId id, uint32_t previous)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                const DriverStatus status = GetDriverStatus(id);
+
+                if ((status.state == DriverState::RUNNING) && (status.process_id != 0) && (status.process_id != previous))
+                {
+                    return status.process_id;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return 0;
+        }
+
+        bool AwaitStopped(DriverId id)
+        {
+            for (uint32_t poll = 0; poll < MAX_POLLS; poll++)
+            {
+                if (GetDriverStatus(id).state == DriverState::STOPPED)
+                {
+                    return true;
+                }
+
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            return false;
+        }
+
         //  The driver manager runs hello.bin case 19 from the kernel's embedded copy as the test-echo driver: started,
-        //      crashed twice and restarted after 100 then 200 ms, then stopped.
+        //      crashed twice and restarted after 100 then 200 ms, hung at EL0 and killed, restarted after 400 ms, then
+        //      stopped by a kill while it waits for a request.
 
         uint32_t CheckDriverManager(CLISessionContext &context)
         {
@@ -5032,30 +5070,56 @@ namespace cli::commands
                 failures += CheckEcho(context, 16);
             }
 
-            //  Stopped: the driver runs on until it exits, then stays down.
+            //  Hung: spinning at EL0, so only a kill ends it.
 
-            StopDriver(DriverId::TEST_ECHO);
-            failures += EndTheDriver(context, ECHO_OP_EXIT, "a call the stopped driver exits on");
-
-            bool stopped = false;
-
-            for (uint32_t poll = 0; (poll < MAX_POLLS) && !stopped; poll++)
             {
-                stopped = (GetDriverStatus(DriverId::TEST_ECHO).state == DriverState::STOPPED);
+                const uint8_t request[1] = {ECHO_OP_HANG};
+                uint8_t reply[4] = {};
+                size_t reply_length = 0;
 
-                if (!stopped)
+                failures += Call(context, request, sizeof(request), reply, sizeof(reply), reply_length, minstd::chrono::milliseconds(200),
+                                 CHANNEL_TIMED_OUT, "a call the driver hangs on");
+            }
+
+            RestartDriver(DriverId::TEST_ECHO);
+
+            const uint32_t unhung = AwaitManagedEcho(process_id);
+
+            if (unhung == 0)
+            {
+                context << "  FAIL: the driver manager did not kill and restart the hung driver\n";
+                StopDriver(DriverId::TEST_ECHO);
+                return failures + 1;
+            }
+
+            {
+                const DriverStatus status = GetDriverStatus(DriverId::TEST_ECHO);
+
+                if ((status.kills != before.kills + 1) || (status.exits != before.exits + 3) || (status.last_restart_delay_ms != 400))
                 {
-                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                    context << minstd::format(buffer, "  FAIL: after the hang: {} kill(s), {} exit(s), restarted after {} ms\n",
+                                              status.kills - before.kills, status.exits - before.exits, status.last_restart_delay_ms);
+                    failures++;
                 }
             }
+
+            failures += CheckEcho(context, 16);
+
+            //  Stopped: killed while it waits for a request, and stays down.
+
+            StopDriver(DriverId::TEST_ECHO);
+
+            const bool stopped = AwaitStopped(DriverId::TEST_ECHO);
 
             PhysicalTimer::Wait(minstd::chrono::milliseconds(500));
 
             const DriverStatus after = GetDriverStatus(DriverId::TEST_ECHO);
 
-            if (!stopped || (after.state != DriverState::STOPPED) || (after.process_id != 0) || (GetChannel(ChannelId::TEST_ECHO).Server() != 0))
+            if (!stopped || (after.state != DriverState::STOPPED) || (after.process_id != 0) || (GetChannel(ChannelId::TEST_ECHO).Server() != 0) ||
+                (after.kills != before.kills + 2))
             {
-                context << minstd::format(buffer, "  FAIL: the stopped driver is {}, process {}\n", ToString(after.state), after.process_id);
+                context << minstd::format(buffer, "  FAIL: the stopped driver is {}, process {}, after {} kill(s)\n", ToString(after.state), after.process_id,
+                                          after.kills - before.kills);
                 failures++;
             }
 
@@ -5073,16 +5137,275 @@ namespace cli::commands
 
             return failures;
         }
+        //  The "HWRNG" entity, through the hw-rng driver where the board has a hardware RNG: reads across the
+        //      channel's limit, then the driver killed, reads failing, and the restarted driver serving again.
+
+        uint32_t CheckRandomNumberGenerator(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+            uint32_t failures = 0;
+
+            auto lookup = GetOSEntityRegistry().GetEntityByAlias<RandomNumberGeneratorOSEntity>("HWRNG");
+
+            if (lookup.Failed())
+            {
+                context << "  FAIL: there is no HWRNG entity\n";
+                return 1;
+            }
+
+            RandomNumberGeneratorOSEntity &rng = *lookup;
+
+            constexpr size_t WORDS = HW_RNG_MAX_WORDS + 100;
+            static uint32_t first[WORDS];
+            static uint32_t second[WORDS];
+
+            if (!rng.Read(first, WORDS) || !rng.Read(second, WORDS))
+            {
+                context << "  FAIL: the random number generator did not answer\n";
+                return 1;
+            }
+
+            //  Random words agree by chance about once in 2^32: a few matches mean a stuck or repeating generator.
+
+            uint32_t repeats = 0;
+
+            for (size_t i = 0; i < WORDS; i++)
+            {
+                repeats += (first[i] == second[i]) ? 1 : 0;
+                repeats += ((i > 0) && (first[i] == first[i - 1])) ? 1 : 0;
+            }
+
+            if (repeats > 2)
+            {
+                context << minstd::format(buffer, "  FAIL: {} repeated words from the random number generator\n", repeats);
+                failures++;
+            }
+
+            if (!rng.FromHardware())
+            {
+                context << "  hw-rng: no hardware RNG, so the kernel's software generator serves\n";
+                return failures;
+            }
+
+            const DriverStatus before = GetDriverStatus(DriverId::HW_RNG);
+
+            if (before.state != DriverState::RUNNING)
+            {
+                context << minstd::format(buffer, "  FAIL: the hw-rng driver is {}\n", ToString(before.state));
+                return failures + 1;
+            }
+
+            RestartDriver(DriverId::HW_RNG);
+
+            uint32_t failed_reads = 0;
+            bool recovered = false;
+
+            for (uint32_t poll = 0; (poll < MAX_POLLS) && !recovered; poll++)
+            {
+                uint32_t words[4];
+                const bool read = rng.Read(words, 4);
+                const DriverStatus status = GetDriverStatus(DriverId::HW_RNG);
+
+                failed_reads += read ? 0 : 1;
+                recovered = read && (failed_reads > 0) && (status.process_id != before.process_id);
+
+                if (!recovered)
+                {
+                    PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+                }
+            }
+
+            const DriverStatus after = GetDriverStatus(DriverId::HW_RNG);
+
+            if (!recovered || (after.kills != before.kills + 1) || (after.starts != before.starts + 1))
+            {
+                context << minstd::format(buffer, "  FAIL: the killed hw-rng driver: {} failed read(s), {} kill(s), {} start(s), recovered {}\n",
+                                          failed_reads, after.kills - before.kills, after.starts - before.starts, recovered);
+                failures++;
+            }
+
+            if (failures == 0)
+            {
+                context << "  hw-rng OK\n";
+            }
+
+            return failures;
+        }
+        //  The console driver killed while the CLI writes: what is written meanwhile goes out through EL2, and the
+        //      restarted driver carries the console again.  The commands after this test show that its input works.
+
+        uint32_t CheckConsole(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            const DriverStatus before = GetDriverStatus(DriverId::CONSOLE);
+
+            if ((before.state != DriverState::RUNNING) || (GetChannel(ChannelId::CONSOLE).Server() != before.process_id))
+            {
+                context << minstd::format(buffer, "  FAIL: the console driver is {}, process {}\n", ToString(before.state), before.process_id);
+                return 1;
+            }
+
+            context << "  console: written before its driver is killed\n";
+
+            RestartDriver(DriverId::CONSOLE);
+
+            //  After the manager's line about the kill, and well before the reaper releases the driver.
+
+            PhysicalTimer::Wait(minstd::chrono::milliseconds(300));
+
+            context << "  console: written while its driver restarts\n";
+
+            uint32_t restarted = AwaitRestart(DriverId::CONSOLE, before.process_id);
+
+            for (uint32_t poll = 0; (restarted != 0) && (poll < MAX_POLLS) && (GetChannel(ChannelId::CONSOLE).Server() != restarted); poll++)
+            {
+                PhysicalTimer::Wait(minstd::chrono::milliseconds(POLL_MS));
+            }
+
+            context << "  console: written after its driver restarted\n";
+
+            const DriverStatus after = GetDriverStatus(DriverId::CONSOLE);
+
+            if ((restarted == 0) || (GetChannel(ChannelId::CONSOLE).Server() != restarted) || (after.kills != before.kills + 1) ||
+                (after.starts != before.starts + 1))
+            {
+                context << minstd::format(buffer, "  FAIL: the killed console driver: process {}, {} kill(s), {} start(s)\n", restarted,
+                                          after.kills - before.kills, after.starts - before.starts);
+                return 1;
+            }
+
+            context << "  console OK\n";
+
+            return 0;
+        }
+
+        //  Restarts a driver after a delay, from its own task, while the test's task is blocked in a call to it.
+
+        class DelayedDriverRestart : public Runnable
+        {
+        public:
+            DelayedDriverRestart(DriverId id, minstd::chrono::milliseconds delay)
+                : id_(id),
+                  delay_(delay)
+            {
+            }
+
+            void Run() override
+            {
+                task::TaskImpl::GetTask().SleepFor(minstd::chrono::duration_cast<minstd::chrono::microseconds>(delay_));
+                RestartDriver(id_);
+            }
+
+        private:
+            DriverId id_;
+            minstd::chrono::milliseconds delay_;
+        };
+
+        //  The SD card driver killed 50 ms into a 1 MB read, which takes the better part of a second through EL2's
+        //      traps: that read fails, and the next one waits for the restarted driver and reads what the card held
+        //      before.
+
+        uint32_t CheckSDCard(CLISessionContext &context)
+        {
+            minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
+
+            constexpr uint32_t LONG_READ_BLOCKS = 2048;
+            constexpr uint32_t CHECK_BLOCKS = 64;
+            constexpr size_t BLOCK_SIZE = 512;
+
+            const DriverStatus before = GetDriverStatus(DriverId::SD_CARD);
+
+            if ((before.state != DriverState::RUNNING) || (GetChannel(ChannelId::SD_CARD).Server() != before.process_id))
+            {
+                context << minstd::format(buffer, "  FAIL: the sd-card driver is {}, process {}\n", ToString(before.state), before.process_id);
+                return 1;
+            }
+
+            ExternalMassMediaController &sd_card = GetExternalMassMediaController();
+
+            uint8_t *long_read = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(LONG_READ_BLOCKS * BLOCK_SIZE, 64));
+            uint8_t *reference = static_cast<uint8_t *>(__os_dynamic_heap_resource.allocate(CHECK_BLOCKS * BLOCK_SIZE, 64));
+
+            if ((long_read == nullptr) || (reference == nullptr))
+            {
+                context << "  FAIL: no memory for the SD card reads\n";
+                return 1;
+            }
+
+            uint32_t failures = 0;
+
+            if (sd_card.ReadFromBlock(reference, 0, CHECK_BLOCKS).Failed())
+            {
+                context << "  FAIL: the SD card read before the kill failed\n";
+                failures++;
+            }
+
+            static DelayedDriverRestart restart(DriverId::SD_CARD, minstd::chrono::milliseconds(50));
+
+            if (task::GetTaskManager().ForkKernelTask(&restart, "SD driver restart").Failed())
+            {
+                context << "  FAIL: the task to kill the sd-card driver could not be forked\n";
+                failures++;
+            }
+            else
+            {
+                const bool killed_read_failed = sd_card.ReadFromBlock(long_read, 0, LONG_READ_BLOCKS).Failed();
+
+                //  Reported after the manager's lines about the exit, so they don't interleave.
+
+                const uint32_t restarted = AwaitRestart(DriverId::SD_CARD, before.process_id);
+
+                if (killed_read_failed)
+                {
+                    context << "  sd-card: a read failed when its driver was killed\n";
+                }
+                else
+                {
+                    context << "  FAIL: the read the sd-card driver was killed in succeeded\n";
+                    failures++;
+                }
+
+                //  Read into the long read's buffer, which the failed read left part written.
+
+                const auto next_read = sd_card.ReadFromBlock(long_read, 0, CHECK_BLOCKS);
+                const DriverStatus after = GetDriverStatus(DriverId::SD_CARD);
+
+                if (next_read.Failed() || (memcmp(long_read, reference, CHECK_BLOCKS * BLOCK_SIZE) != 0))
+                {
+                    context << "  FAIL: the SD card read after the restart failed or differs\n";
+                    failures++;
+                }
+
+                if ((restarted == 0) || (after.kills != before.kills + 1) || (after.starts != before.starts + 1))
+                {
+                    context << minstd::format(buffer, "  FAIL: the killed sd-card driver: process {}, {} kill(s), {} start(s)\n", restarted,
+                                              after.kills - before.kills, after.starts - before.starts);
+                    failures++;
+                }
+            }
+
+            __os_dynamic_heap_resource.deallocate(reference, CHECK_BLOCKS * BLOCK_SIZE, 64);
+            __os_dynamic_heap_resource.deallocate(long_read, LONG_READ_BLOCKS * BLOCK_SIZE, 64);
+
+            if (failures == 0)
+            {
+                context << "  sd-card OK\n";
+            }
+
+            return failures;
+        }
     } // namespace drivers_test
 
     void CLITestDriversCommand::ProcessToken(CommandParser &parser, CLISessionContext &context) const
     {
         minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
-        context << "\ntest drivers: device access, channels and the driver manager\n";
+        context << "\ntest drivers: device access, channels, the driver manager, and the hw-rng, console and sd-card drivers\n";
 
         const uint32_t failures = drivers_test::CheckDeviceCalls(context) + drivers_test::CheckChannels(context) +
-                                  drivers_test::CheckDriverManager(context);
+                                  drivers_test::CheckDriverManager(context) + drivers_test::CheckRandomNumberGenerator(context) +
+                                  drivers_test::CheckConsole(context) + drivers_test::CheckSDCard(context);
 
         if (failures == 0)
         {

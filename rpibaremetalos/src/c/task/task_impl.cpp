@@ -60,10 +60,11 @@ namespace task
 
         wait_reason_ = reason;
         wait_start_ = PhysicalTimer::Now();
+        interruptible_wait_.store(IsInterruptible(reason), minstd::memory_order_seq_cst);
 
         //  Before the task is published anywhere, or a waker's compare-exchange could find it not yet WAITING.
 
-        wait_status_.store(static_cast<uint32_t>(WaitStatus::WAITING), minstd::memory_order_release);
+        wait_status_.store(static_cast<uint32_t>(WaitStatus::WAITING), minstd::memory_order_seq_cst);
 
         if (state_ == ExecutionState::RUNNING)
         {
@@ -84,6 +85,13 @@ namespace task
             wake_deadline_ticks_ = deadline_ticks;
             TaskManagerImpl::Instance().ExecutionContextForCurrentCore().AddWaitDeadline(*this);
         }
+
+        //  A kill that came before WAITING was visible found nothing to end; CommitBlock() then returns at once.
+
+        if (IsInterruptible(reason) && KillRequested())
+        {
+            TaskManagerImpl::Instance().WakeTask(*this, WaitStatus::INTERRUPTED);
+        }
     }
 
     WaitStatus TaskImpl::CommitBlock()
@@ -103,6 +111,7 @@ namespace task
         }
 
         wait_reason_ = WaitReason::NONE;
+        interruptible_wait_.store(false, minstd::memory_order_relaxed);
 
         return how;
     }
@@ -133,7 +142,10 @@ namespace task
 
         while (PhysicalTimer::CurrentTicks() < deadline_ticks)
         {
-            Block(WaitReason::SLEEP, deadline_ticks);
+            if (Block(WaitReason::SLEEP, deadline_ticks) == WaitStatus::INTERRUPTED)
+            {
+                break;
+            }
         }
 
         RestoreIRQs(saved_irqs);

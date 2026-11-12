@@ -288,6 +288,30 @@ namespace syscall
         return ReplyOnChannel(task::TaskImpl::GetTask(), handle, length, data_length);
     }
 
+    //  message is a USER pointer.
+
+    int ChannelPost(uint32_t handle, const void *message, uint64_t length)
+    {
+        uint8_t local_message[CHANNEL_POST_MAX];
+
+        if (length > sizeof(local_message))
+        {
+            return CHANNEL_TOO_LONG;
+        }
+
+        if ((length > 0) && !task::CopyToKernelSpaceFromUserSpace(local_message, (uint64_t)message, static_cast<size_t>(length)))
+        {
+            return CHANNEL_BAD_ADDRESS;
+        }
+
+        return PostOnChannel(task::TaskImpl::GetTask(), handle, local_message, static_cast<size_t>(length));
+    }
+
+    int InterruptRoute(uint32_t handle, uint32_t channel)
+    {
+        return RouteUserDeviceInterrupt(task::TaskImpl::GetTask(), handle, channel);
+    }
+
     void Exit()
     {
         task::Task::GetTask().Exit();
@@ -320,6 +344,7 @@ extern "C" void *const __system_call_table[] = {(void *)syscall::Write, (void *)
                                                (void *)syscall::FindStatistic, (void *)syscall::ReadStatistic,
                                                (void *)syscall::FindProcess, (void *)syscall::Sleep,
                                                (void *)syscall::DeviceOpen, (void *)syscall::InterruptWait, (void *)syscall::InterruptAck,
-                                               (void *)syscall::ChannelOpen, (void *)syscall::ChannelReceive, (void *)syscall::ChannelReply};
+                                               (void *)syscall::ChannelOpen, (void *)syscall::ChannelReceive, (void *)syscall::ChannelReply,
+                                               (void *)syscall::ChannelPost, (void *)syscall::InterruptRoute};
 
 static_assert(sizeof(__system_call_table) / sizeof(__system_call_table[0]) == NUMBER_OF_SYSTEM_CALLS, "one entry per system call number");

@@ -8,6 +8,12 @@
 
 extern "C" const uint8_t __embedded_hello_start[];
 extern "C" const uint8_t __embedded_hello_end[];
+extern "C" const uint8_t __embedded_hw_rng_driver_start[];
+extern "C" const uint8_t __embedded_hw_rng_driver_end[];
+extern "C" const uint8_t __embedded_console_driver_start[];
+extern "C" const uint8_t __embedded_console_driver_end[];
+extern "C" const uint8_t __embedded_sd_card_driver_start[];
+extern "C" const uint8_t __embedded_sd_card_driver_end[];
 
 namespace
 {
@@ -18,6 +24,9 @@ bool FindEmbeddedImage(const char *name, EmbeddedImage &image)
 {
     const EmbeddedImage images[] = {
         {"hello.bin", __embedded_hello_start, static_cast<size_t>(__embedded_hello_end - __embedded_hello_start)},
+        {"hw_rng_driver.bin", __embedded_hw_rng_driver_start, static_cast<size_t>(__embedded_hw_rng_driver_end - __embedded_hw_rng_driver_start)},
+        {"console_driver.bin", __embedded_console_driver_start, static_cast<size_t>(__embedded_console_driver_end - __embedded_console_driver_start)},
+        {"sd_card_driver.bin", __embedded_sd_card_driver_start, static_cast<size_t>(__embedded_sd_card_driver_end - __embedded_sd_card_driver_start)},
     };
 
     for (const EmbeddedImage &candidate : images)

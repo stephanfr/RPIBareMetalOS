@@ -37,6 +37,42 @@ namespace
         }
     }
 
+    TEST(UserDeviceRegistryTests, TheHardwareRNGIsNamedForItsRegisterLayout)
+    {
+        constexpr const char *NAMES[] = {DEVICE_NAME_BCM2835_RNG, DEVICE_NAME_IPROC_RNG200, DEVICE_NAME_IPROC_RNG200};
+        constexpr const char *OTHER_NAMES[] = {DEVICE_NAME_IPROC_RNG200, DEVICE_NAME_BCM2835_RNG, DEVICE_NAME_BCM2835_RNG};
+        constexpr uint64_t RNGS[] = {0x3F104000, 0xFE104000, 0x107D208000};
+
+        for (uint32_t i = 0; i < 3; i++)
+        {
+            UserDeviceDescriptor descriptor{};
+
+            CHECK_TRUE(FindUserDevice(BOARDS[i], NAMES[i], descriptor));
+            CHECK_EQUAL(static_cast<int>(UserDeviceId::HW_RNG), static_cast<int>(descriptor.id));
+            CHECK_EQUAL(RNGS[i], descriptor.registers_physical);
+            CHECK_EQUAL(0x1000ULL, descriptor.registers_size);
+            CHECK_EQUAL(static_cast<int>(Interrupts::NO_SUCH_INTERRUPT), static_cast<int>(descriptor.interrupt));
+
+            CHECK_FALSE(FindUserDevice(BOARDS[i], OTHER_NAMES[i], descriptor));
+        }
+    }
+
+    TEST(UserDeviceRegistryTests, EveryBoardHasItsSDControllerWithoutAnInterrupt)
+    {
+        constexpr uint64_t CONTROLLERS[] = {0x3F300000, 0xFE340000, 0x1000FFF000};
+
+        for (uint32_t i = 0; i < 3; i++)
+        {
+            UserDeviceDescriptor descriptor{};
+
+            CHECK_TRUE(FindUserDevice(BOARDS[i], DEVICE_NAME_SD_CARD, descriptor));
+            CHECK_EQUAL(static_cast<int>(UserDeviceId::SD_CARD), static_cast<int>(descriptor.id));
+            CHECK_EQUAL(CONTROLLERS[i], descriptor.registers_physical);
+            CHECK_EQUAL(0x1000ULL, descriptor.registers_size);
+            CHECK_EQUAL(static_cast<int>(Interrupts::NO_SUCH_INTERRUPT), static_cast<int>(descriptor.interrupt));
+        }
+    }
+
     TEST(UserDeviceRegistryTests, LookupByNameAndByIdAgree)
     {
         for (RPIBoardType board : BOARDS)

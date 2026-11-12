@@ -203,14 +203,14 @@ namespace cli::commands
     {
         minstd::fixed_string<MAX_CLI_COMMAND_LENGTH> buffer;
 
-        context.output_stream_ << "Driver           State             Process  Starts  Exits  Last restart delay (ms)\n";
+        context.output_stream_ << "Driver           State             Process  Starts  Exits  Kills  Last restart delay (ms)\n";
 
         for (uint32_t id = 0; id < static_cast<uint32_t>(DriverId::COUNT); id++)
         {
             const DriverStatus status = GetDriverStatus(static_cast<DriverId>(id));
 
-            context.output_stream_ << minstd::format(buffer, "{:<16} {:<17} {:>7}  {:>6}  {:>5}  {:>7}\n", status.name, ToString(status.state),
-                                                     status.process_id, status.starts, status.exits, status.last_restart_delay_ms);
+            context.output_stream_ << minstd::format(buffer, "{:<16} {:<17} {:>7}  {:>6}  {:>5}  {:>5}  {:>7}\n", status.name, ToString(status.state),
+                                                     status.process_id, status.starts, status.exits, status.kills, status.last_restart_delay_ms);
         }
     }
 

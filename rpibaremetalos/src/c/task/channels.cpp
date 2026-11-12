@@ -11,10 +11,13 @@
 #include "platform/memory_model.h"
 #include "task/task_impl.h"
 #include "uapi/channels.h"
+#include "uapi/console.h"
+#include "uapi/hw_rng.h"
+#include "uapi/sd_card.h"
 
 namespace
 {
-    constexpr const char *CHANNEL_NAMES[] = {CHANNEL_NAME_TEST_ECHO};
+    constexpr const char *CHANNEL_NAMES[] = {CHANNEL_NAME_TEST_ECHO, CHANNEL_NAME_HW_RNG, CHANNEL_NAME_CONSOLE, CHANNEL_NAME_SD_CARD};
 
     static_assert(sizeof(CHANNEL_NAMES) / sizeof(CHANNEL_NAMES[0]) == static_cast<uint32_t>(ChannelId::COUNT), "a name per channel");
     static_assert(static_cast<uint64_t>(ChannelId::COUNT) * USER_CHANNEL_SLOT <= USER_CHANNEL_TOP - USER_CHANNEL_BASE, "a slot per channel");
@@ -38,6 +41,7 @@ namespace
     static_assert(DataSizesAreValid(), "a channel's data area is whole pages, at most CHANNEL_DATA_MAX");
 
     task::Channel channels[static_cast<uint32_t>(ChannelId::COUNT)];
+    task::ChannelListener *listeners[static_cast<uint32_t>(ChannelId::COUNT)] = {};
     uint64_t channel_memory[static_cast<uint32_t>(ChannelId::COUNT)];       //  physical; 0 if it has none
 
     size_t MemorySize(ChannelId id)
@@ -101,6 +105,19 @@ void InitializeChannels()
 task::Channel &GetChannel(ChannelId id)
 {
     return channels[static_cast<uint32_t>(id)];
+}
+
+void SetChannelListener(ChannelId id, task::ChannelListener *listener)
+{
+    if (id < ChannelId::COUNT)
+    {
+        listeners[static_cast<uint32_t>(id)] = listener;
+    }
+}
+
+bool ServesChannel(const task::TaskImpl &task, uint32_t handle)
+{
+    return ServedChannel(task, handle) != nullptr;
 }
 
 int OpenChannel(task::TaskImpl &task, const char *name, uint32_t &handle, uint64_t &memory, uint64_t &data_size)
@@ -191,10 +208,39 @@ int ReplyOnChannel(task::TaskImpl &task, uint32_t handle, uint64_t length, uint6
     return channel->Reply(static_cast<size_t>(length), static_cast<size_t>(data_length));
 }
 
+int PostOnChannel(task::TaskImpl &task, uint32_t handle, const uint8_t *message, size_t length)
+{
+    if (ServedChannel(task, handle) == nullptr)
+    {
+        return CHANNEL_INVALID_HANDLE;
+    }
+
+    if (listeners[handle] == nullptr)
+    {
+        return CHANNEL_NO_LISTENER;
+    }
+
+    if (length > CHANNEL_POST_MAX)
+    {
+        return CHANNEL_TOO_LONG;
+    }
+
+    listeners[handle]->Posted(message, length);
+
+    return CHANNEL_SUCCESS;
+}
+
 void ReleaseChannels(uint32_t process_id)
 {
-    for (task::Channel &channel : channels)
+    for (uint32_t id = 0; id < static_cast<uint32_t>(ChannelId::COUNT); id++)
     {
-        channel.Unbind(process_id);
+        const bool served = (process_id != 0) && (channels[id].Server() == process_id);
+
+        channels[id].Unbind(process_id);
+
+        if (served && (listeners[id] != nullptr))
+        {
+            listeners[id]->Released();
+        }
     }
 }

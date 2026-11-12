@@ -103,6 +103,8 @@ namespace task
         void VisitTaskList(TaskListVisitorCallback callback) const override;
         TaskHandle FindTask(const UUID &task_id) override;
 
+        bool KillTask(const UUID &task_id) override;
+
         //  The lowest process id above after_process_id of a task loaded from binary_path that has not exited, or
         //      0 if there is none: 0 is never a user task's id.
 

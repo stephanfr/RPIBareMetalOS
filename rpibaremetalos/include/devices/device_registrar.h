@@ -20,7 +20,7 @@ public:
 
     virtual minstd::random_device *CreateHardwareRNG() = 0;
 
-    virtual void RegisterDevices(minstd::random_device *hw_rng) = 0;
+    virtual void RegisterDevices() = 0;
 
 protected:
 

@@ -9,6 +9,8 @@
 
 #include "devices/log.h"
 #include "devices/physical_timer.h"
+#include "devices/rng_proxy.h"
+#include "devices/sd_card_proxy.h"
 #include "devices/user_device_registry.h"
 #include "services/stats_db/kernel_statistic_ids.h"
 #include "services/stats_db/stats_db.h"
@@ -36,14 +38,27 @@ namespace
     {
         const char *name;
         const char *image;                  //  a loader path: "embedded:<name>" for an image in the kernel
-        unsigned long arg;
+        unsigned long (*argument)();        //  null: 0
         DeviceCapabilities devices;
         ChannelCapabilities channels;
-        bool start_at_boot;
+        bool (*start_at_boot)();            //  null: only when asked
     };
 
+    bool Always()
+    {
+        return true;
+    }
+
+    unsigned long EchoDriverCase()
+    {
+        return 19;
+    }
+
     constexpr DriverDefinition DRIVERS[] = {
-        {"test-echo", "embedded:hello.bin", 19, NO_DEVICE_CAPABILITIES, CapabilityFor(ChannelId::TEST_ECHO), false},
+        {"test-echo", "embedded:hello.bin", EchoDriverCase, NO_DEVICE_CAPABILITIES, CapabilityFor(ChannelId::TEST_ECHO), nullptr},
+        {"hw-rng", "embedded:hw_rng_driver.bin", nullptr, CapabilityFor(UserDeviceId::HW_RNG), CapabilityFor(ChannelId::HW_RNG), HardwareRNGPresent},
+        {"console", "embedded:console_driver.bin", nullptr, CapabilityFor(UserDeviceId::CONSOLE_UART), CapabilityFor(ChannelId::CONSOLE), Always},
+        {"sd-card", "embedded:sd_card_driver.bin", SDCardDriverArgument, CapabilityFor(UserDeviceId::SD_CARD), CapabilityFor(ChannelId::SD_CARD), Always},
     };
 
     static_assert(sizeof(DRIVERS) / sizeof(DRIVERS[0]) == static_cast<uint32_t>(DriverId::COUNT), "a definition per driver");
@@ -54,19 +69,23 @@ namespace
     system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::DRIVER_RESTARTS>
         driver_restarts("drivers", "restarts", "EL0 driver processes started again after exiting", 0);
 
-    //  wanted_ and released_ are written by other tasks; the rest only by the manager task.  Status readers may see a
-    //      slot mid-update, which costs them nothing worse than a stale count.
+    //  wanted_, restart_requested_ and released_ are written by other tasks; the rest only by the manager task.  Status
+    //      readers may see a slot mid-update, which costs them nothing worse than a stale count.
 
     struct DriverSlot
     {
         minstd::atomic<bool> wanted_{false};
+        minstd::atomic<bool> restart_requested_{false};
         minstd::atomic<bool> released_{false};
         minstd::atomic<uint32_t> process_id_{0};
         minstd::atomic<uint32_t> state_{static_cast<uint32_t>(DriverState::STOPPED)};
         minstd::atomic<uint32_t> starts_{0};
         minstd::atomic<uint32_t> exits_{0};
+        minstd::atomic<uint32_t> kills_{0};
         minstd::atomic<uint32_t> last_restart_delay_ms_{0};
 
+        UUID task_id_;
+        bool killed_ = false;               //  this process
         milliseconds next_delay_{FIRST_RESTART_DELAY};
         time_point<nanoseconds> started_at_;
         time_point<nanoseconds> restart_at_;
@@ -93,7 +112,7 @@ namespace
         {
             for (uint32_t id = 0; id < static_cast<uint32_t>(DriverId::COUNT); id++)
             {
-                if (DRIVERS[id].start_at_boot)
+                if ((DRIVERS[id].start_at_boot != nullptr) && DRIVERS[id].start_at_boot())
                 {
                     slots[id].wanted_.store(true, minstd::memory_order_release);
                 }
@@ -137,6 +156,7 @@ namespace
             DriverSlot &slot = slots[id];
             const DriverDefinition &driver = DRIVERS[id];
             const bool wanted = slot.wanted_.load(minstd::memory_order_acquire);
+            const bool restart = slot.restart_requested_.exchange(false, minstd::memory_order_acq_rel);
 
             switch (slot.State())
             {
@@ -150,6 +170,11 @@ namespace
             case DriverState::RUNNING:
                 if (!slot.released_.load(minstd::memory_order_acquire))
                 {
+                    if ((!wanted || restart) && !slot.killed_)
+                    {
+                        Kill(id, wanted ? "to restart it" : "to stop it");
+                    }
+
                     break;
                 }
 
@@ -188,6 +213,24 @@ namespace
             }
         }
 
+        //  The process may finish an uninterruptible wait first, so this only starts it going: the reaper's release
+        //      still marks the exit.
+
+        static void Kill(uint32_t id, const char *why)
+        {
+            DriverSlot &slot = slots[id];
+
+            LogError("Driver '%s' (process %u) killed %s\n", DRIVERS[id].name, slot.process_id_.load(), why);
+
+            slot.killed_ = true;
+            slot.kills_.fetch_add(1);
+
+            if (!task::GetTaskManager().KillTask(slot.task_id_))
+            {
+                LogError("Driver '%s' (process %u) could not be killed\n", DRIVERS[id].name, slot.process_id_.load());
+            }
+        }
+
         static void ScheduleRestart(DriverSlot &slot, time_point<nanoseconds> now)
         {
             slot.restart_at_ = now + slot.next_delay_;
@@ -205,7 +248,9 @@ namespace
 
             slot.released_.store(false, minstd::memory_order_release);
 
-            auto forked = task::GetTaskManager().ForkServiceTask(image, driver.arg, task::TaskDefinition{driver.name}, driver.devices, driver.channels);
+            const unsigned long argument = (driver.argument != nullptr) ? driver.argument() : 0;
+
+            auto forked = task::GetTaskManager().ForkServiceTask(image, argument, task::TaskDefinition{driver.name}, driver.devices, driver.channels);
 
             uint32_t process_id = 0;
 
@@ -228,6 +273,8 @@ namespace
 
             driver_starts.Increment();
 
+            slot.task_id_ = forked.Value();
+            slot.killed_ = false;
             slot.started_at_ = now;
             slot.starts_.fetch_add(1);
             slot.process_id_.store(process_id, minstd::memory_order_release);
@@ -269,17 +316,26 @@ void StopDriver(DriverId id)
     }
 }
 
+void RestartDriver(DriverId id)
+{
+    if (id < DriverId::COUNT)
+    {
+        slots[static_cast<uint32_t>(id)].restart_requested_.store(true, minstd::memory_order_release);
+        manager_doorbell.Ring();
+    }
+}
+
 DriverStatus GetDriverStatus(DriverId id)
 {
     if (id >= DriverId::COUNT)
     {
-        return DriverStatus{"", DriverState::STOPPED, 0, 0, 0, 0};
+        return DriverStatus{"", DriverState::STOPPED, 0, 0, 0, 0, 0};
     }
 
     const DriverSlot &slot = slots[static_cast<uint32_t>(id)];
 
     return DriverStatus{DRIVERS[static_cast<uint32_t>(id)].name, slot.State(), slot.process_id_.load(), slot.starts_.load(),
-                        slot.exits_.load(), slot.last_restart_delay_ms_.load()};
+                        slot.exits_.load(), slot.kills_.load(), slot.last_restart_delay_ms_.load()};
 }
 
 const char *ToString(DriverState state)

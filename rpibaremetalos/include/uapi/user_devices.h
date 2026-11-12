@@ -16,6 +16,9 @@
 //
 //      sc_DeviceOpen("test-timer", &timer, &registers);
 //      for (;;) { sc_InterruptWait(timer, 0); ...clear the device's interrupt...; sc_InterruptAck(timer); }
+//
+//  sc_InterruptRoute(handle, channel) has the device's interrupt also end the receive on a channel the driver serves,
+//      with CHANNEL_EVENT (channels.h), so one wait covers both.  The ack is unchanged.  It lasts until the driver exits.
 
 #include <stdint.h>
 
@@ -24,7 +27,7 @@
 #define DEVICE_NOT_PERMITTED        -2      /* not in the caller's capabilities */
 #define DEVICE_BUSY                 -3      /* another process owns it */
 #define DEVICE_BAD_ADDRESS          -4
-#define DEVICE_INVALID_HANDLE       -5      /* not a device the caller owns */
+#define DEVICE_INVALID_HANDLE       -5      /* not a device the caller owns, or a channel it serves */
 #define DEVICE_NO_INTERRUPT         -6
 #define DEVICE_TIMED_OUT            -7
 #define DEVICE_NO_MEMORY            -8      /* the registers could not be mapped */
@@ -37,7 +40,23 @@
 
 #define DEVICE_NAME_TEST_TIMER      "test-timer"
 
-//  Device registers take single 32-bit loads and stores.  A load or store pair, or one that writes back its base
+//  The hardware RNG, by its register layout: the Pi 3's, and the Pi 4's and 5's.  A board has one of them.
+
+#define DEVICE_NAME_BCM2835_RNG     "bcm2835-rng"
+#define DEVICE_NAME_IPROC_RNG200    "iproc-rng200"
+
+//  The console's PL011 UART: the SoC's UART0 on the Pi 3 and 4, RP1's on the Pi 5.  Its interrupt is the receive and
+//      transmit interrupts.  The kernel sets up its pins, clock and baud rate at boot.
+
+#define DEVICE_NAME_CONSOLE_UART    "console-uart"
+
+//  The SD card's SDHCI controller: the Pi 3's Arasan, the Pi 4's EMMC2 (the legacy controller under QEMU, where the
+//      card is), the Pi 5's BCM2712.  EL2 traps its page and refuses DMA, so it is driven by PIO.  The kernel sets the
+//      Pi 3's and 4's pins at boot.
+
+#define DEVICE_NAME_SD_CARD         "sd-card"
+
+//  Device registers take single 32-bit loads and stores, or a byte store where a register needs one.  A load or store pair, or one that writes back its base
 //      register, can't be emulated where EL2 traps the page, so these pin the instruction rather than leave it to the
 //      compiler.
 
@@ -53,4 +72,9 @@ static inline uint32_t DeviceRead32(uint64_t address)
 static inline void DeviceWrite32(uint64_t address, uint32_t value)
 {
     __asm__ volatile("str %w0, [%1]" : : "r"(value), "r"(address) : "memory");
+}
+
+static inline void DeviceWrite8(uint64_t address, uint8_t value)
+{
+    __asm__ volatile("strb %w0, [%1]" : : "r"(value), "r"(address) : "memory");
 }

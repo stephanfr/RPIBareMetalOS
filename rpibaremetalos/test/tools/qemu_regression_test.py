@@ -202,11 +202,20 @@ def run(qemu: str, armstub: str, kernel: str, hypervisor: str, sdimage: str,
         # test drivers -- a service process opens the test timer, has its interrupts forwarded, and gives it back on
         # exit; another serves the test-echo channel for the kernel's calls, and exits holding one.  Second owners and
         # processes without the capability are refused.  Then the driver manager runs the embedded test-echo driver,
-        # restarts it after two crashes, and leaves it stopped.
-        output = send_command('test drivers', timeout=90)
+        # restarts it after two crashes and a kill when it hangs, and kills it to stop it.  Last, the HWRNG entity reads
+        # through the hw-rng driver, which is killed and restarted.  QEMU's raspi4b has no RNG200, so there the kernel's
+        # software generator serves and no hw-rng driver runs.  Then the console driver is killed: what the CLI writes
+        # while it restarts goes out through EL2, and every command after this one is typed through its successor.  Last,
+        # the sd-card driver is killed during a 1 MB read, which fails; the next read waits for its successor, and every
+        # file read after this goes through it.
+        output = send_command('test drivers', timeout=120)
         check('test drivers', output, 'PASS: drivers test', 'case 18: device calls OK', 'case 18: device refused OK',
               'channel calls OK', 'case 19: channel refused OK', 'driver manager OK',
-              *(['case 18: device interrupts OK'] if machine == 'raspi3b' else []))
+              'console: written before its driver is killed', 'console: written while its driver restarts',
+              'console: written after its driver restarted', 'console OK',
+              'sd-card: a read failed when its driver was killed', 'sd-card OK',
+              *(['case 18: device interrupts OK', 'hw-rng OK'] if machine == 'raspi3b'
+                else ['hw-rng: no hardware RNG']))
 
         # hypervisor update — live update.  Failures first, each leaving v0.1 running.  Then the v0.2 build on the SD image
         # replaces it on every core without a reboot, and every test after this runs on the updated hypervisor.
@@ -358,8 +367,12 @@ def run(qemu: str, armstub: str, kernel: str, hypervisor: str, sdimage: str,
         else:
             print(f'\nPASS [list statistics]: tasks.user_faults is {expected_user_faults}')
 
-        # The driver manager started the test-echo driver once and restarted it after each of its two crashes.
-        for stat_id, name, expected in ((48, 'drivers.starts', 3), (49, 'drivers.restarts', 2)):
+        # The driver manager started the test-echo driver once and restarted it after two crashes and a kill, and
+        # killed it again to stop it.  It started the console and sd-card drivers at boot and restarted each after test
+        # drivers killed it.  On raspi3b the same goes for the hw-rng driver.
+        hw_rng = 1 if machine == 'raspi3b' else 0
+        for stat_id, name, expected in ((48, 'drivers.starts', 8 + 2 * hw_rng), (49, 'drivers.restarts', 5 + hw_rng),
+                                        (50, 'tasks.kills', 4 + hw_rng)):
             found = re.search(rf'^\s*0\s+{stat_id}\s+counter\s+{re.escape(name)}\s+(\d+)\s*$', output, re.MULTILINE)
             if found is None or int(found.group(1)) != expected:
                 print(f'\nFAIL [list statistics]: expected {name} to be {expected}, got '
@@ -462,15 +475,16 @@ def run(qemu: str, armstub: str, kernel: str, hypervisor: str, sdimage: str,
         # The SD card metrics.  Mounting the filesystem and loading every user binary read the
         # card, so reads and blocks_read must have moved, and the time spent must be nonzero.
         # The run never writes, so the write statistics need only be present.  io_failures and
-        # last_io_failure are correctness canaries: a nonzero value means a read gave up after
-        # all its retries; transfer_aborts means a data command hit an error at all.  The card
-        # must have come up, so there was at least one reset.
+        # last_io_failure are correctness canaries: test drivers fails exactly one read by
+        # killing the driver in it, and any other failure means a read gave up after all its
+        # retries; transfer_aborts means a data command hit an error at all.  The card must
+        # have come up, so there was at least one reset.
         expect_stat(21, 'counter', 'emmc.reads', lambda v: v > 0, '> 0')
         expect_stat(22, 'counter', 'emmc.writes', lambda v: v >= 0, 'present')
         expect_stat(23, 'counter', 'emmc.blocks_read', lambda v: v >= stat_value(21, 'counter', 'emmc.reads'), '>= reads')
         expect_stat(24, 'counter', 'emmc.blocks_written', lambda v: v >= 0, 'present')
-        expect_stat(25, 'counter', 'emmc.io_failures', lambda v: v == 0, '== 0')
-        expect_stat(26, 'timestamp', 'emmc.last_io_failure', lambda v: v == 0, '== 0 (never)')
+        expect_stat(25, 'counter', 'emmc.io_failures', lambda v: v == 1, '== 1')
+        expect_stat(26, 'timestamp', 'emmc.last_io_failure', lambda v: v > 0, '> 0')
         expect_stat(27, 'counter', 'emmc.command_retries', lambda v: v >= 0, 'present')
         expect_stat(28, 'counter', 'emmc.io_time_us', lambda v: v > 0, '> 0')
         expect_stat(29, 'gauge', 'emmc.max_io_time_us', lambda v: 0 < v <= stat_value(28, 'counter', 'emmc.io_time_us'), 'in 1..io_time_us')

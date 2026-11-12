@@ -46,6 +46,9 @@ typedef enum class BlockIOResultCodes
     EMMC_TIMEOUT_FOR_ISSUE_COMMAND,
     EMMC_TIMEOUT_WAITING_FOR_DATA_DONE,
 
+    SD_DRIVER_UNAVAILABLE,
+    SD_DRIVER_FAILED,
+
     __LAST_BLOCK_IO_ERROR__
 } BlockIOResultCodes;
 

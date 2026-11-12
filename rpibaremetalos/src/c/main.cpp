@@ -140,10 +140,6 @@ extern "C" void kernel_main()
 
     printf("Task Manager Initialized\n");
 
-    //  Mount the filesystems on the SD card
-
-    filesystems::MountSDCardFilesystems();
-
     printf("Starting recurring interrupt\n");
 
     EnableIRQs();
@@ -152,6 +148,15 @@ extern "C" void kernel_main()
     GetSchedulerClock().Start(milliseconds{50});
 
     printf("Interrupts enabled\n");
+
+    if (!StartDriverManager())
+    {
+        printf("Failed to start the driver manager\n");
+    }
+
+    //  The SD card's driver runs at EL0, so the filesystems mount once the driver manager has it serving.
+
+    filesystems::MountSDCardFilesystems();
 
     //  Start the command line interface
 
@@ -174,11 +179,6 @@ extern "C" void kernel_main()
     }
 
     cli::CommandLineInterface &cli = *start_cli_result;
-
-    if (!StartDriverManager())
-    {
-        printf("Failed to start the driver manager\n");
-    }
 
     printf("Forking CLI\n");
 

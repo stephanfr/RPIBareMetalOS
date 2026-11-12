@@ -37,6 +37,22 @@ public:
         return false;
     }
 
+    //  For a UART an EL0 driver runs: lets its interrupt reach the interrupt controller, for the driver to take.
+    //      False if it can't.  Once, at boot.
+
+    virtual bool EnableInterruptSource()
+    {
+        return false;
+    }
+
+    //  A character, if one is waiting, without blocking.  False if none, or the device can't tell.
+
+    virtual bool TryGetc(unsigned int &c)
+    {
+        (void)c;
+        return false;
+    }
+
     CharacterIODevice &operator <<(const char *str)
     {
         while (*str)

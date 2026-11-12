@@ -58,6 +58,11 @@ void __LogInternal(LogLevel log_level, const char *filename, int line_number, co
         return;
     }
 
+    if (log_level == LogLevel::FATAL)
+    {
+        UseEL2Console();
+    }
+
     char line_num_buffer[24];
     char modified_format[MAX_MODIFIED_FORMAT_LENGTH + 1];
 
@@ -94,6 +99,11 @@ void __LogWithoutLineNumberInternal(LogLevel log_level, const char *filename, co
     if (log_level > __current_log_level)
     {
         return;
+    }
+
+    if (log_level == LogLevel::FATAL)
+    {
+        UseEL2Console();
     }
 
     char modified_format[MAX_MODIFIED_FORMAT_LENGTH + 1];

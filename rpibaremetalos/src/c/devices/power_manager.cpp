@@ -6,6 +6,7 @@
 
 #include "psci.h"
 
+#include "devices/console_proxy.h"
 #include "devices/gpio.h"
 #include "devices/physical_timer.h"
 #include "devices/log.h"
@@ -39,6 +40,7 @@ static void ReportPowerCallFailure(const char *function_name, int64_t result)
 
 void PowerManager::Halt()
 {
+    FlushConsole();
     NotifyFirmwareOfReboot();
 
     ReportPowerCallFailure("SYSTEM_OFF", PSCICall(PSCI_SYSTEM_OFF));
@@ -47,6 +49,7 @@ void PowerManager::Halt()
 
 void PowerManager::Reboot()
 {
+    FlushConsole();
     NotifyFirmwareOfReboot();
 
     ReportPowerCallFailure("SYSTEM_RESET", PSCICall(PSCI_SYSTEM_RESET));

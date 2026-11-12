@@ -9,12 +9,16 @@
 //      expected to exit, so every exit is logged as an error.  Its channels fail calls meanwhile (task/channels.h).
 //
 //  A restart waits for the reaper to release the dead driver's devices and channels, so the new process can open them.
+//      A driver is stopped or restarted by killing it (TaskManager::KillTask()), so one that hangs at EL0 still goes.
 
 #include <stdint.h>
 
 typedef enum class DriverId : uint32_t
 {
     TEST_ECHO = 0,          //  hello.bin case 19, embedded; for testing, so not started at boot
+    HW_RNG,                 //  started at boot when the board's hardware RNG works
+    CONSOLE,                //  the console UART; always started at boot
+    SD_CARD,                //  the SD card; always started at boot, and the filesystems wait for it
 
     COUNT
 } DriverId;
@@ -33,6 +37,7 @@ struct DriverStatus
     uint32_t process_id;            //  0 unless RUNNING
     uint32_t starts;
     uint32_t exits;
+    uint32_t kills;
     uint32_t last_restart_delay_ms;
 };
 
@@ -40,11 +45,15 @@ struct DriverStatus
 
 bool StartDriverManager();
 
-//  Wanted drivers run, and are restarted when they exit.  A driver no longer wanted keeps running until it next exits:
-//      there is no way yet to stop a process from outside.
+//  Wanted drivers run, and are restarted when they exit.  A driver no longer wanted is killed and stays down.
 
 void StartDriver(DriverId id);
 void StopDriver(DriverId id);
+
+//  Kills a running driver so it starts again, after the usual delay: for a proxy whose call timed out on a driver that
+//      has presumably hung.
+
+void RestartDriver(DriverId id);
 
 DriverStatus GetDriverStatus(DriverId id);
 

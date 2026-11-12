@@ -26,6 +26,7 @@ void InitializeUserDevices();
 int OpenUserDevice(task::TaskImpl &task, const char *name, uint32_t &handle, uint64_t &registers);
 int WaitForUserDeviceInterrupt(task::TaskImpl &task, uint32_t handle, uint64_t timeout_microseconds);
 int AcknowledgeUserDeviceInterrupt(task::TaskImpl &task, uint32_t handle);
+int RouteUserDeviceInterrupt(task::TaskImpl &task, uint32_t device_handle, uint32_t channel_handle);
 
 //  Gives back every device 'process_id' owns, its interrupt masked.  Only once its address space is gone, so the
 //      next owner is the only process mapping the registers.  Repeating it is harmless.

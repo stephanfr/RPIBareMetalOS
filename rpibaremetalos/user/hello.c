@@ -261,6 +261,7 @@ static int TestDeviceCalls(unsigned long flags)
 #define ECHO_OP_EXIT            5               /* exits without replying */
 #define ECHO_OP_DATA            6               /* replies with the data's length, and the data with each byte complemented */
 #define ECHO_OP_CRASH           7               /* writes to the kernel's memory, and is killed */
+#define ECHO_OP_HANG            8               /* spins at EL0 without replying, until it is killed */
 
 #define ECHO_DATA_SIZE          0x10000         /* the test-echo channel's data area */
 
@@ -421,6 +422,11 @@ static void ServeEchoChannel(unsigned long flags)
                 *(volatile uint64_t *)KERNEL_VA_BASE = 0;
                 sc_Write("case 19: FAIL NOT KILLED\n");
                 return;
+
+            case ECHO_OP_HANG:
+                for (volatile uint64_t spins = 0;; spins++)
+                {
+                }
 
             default:
                 sc_Write("case 19: FAIL an unknown operation\n");

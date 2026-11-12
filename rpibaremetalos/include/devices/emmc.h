@@ -30,6 +30,8 @@ public:
 
     virtual uint32_t BlockSize() const = 0;
 
+    //  Waits for the card to be ready to use.
+
     virtual BlockIOResultCodes Initialize() = 0;
 
     virtual BlockIOResultCodes Seek(uint64_t offset_in_bytes) = 0;

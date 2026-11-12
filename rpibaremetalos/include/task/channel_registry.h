@@ -10,10 +10,15 @@
 #include <stdint.h>
 
 #include "uapi/channels.h"
+#include "uapi/console.h"
+#include "uapi/sd_card.h"
 
 typedef enum class ChannelId : uint32_t
 {
     TEST_ECHO = 0,
+    HW_RNG,
+    CONSOLE,
+    SD_CARD,
 
     COUNT
 } ChannelId;
@@ -39,6 +44,12 @@ constexpr size_t ChannelDataSize(ChannelId id)
     {
     case ChannelId::TEST_ECHO:
         return 0x10000;
+
+    case ChannelId::CONSOLE:
+        return CONSOLE_DATA_SIZE;
+
+    case ChannelId::SD_CARD:
+        return SD_CARD_DATA_SIZE;
 
     default:
         return 0;

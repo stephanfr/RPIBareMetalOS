@@ -65,6 +65,9 @@ namespace
 
     system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_WAIT_TIMEOUTS>
         task_wait_timeouts("tasks", "wait_timeouts", "Waits ended by their timeout", 0);
+
+    system_stats::KernelCounterStatistic<system_stats::KernelStatisticId::TASK_KILLS>
+        task_kills("tasks", "kills", "User tasks killed by request", 0);
 }
 
 UUID GetCurrentTaskId(void)
@@ -660,6 +663,41 @@ namespace task
         return TaskHandle(*task_itr->second);
     }
 
+    bool TaskManagerImpl::KillTask(const UUID &task_id)
+    {
+        TaskHandle handle = FindTask(task_id);
+
+        if (!handle)
+        {
+            return false;
+        }
+
+        TaskImpl &task = static_cast<TaskImpl &>(*handle);
+
+        //  A service task is a kernel task until it has loaded its binary, but has its path from the fork.
+
+        const bool user_process = (task.Type() == Task::TaskType::USER_TASK) || (task.Type() == Task::TaskType::SERVICE_TASK) ||
+                                  !task.binary_path_.empty();
+
+        if (!user_process || task.has_exited_.load(minstd::memory_order_acquire))
+        {
+            return false;
+        }
+
+        task.kill_requested_.store(true, minstd::memory_order_seq_cst);
+
+        if (task.interruptible_wait_.load(minstd::memory_order_seq_cst))
+        {
+            WakeTask(task, WaitStatus::INTERRUPTED);
+        }
+
+        //  Running at EL0 on its core, it sees the flag when this interrupt returns there.
+
+        RequestReschedule(task.schedule_on_core_.load());
+
+        return true;
+    }
+
     /**
      * @brief Preemptively schedules the next task.
      *
@@ -702,6 +740,21 @@ namespace task
         RequestReschedule(core);
 
         return true;
+    }
+
+    //  Every return to EL0 comes through here, outside interrupt context.  A kill that lands after the check is
+    //      seen at the next one: its IPI is pending until the eret unmasks IRQs.
+
+    extern "C" void ReturningToUserSpace()
+    {
+        TaskImpl &task = TaskImpl::GetTask();
+
+        if (task.KillRequested())
+        {
+            task_kills.Increment();
+            LogWarning("Task %s (process %u) killed\n", task.Name().c_str(), task.ProcessId());
+            task.Exit();
+        }
     }
 
     void TaskManagerImpl::RequestReschedule(uint32_t core)

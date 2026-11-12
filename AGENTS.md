@@ -98,6 +98,23 @@ the code cannot say.  Fewer, shorter comments are better than many distracting o
 - **Be correct**: when changing code, update or delete the comments it touches.  A wrong comment is
   worse than none.
 
+## EL0 Drivers
+
+A driver is a user program, `rpibaremetalos/user/<name>_driver.c`, that sees only `include/uapi`.  It is linked into
+the kernel: add it to `USER_DRIVERS` (`Makefile.aarch64.mk`), `src/asm/embedded_images.S` and `embedded_images.cpp`.
+
+- **Give it only what it needs:**
+  - its device in `user_device_registry.cpp`, whose pages must also be on the board's stage-2 allow-list
+    (`hypervisor_memory.c`);
+  - its channel in `channel_registry.h` and `channels.cpp`;
+  - its entry in `DRIVERS` (`driver_manager.cpp`), with those capabilities.
+- **Device registers** take `DeviceRead32` / `DeviceWrite32`, or `DeviceWrite8` where a register needs a byte store:
+  single accesses, since EL2 can't emulate a pair or a writeback on a trapped page.
+- **The protocol** is a header in `include/uapi`.  The kernel's proxy treats whatever the driver writes as untrusted.
+- **A proxy never hangs its caller:** calls take timeouts, and a call that times out calls `RestartDriver`.  Code that
+  can't block, an ISR or a holder of a spinlock, uses a ring and `Channel::Signal()`, never `Call()`.
+- **Tests** go in `test drivers`, including killing the driver and checking its proxy recovers.
+
 ## Git Workflow
 
 ### Rules

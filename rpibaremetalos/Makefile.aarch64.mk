@@ -178,6 +178,13 @@ USER_ELF      := $(USER_BUILD)/hello.elf
 USER_LD_TEMPLATE := $(USER_DIR)/user.template.ld
 USER_LD       := $(USER_BUILD)/user.ld
 USER_SRC      := $(USER_DIR)/crt0.S $(USER_DIR)/syscalls.S $(USER_DIR)/hello.c
+USER_RUNTIME  := $(USER_DIR)/crt0.S $(USER_DIR)/syscalls.S
+
+#  The EL0 drivers: user images like hello.bin, one per user/<name>_driver.c, linked into the kernel rather than put
+#      on the SD card.
+
+USER_DRIVERS := hw_rng console sd_card
+DRIVER_BINS  := $(foreach driver,$(USER_DRIVERS),$(USER_BUILD)/$(driver)_driver.bin)
 USER_FLAGS    := -ffreestanding -nostdlib -nostartfiles -static -no-pie -Wl,--build-id=none \
                  -mcpu=cortex-a53 -mstrict-align -mno-outline-atomics -O1 -Wall -Iinclude/uapi
 
@@ -199,12 +206,16 @@ $(USER_BIN): $(USER_SRC) $(USER_LD) $(wildcard include/uapi/*.h)
 	$(CC) $(USER_FLAGS) -T $(USER_LD) -o $(USER_ELF) $(USER_SRC)
 	$(OBJCOPY) -O binary $(USER_ELF) $(USER_BIN)
 
-user: checkdirs $(USER_BIN)
+$(USER_BUILD)/%_driver.bin: $(USER_RUNTIME) $(USER_DIR)/%_driver.c $(USER_LD) $(wildcard include/uapi/*.h)
+	$(CC) $(USER_FLAGS) -T $(USER_LD) -o $(USER_BUILD)/$*_driver.elf $(USER_RUNTIME) $(USER_DIR)/$*_driver.c
+	$(OBJCOPY) -O binary $(USER_BUILD)/$*_driver.elf $@
+
+user: checkdirs $(USER_BIN) $(DRIVER_BINS)
 
 #  The user images linked into the kernel (src/asm/embedded_images.S, D8 in STAGE2_EL0_DRIVERS_PLAN.md).  .incbin
 #      isn't in the assembler's dependency output, so the object names them here.
 
-EMBEDDED_IMAGES := $(USER_BIN)
+EMBEDDED_IMAGES := $(USER_BIN) $(DRIVER_BINS)
 
 $(BUILD_ROOT)/asm/embedded_images.o: $(EMBEDDED_IMAGES)
 

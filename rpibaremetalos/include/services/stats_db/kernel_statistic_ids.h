@@ -74,6 +74,10 @@ namespace system_stats
 
         DRIVER_STARTS                   = 48,
         DRIVER_RESTARTS                 = 49,
+
+        TASK_KILLS                      = 50,
+
+        CONSOLE_TX_BYPASSED             = 51,
     } KernelStatisticId;
 
     constexpr uint32_t KernelStatistic(KernelStatisticId id)

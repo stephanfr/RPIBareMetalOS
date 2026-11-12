@@ -97,3 +97,15 @@ sc_ChannelReply:
     mov     w8, #SYS_CHANNEL_REPLY_NUMBER
     svc     #0
     ret
+
+    .globl sc_ChannelPost
+sc_ChannelPost:
+    mov     w8, #SYS_CHANNEL_POST_NUMBER
+    svc     #0
+    ret
+
+    .globl sc_InterruptRoute
+sc_InterruptRoute:
+    mov     w8, #SYS_INTERRUPT_ROUTE_NUMBER
+    svc     #0
+    ret

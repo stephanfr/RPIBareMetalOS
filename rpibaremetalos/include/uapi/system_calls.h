@@ -25,8 +25,10 @@
 #define SYS_CHANNEL_OPEN_NUMBER     12
 #define SYS_CHANNEL_RECEIVE_NUMBER  13
 #define SYS_CHANNEL_REPLY_NUMBER    14
+#define SYS_CHANNEL_POST_NUMBER     15
+#define SYS_INTERRUPT_ROUTE_NUMBER  16
 
-#define NUMBER_OF_SYSTEM_CALLS 15
+#define NUMBER_OF_SYSTEM_CALLS 17
 
 #ifndef __ASSEMBLER__
 
@@ -64,12 +66,14 @@ extern "C"
     int sc_DeviceOpen(const char *name, uint32_t *handle, uint64_t *registers);
     int sc_InterruptWait(uint32_t handle, uint64_t timeout_microseconds);
     int sc_InterruptAck(uint32_t handle);
+    int sc_InterruptRoute(uint32_t handle, uint32_t channel);
 
     //  The channel calls, for a driver: results and the memory's layout are in channels.h.
 
     int sc_ChannelOpen(const char *name, uint32_t *handle, uint64_t *page, uint64_t *data_size);
     int sc_ChannelReceive(uint32_t handle, uint64_t timeout_microseconds, uint64_t *data_length);
     int sc_ChannelReply(uint32_t handle, uint64_t length, uint64_t data_length);
+    int sc_ChannelPost(uint32_t handle, const void *message, uint64_t length);
 
 #ifdef __cplusplus
 }

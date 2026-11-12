@@ -8,8 +8,10 @@
 
 #include "devices/log.h"
 #include "devices/user_device_registry.h"
+#include "platform/address_space_layout.h"
 #include "platform/exception_manager.h"
 #include "platform/platform_info.h"
+#include "task/channels.h"
 #include "task/io_doorbell.h"
 #include "task/task_impl.h"
 #include "uapi/user_devices.h"
@@ -17,6 +19,7 @@
 namespace
 {
     constexpr uint32_t NO_OWNER = 0;            //  process ids start at 1
+    constexpr uint32_t NO_ROUTE = 0;            //  route_ holds a ChannelId plus one
 
     //  One per UserDeviceId.  The ISR masks the line and wakes the owner; the owner unmasks it with an ack.
 
@@ -67,9 +70,16 @@ namespace
 
         void Release(uint32_t process_id)
         {
+            route_.store(NO_ROUTE, minstd::memory_order_release);
+
             uint32_t expected = process_id;
 
             owner_.compare_exchange_strong(expected, NO_OWNER, minstd::memory_order_acq_rel);
+        }
+
+        void RouteTo(ChannelId channel)
+        {
+            route_.store(static_cast<uint32_t>(channel) + 1, minstd::memory_order_release);
         }
 
         void MaskInterrupt()
@@ -109,6 +119,13 @@ namespace
         {
             MaskInterrupt();
             doorbell_.Ring();
+
+            const uint32_t route = route_.load(minstd::memory_order_acquire);
+
+            if (route != NO_ROUTE)
+            {
+                GetChannel(static_cast<ChannelId>(route - 1)).Signal();
+            }
         }
 
     private:
@@ -116,6 +133,7 @@ namespace
         bool present_ = false;
 
         minstd::atomic<uint32_t> owner_{NO_OWNER};
+        minstd::atomic<uint32_t> route_{NO_ROUTE};
         task::IODoorbell doorbell_;
     };
 
@@ -154,6 +172,13 @@ void InitializeUserDevices()
             continue;
         }
 
+        //  The controller the platform drives the card with, which under QEMU's raspi4b isn't the registry's EMMC2.
+
+        if (descriptor.id == UserDeviceId::SD_CARD)
+        {
+            descriptor.registers_physical = KernelVirtualAddressToPhysical(reinterpret_cast<uint64_t>(GetPlatformInfo().GetEMMCBase()));
+        }
+
         UserDevice &device = user_devices[id];
 
         device.SetDescriptor(descriptor);
@@ -176,10 +201,12 @@ int OpenUserDevice(task::TaskImpl &task, const char *name, uint32_t &handle, uin
 {
     UserDeviceDescriptor descriptor;
 
-    if (!FindUserDevice(GetPlatformInfo().GetBoardType(), name, descriptor))
+    if (!FindUserDevice(GetPlatformInfo().GetBoardType(), name, descriptor) || !user_devices[static_cast<uint32_t>(descriptor.id)].Present())
     {
         return DEVICE_NOT_FOUND;
     }
+
+    descriptor = user_devices[static_cast<uint32_t>(descriptor.id)].Descriptor();
 
     if ((task.GrantedDevices() & CapabilityFor(descriptor.id)) == 0)
     {
@@ -239,7 +266,7 @@ int WaitForUserDeviceInterrupt(task::TaskImpl &task, uint32_t handle, uint64_t t
 
     if (timeout_microseconds == DEVICE_WAIT_FOREVER)
     {
-        device->Doorbell().Wait(task::WaitReason::DEVICE);
+        device->Doorbell().Wait(task::WaitReason::INTERRUPT);
         return DEVICE_SUCCESS;
     }
 
@@ -247,7 +274,7 @@ int WaitForUserDeviceInterrupt(task::TaskImpl &task, uint32_t handle, uint64_t t
 
     const uint64_t clamped = (timeout_microseconds > static_cast<uint64_t>(INT64_MAX)) ? static_cast<uint64_t>(INT64_MAX) : timeout_microseconds;
 
-    return device->Doorbell().Wait(task::WaitReason::DEVICE, microseconds(static_cast<int64_t>(clamped))) ? DEVICE_SUCCESS : DEVICE_TIMED_OUT;
+    return device->Doorbell().Wait(task::WaitReason::INTERRUPT, microseconds(static_cast<int64_t>(clamped))) ? DEVICE_SUCCESS : DEVICE_TIMED_OUT;
 }
 
 int AcknowledgeUserDeviceInterrupt(task::TaskImpl &task, uint32_t handle)
@@ -265,6 +292,25 @@ int AcknowledgeUserDeviceInterrupt(task::TaskImpl &task, uint32_t handle)
     }
 
     device->UnmaskInterrupt();
+
+    return DEVICE_SUCCESS;
+}
+
+int RouteUserDeviceInterrupt(task::TaskImpl &task, uint32_t device_handle, uint32_t channel_handle)
+{
+    UserDevice *device = OwnedDevice(task, device_handle);
+
+    if ((device == nullptr) || !ServesChannel(task, channel_handle))
+    {
+        return DEVICE_INVALID_HANDLE;
+    }
+
+    if (!device->HasInterrupt())
+    {
+        return DEVICE_NO_INTERRUPT;
+    }
+
+    device->RouteTo(static_cast<ChannelId>(channel_handle));
 
     return DEVICE_SUCCESS;
 }

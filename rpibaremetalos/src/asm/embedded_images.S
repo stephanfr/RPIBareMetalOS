@@ -15,3 +15,24 @@ __embedded_hello_start:
 __embedded_hello_end:
 
     .balign 4096
+    .globl  __embedded_hw_rng_driver_start
+__embedded_hw_rng_driver_start:
+    .incbin "build/user/hw_rng_driver.bin"
+    .globl  __embedded_hw_rng_driver_end
+__embedded_hw_rng_driver_end:
+
+    .balign 4096
+    .globl  __embedded_console_driver_start
+__embedded_console_driver_start:
+    .incbin "build/user/console_driver.bin"
+    .globl  __embedded_console_driver_end
+__embedded_console_driver_end:
+
+    .balign 4096
+    .globl  __embedded_sd_card_driver_start
+__embedded_sd_card_driver_start:
+    .incbin "build/user/sd_card_driver.bin"
+    .globl  __embedded_sd_card_driver_end
+__embedded_sd_card_driver_end:
+
+    .balign 4096

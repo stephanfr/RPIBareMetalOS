@@ -395,6 +395,13 @@ namespace task
         //  Join() runs on any core, so it reads this rather than state_, which only the owning core may touch.
 
         minstd::atomic<bool> has_exited_{false};
+
+        //  Set once by TaskManagerImpl::KillTask().  It and interruptible_wait_ are a Dekker pair with wait_status_:
+        //      the killer stores the flag then reads the wait, the task stores WAITING then reads the flag, all
+        //      sequentially consistent, so one of them ends an interruptible wait.
+
+        minstd::atomic<bool> kill_requested_{false};
+        minstd::atomic<bool> interruptible_wait_{false};
         WaitQueue exit_waiters_;
 
         long counter_;
@@ -427,6 +434,12 @@ namespace task
         //  The channels it may serve with sc_ChannelOpen.
 
         ChannelCapabilities GrantedChannels() const { return channel_capabilities_; }
+
+        bool KillRequested() const { return kill_requested_.load(minstd::memory_order_seq_cst); }
+
+        //  Whether the caller, this core's current task, may block now.
+
+        bool MayBlock() const { return (preempt_count_ == 0) && !InInterrupt() && AreIRQsEnabled(); }
 
         //  The single argument a user task receives in x0.  Read by StartUserTaskWrapper,
         //      which is a free function rather than a member and so cannot see user_arg_.

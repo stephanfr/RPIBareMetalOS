@@ -24,6 +24,20 @@ namespace
         {RPIBoardType::RPI3, {UserDeviceId::TEST_TIMER, DEVICE_NAME_TEST_TIMER, 0x3F003000, PAGE_4K, Interrupts::SYSTEM_TIMER_3}},
         {RPIBoardType::RPI4, {UserDeviceId::TEST_TIMER, DEVICE_NAME_TEST_TIMER, 0xFE003000, PAGE_4K, Interrupts::SYSTEM_TIMER_3}},
         {RPIBoardType::RPI5, {UserDeviceId::TEST_TIMER, DEVICE_NAME_TEST_TIMER, 0x107C003000, PAGE_4K, Interrupts::SYSTEM_TIMER_3}},
+
+        {RPIBoardType::RPI3, {UserDeviceId::HW_RNG, DEVICE_NAME_BCM2835_RNG, 0x3F104000, PAGE_4K, Interrupts::NO_SUCH_INTERRUPT}},
+        {RPIBoardType::RPI4, {UserDeviceId::HW_RNG, DEVICE_NAME_IPROC_RNG200, 0xFE104000, PAGE_4K, Interrupts::NO_SUCH_INTERRUPT}},
+        {RPIBoardType::RPI5, {UserDeviceId::HW_RNG, DEVICE_NAME_IPROC_RNG200, 0x107D208000, PAGE_4K, Interrupts::NO_SUCH_INTERRUPT}},
+
+        {RPIBoardType::RPI3, {UserDeviceId::CONSOLE_UART, DEVICE_NAME_CONSOLE_UART, 0x3F201000, PAGE_4K, Interrupts::UART0}},
+        {RPIBoardType::RPI4, {UserDeviceId::CONSOLE_UART, DEVICE_NAME_CONSOLE_UART, 0xFE201000, PAGE_4K, Interrupts::UART0}},
+        {RPIBoardType::RPI5, {UserDeviceId::CONSOLE_UART, DEVICE_NAME_CONSOLE_UART, 0x1F00030000, PAGE_4K, Interrupts::UART0}},
+
+        //  The Pi 4's is EMMC2 on hardware; the kernel substitutes the legacy controller at 0xFE300000 under QEMU.
+
+        {RPIBoardType::RPI3, {UserDeviceId::SD_CARD, DEVICE_NAME_SD_CARD, 0x3F300000, PAGE_4K, Interrupts::NO_SUCH_INTERRUPT}},
+        {RPIBoardType::RPI4, {UserDeviceId::SD_CARD, DEVICE_NAME_SD_CARD, 0xFE340000, PAGE_4K, Interrupts::NO_SUCH_INTERRUPT}},
+        {RPIBoardType::RPI5, {UserDeviceId::SD_CARD, DEVICE_NAME_SD_CARD, 0x1000FFF000, PAGE_4K, Interrupts::NO_SUCH_INTERRUPT}},
     };
 }
 

@@ -24,6 +24,14 @@
 //
 //      sc_ChannelOpen("test-echo", &channel, &page, &data_size);
 //      for (;;) { int length = sc_ChannelReceive(channel, CHANNEL_WAIT_FOREVER, &in); ...; sc_ChannelReply(channel, n, out); }
+//
+//  A receive returns CHANNEL_EVENT instead of a request when the kernel signals the channel, or when an interrupt
+//      routed to it fires (sc_InterruptRoute, user_devices.h).  Events merge, so the driver checks every source of them
+//      each time: a channel's own protocol says what the kernel's signal means.
+//
+//  sc_ChannelPost(handle, message, length) hands the kernel a message of at most CHANNEL_POST_MAX bytes, from the
+//      driver's own memory, without waiting: a device's input, say.  Only channels whose protocol defines posts take
+//      them.
 
 #include <stdint.h>
 
@@ -41,8 +49,12 @@
 #define CHANNEL_ABANDONED           -11     /* the caller gave up before the reply */
 #define CHANNEL_NO_SERVER           -12     /* to kernel callers: no driver serves the channel */
 #define CHANNEL_SERVER_EXITED       -13     /* to kernel callers: the driver exited holding the request */
+#define CHANNEL_INTERRUPTED         -14     /* the driver is being killed, so never sees it */
+#define CHANNEL_EVENT               -15     /* not a failure: from sc_ChannelReceive, an event in place of a request */
+#define CHANNEL_NO_LISTENER         -16     /* sc_ChannelPost on a channel that takes no posts */
 
 #define CHANNEL_NAME_LENGTH         32      /* including the terminating NUL */
+#define CHANNEL_POST_MAX            512
 #define CHANNEL_WAIT_FOREVER        0       /* sc_ChannelReceive's timeout */
 
 //  The control page.  Requests and replies are messages: headers and status, at most CHANNEL_MESSAGE_MAX bytes.

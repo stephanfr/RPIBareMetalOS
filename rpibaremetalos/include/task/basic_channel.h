@@ -151,6 +151,17 @@ namespace task
             return current == server;
         }
 
+        //  Ends the driver's receive with CHANNEL_EVENT, or its next one if it isn't waiting.  Events merge until a
+        //      receive returns one, so the driver checks every source of them each time.  Any context, ISRs included.
+
+        void Signal()
+        {
+            if (!event_.exchange(true, minstd::memory_order_acq_rel))
+            {
+                driver_queue_.WakeAll();
+            }
+        }
+
         //  Fails the call whose request the driver holds.  Nothing if 'server' doesn't serve the channel.
 
         void Unbind(uint32_t server)
@@ -164,6 +175,7 @@ namespace task
                 }
 
                 server_.store(NO_SERVER, minstd::memory_order_release);
+                event_.store(false, minstd::memory_order_relaxed);
 
                 switch (GetState())
                 {
@@ -341,6 +353,7 @@ namespace task
 
         minstd::atomic<uint32_t> state_{static_cast<uint32_t>(State::IDLE)};
         minstd::atomic<uint32_t> server_{NO_SERVER};
+        minstd::atomic<bool> event_{false};
 
         //  Under lock_, for the call in flight.
 
@@ -489,7 +502,7 @@ namespace task
 
             for (;;)
             {
-                const auto outcome = driver_queue_.WaitOnce([this]() { return GetState() == State::REQUESTED; },
+                const auto outcome = driver_queue_.WaitOnce([this]() { return (GetState() == State::REQUESTED) || event_.load(minstd::memory_order_acquire); },
                                                             WaitReason::CHANNEL, deadline_ticks, WaitQueue::Position::TAIL);
 
                 {
@@ -503,9 +516,19 @@ namespace task
                     }
                 }
 
+                if (event_.exchange(false, minstd::memory_order_acq_rel))
+                {
+                    return CHANNEL_EVENT;
+                }
+
                 if (outcome == WaitQueue::Outcome::TIMED_OUT)
                 {
                     return CHANNEL_TIMED_OUT;
+                }
+
+                if (outcome == WaitQueue::Outcome::INTERRUPTED)
+                {
+                    return CHANNEL_INTERRUPTED;
                 }
             }
         }

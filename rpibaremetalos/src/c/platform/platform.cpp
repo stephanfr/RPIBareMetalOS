@@ -26,6 +26,9 @@
 #include "devices/rpi4/rpi4_device_registrar.h"
 #include "devices/rpi5/rpi5_device_registrar.h"
 
+#include "devices/console_proxy.h"
+#include "devices/rng_proxy.h"
+#include "devices/sd_card_proxy.h"
 #include "devices/std_streams.h"
 
 #include "devices/video/console_video_framebuffer.h"
@@ -164,9 +167,8 @@ void InitializePlatform()
     //
     //  Device intialization is a two-step process: first we have to create the hardware random number generator (HWRNG)
     //    and then we can register the devices for the platform. The HWRNG is used to seed the software RNGs, which are
-    //    used to generate UUIDs for the devices. The HWRNG is also registered as an OSEntity, so that it can be used by
-    //    other parts of the OS. The device registrar is responsible for creating and registering the
-    //    devices for the platform. The device registrar is also responsible for creating and registering the HWRNG.
+    //    used to generate UUIDs for the devices.  After that the kernel reaches the HWRNG only through its EL0 driver,
+    //    behind the "HWRNG" entity (devices/rng_proxy.h).
 
     minstd::unique_ptr<DeviceRegistrar> device_registrar;
 
@@ -207,6 +209,7 @@ void InitializePlatform()
     }
 
     auto hw_rng = device_registrar->CreateHardwareRNG();
+    const bool hardware_rng_present = (hw_rng != nullptr);
 
     //  If HW RNG is not available (e.g. QEMU), fall back to a SW RNG seeded from the CPU timer and board serial number
 
@@ -231,7 +234,18 @@ void InitializePlatform()
 
     //  We have the RNGs setup - now register the devices for the platform
 
-    device_registrar->RegisterDevices(hw_rng);
+    device_registrar->RegisterDevices();
+
+    //  From here the kernel leaves the hardware RNG, the console UART and the SD card to their EL0 drivers.
+
+    RegisterRandomNumberGenerator(hardware_rng_present, *hw_rng);
+    PrepareSDCardPins();
+
+    if (!RegisterConsole())
+    {
+        LogFatal("The board registered no serial UART for the console\n");
+        ParkCore();
+    }
 
     //  Setup the console, and if it fails, park the core -- we cannot continue without a console.
 

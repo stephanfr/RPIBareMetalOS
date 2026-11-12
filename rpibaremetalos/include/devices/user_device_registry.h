@@ -15,6 +15,9 @@
 typedef enum class UserDeviceId : uint32_t
 {
     TEST_TIMER = 0,
+    HW_RNG,
+    CONSOLE_UART,
+    SD_CARD,
 
     COUNT
 } UserDeviceId;
